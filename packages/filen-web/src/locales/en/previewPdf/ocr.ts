@@ -72,5 +72,7 @@ export const previewPdfOcr = {
 	/** Settings › Office — the language picker dialog's description */
 	previewPdfOcrSettingsDialogDescription: "Recognise text in scanned PDFs in these languages.",
 	/** Settings › Office — the language picker dialog's save button */
-	previewPdfOcrSettingsSave: "Save"
+	previewPdfOcrSettingsSave: "Save",
+	/** One-line status under the ribbon while the editor looks for the PDF's scanned pages */
+	previewPdfOcrFinding: "Looking for scanned pages…"
 } as const

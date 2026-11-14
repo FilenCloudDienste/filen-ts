@@ -5,17 +5,18 @@ import { openPdfEngine } from "@/features/pdf/session/engineWorker"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 // One signature check in a short-lived engine worker opened read-only on the file (ranged: only the signed byte
-// ranges, the xref and the signature dictionaries are read). The worker is closed once the report is in, or as soon as
-// the check is abandoned.
+// ranges, the xref and the signature dictionaries are read), an encrypted one unlocked with `password`. The worker is
+// closed once the report is in, or as soon as the check is abandoned.
 export async function verifyInEngine(
 	file: AnyFile,
 	access: PreviewAccessMode,
 	fields: readonly PdfSignatureFieldHint[] | null,
-	signal: AbortSignal
+	signal: AbortSignal,
+	password?: string
 ): Promise<PdfSignatureReport> {
 	signal.throwIfAborted()
 
-	const engine = await openPdfEngine({ file, access, role: "verify" })
+	const engine = await openPdfEngine({ file, access, role: "verify", ...(password === undefined ? {} : { password }) })
 	const close = (): void => {
 		void engine.close()
 	}

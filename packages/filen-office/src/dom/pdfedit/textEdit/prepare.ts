@@ -16,8 +16,11 @@ export interface TextEditStyle {
 	readonly language?: string
 }
 
+// What laying out new text needs of a target ("Add text" makes one: newTextFrame, a matched font, the page's size).
+export type TextEditSource = Pick<TextEditTarget, "frame" | "size" | "color" | "font" | "pageWidth" | "pageHeight">
+
 export async function prepareTextEdit(
-	target: TextEditTarget,
+	target: TextEditSource,
 	text: string,
 	assets: PdfFontAssets,
 	style: TextEditStyle = {},

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { MessageSquareIcon, Trash2Icon } from "lucide-react"
+import { DownloadIcon, MessageSquareIcon, Trash2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { hexToRgb, type PdfAnnotationInfo, type PdfRgb } from "@filen/office/core/pdfedit/annotations"
 import { Button } from "@/components/ui/button"
@@ -36,13 +36,24 @@ export interface PdfAnnotationPopoverProps {
 	onStyle: (change: PdfAnnotationStyleChange) => void
 	onComment: () => void
 	onDelete: () => void
+	// A file attachment: downloads its file (application/octet-stream, never opened).
+	onDownload?: () => void
+	downloadLabel?: string
 }
 
 function sliderValue(value: number | readonly number[]): number {
 	return typeof value === "number" ? value : (value[0] ?? 0)
 }
 
-export function PdfAnnotationPopover({ info, className, onStyle, onComment, onDelete }: PdfAnnotationPopoverProps) {
+export function PdfAnnotationPopover({
+	info,
+	className,
+	onStyle,
+	onComment,
+	onDelete,
+	onDownload,
+	downloadLabel
+}: PdfAnnotationPopoverProps) {
 	const { t } = useTranslation("preview")
 	const [colorOpen, setColorOpen] = useState(false)
 	// A slider's value while it is dragged (null: the annotation's own).
@@ -111,7 +122,7 @@ export function PdfAnnotationPopover({ info, className, onStyle, onComment, onDe
 					<label className="flex items-center gap-1.5 text-xs">
 						<span className="sr-only">{t("previewPdfAnnotOpacity")}</span>
 						<Slider
-							className="w-20"
+							className="w-20 shrink-0 data-horizontal:w-20"
 							min={10}
 							max={100}
 							step={5}
@@ -136,7 +147,7 @@ export function PdfAnnotationPopover({ info, className, onStyle, onComment, onDe
 						<label className="flex items-center gap-1.5 text-xs">
 							<span className="sr-only">{t("previewPdfAnnotWidth")}</span>
 							<Slider
-								className="w-20"
+								className="w-20 shrink-0 data-horizontal:w-20"
 								min={PDF_ANNOT_WIDTH_MIN}
 								max={PDF_ANNOT_WIDTH_MAX}
 								step={PDF_ANNOT_WIDTH_STEP}
@@ -170,6 +181,18 @@ export function PdfAnnotationPopover({ info, className, onStyle, onComment, onDe
 			>
 				<MessageSquareIcon />
 			</Button>
+			{onDownload === undefined ? null : (
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					aria-label={downloadLabel}
+					title={downloadLabel}
+					onMouseDown={keepFocus}
+					onClick={onDownload}
+				>
+					<DownloadIcon />
+				</Button>
+			)}
 			{info.locked ? null : (
 				<Button
 					variant="ghost"

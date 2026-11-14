@@ -1,4 +1,5 @@
 import { MessageChannel, Worker, type MessagePort } from "node:worker_threads"
+import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PdfEngineClient, type PdfEngineWorkerLike } from "../../dom/pdfedit/client"
 import type { PdfOpenResult } from "../../dom/pdfedit/protocol"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort, type SyncRangeServerStats } from "../../dom/pdfedit/syncRange"
@@ -120,4 +121,35 @@ export function spawnEngine(setup: EngineSetup, onTerminate?: () => void): PdfEn
 // Terminates every engine the tests started (afterEach).
 export function stopEngines(): void {
 	for (const client of running.splice(0)) client.terminate()
+}
+
+// The held output streamed over a save port, read here as an upload would; `fail` aborts it halfway.
+export async function upload(client: PdfEngineClient, fail = false): Promise<{ readonly uploaded: boolean; readonly bytes: Uint8Array }> {
+	const channel = new MessageChannel()
+	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
+	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
+	const chunks: Uint8Array[] = []
+
+	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) {
+		chunks.push(chunk)
+
+		if (fail) {
+			reader.abort("upload")
+
+			break
+		}
+	}
+
+	if (!fail) reader.settled(true)
+
+	const { uploaded } = await written
+	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
+	let at = 0
+
+	for (const chunk of chunks) {
+		bytes.set(chunk, at)
+		at += chunk.length
+	}
+
+	return { uploaded, bytes }
 }

@@ -8,15 +8,12 @@ import { resolveModKey } from "./helpers/modkey"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
 
-// Fill & Sign in a real browser: text and marks placed on a page, a signature drawn with the pointer (and touch on the
-// mobile WebKit viewport), saved for reuse and offered again in the next document, initials typed, and the saved
-// signature deleted in Settings › Office. The saved file is read back by pdf.js. Fixture: @filen/office's
+// Fill & Sign in a real browser: text and marks placed on a page (by pointer and by keyboard), a signature drawn with
+// the pointer (and touch on the mobile WebKit viewport), saved for reuse and offered again in the next document,
+// initials typed, and the saved signature deleted in Settings › Office. The saved file is read back by pdf.js. Fixture: @filen/office's
 // acroform.pdf (src/scripts/pdfFormFixtures.ts).
 
 test.describe.configure({ mode: "default" })
-
-// Unskip once the Fill & Sign tools are registered in the PDF editor.
-test.fixme(() => true, "the Fill & Sign tools are not registered in the PDF editor yet")
 
 const FIXTURE = new URL("../../filen-office/src/tests/fixtures/pdfforms/acroform.pdf", import.meta.url)
 const PDF_MIME = "application/pdf"
@@ -101,14 +98,22 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		await open(page, listbox, first)
 		await fillSignTab(page).click()
 
-		const pageSurface = page.getByRole("region", { name: /Page 2 of 2/u })
+		// While a Fill & Sign tool is active each page is a surface to place on.
+		const pageSurface = page.getByRole("application", { name: preview.previewPdfFillPlaceOnPage.replace("{{page}}", "2") })
 
 		await page.getByRole("button", { name: preview.previewPdfFillText }).click()
-		await pageSurface.click({ position: { x: 300, y: 120 } })
-		await page.keyboard.type("Signed in Berlin")
-		await page.keyboard.press("Escape")
+		await pageSurface.click({ position: { x: 300, y: 120 }, timeout: SWAP_TIMEOUT_MS })
+		await page.getByRole("textbox", { name: preview.previewPdfFillTextLabel }).fill("Signed in Berlin")
+		await page.keyboard.press("Enter")
 		await page.getByRole("button", { name: preview.previewPdfFillCheck }).click()
 		await pageSurface.click({ position: { x: 120, y: 220 } })
+
+		// A cross placed from the keyboard: Enter puts it at the page's centre, arrows move it, Enter places it.
+		await page.getByRole("button", { name: preview.previewPdfFillCross }).click()
+		await pageSurface.focus()
+		await page.keyboard.press("Enter")
+		await page.keyboard.press("Shift+ArrowRight")
+		await page.keyboard.press("Enter")
 
 		// A drawn signature, saved for reuse.
 		await page.getByRole("button", { name: preview.previewPdfFillSignature }).click()
@@ -145,6 +150,8 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		const types = await annotationTypes(await downloaded(page))
 
 		expect(types[1]).toEqual(expect.arrayContaining(["FreeText", "Ink", "Stamp"]))
+		// The text, the check mark, the cross and the drawn signature.
+		expect(types[1]?.filter(type => type === "Ink").length).toBe(3)
 		await close(page)
 
 		// The next document offers the saved signature first.

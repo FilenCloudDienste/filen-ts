@@ -1,5 +1,4 @@
-import { preparedPassword, type PdfAllowed, type PdfSecurityChoice } from "@filen/office/core/pdfedit/security"
-import type { PdfSecurityDescription } from "@filen/office/dom/pdfedit/security"
+import { preparedPassword, type PdfAllowed, type PdfSecurityChoice, type PdfSecuritySummary } from "@filen/office/core/pdfedit/security"
 import { pdfPasswordAllowed } from "@/features/office/lib/pdfPassword"
 
 // The Protect document dialog's rules: the form a document starts with, and the choice (or the field errors) a form
@@ -40,18 +39,18 @@ export interface ProtectResult {
 const NO_ERRORS: ProtectErrors = { password: null, owner: null, open: null, same: false }
 
 // The protection the document has now, as the dialog's choices.
-export function currentMode(current: PdfSecurityDescription): ProtectMode {
+export function currentMode(current: PdfSecuritySummary): ProtectMode {
 	if (current.method === "none") return "none"
 
 	return current.restricted ? "restrict" : "open"
 }
 
 // Changes need owner access on an encrypted document; without it only keeping (or upgrading) is possible.
-export function isLocked(current: PdfSecurityDescription): boolean {
+export function isLocked(current: PdfSecuritySummary): boolean {
 	return current.method !== "none" && !current.ownerAccess
 }
 
-export function initialForm(current: PdfSecurityDescription): ProtectForm {
+export function initialForm(current: PdfSecuritySummary): ProtectForm {
 	return {
 		mode: currentMode(current),
 		password: "",
@@ -84,11 +83,11 @@ function samePassword(a: string, b: string): boolean {
 	return left.ok && right.ok ? left.value === right.value : a === b
 }
 
-function unchanged(current: PdfSecurityDescription, form: ProtectForm): PdfSecurityChoice {
+function unchanged(current: PdfSecuritySummary, form: ProtectForm): PdfSecurityChoice {
 	return form.upgrade && current.rc4 && current.upgrade === null ? { kind: "upgrade" } : { kind: "keep" }
 }
 
-export function protectChoice(current: PdfSecurityDescription, form: ProtectForm): ProtectResult {
+export function protectChoice(current: PdfSecuritySummary, form: ProtectForm): ProtectResult {
 	const mode = currentMode(current)
 
 	if (isLocked(current)) return { choice: unchanged(current, form), errors: NO_ERRORS }

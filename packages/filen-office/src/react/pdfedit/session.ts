@@ -15,6 +15,9 @@ export interface PdfEditSnapshot {
 	readonly widgets: ReadonlyMap<number, readonly PdfWidgetSummary[]>
 	// Changes sent and not yet answered.
 	readonly pending: number
+	// The pages the change that made this revision of the document touched (every page after a save that started a
+	// new history), for a view that reads more of a page than its rendering (its annotations).
+	readonly touched: readonly number[]
 }
 
 export class PdfEditSessionModel {
@@ -28,7 +31,7 @@ export class PdfEditSessionModel {
 
 	constructor(engine: PdfEditEngine, document: MupdfPdfDocument, state: PdfEditState) {
 		this.engine = engine
-		this.snapshot = { document, state, widgets: new Map(), pending: 0 }
+		this.snapshot = { document, state, widgets: new Map(), pending: 0, touched: [] }
 	}
 
 	subscribe = (listener: () => void): (() => void) => {
@@ -42,7 +45,8 @@ export class PdfEditSessionModel {
 	getSnapshot = (): PdfEditSnapshot => this.snapshot
 
 	private set(next: PdfEditSnapshot): void {
-		this.snapshot = next
+		// Restrictions the owner password lifted no longer hold for printing either.
+		this.snapshot = next.state.restrictions.owner ? { ...next, document: next.document.unrestricted() } : next
 
 		for (const listener of this.listeners) listener()
 	}
@@ -69,7 +73,8 @@ export class PdfEditSessionModel {
 			document: current.document.next(result.pages, result.state.pageCount),
 			state: result.state.revision >= current.state.revision ? result.state : current.state,
 			widgets,
-			pending: current.pending
+			pending: current.pending,
+			touched: result.pages
 		})
 	}
 
@@ -96,6 +101,16 @@ export class PdfEditSessionModel {
 
 	redo(): Promise<PdfCommandResult> {
 		return this.run(() => this.engine.call("redo", {}))
+	}
+
+	// A snapshot from a request that is not a change (new protection chosen, owner rights unlocked).
+	refresh(state: PdfEditState): void {
+		if (state.revision >= this.snapshot.state.revision) this.set({ ...this.snapshot, state })
+	}
+
+	// A placed certificate signature that was not signed or not kept goes (signDiscard).
+	discardSignature(): Promise<PdfCommandResult> {
+		return this.run(() => this.engine.call("signDiscard", {}))
 	}
 
 	// The widgets of these pages, read once each (batched).
@@ -146,15 +161,15 @@ export class PdfEditSessionModel {
 			return
 		}
 
+		const all = Array.from({ length: ended.state.pageCount }, (_, index) => index)
+
 		this.asked.clear()
 		this.set({
-			document: current.document.next(
-				Array.from({ length: ended.state.pageCount }, (_, index) => index),
-				ended.state.pageCount
-			),
+			document: current.document.next(all, ended.state.pageCount),
 			state: ended.state,
 			widgets: new Map(),
-			pending: current.pending
+			pending: current.pending,
+			touched: all
 		})
 	}
 }

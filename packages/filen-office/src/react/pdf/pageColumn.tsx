@@ -841,9 +841,10 @@ function PdfPageView({
 						)
 					})
 				: null}
-			{/* Last: over the text layer and links. Only on the document shown, whose viewport the host's coordinates
-			are for. */}
-			{overlay !== undefined && viewport !== undefined && fresh && nearView && inView ? overlay(pageNumber, viewport) : null}
+			{/* Last: over the text layer and links. Kept mounted while a new document's page is read (the editor hands
+			out a new document on every change): taking it down would drop the focus and the keys typed meanwhile in a
+			form field. The page's viewport is the last one read until then. */}
+			{overlay !== undefined && viewport !== undefined && nearView && inView ? overlay(pageNumber, viewport) : null}
 		</div>
 	)
 }

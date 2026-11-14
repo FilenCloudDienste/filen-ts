@@ -10,9 +10,10 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { log } from "@/lib/log"
 import { loadSavedSignatures, savedSignatures, useSavedSignatures } from "@/features/pdf/fillSign/savedSignatures"
 import { SignaturePreview } from "@/features/pdf/fillSign/signatureDialog"
+import { OcrLanguagesRow } from "@/features/pdf/ocr/ocrLanguagesRow"
 
-// Office → PDF: PDFs are only ever saved with Save (no autosave), and the visual signatures and initials saved in
-// Fill & Sign (synced, features/pdf/fillSign/savedSignatures.ts), each deletable.
+// Office → PDF: PDFs are only ever saved with Save (no autosave), the visual signatures and initials saved in Fill &
+// Sign (synced, features/pdf/fillSign/savedSignatures.ts), each deletable, and the text recognition languages.
 export function OfficePdfRows() {
 	const { t } = useTranslation(["settings", "common"])
 	const saved = useSavedSignatures()
@@ -53,6 +54,7 @@ export function OfficePdfRows() {
 					</Button>
 				</div>
 			</SettingsRow>
+			<OcrLanguagesRow />
 			<SavedSignaturesDialog
 				open={managing}
 				onOpenChange={setManaging}

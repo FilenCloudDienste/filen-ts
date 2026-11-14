@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { EraserIcon, PenLineIcon } from "lucide-react"
 import type { PdfViewerState } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
+import { fakeToolContext } from "@/tests/support/pdfToolContext"
 import "@/lib/i18n"
 
 // The PDF ribbon: the viewer's commands first on Home, each tab's tools in their groups, a mode tool pressed while
@@ -23,6 +24,7 @@ const { toolEnabled } = await import("@/features/pdf/tools/registry")
 const { registerAllActions } = await import("@/lib/keymap/actions")
 
 registerAllActions()
+
 
 type Props = Parameters<typeof PdfRibbon>[0]
 type History = NonNullable<Props["history"]>
@@ -82,7 +84,7 @@ function setup(overrides: Partial<Props>): Props {
 			}
 		],
 		policy: { editable: true, online: true, tools: null },
-		toolContext: { edit: vi.fn(), finish: vi.fn() },
+		toolContext: fakeToolContext(),
 		activeTool: null,
 		onActivateTool: vi.fn(),
 		onPrefetch: vi.fn(),
@@ -90,6 +92,7 @@ function setup(overrides: Partial<Props>): Props {
 		...overrides
 	}
 }
+
 
 function history(overrides: Partial<History>): History {
 	return {
@@ -137,7 +140,7 @@ describe("PdfRibbon", () => {
 		fireEvent.click(draw)
 
 		expect(props.onPrefetch).toHaveBeenCalled()
-		expect(props.onActivateTool).toHaveBeenCalledWith("draw")
+		expect(props.onActivateTool).toHaveBeenCalledWith("draw", undefined)
 
 		rerender(
 			<PdfRibbon
@@ -152,12 +155,73 @@ describe("PdfRibbon", () => {
 
 		fireEvent.click(pressed)
 
-		expect(props.onActivateTool).toHaveBeenLastCalledWith(null)
+		expect(props.onActivateTool).toHaveBeenLastCalledWith(null, undefined)
+	})
+
+	it("shows a tool with variants as its chosen variant, with a menu choosing another, and the idle tool pressed", async () => {
+		const props = setup({
+			tools: [
+				{
+					id: "select",
+					ribbon: { tab: "home", group: "annotate", order: 1 },
+					labelKey: "previewPdfAnnotToolSelect",
+					icon: PenLineIcon,
+					toolClass: "annotate",
+					actionIds: [],
+					actions: [],
+					enabledWhen: () => ({ enabled: true }),
+					commands: [],
+					idle: true,
+					run: context => {
+						context.finish()
+					}
+				},
+				{
+					id: "markup",
+					ribbon: { tab: "home", group: "annotate", order: 2 },
+					labelKey: "previewPdfAnnotToolHighlight",
+					icon: PenLineIcon,
+					toolClass: "annotate",
+					actionIds: [],
+					actions: [],
+					enabledWhen: () => ({ enabled: true }),
+					commands: [],
+					variants: [
+						{ id: "Highlight", labelKey: "previewPdfAnnotToolHighlight", icon: PenLineIcon },
+						{ id: "Underline", labelKey: "previewPdfAnnotToolUnderline", icon: EraserIcon }
+					]
+				}
+			],
+			toolVariants: { markup: "Underline" }
+		})
+
+		render(<PdfRibbon {...props} />)
+
+		expect(screen.getByRole("button", { name: "Select" }).getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(screen.getByRole("button", { name: "Underline" }))
+		expect(props.onActivateTool).toHaveBeenLastCalledWith("markup", "Underline")
+
+		fireEvent.click(screen.getByRole("button", { name: "Highlight options" }))
+
+		const item = await screen.findByRole("menuitem", { name: "Highlight" })
+
+		fireEvent.click(item)
+		expect(props.onActivateTool).toHaveBeenLastCalledWith("markup", "Highlight")
+	})
+
+	it("offers Flatten annotations in the Save menu", async () => {
+		const toggle = vi.fn()
+		const props = setup({ history: history({ flatten: { on: false, enabled: true, toggle } }) })
+
+		render(<PdfRibbon {...props} />)
+		fireEvent.click(screen.getByRole("button", { name: "More save options" }))
+		fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Flatten annotations" }))
+		expect(toggle).toHaveBeenCalled()
 	})
 
 	it("runs an action tool and shows why one is not offered", () => {
 		const finish = vi.fn()
-		const props = setup({ toolContext: { edit: vi.fn(), finish } })
+		const props = setup({ toolContext: fakeToolContext({ finish }) })
 		const { rerender } = render(<PdfRibbon {...props} />)
 
 		fireEvent.click(screen.getByRole("tab", { name: "Fill & Sign" }))

@@ -19,12 +19,26 @@ export interface PdfCommandContext {
 	readonly now: () => Date
 }
 
+// A command that makes an object the page then selects (an annotation) reports it beside the pages it touched.
+export interface PdfCommandOutcome {
+	readonly pages: readonly number[]
+	readonly created: { readonly page: number; readonly id: number }
+}
+
+// The pages a command's outcome touched.
+export function outcomePages(outcome: readonly number[] | PdfCommandOutcome): readonly number[] {
+	return "created" in outcome ? outcome.pages : outcome
+}
+
 export interface PdfCommand<A> {
 	// The kind of change, for the signature policy and the save planner.
 	readonly tool: PdfToolClass
+	// It removes content from the file (deleted pages, redacted, cropped-away or replaced content, ...): a save in place
+	// leaves the removed content in the file's earlier versions, which the user is told.
+	readonly removesContent?: true
 	// The arguments when well-formed, else null (answered "badRequest").
 	parse(args: unknown): A | null
-	run(context: PdfCommandContext, args: A): readonly number[]
+	run(context: PdfCommandContext, args: A): readonly number[] | PdfCommandOutcome
 }
 
 // A feature's commands, by name ("<feature>.<command>"), from its argument map.

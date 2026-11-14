@@ -49,7 +49,12 @@ function op<T>(doc: mupdf.PDFDocument, label: string, run: () => T): T {
 	}
 }
 
-function save(doc: mupdf.PDFDocument, options = "garbage=compact,compress"): Uint8Array {
+const UNENCRYPTED = { garbage: "compact", compress: "yes", objstms: "yes", encrypt: "none" }
+
+function save(
+	doc: mupdf.PDFDocument,
+	options: string | Readonly<Record<string, string | number>> = "garbage=compact,compress"
+): Uint8Array {
 	return doc.saveToBuffer(options).asUint8Array().slice()
 }
 
@@ -390,9 +395,13 @@ describe("extract", () => {
 
 		const saved = extractSaveOptions(source, null)
 
-		expect(saved).toEqual({ ok: true, options: "garbage=compact,compress,objstms", encrypted: false })
+		expect(saved).toEqual({ ok: true, options: UNENCRYPTED, encrypted: false })
 
 		const bytes = save(doc, saved.ok ? saved.options : "")
+		const unlocked = mupdf.Document.openDocument(bytes, "application/pdf")
+
+		expect(unlocked.needsPassword()).toBe(false)
+		expect(unlocked.getMetaData("encryption")).toBe("None")
 		const pdf = await openPdf(bytes)
 		const objects = await pdf.getFieldObjects()
 
@@ -421,14 +430,43 @@ describe("extract", () => {
 		expect(reopened.needsPassword()).toBe(true)
 		expect(reopened.authenticatePassword("pässword")).toBeGreaterThan(0)
 		expect(await pdfjsTexts(bytes, "pässword")).toEqual(["Page 2"])
-		expect(extractSaveOptions(source, { user: "pässword" }, false)).toEqual({
-			ok: true,
-			options: "garbage=compact,compress,objstms",
-			encrypted: false
-		})
-		expect(extractSaveOptions(source, { user: "a,b" })).toEqual({ ok: false, reason: "unsupportedPassword" })
+		expect(extractSaveOptions(source, { user: "pässword" }, false)).toEqual({ ok: true, options: UNENCRYPTED, encrypted: false })
+
+		// A separator in a password is a password character, never another option.
+		const comma = extractSaveOptions(source, { user: "a,encrypt=none" })
+
+		if (!comma.ok) throw new Error("refused")
+
+		const commaDoc = mupdf.Document.openDocument(save(extracted.document, comma.options), "application/pdf")
+
+		expect(commaDoc.needsPassword()).toBe(true)
+		expect(commaDoc.authenticatePassword("a,encrypt=none")).toBeGreaterThan(0)
+		// A control character cannot pass the option parser unchanged: such a password cannot be carried.
+		expect(extractSaveOptions(source, { user: "a\u0007b" })).toEqual({ ok: false, reason: "unsupportedPassword" })
+		expect(extractSaveOptions(source, { user: "a\tb" })).toEqual({ ok: false, reason: "unsupportedPassword" })
 		extracted.document.destroy()
 	})
+
+	it.each(["a,encrypt=none", 'x","encrypt":"none', 'o\\"wn,er=1}{', "🔑,=密码"])(
+		"carries a password with separators %j intact, never as options",
+		async password => {
+			const source = open(makeOrganisedPdf({ userPassword: "pässword" }), "pässword")
+			const extracted = extractDocument(mupdf, source, [0])
+			const saved = extractSaveOptions(source, { user: password, owner: `${password}!` })
+
+			if (!saved.ok) throw new Error("refused")
+
+			const bytes = save(extracted.document, saved.options)
+			const reopened = mupdf.Document.openDocument(bytes, "application/pdf").asPDF()
+
+			expect(reopened?.getMetaData("encryption")).toBe("Standard V5 R6 256-bit AES")
+			expect(reopened?.needsPassword()).toBe(true)
+			expect(reopened?.authenticatePassword(password)).toBe(2)
+			expect(reopened?.authenticatePassword(`${password}!`)).toBe(4)
+			expect(await pdfjsTexts(bytes, password)).toEqual(["Page 1"])
+			extracted.document.destroy()
+		}
+	)
 
 	it("lists the top-level bookmarks' pages for a split", () => {
 		expect(topLevelBookmarkPages(open(makeOrganisedPdf()))).toEqual([0, 1, 2, 3, 4, 5])

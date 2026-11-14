@@ -66,5 +66,19 @@ export const previewPdfSecurity = {
 	/** Owner password prompt: label of the password field */
 	previewPdfSecurityUnlockLabel: "Owner password",
 	/** Owner password prompt: error after a password that isn't the owner password */
-	previewPdfSecurityUnlockWrong: "That isn't the owner password. Try again."
+	previewPdfSecurityUnlockWrong: "That isn't the owner password. Try again.",
+	/** Item of the PDF editor's Save menu opening the Protect document dialog */
+	previewPdfSecurityMenu: "Security…",
+	/** Toast after the Protect document dialog was applied: the new password or restrictions are written by the next save */
+	previewPdfSecurityApplied: "The new protection is applied when you save.",
+	/** Toast when the chosen password or restrictions can't be applied to this PDF */
+	previewPdfSecurityFailed: "This protection can't be applied to this PDF.",
+	/** Toast after the owner password lifted the PDF's restrictions */
+	previewPdfSecurityUnlocked: "Restrictions lifted until you close this PDF.",
+	/** Button of the outdated-encryption notice under the ribbon: re-encrypt with AES-256 on the next save */
+	previewPdfSecurityUpgradeAction: "Upgrade",
+	/** Button of the outdated-encryption notice under the ribbon: keep the encryption as it is */
+	previewPdfSecurityUpgradeDismiss: "Not now",
+	/** Notice under the ribbon once the upgrade to AES-256 was chosen; AES-256 is the encryption method, keep it as is */
+	previewPdfSecurityUpgradePending: "Saving re-encrypts this PDF with AES-256."
 } as const

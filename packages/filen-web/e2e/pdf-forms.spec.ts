@@ -8,14 +8,11 @@ import { resolveModKey } from "./helpers/modkey"
 import { preview } from "@/locales/en/preview"
 
 // PDF forms in a real browser: every AcroForm widget type filled through the overlay, saved as a new version and read
-// back by another parser; the overlay never offers a credential field (a document's "password" field is masked text,
-// autocomplete off, no document-chosen name, no <form>); scripts and XFA notices say what does not work. Fixtures are
-// @filen/office's (src/scripts/pdfFormFixtures.ts).
+// back by another parser; the overlay never offers a credential field (a document's "password" field is masked
+// read-only text that refuses typing and is never written, autocomplete off, no document-chosen name, no <form>);
+// scripts and XFA notices say what does not work. Fixtures are @filen/office's (src/scripts/pdfFormFixtures.ts).
 
 test.describe.configure({ mode: "default" })
-
-// Unskip once the forms tool is registered in the PDF editor.
-test.fixme(() => true, "the forms tool is not registered in the PDF editor yet")
 
 const FIXTURES = new URL("../../filen-office/src/tests/fixtures/pdfforms/", import.meta.url)
 const PDF_MIME = "application/pdf"
@@ -79,22 +76,27 @@ test("a PDF form: every field type filled, saved and read back; the overlay is n
 		await fullName.fill("Jane Doe")
 		await expect(fullName).toHaveValue("Jane Doe", { timeout: SWAP_TIMEOUT_MS })
 
-		// The document's password field: plain masked text, nothing a password manager would offer a login to.
+		// The document's password field: masked text, nothing a password manager would offer a login to, and never
+		// filled (its value would be written into the file): typing says so.
 		const password = page.getByRole("textbox", { name: "Password" })
 
 		await expect(password).toHaveAttribute("type", "text")
 		await expect(password).toHaveAttribute("autocomplete", "off")
 		await expect(password).toHaveAttribute("data-1p-ignore", "true")
+		await expect(password).toHaveAttribute("readonly", "")
 		await expect(password).not.toHaveAttribute("name", "password")
 		await expect(page.locator("form")).toHaveCount(0)
 		await expect(page.locator('[name="password"], #password, input[type="password"]')).toHaveCount(0)
-		await password.fill("s3cret")
+		await password.press("s")
+		await expect(page.getByText(preview.previewPdfFormPassword)).toBeVisible()
 
 		await page.getByRole("textbox", { name: "Code" }).fill("AB12CD99")
 		await page.getByRole("textbox", { name: "Postal code" }).fill("12345678")
 		await page.getByRole("textbox", { name: "Notes" }).fill("line one\nline two")
 		await page.getByRole("checkbox", { name: "I agree" }).check()
 		await page.getByRole("combobox", { name: "Country" }).selectOption("France")
+		// An editable combo box takes its own text.
+		await page.getByRole("combobox", { name: "City" }).fill("Hamburg")
 		await page.getByRole("listbox", { name: "Toppings" }).selectOption(["Cheese", "Olives"])
 		await expect(page.getByRole("textbox", { name: "Read-only" })).toHaveAttribute("readonly", "")
 
@@ -105,6 +107,9 @@ test("a PDF form: every field type filled, saved and read back; the overlay is n
 		await expect(radios.nth(0)).not.toBeChecked()
 
 		await page.keyboard.press(`${mod}+s`)
+		// The required field was left empty: said, and saved anyway.
+		await expect(page.getByText(preview.previewPdfFormRequiredEmpty_one.replace("{{count}}", "1"))).toBeVisible()
+		await expect(page.getByRole("textbox", { name: "Required" })).toHaveAttribute("aria-invalid", "true")
 		await expect(page.getByRole("button", { name: preview.previewSaveAction, exact: true })).toBeDisabled({
 			timeout: LIVE_WRITE_TIMEOUT_MS
 		})
@@ -112,12 +117,13 @@ test("a PDF form: every field type filled, saved and read back; the overlay is n
 		const values = await fieldValues(await downloaded(page))
 
 		expect(values.get("name")).toEqual(["Jane Doe"])
-		expect(values.get("password")).toEqual(["s3cret"])
+		expect(values.get("password")).toEqual([""])
 		expect(values.get("code")).toEqual(["AB12CD"])
 		expect(values.get("zip")).toEqual(["12345"])
 		expect(values.get("agree")).toEqual(["Yes"])
 		expect(values.get("choice")).toEqual(["B", "B"])
 		expect(values.get("country")).toEqual([["France"]])
+		expect(values.get("city")).toEqual([["Hamburg"]])
 		expect(values.get("toppings")).toEqual([["Cheese", "Olives"]])
 		await close(page)
 	})
@@ -145,11 +151,11 @@ test("forms with scripts or XFA say what doesn't work here", async ({ page }) =>
 
 		await open(page, listbox, names.calculated)
 		await page.getByRole("textbox", { name: "First number" }).fill("2")
-		await expect(page.getByText(preview.previewPdfFormScripts)).toBeVisible({ timeout: SWAP_TIMEOUT_MS })
+		await expect(page.getByText(preview.previewPdfScripts)).toBeVisible({ timeout: SWAP_TIMEOUT_MS })
 		await close(page)
 
 		await open(page, listbox, names.xfa)
-		await expect(page.getByText(preview.previewPdfFormXfaOnly)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expect(page.getByText(preview.previewPdfXfaOnly)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await close(page)
 
 		// A hybrid form is filled through its AcroForm; the first save asks before dropping the XFA data.

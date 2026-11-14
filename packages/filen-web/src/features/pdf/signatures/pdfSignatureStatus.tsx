@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ShieldAlertIcon, ShieldCheckIcon, ShieldQuestionIcon, ShieldXIcon, type LucideIcon } from "lucide-react"
-import type { PdfDocument } from "@filen/office/dom/pdf"
+import type { PdfSignatureSource } from "@filen/office/dom/pdf"
 import type { PdfSignatureSummaryState } from "@filen/office/core/pdfsign/summary"
 import { signatureBanner } from "@/features/pdf/signatures/signatureStatus.logic"
 import { usePdfSignatureReport } from "@/features/pdf/signatures/usePdfSignatureReport"
@@ -15,7 +15,8 @@ import { Spinner } from "@/components/ui/spinner"
 // nothing for an unsigned document.
 
 export interface PdfSignatureStatusProps {
-	document: PdfDocument
+	// What its signatures are read from (pdf.js, a second parser to the verifier's).
+	document: PdfSignatureSource
 	// Null: nothing can verify this document's bytes, so no status shows.
 	verify: PdfSignatureVerify | null
 	// Opens the byte prefix the signature covers, read-only; absent where the viewer cannot show it.

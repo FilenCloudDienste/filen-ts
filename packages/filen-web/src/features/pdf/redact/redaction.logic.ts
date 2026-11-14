@@ -1,10 +1,13 @@
-import type {
-	RedactionFailure,
-	RedactionFinding,
-	RedactionMark,
-	RedactionPlace,
-	RedactionPreset,
-	RedactionTerm
+import {
+	quadBounds,
+	rectsOverlap,
+	type RedactionFailure,
+	type RedactionFinding,
+	type RedactionMark,
+	type RedactionPlace,
+	type RedactionPreset,
+	type RedactionTerm,
+	type RedactRect
 } from "@filen/office/core/pdfedit/redactVerify"
 import { editedCopyName } from "@/features/drive/lib/copyName"
 import type { previewPdfRedaction } from "@/locales/en/previewPdf/redaction"
@@ -123,4 +126,46 @@ export function togglePreset(presets: readonly RedactionPreset[], preset: Redact
 // The selected findings, in document order.
 export function selectedFindings(findings: readonly RedactionFinding[], selected: ReadonlySet<string>): RedactionFinding[] {
 	return findings.filter(finding => selected.has(finding.id))
+}
+
+// The findings a pending text mark still covers (by id): a finding counts as marked while every one of its quads
+// overlaps a text mark's quad on its page. A mark removed from the review list since leaves its finding unmarked.
+export function markedFindings(findings: readonly RedactionFinding[], marks: readonly RedactionMark[]): ReadonlySet<string> {
+	const byPage = new Map<number, RedactRect[]>()
+
+	for (const mark of marks) {
+		if (mark.kind !== "text") continue
+
+		const rects = byPage.get(mark.page) ?? []
+
+		for (const quad of mark.quads) rects.push(quadBounds(quad))
+
+		byPage.set(mark.page, rects)
+	}
+
+	const marked = new Set<string>()
+
+	for (const finding of findings) {
+		const rects = byPage.get(finding.page)
+
+		if (
+			rects !== undefined &&
+			finding.quads.length > 0 &&
+			finding.quads.every(quad => rects.some(rect => rectsOverlap(rect, quadBounds(quad))))
+		)
+			marked.add(finding.id)
+	}
+
+	return marked
+}
+
+// The pages with pending marks, in order (each is one Apply step).
+export function markedPages(marks: readonly RedactionMark[]): number[] {
+	return [...new Set(marks.map(mark => mark.page))].sort((a, b) => a - b)
+}
+
+// The error a save throws when the written file failed the redaction check (save/pdfSave.ts PdfRedactionRefusedError),
+// told by its name so this module stays free of the save pipeline.
+export function isRedactionRefusal(error: unknown): error is Error & { readonly failure: RedactionFailure } {
+	return error instanceof Error && error.name === "PdfRedactionRefusedError" && "failure" in error
 }

@@ -725,6 +725,8 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["src/features/preview/components/pdfViewer.tsx", "PdfViewer"],
 		["src/features/pdf/session/fieldOverlay.tsx", "PdfFieldOverlay"],
 		["src/features/pdf/session/fieldOverlay.tsx", "FieldControl"],
+		["src/features/pdf/fillSign/fillSignPlacement.tsx", "FillSignOverlay"],
+		["src/features/pdf/forms/formNotices.tsx", "PdfFormNotices"],
 		["src/features/pdf/session/usePdfEdit.tsx", "usePdfEdit"],
 		["src/features/pdf/ribbon/pdfRibbon.tsx", "PdfRibbon"],
 		["src/features/preview/components/pdfCommandBar.tsx", "PdfCommandBar"],

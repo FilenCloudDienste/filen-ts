@@ -7,7 +7,7 @@ import { engineFields, fieldChecked, pdfjsFields } from "@/features/pdf/session/
 
 vi.mock("@/features/pdf/session/engineModule", () => ({ prefetchPdfEngine: () => undefined }))
 
-const STATE = { revision: 0, pageCount: 2, dirty: false } as unknown as PdfEditState
+const STATE = { revision: 0, pageCount: 2, dirty: false, restrictions: { owner: false } } as unknown as PdfEditState
 
 function fakeEngine(calls: string[]): PdfEngine {
 	const call = (op: string): Promise<unknown> => {
@@ -110,7 +110,7 @@ describe("form fields over the page", () => {
 			{ subtype: "Widget", id: "18R", fieldType: "Tx", hidden: true, rect: [1, 2, 3, 4] }
 		])
 
-		expect(fields.map(field => [field.id, field.type, field.value])).toEqual([
+		expect(fields.map(field => [field.id, field.kind, field.value])).toEqual([
 			[12, "text", "Ada"],
 			[14, "checkbox", "Yes"]
 		])
@@ -127,6 +127,7 @@ describe("form fields over the page", () => {
 			field: "choice",
 			label: "Choice",
 			value: "Off",
+			selected: [],
 			onState: "A",
 			options: [],
 			maxLength: 0,
@@ -141,7 +142,7 @@ describe("form fields over the page", () => {
 		}
 		const [field] = engineFields([widget, { ...widget, id: 10, type: "signature" }])
 
-		expect(field).toMatchObject({ id: 9, type: "radio", readOnly: true })
+		expect(field).toMatchObject({ id: 9, kind: "radio", readOnly: true })
 		expect(field === undefined ? true : fieldChecked(field)).toBe(false)
 	})
 })

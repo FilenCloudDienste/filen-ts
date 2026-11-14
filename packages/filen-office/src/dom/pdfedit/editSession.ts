@@ -7,11 +7,19 @@ import {
 	type PdfSignatureState,
 	type PdfToolClass
 } from "../../core/pdfedit/signaturePolicy"
+import { heldAfterSave, type PdfHeldAccess, type PdfSecurityChoice, type PdfSecurityWriteOptions } from "../../core/pdfedit/security"
 import type { PdfEditState, PdfFormState } from "../../core/pdfedit/state"
 import { num } from "./fields"
-import { formState, isTagged, signatureState } from "./formState"
+import { formState, isTagged, signatureState, xfaState } from "./formState"
 import type { PdfAccess } from "./protocol"
+import { securitySummary } from "./security/index"
 import type { SyncRangeLifetime } from "./syncRange"
+
+// New protection chosen for the next save: the choice, and the write options planned from it (an encryption change).
+export interface PendingSecurity {
+	readonly choice: PdfSecurityChoice
+	readonly options: Exclude<PdfSecurityWriteOptions, { readonly encrypt: "keep" }>
+}
 
 // The editor's history and bookkeeping. Every change is a command, logged with its arguments, and run as one MuPDF
 // journal operation. Undo and redo go through MuPDF's journal while they can; a save ends that (MuPDF 1.28 cannot undo
@@ -53,6 +61,11 @@ export interface HeldOutput {
 	readonly serving: EngineLifetime[]
 	// The applied count the file's last save stands at again when this save does not become the file.
 	readonly previousSaved: number
+	// The new protection it was written with, and MuPDF's name for the encryption it has.
+	readonly security: PendingSecurity | null
+	readonly encryption: string
+	// It redacted or changed the protection: once it becomes the file, the session starts again on it.
+	readonly resets: boolean
 }
 
 // Runs one logged step on `document` as one journal operation.
@@ -74,10 +87,15 @@ export class PdfEditSession {
 	restrictions: PdfRestrictions
 	form: PdfFormState
 	tagged: boolean
-	readonly encryption: string
-	readonly access: PdfAccess
-	// The password the document was opened with: a rebuild opens it again. Held in the engine's memory only.
-	readonly password: string | undefined
+	encryption: string
+	access: PdfAccess
+	// The password the document was opened with (or the owner password that unlocked it later): a rebuild opens it
+	// again. Held in the engine's memory only.
+	password: string | undefined
+	// What the document is authenticated with (security.ts PdfHeldAccess), in the engine's memory only.
+	held: PdfHeldAccess
+	// The protection the next save writes (the Protect dialog's choice, planned), null: the file keeps its own.
+	security: PendingSecurity | null = null
 	private pages: Map<number, number> | null = null
 	// The operation still open (a gesture continues it): its gesture id, its step, and the journal position before it.
 	private open: { readonly id: string | null; readonly step: LoggedStep; readonly before: number } | null = null
@@ -88,6 +106,7 @@ export class PdfEditSession {
 			readonly access: PdfAccess
 			readonly encryption: string
 			readonly restrictions: PdfRestrictions
+			readonly held: PdfHeldAccess
 			readonly password?: string
 		}
 	) {
@@ -97,6 +116,7 @@ export class PdfEditSession {
 		this.access = options.access
 		this.encryption = options.encryption
 		this.restrictions = options.restrictions
+		this.held = options.held
 		this.password = options.password
 	}
 
@@ -207,8 +227,41 @@ export class PdfEditSession {
 		}
 
 		if (this.open !== null) kinds.add(this.open.step.tool)
+		if (this.security !== null) kinds.add("security")
 
 		return [...kinds]
+	}
+
+	// The steps in the document, as the save writes it (an open gesture's ends before a save).
+	appliedSteps(): readonly LoggedStep[] {
+		return this.log.slice(0, this.applied)
+	}
+
+	// The owner password unlocked the document: its restrictions are lifted, and a rebuild opens it with that password.
+	unlocked(held: PdfHeldAccess): void {
+		this.held = held
+		this.password = held.password
+		this.access = "owner"
+		this.restrictions = PDF_UNRESTRICTED
+		this.revision++
+	}
+
+	// Sets the protection the next save writes (null: none of its own).
+	protect(security: PendingSecurity | null): void {
+		this.security = security
+		this.revision++
+	}
+
+	// A save wrote new protection and became the file: the document carries it now, with owner rights (the user chose
+	// the owner password). `method`: MuPDF's name for it.
+	protectedAs(options: PdfSecurityWriteOptions, method: string): void {
+		this.held = heldAfterSave(options, this.held)
+		this.password = this.held.password === "" ? undefined : this.held.password
+		this.encryption = method
+		this.access = options.encrypt === "none" ? "none" : "owner"
+		this.restrictions = PDF_UNRESTRICTED
+		this.security = null
+		this.revision++
 	}
 
 	// The 0-based page of a page object, from one walk of the page tree kept until pages change.
@@ -269,7 +322,8 @@ export class PdfEditSession {
 		return {
 			revision: this.revision,
 			pageCount: document.countPages(),
-			dirty: this.applied !== this.savedApplied || this.open !== null,
+			// New protection is a change to save too.
+			dirty: this.applied !== this.savedApplied || this.open !== null || this.security !== null,
 			canUndo: undo !== null,
 			canRedo: redo !== null,
 			undoLabel: undo?.label ?? null,
@@ -280,8 +334,10 @@ export class PdfEditSession {
 			restrictions: this.restrictions,
 			tools: toolAvailability(this.signatures, this.restrictions),
 			encryption: { method: this.encryption, access: this.access },
+			security: { ...securitySummary(document, this.held), pending: this.security?.choice.kind ?? null },
 			tagged: this.tagged,
-			form: this.form
+			// XFA read live: removing it before a save is a step that undo takes back.
+			form: { ...this.form, xfa: xfaState(document) }
 		}
 	}
 }

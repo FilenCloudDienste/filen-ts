@@ -38,7 +38,14 @@ export function pdfToolGroups(tools: readonly PdfTool[], tab: PdfRibbonTab): Pdf
 }
 
 // Groups with a name of their own; any other is named after its first tool.
-const GROUP_LABELS: ReadonlyMap<string, PreviewKey> = new Map([["form", "previewPdfRibbonGroupForm"]])
+const GROUP_LABELS: ReadonlyMap<string, PreviewKey> = new Map([
+	["form", "previewPdfRibbonGroupForm"],
+	["annotate", "previewPdfRibbonGroupAnnotate"],
+	["comment", "previewPdfRibbonGroupComment"],
+	["pagesInsert", "previewPdfPagesInsert"],
+	["pagesPage", "previewPdfPagesToolbarLabel"],
+	["redact", "previewPdfRedactMode"]
+])
 
 export function pdfToolGroupLabelKey(group: PdfToolGroup): PreviewKey | null {
 	return GROUP_LABELS.get(group.id) ?? group.tools[0]?.labelKey ?? null
@@ -56,11 +63,12 @@ export function pdfToolControl(tool: PdfTool, policy: PdfPolicyState, activeTool
 
 	return {
 		reasonKey: verdict.enabled ? null : verdict.reasonKey,
-		pressed: tool.run === undefined ? activeTool === tool.id : undefined
+		pressed: tool.idle === true ? activeTool === null : tool.run === undefined ? activeTool === tool.id : undefined
 	}
 }
 
 // What choosing a mode tool makes the active tool: it, or nothing when it already was (pressed again, it finishes).
+// The idle tool is chosen by ending the active one.
 export function nextActiveTool(tool: PdfTool, activeTool: string | null): string | null {
-	return activeTool === tool.id ? null : tool.id
+	return tool.idle === true || activeTool === tool.id ? null : tool.id
 }

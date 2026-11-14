@@ -26,4 +26,4 @@ export {
 export { flattenAnnotations } from "./flatten"
 export { listAnnotationAttachments, listDocumentAttachments, listLinks, readAttachment } from "./links"
 export { listAnnotations, plainTextOf, readAnnotation, readCommentThreads } from "./read"
-export { PdfAnnotationError } from "./shared"
+export { PdfAnnotationError, withPageScope } from "./shared"

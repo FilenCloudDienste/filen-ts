@@ -766,6 +766,13 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["pdf.rotatePagesCcw", "editor.foldAll"],
 	["pdf.rotatePagesCw", "editor.unfold"],
 	["pdf.rotatePagesCw", "editor.unfoldAll"],
+	// The crop tool's K works on the PDF's page surface; K plays and pauses only in a player or the video editor, which
+	// the PDF body never shows.
+	["pdf.tool.crop", "media.playPause"],
+	["pdf.tool.crop", "preview.videoShuttlePause"],
+	// A PDF tool letter acts only with focus on the pages in the preview overlay; a chat message's letters only with focus
+	// on the message, and the chat stands down while the preview is the open dialog.
+	["pdf.tool.redact", "chats.message.reply"],
 	// The listings and the chat under the preview stand down while it is the open dialog; the notes route never mounts
 	// it.
 	["pdf.delete", "chats.deleteSelected"],
@@ -785,7 +792,13 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// mounts the editor) never share a layer with the PDF editor.
 	["pdf.escape", "chats.composer.cancel"],
 	["pdf.escape", "links.back"],
-	["pdf.escape", "media.close"]
+	["pdf.escape", "media.close"],
+	// The PDF tools' letters act on the page surface of the preview dialog only, outside its fields: the shell's theme
+	// toggle stands down under a dialog, and the players and the running show never share that layer.
+	["annotations.draw", "app.toggleTheme"],
+	["annotations.hand", "media.subtitleLater"],
+	["annotations.hand", "presentation.show.nextHidden"],
+	["annotations.note", "media.subtitles"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

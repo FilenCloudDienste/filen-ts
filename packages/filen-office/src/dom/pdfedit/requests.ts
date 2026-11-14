@@ -11,7 +11,14 @@ import type {
 	PdfPermission
 } from "./protocol"
 import { saslPrepPassword } from "../../core/pdfwrite/crypto"
+import { ANNOTATION_REQUESTS } from "./annotationRequests"
 import { EDIT_REQUESTS, startEdit } from "./editRequests"
+import { FORM_REQUESTS } from "./formRequests"
+import { EXTRACT_REQUESTS } from "./pages/extractRequest"
+import { PAGE_SOURCE_REQUESTS } from "./pages/sources"
+import { PROTECT_REQUESTS } from "./protectRequests"
+import { SIGN_REQUESTS } from "./signRequests"
+import { TOOL_REQUESTS } from "./toolRequests"
 import { TileRenderer } from "./render"
 import { SyncRangeReader, syncRangeStreamHandle } from "./stream"
 
@@ -72,7 +79,22 @@ function access(result: number): PdfAccess {
 }
 
 function opened(document: Mupdf.PDFDocument, password: string | undefined): PdfOpenResult {
-	if (!document.needsPassword()) return { status: "open", document: summary(document), access: "none" }
+	if (!document.needsPassword()) {
+		if (password === undefined) return { status: "open", document: summary(document), access: "none" }
+
+		// A file that opens without a password may still be given its owner password (one the session unlocked, or the
+		// owner password a save just set): it lifts the restrictions. A failed attempt drops all access, which the empty
+		// password gives back.
+		for (const candidate of passwordCandidates(password)) {
+			if ((document.authenticatePassword(candidate) & 4) !== 0)
+				return { status: "open", document: summary(document), access: "owner" }
+		}
+
+		document.authenticatePassword("")
+
+		return { status: "open", document: summary(document), access: "none" }
+	}
+
 	if (password === undefined) return { status: "password" }
 
 	// As typed, then SASLprep'd (an AES-256 password, PDF 32000-2 §7.6.4.3.3): each attempt authenticates anew, so the
@@ -176,12 +198,18 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 
 		return { value: pages }
 	},
-	render: async (context, { page, scale, rotation, tile }) => {
+	render: async (context, { page, scale, rotation, tile, print }) => {
 		const { document, renderer } = context.open()
 
 		if (!Number.isInteger(page) || page < 0 || page >= document.countPages() || !(scale > 0)) throw new PdfEngineRefusal("badRequest")
 
-		const drawn = renderer.render(page, scale, rotation, tile)
+		const drawn = renderer.render(
+			page,
+			scale,
+			rotation,
+			tile,
+			print === undefined ? undefined : { annotations: print.annotations === true }
+		)
 		const bitmap = await context.host.toBitmap(drawn.rgba, drawn.width, drawn.height)
 
 		return { value: { bitmap, tile: drawn.tile }, transfer: [bitmap] }
@@ -213,5 +241,16 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 	verifySignatures: () => {
 		throw new PdfEngineRefusal("badRequest", "signature verification is not served")
 	},
-	...EDIT_REQUESTS
+	// The redaction verifier runs in a verifying engine's worker, which registers it.
+	verifyRedaction: () => {
+		throw new PdfEngineRefusal("badRequest", "redaction verification is not served")
+	},
+	...EDIT_REQUESTS,
+	...FORM_REQUESTS,
+	...ANNOTATION_REQUESTS,
+	...PAGE_SOURCE_REQUESTS,
+	...EXTRACT_REQUESTS,
+	...PROTECT_REQUESTS,
+	...TOOL_REQUESTS,
+	...SIGN_REQUESTS
 }

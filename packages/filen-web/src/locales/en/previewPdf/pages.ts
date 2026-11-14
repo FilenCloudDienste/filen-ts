@@ -64,8 +64,24 @@ export const previewPdfPages = {
 	previewPdfPagesInsertImageFailed: "This image couldn't be inserted.",
 	/** Error toast: the chosen file could not be opened as a PDF */
 	previewPdfPagesInsertFileFailed: "This file couldn't be inserted. It may not be a PDF.",
-	/** One-time notice after a page change in a PDF that carries accessibility tags (structure for screen readers) */
-	previewPdfTagged: "This PDF has accessibility tags. They may be incomplete after this change.",
+	/** PDF Insert — title of the picker for a PDF in the user's Filen drive whose pages are inserted */
+	previewPdfPagesInsertPickerTitle: "Insert pages from a PDF",
+	/** PDF Insert — description of that picker */
+	previewPdfPagesInsertPickerDescription: "Every page of the PDF you choose goes in after the current page.",
+	/** PDF Insert — the password prompt's text when the PDF chosen to insert from is password-protected */
+	previewPdfPagesInsertPasswordBody: "The PDF to insert from is password-protected. Enter its password.",
+	/** Screen reader announcement after pages were cropped; {{page}} is the page's number */
+	previewPdfPagesCropped_one: "Page {{page}} cropped",
+	/** Screen reader announcement after pages were cropped */
+	previewPdfPagesCropped_other: "{{count}} pages cropped",
+	/** Button that closes a one-line notice under the ribbon */
+	previewPdfPagesNoticeDismiss: "Dismiss",
+	/** PDF Organise grid — button on a signed PDF: saves a copy of it without its signatures, whose pages can then be organised */
+	previewPdfPagesCopyWithoutSignatures: "Edit a copy without signatures",
+	/** Name of that copy, in parentheses after the original name: "contract (without signatures).pdf" */
+	previewPdfPagesUnsignedSuffix: "without signatures",
+	/** Keyboard shortcuts — the PDF editor's crop tool */
+	previewPdfKeyCrop: "Crop (PDF)",
 
 	/** PDF Extract dialog — title */
 	previewPdfExtractTitle: "Extract pages",
@@ -94,8 +110,7 @@ export const previewPdfPages = {
 	/** PDF Extract and Split dialogs — note under the password switch */
 	previewPdfExtractKeepPasswordNote: "They open with this PDF's password.",
 	/** PDF Extract and Split dialogs — error: the password cannot be given to new files */
-	previewPdfExtractPasswordUnsupported:
-		"This PDF's password contains a comma, which new files can't use. Turn off password protection to continue.",
+	previewPdfExtractPasswordUnsupported: "This PDF's password can't be given to new files. Turn off password protection to continue.",
 	/** PDF Extract and Split dialogs — note for a signed PDF */
 	previewPdfExtractSignatures: "Signatures aren't copied. Where a signature shows on a page, its picture stays.",
 	/** PDF Extract and Split dialogs — the name of the file that will be made; {{name}} is a file name */

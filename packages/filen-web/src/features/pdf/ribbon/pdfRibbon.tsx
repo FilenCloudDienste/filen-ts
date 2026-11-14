@@ -4,7 +4,14 @@ import { ChevronDownIcon, Redo2Icon, Undo2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+	DropdownMenu,
+	DropdownMenuCheckboxItem,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
 import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -12,7 +19,14 @@ import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/offic
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { BAR_BUTTON } from "@/features/preview/components/commandBar.logic"
 import { usePdfCommandParts, type PdfCommandBarProps } from "@/features/preview/components/pdfCommandParts"
-import { PDF_RIBBON_TABS, type PdfPolicyState, type PdfRibbonTab, type PdfTool, type PdfToolContext } from "@/features/pdf/tools/registry"
+import {
+	PDF_RIBBON_TABS,
+	toolVariant,
+	type PdfPolicyState,
+	type PdfRibbonTab,
+	type PdfTool,
+	type PdfToolContext
+} from "@/features/pdf/tools/registry"
 import {
 	nextActiveTool,
 	pdfRibbonTab,
@@ -39,7 +53,11 @@ export interface PdfRibbonHistory {
 	redo(): void
 	save(): void
 	saveAsCopy(): void
+	// Opens the Protect document dialog (Security…), absent where it is not offered.
+	security?: (() => void) | undefined
 	discard(): void
+	// The Save menu's "Flatten annotations" option (written into the pages on the next save), absent where none applies.
+	readonly flatten?: { readonly on: boolean; readonly enabled: boolean; toggle(): void }
 }
 
 export interface PdfRibbonProps extends PdfCommandBarProps {
@@ -47,7 +65,9 @@ export interface PdfRibbonProps extends PdfCommandBarProps {
 	readonly policy: PdfPolicyState
 	readonly toolContext: PdfToolContext
 	readonly activeTool: string | null
-	readonly onActivateTool: (id: string | null) => void
+	// The chosen variant of each tool with variants, by tool id.
+	readonly toolVariants?: Readonly<Record<string, string>>
+	readonly onActivateTool: (id: string | null, variant?: string) => void
 	// A tool control was hovered or focused, or the Tools tab chosen: the host starts fetching the editor.
 	readonly onPrefetch: () => void
 	// Null until the editor holds the document.
@@ -55,31 +75,72 @@ export interface PdfRibbonProps extends PdfCommandBarProps {
 }
 
 const TOOL_GROUP_PRIORITY = 4
+// A tool's variant menu button.
+const VARIANT_MENU = 14
 
 function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }) {
 	const { t } = useTranslation("preview")
 	const control = pdfToolControl(tool, props.policy, props.activeTool)
 	const action = tool.actionIds[0]
-
-	return (
+	const variant = toolVariant(tool, props.toolVariants?.[tool.id])
+	const Icon = variant?.icon ?? tool.icon
+	const button = (
 		<TooltipIconButton
-			label={t(tool.labelKey)}
+			label={variant === null ? t(tool.labelKey) : t(variant.labelKey)}
 			disabled={control.reasonKey !== null}
 			title={control.reasonKey === null ? undefined : t(control.reasonKey)}
 			pressed={control.pressed}
-			className={cn("shrink-0", control.pressed === true && "bg-accent text-foreground")}
+			className={cn("shrink-0", control.pressed === true && "bg-accent text-foreground", variant !== null && "rounded-r-none")}
 			shortcut={action === undefined ? null : <Kbd action={action} />}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				if (tool.run === undefined) {
-					props.onActivateTool(nextActiveTool(tool, props.activeTool))
+					props.onActivateTool(nextActiveTool(tool, props.activeTool), variant?.id)
 				} else {
 					tool.run(props.toolContext)
 				}
 			}}
 		>
-			<tool.icon />
+			<Icon />
 		</TooltipIconButton>
+	)
+
+	if (variant === null) return button
+
+	// A tool with variants: the button uses the chosen one, the menu beside it picks another (and makes it active).
+	return (
+		<span className="flex shrink-0 items-center">
+			{button}
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					disabled={control.reasonKey !== null}
+					render={
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t("previewPdfToolVariants", { tool: t(tool.labelKey) })}
+							className="w-3.5 rounded-l-none"
+							onMouseDown={keepFocus}
+						/>
+					}
+				>
+					<ChevronDownIcon />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent data-preview-surface>
+					{(tool.variants ?? []).map(entry => (
+						<DropdownMenuItem
+							key={entry.id}
+							onClick={() => {
+								props.onActivateTool(tool.id, entry.id)
+							}}
+						>
+							<entry.icon aria-hidden="true" />
+							{t(entry.labelKey)}
+						</DropdownMenuItem>
+					))}
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</span>
 	)
 }
 
@@ -96,7 +157,7 @@ function toolGroups(props: PdfRibbonProps, tab: PdfRibbonTab, label: (key: Previ
 			id: `tool-${group.id}`,
 			label: label(labelKey),
 			icon: first.icon,
-			width: group.tools.length * BAR_BUTTON,
+			width: group.tools.reduce((sum, tool) => sum + BAR_BUTTON + (tool.variants === undefined ? 0 : VARIANT_MENU), 0),
 			priority: TOOL_GROUP_PRIORITY,
 			single: group.tools.length === 1,
 			content: (
@@ -193,6 +254,30 @@ function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; on
 						>
 							{t("previewPdfSaveAsCopy")}
 						</DropdownMenuItem>
+						{history.flatten === undefined ? null : (
+							<>
+								<DropdownMenuSeparator />
+								<DropdownMenuCheckboxItem
+									checked={history.flatten.on}
+									disabled={!history.flatten.enabled}
+									title={t("previewPdfAnnotFlattenBody")}
+									onCheckedChange={() => {
+										history.flatten?.toggle()
+									}}
+								>
+									{t("previewPdfAnnotFlatten")}
+								</DropdownMenuCheckboxItem>
+							</>
+						)}
+						{history.security === undefined ? null : (
+							<DropdownMenuItem
+								onClick={() => {
+									history.security?.()
+								}}
+							>
+								{t("previewPdfSecurityMenu")}
+							</DropdownMenuItem>
+						)}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>

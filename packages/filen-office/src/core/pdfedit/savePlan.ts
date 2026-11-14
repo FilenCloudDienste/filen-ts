@@ -38,15 +38,16 @@ export interface PdfSavePlan {
 	readonly invalidates: readonly string[]
 	// The heap the save is expected to reach.
 	readonly peakBytes: number
-	// MuPDF's write options.
+	// MuPDF's write options, plain words: the save adds the encryption (kept, or the Protect dialog's) through
+	// composeWriteOptions (security.ts).
 	readonly options: string
 	readonly refuse: PdfSaveRefusal | null
 }
 
-export const PDF_FULL_SAVE_OPTIONS = "garbage=compact,objstms,compress,encrypt=keep"
+export const PDF_FULL_SAVE_OPTIONS = "garbage=compact,objstms,compress"
 // No object streams: a reader that never learned them still reads the signed revisions, and the appended one stays
 // plain to check.
-export const PDF_INCREMENTAL_SAVE_OPTIONS = "incremental,encrypt=keep"
+export const PDF_INCREMENTAL_SAVE_OPTIONS = "incremental"
 
 export function planSave(input: PdfSaveInput): PdfSavePlan {
 	const signed = input.signatures.fields.length > 0

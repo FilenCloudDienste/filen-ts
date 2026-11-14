@@ -14,16 +14,12 @@ export const previewPdfFillSign = {
 	previewPdfFillSignature: "Signature",
 	/** Fill & Sign — tool adding initials */
 	previewPdfFillInitials: "Initials",
-	/** Fill & Sign — undo step label: text placed */
-	previewPdfFillStepText: "Add text",
-	/** Fill & Sign — undo step label: a mark placed */
-	previewPdfFillStepMark: "Add mark",
-	/** Fill & Sign — undo step label: a signature placed */
-	previewPdfFillStepSignature: "Add signature",
-	/** Fill & Sign — undo step label: initials placed */
-	previewPdfFillStepInitials: "Add initials",
-	/** Fill & Sign — undo step label: a form field filled in */
-	previewPdfFillStepField: "Fill in field",
+	/** Fill & Sign — accessible name of a page while a Fill & Sign tool waits to be placed on it; {{page}} is the page number */
+	previewPdfFillPlaceOnPage: "Place on page {{page}}",
+	/** Fill & Sign — hint while a Fill & Sign tool waits to be placed */
+	previewPdfFillPlaceHint: "Click on the page, or press Enter and move it with the arrow keys, to place it.",
+	/** Fill & Sign — accessible name of the box where text placed on the page is typed */
+	previewPdfFillTextLabel: "Text to add",
 
 	/** Signature dialog — title when adding a signature */
 	previewPdfSignatureDialogTitle: "Add signature",

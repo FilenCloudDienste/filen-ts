@@ -100,3 +100,104 @@ export function editorKey(event: EditorKeyEvent, mac: boolean): "done" | "cancel
 export function textRows(text: string): number {
 	return Math.max(1, text.split("\n").length)
 }
+
+// --- The page surface and the engine's display space ---
+
+// What a tool overlay knows of its page's geometry (pdf.js's viewport and the editor's share it).
+export interface PageGeometry {
+	readonly viewBox: readonly number[]
+	readonly scale: number
+	convertToViewportPoint(x: number, y: number): unknown[]
+	convertToPdfPoint(x: number, y: number): unknown[]
+}
+
+// A point of the page box (CSS px from its top-left) in the engine's display space: points from the top-left of the
+// page as shown (its crop box), y down.
+export function surfaceToDisplay(geometry: PageGeometry, x: number, y: number): [number, number] {
+	const [ux, uy] = geometry.convertToPdfPoint(x, y)
+	const [x0 = 0, , , y1 = 0] = geometry.viewBox
+
+	return [Number(ux) - x0, y1 - Number(uy)]
+}
+
+export function displayToSurface(geometry: PageGeometry, x: number, y: number): [number, number] {
+	const [x0 = 0, , , y1 = 0] = geometry.viewBox
+	const [sx, sy] = geometry.convertToViewportPoint(x + x0, y1 - y)
+
+	return [Number(sx), Number(sy)]
+}
+
+// The CSS transform that lays content drawn at display space × `scale` (as the text editor places itself) onto the
+// page box, whatever the view's rotation: display → surface without its scale, which the content applies.
+export function displayTransform(geometry: PageGeometry): string {
+	const [ox, oy] = displayToSurface(geometry, 0, 0)
+	const [ax, ay] = displayToSurface(geometry, 1, 0)
+	const [bx, by] = displayToSurface(geometry, 0, 1)
+	const s = geometry.scale > 0 ? geometry.scale : 1
+	const values = [(ax - ox) / s, (ay - oy) / s, (bx - ox) / s, (by - oy) / s, ox, oy]
+
+	return `matrix(${values.map(String).join(", ")})`
+}
+
+// --- What an edit replaces ---
+
+export interface TextChange {
+	// The part of the target's text replaced, and what replaces it.
+	readonly start: number
+	readonly end: number
+	readonly text: string
+}
+
+const WORD_CHAR = /[\p{L}\p{N}\p{M}_'’-]/u
+
+function isWordChar(char: string | undefined): boolean {
+	return char !== undefined && WORD_CHAR.test(char)
+}
+
+// The words of `before` that `after` changes, as one span: the common start and end are kept, the rest widened to
+// whole words, so an edited word is replaced alone and its neighbours stay as drawn. Null when nothing changed.
+export function changedSpan(before: string, after: string): TextChange | null {
+	if (before === after) return null
+
+	let start = 0
+
+	while (start < before.length && start < after.length && before[start] === after[start]) start++
+
+	let end = before.length
+	let endAfter = after.length
+
+	while (end > start && endAfter > start && before[end - 1] === after[endAfter - 1]) {
+		end--
+		endAfter--
+	}
+
+	// Back to the start of the word the change begins in, on to the end of the word it ends in.
+	// A word the change touches (inside it, or text joined to its end or start) is replaced whole.
+	while (start > 0 && isWordChar(before[start - 1]) && (isWordChar(before[start]) || isWordChar(after[start]))) start--
+
+	while (end < before.length && isWordChar(before[end]) && (isWordChar(before[end - 1]) || isWordChar(after[endAfter - 1]))) {
+		end++
+		endAfter++
+	}
+
+	// Text only inserted between words: it replaces the next word with itself and that word (the last word at the end).
+	if (start === end) {
+		if (end < before.length) {
+			while (end < before.length && !isWordChar(before[end])) {
+				end++
+				endAfter++
+			}
+
+			while (end < before.length && isWordChar(before[end])) {
+				end++
+				endAfter++
+			}
+		} else {
+			while (start > 0 && !isWordChar(before[start - 1])) start--
+
+			while (start > 0 && isWordChar(before[start - 1])) start--
+		}
+	}
+
+	return { start, end, text: after.slice(start, endAfter) }
+}

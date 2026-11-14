@@ -24,6 +24,11 @@ export function partSuffix(t: TFunction<"preview">, part: number): CopySuffix {
 	return numbered(t, t("previewPdfPagesPartSuffix", { part }))
 }
 
+// "without signatures": a signed PDF's copy whose pages can be organised.
+export function unsignedSuffix(t: TFunction<"preview">): CopySuffix {
+	return numbered(t, t("previewPdfPagesUnsignedSuffix"))
+}
+
 // One name per suffix, in order, each free in `taken` (lowercased names in the directory) and different from the
 // names before it in the batch.
 export function batchCopyNames(original: string, suffixes: readonly CopySuffix[], taken: ReadonlySet<string>): string[] {

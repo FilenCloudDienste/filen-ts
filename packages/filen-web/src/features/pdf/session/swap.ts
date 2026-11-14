@@ -30,11 +30,18 @@ export interface PdfSwapDeps {
 
 type Change = (session: PdfEditSessionModel) => Promise<unknown>
 
+// A change waiting for the editor, and who hears when it is dropped instead (the editor did not start, was poisoned or
+// closed first).
+interface Queued {
+	readonly change: Change
+	readonly dropped: (() => void) | undefined
+}
+
 export class PdfEditSwap {
 	private phase: PdfEditPhase = { kind: "view" }
 	private readonly listeners = new Set<() => void>()
 	private readonly deps: PdfSwapDeps
-	private queue: Change[] = []
+	private queue: Queued[] = []
 	private running: Promise<void> = Promise.resolve()
 	// The viewer's document (what it knows that the engine does not serve is read from it before it closes) and the
 	// password it accepted (memory only, for the engine's open).
@@ -79,6 +86,12 @@ export class PdfEditSwap {
 		return this.accepted
 	}
 
+	// The document opens with another password from now on: the owner password that unlocked it, or the new one a save
+	// protected it with (undefined: it has none).
+	setPassword(password: string | undefined): void {
+		this.accepted = password
+	}
+
 	private facts(): Promise<PdfDocumentFacts> {
 		return this.viewer === null
 			? Promise.resolve({ info: null, permissions: null, signatures: null, outline: null })
@@ -90,13 +103,17 @@ export class PdfEditSwap {
 		prefetchPdfEngine()
 	}
 
-	// Runs `change` on the editor, starting it first if needed.
-	edit(change: Change): void {
+	// Runs `change` on the editor, starting it first if needed; `dropped` runs instead when it never will.
+	edit(change: Change, dropped?: () => void): void {
 		const phase = this.phase
 
-		if (phase.kind === "poisoned") return
+		if (phase.kind === "poisoned") {
+			dropped?.()
 
-		this.queue.push(change)
+			return
+		}
+
+		this.queue.push({ change, dropped })
 
 		if (phase.kind === "editing") this.drain(phase.session)
 		else if (phase.kind !== "starting") void this.start()
@@ -135,7 +152,7 @@ export class PdfEditSwap {
 		}
 
 		if (opened === null) {
-			this.queue = []
+			this.drop()
 			this.set({ kind: "failed" })
 
 			return
@@ -176,9 +193,14 @@ export class PdfEditSwap {
 		return { engine, session: new PdfEditSessionModel(engine.client, document, state) }
 	}
 
+	// Changes that will not run now: each waiting one's caller hears it.
+	private drop(): void {
+		for (const queued of this.queue.splice(0)) queued.dropped?.()
+	}
+
 	// Changes run one after another; one the engine refuses is reported and the next runs.
 	private drain(session: PdfEditSessionModel): void {
-		const changes = this.queue
+		const changes = this.queue.map(queued => queued.change)
 
 		this.queue = []
 
@@ -196,7 +218,7 @@ export class PdfEditSwap {
 
 	private poisoned(): void {
 		this.generation++
-		this.queue = []
+		this.drop()
 		this.set({ kind: "poisoned" })
 	}
 
@@ -205,7 +227,7 @@ export class PdfEditSwap {
 		const phase = this.phase
 
 		this.generation++
-		this.queue = []
+		this.drop()
 
 		if (phase.kind === "editing") void phase.engine.close()
 

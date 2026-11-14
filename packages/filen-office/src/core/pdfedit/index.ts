@@ -32,11 +32,13 @@ export {
 } from "./signaturePolicy"
 export type {
 	PdfCommandResult,
+	PdfEditSecurity,
 	PdfEditState,
 	PdfEncryptionState,
 	PdfFormState,
 	PdfPageWidgets,
 	PdfRect,
+	PdfWidgetOption,
 	PdfWidgetSummary,
 	PdfWidgetType
 } from "./state"

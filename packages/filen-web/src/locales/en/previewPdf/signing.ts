@@ -111,5 +111,24 @@ export const previewPdfSigning = {
 	/** Confirm before a save that breaks digital signatures, several signatures (exact wording) */
 	previewPdfSigningInvalidate_other: "Saving these changes invalidates {{count}} signatures.",
 	/** Button of that confirm: save and break the signatures */
-	previewPdfSigningInvalidateConfirm: "Save anyway"
+	previewPdfSigningInvalidateConfirm: "Save anyway",
+	/** Ribbon button (Protect tab) that signs the PDF with a certificate file */
+	previewPdfSigningTool: "Sign with certificate",
+	/** One-line notice when unsaved changes are too large to save together with the signature (exact wording) */
+	previewPdfSignAfterChanges: "To sign, Filen first saves your changes as a new version, then saves the signed version.",
+	/** One-line hint under the ribbon while the user places the signature on a page */
+	previewPdfSigningPlaceHint:
+		"Drag on a page to place your signature, or choose an empty signature field. On a page, Enter places it with the keyboard.",
+	/** Button in that hint: stop signing */
+	previewPdfSigningPlaceCancel: "Cancel",
+	/** Accessible name of a page while the signature is placed on it; {{page}} is the page number */
+	previewPdfSigningPlaceOnPage: "Place the signature on page {{page}}",
+	/** Button over an empty signature field of the form: sign in this field */
+	previewPdfSigningSignHere: "Sign here",
+	/** One-line status under the ribbon while the signature is made and the signed PDF saved */
+	previewPdfSigningSaving: "Signing and saving…",
+	/** Message after the signed PDF was saved as a new version */
+	previewPdfSigningSigned: "Signed and saved",
+	/** Error when signing did not complete (nothing was saved) */
+	previewPdfSigningFailed: "The PDF couldn't be signed. Nothing was saved."
 } as const

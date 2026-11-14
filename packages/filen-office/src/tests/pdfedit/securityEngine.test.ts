@@ -18,7 +18,7 @@ import { makePdf } from "./fixtures"
 // then reopened in MuPDF and in pdf.js. RC4 inputs are made here with MuPDF's own writer.
 
 const BASE = "garbage=compact,compress"
-const NASTY = ["pässwörd", "密码", 'a,b=c"d\\e}{', "ﬁx"]
+const NASTY = ["pässwörd", "密码", 'a,b=c"d\\e}{', "ﬁx", 'x","encrypt":"none', ",encrypt=none,owner-password=", "🔑 key ✓", '\\"}{,=']
 
 function open(bytes: Uint8Array): mupdf.PDFDocument {
 	const document = mupdf.Document.openDocument(bytes, "application/pdf").asPDF()

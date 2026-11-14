@@ -5,7 +5,8 @@ import type { PdfPageRect } from "../../../core/pdfedit/visualSignature"
 // label) and the value setters a form edit applies. Each setter changes one field and regenerates the appearance
 // of every widget of that field (a field may have widgets on several pages: a radio group, a repeated name); it
 // returns the pages it touched so the caller re-renders only those. Journal operations are the caller's: one
-// setter call is one form edit. Scripts never run (the session disables JavaScript): calculated fields keep their
+// setter call is one form edit. A password field (PDF 32000-1 §12.7.4.3: its value should not be stored) is never
+// filled here: its value would be written into the file. Scripts never run (the session disables JavaScript): calculated fields keep their
 // last value, which pdfFormScripts reports.
 
 export type PdfFieldKind = "text" | "checkbox" | "radio" | "combo" | "list" | "button" | "signature"
@@ -54,7 +55,7 @@ export type PdfFieldValue =
 	| { readonly kind: "radio" }
 	| { readonly kind: "choice"; readonly values: readonly string[] }
 
-export type PdfFieldRefusal = "readOnly" | "wrongKind" | "notAnOption" | "notFound"
+export type PdfFieldRefusal = "readOnly" | "password" | "wrongKind" | "notAnOption" | "notFound"
 
 // A setter refused: nothing changed.
 export class PdfFieldError extends Error {
@@ -322,25 +323,8 @@ function setChoice(document: PDFDocument, widget: PDFWidget, field: PdfFormField
 	target.put("I", indexArray)
 }
 
-// The bullet every character of a password field's appearance shows.
-const PASSWORD_MASK = "•"
-
-// A password field (PDF 32000-1 §12.7.4.3: never echoed visibly): its appearance is generated from bullets, one per
-// character, and only then is the typed text stored as its value, so neither a render nor a print shows it.
-function setPassword(document: PDFDocument, page: PDFPage, pageIndex0: number, widget: PDFWidget, text: string): number[] {
-	widget.setTextValue(PASSWORD_MASK.repeat([...text].length))
-
-	const pages = refreshField(document, page, pageIndex0, widget)
-	const target = deref(fieldOf(widget.getObject()))
-
-	if (text === "") target.delete("V")
-	else target.put("V", document.newString(text))
-
-	return pages
-}
-
-// Sets one field from one of its widgets. Refuses (PdfFieldError, nothing changed) a read-only field, a value of
-// the wrong kind and, for a combo that is not editable or a list, a value that is not an option. Text is clipped
+// Sets one field from one of its widgets. Refuses (PdfFieldError, nothing changed) a read-only field, a password
+// field, a value of the wrong kind and, for a combo that is not editable or a list, a value that is not an option. Text is clipped
 // to the field's maximum length. Returns the pages whose appearance changed.
 export function setFieldValue(
 	document: PDFDocument,
@@ -356,11 +340,10 @@ export function setFieldValue(
 	const field = describeWidget(widget, pageIndex0)
 
 	if (field.readOnly) throw new PdfFieldError("readOnly")
+	if (field.password) throw new PdfFieldError("password")
 
 	switch (value.kind) {
 		case "text": {
-			if (field.kind === "text" && field.password)
-				return setPassword(document, page, pageIndex0, widget, clipFieldText(field, value.text))
 			if (field.kind === "text") widget.setTextValue(clipFieldText(field, value.text))
 			else if (field.kind === "combo" && field.editable) widget.setChoiceValue(value.text)
 			else throw new PdfFieldError("wrongKind")
@@ -458,7 +441,8 @@ export function resetForm(document: PDFDocument): number[] {
 	return [...byPage.keys()].sort((a, b) => a - b)
 }
 
-// Required fields without a value, for the warning on save (never a refusal).
+// Required fields without a value, for the warning on save (never a refusal). Fields that cannot be filled here
+// (read-only, password) are left out.
 export function missingRequiredFields(document: PDFDocument): PdfFormField[] {
 	const missing: PdfFormField[] = []
 
@@ -466,7 +450,8 @@ export function missingRequiredFields(document: PDFDocument): PdfFormField[] {
 		for (const field of readPageFields(document.loadPage(index), index)) {
 			const empty = field.kind === "checkbox" || field.kind === "radio" ? field.value === "Off" : field.value === ""
 
-			if (field.required && empty && !field.readOnly && missing.every(other => other.name !== field.name)) missing.push(field)
+			if (field.required && empty && !field.readOnly && !field.password && missing.every(other => other.name !== field.name))
+				missing.push(field)
 		}
 	}
 

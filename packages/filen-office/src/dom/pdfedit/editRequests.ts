@@ -1,13 +1,24 @@
 import type * as Mupdf from "mupdf"
 import { savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
+import { REDACTION_SAVE_OPTIONS } from "../../core/pdfedit/redactVerify"
 import { planSave } from "../../core/pdfedit/savePlan"
+import {
+	composeWriteOptions,
+	passwordCandidates,
+	PDF_AES256_METHOD,
+	PDF_AUTH_OWNER,
+	PDF_AUTH_USER,
+	type PdfHeldAccess
+} from "../../core/pdfedit/security"
 import type { PdfCommandResult, PdfPageWidgets } from "../../core/pdfedit/state"
-import { pdfCommand } from "./commands/index"
-import type { PdfCommandContext } from "./commands/types"
+import { saslPrepPassword } from "../../core/pdfwrite/crypto"
+import { pdfCommand, redactionManifest } from "./commands/index"
+import { outcomePages, type PdfCommandContext, type PdfCommandOutcome } from "./commands/types"
+import { pendingSignature } from "./commands/sign"
 import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext } from "./context"
-import { EngineLifetime, PdfEditSession, restrictionsOf, type LoggedStep } from "./editSession"
+import { EngineLifetime, PdfEditSession, restrictionsOf, type LoggedStep, type PendingSecurity } from "./editSession"
 import { pageWidgets } from "./formState"
-import type { PdfOpenResult } from "./protocol"
+import type { PdfOpenResult, PdfSaveProtection } from "./protocol"
 import type { PdfRequestHandler } from "./requests"
 import { TileRenderer } from "./render"
 import { syncRangeStreamHandle } from "./stream"
@@ -40,7 +51,7 @@ type EditOp =
 
 type Handlers = { readonly [K in EditOp]: PdfRequestHandler<K> }
 
-type Editing = OpenDocument & { readonly edit: PdfEditSession }
+export type Editing = OpenDocument & { readonly edit: PdfEditSession }
 
 // Starts the editor's bookkeeping on an unlocked document: the journal from here on.
 export function startEdit(
@@ -56,11 +67,44 @@ export function startEdit(
 		access: opened.access,
 		encryption,
 		restrictions: restrictionsOf(permissions, opened.access, encryption),
+		held: heldAtStart(document, opened, password),
 		...(password === undefined ? {} : { password })
 	})
 }
 
-function editing(context: PdfEngineContext): Editing {
+// What the just unlocked document is authenticated with: the candidate of `password` that unlocks it (each attempt
+// authenticates anew, so the last one tried is the one that holds), or the empty password of a document that opens
+// without one.
+function heldAtStart(
+	document: Mupdf.PDFDocument,
+	opened: Extract<PdfOpenResult, { status: "open" }>,
+	password: string | undefined
+): PdfHeldAccess {
+	if (opened.document.encryption === "None") return { password: "", bits: 0, openPassword: false }
+	if (opened.access === "none" || password === undefined)
+		return { password: "", bits: document.authenticatePassword(""), openPassword: false }
+
+	// Whether the file opens without a password (an owner password may have unlocked one that does); the candidates
+	// below authenticate again either way.
+	const openPassword = document.authenticatePassword("") === 0
+	const candidates = new Set(passwordCandidates(password))
+
+	try {
+		candidates.add(saslPrepPassword(password))
+	} catch {
+		// Prohibited characters: only the forms already listed can match.
+	}
+
+	for (const candidate of candidates) {
+		const bits = document.authenticatePassword(candidate)
+
+		if (bits !== 0) return { password: candidate, bits, openPassword }
+	}
+
+	throw new PdfEngineRefusal("needsPassword", "the document did not unlock again")
+}
+
+export function editing(context: PdfEngineContext): Editing {
 	const open = context.open()
 
 	if (open.edit === null) throw new PdfEngineRefusal("badRequest", "the document is not open for editing")
@@ -127,13 +171,25 @@ function runStep(context: PdfEngineContext, edit: PdfEditSession, document: Mupd
 	if (step.tool === "pages") edit.pagesChanged()
 }
 
+// Unlocks a document opened again with the session's password, with the rights that password grants (an owner
+// password unlocks owner rights even where the file opens without a password). False when it stays locked.
+function unlock(document: Mupdf.PDFDocument, password: string | undefined): boolean {
+	const locked = document.needsPassword()
+
+	if (password === undefined || document.getTrailer().get("Encrypt").isNull()) return !locked
+	if (document.authenticatePassword(password) !== 0) return true
+
+	// The failed attempt dropped all access: a file that needs no password gets it back with the empty one.
+	return !locked && document.authenticatePassword("") !== 0
+}
+
 // A written file held in the heap opened as a document in place (it keeps the buffer alive), unlocked with the
 // document's password, scripts off and its journal on.
 function openInPlace(context: PdfEngineContext, buffer: Mupdf.Buffer, password: string | undefined): Mupdf.PDFDocument {
 	const opened = context.mupdf.Document.openDocument(buffer, "application/pdf").asPDF()
 
 	// An encrypted file keeps its passwords: the one the document was opened with unlocks the written file.
-	if (opened === null || (opened.needsPassword() && (password === undefined || opened.authenticatePassword(password) === 0))) {
+	if (opened === null || !unlock(opened, password)) {
 		opened?.destroy()
 
 		throw new PdfEngineRefusal("failed", "the written file did not open")
@@ -171,7 +227,7 @@ function openBase(context: PdfEngineContext, open: Editing): Mupdf.PDFDocument {
 
 	const password = open.edit.password
 
-	if (base.needsPassword() && (password === undefined || base.authenticatePassword(password) === 0)) {
+	if (!unlock(base, password)) {
 		base.destroy()
 
 		throw new PdfEngineRefusal("needsPassword", "the document did not unlock again")
@@ -186,7 +242,7 @@ function openBase(context: PdfEngineContext, open: Editing): Mupdf.PDFDocument {
 }
 
 // Replaces the document with the opened file and the first `count` logged steps run again.
-function rebuild(context: PdfEngineContext, open: Editing, count: number): void {
+export function rebuild(context: PdfEngineContext, open: Editing, count: number): void {
 	const base = openBase(context, open)
 
 	try {
@@ -200,7 +256,12 @@ function rebuild(context: PdfEngineContext, open: Editing, count: number): void 
 	open.renderer.destroy()
 	open.document.destroy()
 	open.edit.pagesChanged()
-	context.setCurrent({ ...open, document: base, renderer: new TileRenderer(context.mupdf, base, context.host.maxDisplayLists) })
+	context.setCurrent({
+		...open,
+		document: base,
+		renderer: new TileRenderer(context.mupdf, base, context.host.maxDisplayLists),
+		source: open.base
+	})
 	context.mupdf.shrinkStore(50)
 }
 
@@ -211,7 +272,7 @@ function widgetsOf(open: Editing, pages: readonly number[]): PdfPageWidgets[] {
 		.filter(page => Number.isInteger(page) && page >= 0 && page < count)
 		.map(page => {
 			const loaded = open.document.loadPage(page)
-			const widgets = pageWidgets(loaded, page, open.edit.signatures)
+			const widgets = pageWidgets(open.document, loaded, page, open.edit.signatures)
 
 			loaded.destroy()
 
@@ -220,7 +281,7 @@ function widgetsOf(open: Editing, pages: readonly number[]): PdfPageWidgets[] {
 }
 
 // After a change: the touched pages render anew, and the answer carries their widgets.
-function changed(open: Editing, pages: readonly number[]): PdfCommandResult {
+export function changed(open: Editing, pages: readonly number[]): PdfCommandResult {
 	open.renderer.evict(pages)
 
 	return { pages, state: open.edit.snapshot(open.document), widgets: widgetsOf(open, pages) }
@@ -228,11 +289,48 @@ function changed(open: Editing, pages: readonly number[]): PdfCommandResult {
 
 // Undo and redo change whatever the step changed: every page's rendering is dropped (pages with no cached list cost
 // nothing), and the page asks again for the widgets it shows.
-function allPages(document: Mupdf.PDFDocument): number[] {
+export function allPages(document: Mupdf.PDFDocument): number[] {
 	return Array.from({ length: document.countPages() }, (_, index) => index)
 }
 
-function idle(edit: PdfEditSession): void {
+// The protection a written file has, as the page and the verifying engine check it.
+function saveProtection(security: PendingSecurity | null): PdfSaveProtection {
+	if (security === null) return { kind: "keep" }
+
+	const { options } = security
+
+	return options.encrypt === "none"
+		? { kind: "none" }
+		: {
+				kind: "new",
+				userPassword: options["user-password"],
+				ownerPassword: options["owner-password"],
+				permissions: options.permissions
+			}
+}
+
+// The written file's protection as planned: its /P, the owner password granting owner rights, the password to open
+// granting user rights, and nothing else opening a file that needs a password. Run last: a failed attempt drops
+// the document's access.
+function checkProtection(document: Mupdf.PDFDocument, protection: PdfSaveProtection): string | null {
+	const encrypt = document.getTrailer().get("Encrypt")
+
+	if (protection.kind === "keep") return null
+	if (protection.kind === "none") return encrypt.isNull() ? null : "the file is still encrypted"
+	if (!encrypt.isDictionary()) return "the file is not encrypted"
+
+	const permissions = encrypt.get("P")
+
+	if (!permissions.isNumber() || (permissions.asNumber() | 0) !== (protection.permissions | 0)) return "its permissions differ"
+	if ((document.authenticatePassword(protection.ownerPassword) & PDF_AUTH_OWNER) === 0) return "the owner password does not unlock it"
+	if ((document.authenticatePassword(protection.userPassword) & (PDF_AUTH_USER | PDF_AUTH_OWNER)) === 0)
+		return "the password to open does not open it"
+	if (protection.userPassword !== "" && document.authenticatePassword("") !== 0) return "it opens without a password"
+
+	return null
+}
+
+export function idle(edit: PdfEditSession): void {
 	if (edit.output !== null) throw new PdfEngineRefusal("badRequest", "a save is under way")
 }
 
@@ -261,10 +359,10 @@ export const EDIT_REQUESTS: Handlers = {
 		edit.begin(document, name, command.tool, parsed, op?.id ?? null)
 
 		const { command: commandContextValue, release } = commandContext(context, document, edit)
-		let pages: readonly number[]
+		let outcome: readonly number[] | PdfCommandOutcome
 
 		try {
-			pages = command.run(commandContextValue, parsed)
+			outcome = command.run(commandContextValue, parsed)
 		} catch (error) {
 			release()
 			edit.fail(document)
@@ -277,7 +375,9 @@ export const EDIT_REQUESTS: Handlers = {
 
 		if (command.tool === "pages") edit.pagesChanged()
 
-		return { value: changed(open, pages) }
+		const result = changed(open, outcomePages(outcome))
+
+		return { value: "created" in outcome ? { ...result, created: outcome.created } : result }
 	},
 	undo: context => {
 		const open = editing(context)
@@ -309,6 +409,9 @@ export const EDIT_REQUESTS: Handlers = {
 		idle(edit)
 		edit.endOpen(document)
 
+		// A placed certificate signature is written only by its signing save (signBegin), never as a placeholder.
+		if (pendingSignature(document) !== null) throw new PdfEngineRefusal("badRequest", "a signature placeholder is pending")
+
 		const plan = planSave({
 			inputBytes,
 			signatures: edit.signatures,
@@ -320,17 +423,52 @@ export const EDIT_REQUESTS: Handlers = {
 
 		if (plan.refuse !== null) return { value: { status: "refused", plan, reason: plan.refuse } }
 
+		// What the steps redacted (the verifier's manifest), and the protection the save writes.
+		const steps = edit.appliedSteps()
+		const redaction = redactionManifest(steps, pageObject => edit.pageOf(document, pageObject))
+		const security = edit.security
+
+		// Both remove or replace what the earlier revision holds: never appended to it.
+		if ((redaction !== null || security !== null) && plan.mode !== "full")
+			throw new PdfEngineRefusal("failed", "a redaction or a new protection needs a full rewrite")
+
 		// A rewrite is one revision; an incremental save adds one to the file's own, when something changed.
 		const versions = plan.mode === "full" ? 1 : document.countVersions() + (document.hasUnsavedChanges() ? 1 : 0)
-		const buffer = document.saveToBuffer(plan.options)
+		const options = composeWriteOptions(
+			redaction === null ? plan.options : REDACTION_SAVE_OPTIONS,
+			security?.options ?? { encrypt: "keep" }
+		)
+		const buffer = document.saveToBuffer(options)
+		const encryption = security === null ? edit.encryption : security.options.encrypt === "none" ? "None" : PDF_AES256_METHOD
+		// Content removed since the last save stays in the file's earlier versions when this one is saved in place.
+		const removesContent = steps.slice(Math.max(edit.savedApplied, 0)).some(step => pdfCommand(step.label)?.removesContent === true)
 
-		edit.output = { buffer, plan, serving: [], previousSaved: edit.savedApplied }
+		edit.output = {
+			buffer,
+			plan,
+			serving: [],
+			previousSaved: edit.savedApplied,
+			security,
+			encryption,
+			resets: redaction !== null || security !== null
+		}
 		edit.savedApplied = edit.applied
 		edit.written()
 		// The write decoded what it copied: half of the resource store goes again.
 		context.mupdf.shrinkStore(50)
 
-		return { value: { status: "written", plan, size: buffer.getLength(), versions } }
+		return {
+			value: {
+				status: "written",
+				plan,
+				size: buffer.getLength(),
+				versions,
+				encryption,
+				redaction,
+				removesContent,
+				protection: saveProtection(security)
+			}
+		}
 	},
 	serveOutput: (context, { buffer, port }) => {
 		const { edit } = editing(context)
@@ -398,11 +536,15 @@ export const EDIT_REQUESTS: Handlers = {
 		// Written elsewhere (a copy) or not at all: the file is as it was, and so is what is unsaved in it.
 		if (outcome !== "saved") edit.savedApplied = output.previousSaved
 
+		// A redaction or new protection that became the file always starts again on it: the document in memory still
+		// holds what was redacted (in its history) or the old protection.
+		const restart = next === "adopt" || output.resets
+
 		// A rewrite leaves the document as it was (the next save writes it whole again). After an incremental save MuPDF
 		// takes the output as the document's file, so the next revision must be appended to it: the document is opened on
 		// it, in place. The history goes on unless asked to start again; a step back past the save rebuilds from the file
 		// the history starts at (the base).
-		if (outcome !== "saved" || (next === "continue" && output.plan.mode === "full")) {
+		if (outcome !== "saved" || (!restart && output.plan.mode === "full")) {
 			edit.close()
 
 			return { value: { state: edit.snapshot(open.document), heapBytes: context.heapBytes(), history: "kept" } }
@@ -410,8 +552,10 @@ export const EDIT_REQUESTS: Handlers = {
 
 		edit.output = null
 
+		// The written file opens with its new passwords.
+		if (output.security !== null) edit.protectedAs(output.security.options, output.encryption)
+
 		const adopted = openInPlace(context, output.buffer, edit.password)
-		const restart = next === "adopt"
 
 		open.renderer.destroy()
 		open.document.destroy()
@@ -431,7 +575,8 @@ export const EDIT_REQUESTS: Handlers = {
 			document: adopted,
 			renderer: new TileRenderer(context.mupdf, adopted, context.host.maxDisplayLists),
 			heap: output.buffer,
-			base: restart ? output.buffer : open.base
+			base: restart ? output.buffer : open.base,
+			source: output.buffer
 		})
 		context.mupdf.emptyStore()
 
@@ -526,6 +671,10 @@ export const EDIT_REQUESTS: Handlers = {
 			list.destroy()
 			page.destroy()
 		}
+
+		const protection = expected.protection === undefined ? null : checkProtection(document, expected.protection)
+
+		if (protection !== null) return { value: { ok: false, reason: protection } }
 
 		return { value: { ok: true } }
 	}

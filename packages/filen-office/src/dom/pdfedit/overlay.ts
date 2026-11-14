@@ -10,8 +10,9 @@ import type { MupdfModule } from "./protocol"
 // into it). `toDisplay` maps the overlay page's display space into the target page's display space, so producers
 // never see /Rotate, /UserUnit or CropBox origins:
 // - text layout makes the overlay the size of the target's display box: `toDisplay` = identity;
-// - OCR renders the CropBox at `dpi` and Tesseract writes a page of pixels × 72 / dpi points: `fitOverlay` gives
-//   the scale that stretches that page over the target's display box.
+// - an overlay of another size is stretched over the target's display box by `fitOverlay`;
+// - OCR knows its overlay → page content matrix from the render (core/pdfedit/ocrGeometry.ts) and passes it as
+//   `toPage`, used as it is.
 //
 // Content: the target's content streams are wrapped in q … Q (whatever state they leave behind cannot shift the
 // overlay), then `q /<name> Do Q` is appended. The Form XObject keeps the overlay page's own resources (grafted
@@ -24,6 +25,8 @@ export type PdfMatrix = readonly [number, number, number, number, number, number
 export interface GraftOverlayOptions {
 	// Overlay display space → target display space; default identity.
 	readonly toDisplay?: PdfMatrix
+	// Instead: overlay content space → target content space, as it is (OCR's matrix, core/pdfedit/ocrGeometry.ts).
+	readonly toPage?: PdfMatrix
 }
 
 export interface GraftedOverlay {
@@ -92,10 +95,9 @@ export function graftOverlay(
 		if (!box.isArray() || box.length !== 4) throw new PdfOverlayError("The overlay page has no MediaBox")
 
 		// Overlay content space → overlay display → target display → target content space.
-		const matrix = concatMatrix(
-			concatMatrix(overlayPage.getTransform(), options.toDisplay ?? IDENTITY),
-			invertMatrix(page.getTransform())
-		)
+		const matrix =
+			options.toPage ??
+			concatMatrix(concatMatrix(overlayPage.getTransform(), options.toDisplay ?? IDENTITY), invertMatrix(page.getTransform()))
 		const map = document.newGraftMap()
 		const contents = overlayObject.get("Contents")
 		// One content stream is copied as stored (still compressed); a content array is decoded and joined.

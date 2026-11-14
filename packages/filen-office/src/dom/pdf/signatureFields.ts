@@ -46,10 +46,13 @@ export function pdfSignatureFields(signatures: unknown): PdfSignatureFieldHint[]
 	return hints
 }
 
-const loads = new WeakMap<PdfDocument, Promise<PdfSignatureFieldHint[] | null>>()
+// What the signatures are read from: a pdf.js document, or anything else answering as it does.
+export type PdfSignatureSource = Pick<PdfDocument, "getSignatures">
+
+const loads = new WeakMap<PdfSignatureSource, Promise<PdfSignatureFieldHint[] | null>>()
 
 // Read once per document. A pdf.js without getSignatures reports none; a failed read is null (cannot tell).
-export function loadPdfSignatureFields(document: PdfDocument): Promise<PdfSignatureFieldHint[] | null> {
+export function loadPdfSignatureFields(document: PdfSignatureSource): Promise<PdfSignatureFieldHint[] | null> {
 	let loading = loads.get(document)
 
 	if (loading === undefined) {

@@ -1,7 +1,6 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { PdfAllowed, PdfSecurityChoice } from "@filen/office/core/pdfedit/security"
-import type { PdfSecurityDescription } from "@filen/office/dom/pdfedit/security"
+import type { PdfAllowed, PdfSecurityChoice, PdfSecuritySummary } from "@filen/office/core/pdfedit/security"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -41,7 +40,7 @@ export interface PdfProtectDialogProps {
 	open: boolean
 	// The caller is applying a choice; the dialog is held.
 	pending: boolean
-	current: PdfSecurityDescription
+	current: PdfSecuritySummary
 	onOpenChange: (open: boolean) => void
 	// A choice that changes something (never "keep"); the caller plans it in the engine for the next save.
 	onApply: (choice: PdfSecurityChoice) => void

@@ -28,6 +28,11 @@ export interface PdfCommentsPanelProps {
 	readonly onSetState: (root: PdfAnnotationRef, state: PdfReviewState, author: string) => Promise<boolean>
 	// Starts placing a sticky note on the page (none: no New button).
 	readonly onNew?: () => void
+	// The field writing a new comment (a sticky note placed on the page, or the first note of an annotation without
+	// one): shown while `composing`, posted through onPost (the new thread's id, null when refused).
+	readonly composing?: boolean
+	readonly onPost?: (text: string, author: string) => Promise<string | null>
+	readonly onComposeEnd?: () => void
 }
 
 // The list's focus scope: one document.
@@ -45,7 +50,10 @@ export function PdfCommentsPanel({
 	onEdit,
 	onDelete,
 	onSetState,
-	onNew
+	onNew,
+	composing,
+	onPost,
+	onComposeEnd
 }: PdfCommentsPanelProps) {
 	const { t } = useTranslation("preview")
 	const [thread, setThread] = useState<string | undefined>(undefined)
@@ -78,6 +86,7 @@ export function PdfCommentsPanel({
 		new: t("previewPdfCommentNew"),
 		placeholder: t("previewPdfCommentPlaceholder"),
 		replyPlaceholder: t("previewPdfCommentReplyPlaceholder"),
+		post: t("previewPdfCommentPost"),
 		reply: t("previewPdfCommentReply"),
 		save: t("previewPdfCommentSave"),
 		actions: t("previewPdfCommentActions"),
@@ -97,7 +106,8 @@ export function PdfCommentsPanel({
 		reply: (current, text, author) => onReply(current.root.ref, text, author),
 		edit: (_current, comment, text) => onEdit(comment.ref, text),
 		remove: (_current, comment, index) => onDelete(comment.ref, index === 0),
-		resolve: (current, resolved, author) => onSetState(current.root.ref, resolved ? "Completed" : "None", author)
+		resolve: (current, resolved, author) => onSetState(current.root.ref, resolved ? "Completed" : "None", author),
+		...(onPost === undefined ? {} : { post: onPost })
 	}
 
 	return (
@@ -111,7 +121,7 @@ export function PdfCommentsPanel({
 			editable={editable}
 			phone={phone}
 			thread={thread}
-			composing={false}
+			composing={composing === true}
 			onOpenThread={id => {
 				setThread(id)
 
@@ -121,6 +131,7 @@ export function PdfCommentsPanel({
 			}}
 			onClose={onClose}
 			{...(onNew === undefined ? {} : { onNew })}
+			{...(onComposeEnd === undefined ? {} : { onComposeEnd })}
 			actions={actions}
 		/>
 	)

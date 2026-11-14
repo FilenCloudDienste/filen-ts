@@ -14,7 +14,8 @@ import {
 	preparedPassword,
 	upgradeRefusal,
 	type PdfHeldAccess,
-	type PdfSecurityState
+	type PdfSecurityState,
+	type PdfSecurityWriteOptions
 } from "../../core/pdfedit/security"
 
 // The pure security rules: method detection, /P values, and what each Protect choice writes or why it is refused.
@@ -208,5 +209,31 @@ describe("composeWriteOptions", () => {
 		expect(() => composeWriteOptions("garbage=compact,encrypt=none", { encrypt: "keep" })).toThrow()
 		expect(() => composeWriteOptions("incremental", { encrypt: "none" })).toThrow()
 		expect(composeWriteOptions("incremental", { encrypt: "keep" })).toEqual({ incremental: "yes", encrypt: "keep" })
+	})
+
+	it("refuses a base that is not plain words, so no user value can ride in it", () => {
+		for (const base of ["user-password=a", "garbage=compact,garbage=none", 'garbage="x"', "garbage=a b", '{"encrypt":"none"}', "a=b=c"])
+			expect(() => composeWriteOptions(base, { encrypt: "keep" })).toThrow()
+	})
+
+	it("refuses security options planSecurity never makes", () => {
+		const aes = { encrypt: "aes-256", "user-password": "u", "owner-password": "o", permissions: -4 } as const
+
+		expect(composeWriteOptions("garbage", aes)).toEqual({ garbage: "yes", ...aes })
+		for (const password of ["a\tb", "a\u0000", "\ud800x", "x\udc00", "a\u007f"]) {
+			expect(() => composeWriteOptions("garbage", { ...aes, "user-password": password })).toThrow()
+			expect(() => composeWriteOptions("garbage", { ...aes, "owner-password": password })).toThrow()
+		}
+		expect(() => composeWriteOptions("garbage", { ...aes, permissions: 1.5 })).toThrow()
+		expect(() => composeWriteOptions("garbage", { ...aes, permissions: 2 ** 32 })).toThrow()
+		expect(() => composeWriteOptions("garbage", { ...aes, extra: "x" } as unknown as PdfSecurityWriteOptions)).toThrow()
+		expect(() => composeWriteOptions("garbage", { encrypt: "rc4-40" } as unknown as PdfSecurityWriteOptions)).toThrow()
+		expect(() =>
+			composeWriteOptions("garbage", { encrypt: "none", "user-password": "x" } as unknown as PdfSecurityWriteOptions)
+		).toThrow()
+		// Separators, quotes and braces are only characters inside JSON.
+		expect(composeWriteOptions("garbage", { ...aes, "user-password": 'a,encrypt=none","x":"}' })).toMatchObject({
+			"user-password": 'a,encrypt=none","x":"}'
+		})
 	})
 })

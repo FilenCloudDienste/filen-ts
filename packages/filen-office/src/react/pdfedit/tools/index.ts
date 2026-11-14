@@ -62,4 +62,13 @@ export {
 	type TextBoxEditing,
 	type TextBoxState
 } from "./textBox"
-export { TOOL_CLICK_SLOP, TOOL_MIN_SIZE, type ToolKey, type ToolKeyName, type ToolPage, type ToolPointer, type ToolStep } from "./types"
+export {
+	centredRect,
+	TOOL_CLICK_SLOP,
+	TOOL_MIN_SIZE,
+	type ToolKey,
+	type ToolKeyName,
+	type ToolPage,
+	type ToolPointer,
+	type ToolStep
+} from "./types"

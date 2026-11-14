@@ -94,6 +94,27 @@ export function isRestricted(permissions: number): boolean {
 	return (permissions & PERMISSION_BITS) !== PERMISSION_BITS
 }
 
+// The document's protection as the editor reports it to the page (the Protect dialog, the RC4 notice, the owner
+// restriction banner). Carries no password.
+export interface PdfSecuritySummary {
+	readonly method: PdfEncryptionMethod
+	readonly rc4: boolean
+	// Opening needs a password.
+	readonly openPassword: boolean
+	// The file's /P (PDF_PERMISSIONS_ALL without encryption), and what it allows in the dialog's terms.
+	readonly permissions: number
+	readonly restricted: boolean
+	readonly allowed: PdfAllowed
+	// The session may change or remove the encryption.
+	readonly ownerAccess: boolean
+	// Why the RC4 → AES-256 upgrade is not possible, or null.
+	readonly upgrade: PdfSecurityRefusal | null
+}
+
+// MuPDF's name for the encryption new protection writes (its "encryption" metadata): what a check of the written file
+// expects.
+export const PDF_AES256_METHOD = "Standard V5 R6 256-bit AES"
+
 // fz_authenticate_password's result bits.
 export const PDF_AUTH_NONE_NEEDED = 1
 export const PDF_AUTH_USER = 2
@@ -195,12 +216,8 @@ export function preparedPassword(password: string): Prepared {
 
 	const value = decodeUtf8(bytes)
 
-	// SASLprep already prohibits controls; nothing that JSON would escape as \uXXXX may reach MuPDF's option parser.
-	for (let index = 0; index < value.length; index++) {
-		const code = value.charCodeAt(index)
-
-		if (code < 0x20 || code === 0x7f) return { ok: false, reason: "passwordRefused" }
-	}
+	// SASLprep already prohibits controls; nothing MuPDF's option parser would read back differently may reach it.
+	if (!isWriteOptionText(value)) return { ok: false, reason: "passwordRefused" }
 
 	return value === "" ? { ok: false, reason: "emptyPassword" } : { ok: true, value }
 }
@@ -227,6 +244,8 @@ export function upgradeRefusal(state: PdfSecurityState): PdfSecurityRefusal | nu
 
 	if (state.held.openPassword && !user) return "openPasswordUnknown"
 	if (restricted && !owner) return "ownerRequired"
+	// Carried over as held: one the option parser would read back differently cannot be written.
+	if (!isWriteOptionText(state.held.password)) return "passwordRefused"
 
 	return null
 }
@@ -314,10 +333,61 @@ export function heldAfterSave(options: PdfSecurityWriteOptions, previous: PdfHel
 // Keys only the security options may set: a base carrying any would let two sources decide the encryption.
 const SECURITY_KEYS = new Set(["encrypt", "decrypt", "user-password", "owner-password", "permissions"])
 
-// One `saveToBuffer` options object from the save pipeline's own comma-separated options (no passwords there:
-// `garbage=compact,compress` and the like; a bare key means "yes") and the security options. Throws on a base that
-// sets an encryption key, and on an incremental base with an encryption change (MuPDF writes a new encryption only
-// in a full rewrite).
+// A base option's key or value: a plain word ("garbage", "compact", "yes").
+const BASE_WORD = /^[A-Za-z0-9_-]+$/
+
+// A string MuPDF's option parser reads back exactly from JSON: no control characters (JSON writes them as escapes
+// MuPDF does not decode, so the stored password would differ from the typed one) and no lone surrogates.
+export function isWriteOptionText(value: string): boolean {
+	for (let index = 0; index < value.length; index++) {
+		const code = value.charCodeAt(index)
+
+		if (code < 0x20 || code === 0x7f) return false
+
+		if (code >= 0xd800 && code <= 0xdbff) {
+			const next = value.charCodeAt(index + 1)
+
+			if (!(next >= 0xdc00 && next <= 0xdfff)) return false
+
+			index++
+		} else if (code >= 0xdc00 && code <= 0xdfff) return false
+	}
+
+	return true
+}
+
+// The security options checked as they reach the writer (they may have crossed a worker boundary): exactly the keys
+// of their kind, passwords that survive the option parser, and a 32-bit /P.
+function checkedSecurity(security: PdfSecurityWriteOptions): PdfSecurityWriteOptions {
+	const keys = Object.keys(security).sort().join(",")
+
+	if (security.encrypt === "keep" || security.encrypt === "none") {
+		if (keys !== "encrypt") throw new Error("unexpected security write options")
+
+		return { encrypt: security.encrypt }
+	}
+
+	if (security.encrypt !== "aes-256" || keys !== "encrypt,owner-password,permissions,user-password")
+		throw new Error("unexpected security write options")
+
+	const user = security["user-password"]
+	const owner = security["owner-password"]
+	const permissions = security.permissions
+
+	if (typeof user !== "string" || typeof owner !== "string" || !isWriteOptionText(user) || !isWriteOptionText(owner))
+		throw new Error("a password cannot be written")
+	if (!Number.isInteger(permissions) || permissions < -0x80000000 || permissions > 0x7fffffff)
+		throw new Error("permissions must be a 32-bit integer")
+
+	return { encrypt: "aes-256", "user-password": user, "owner-password": owner, permissions }
+}
+
+// One `saveToBuffer` options object from the save pipeline's own comma-separated options (plain words only, no
+// passwords: `garbage=compact,compress` and the like; a bare key means "yes") and the security options. User values
+// never pass through the comma-separated form, which has no escaping: the object is written as JSON, which quotes
+// them. Throws on a base that is not plain words or sets an encryption key, on security options that are not exactly
+// what planSecurity makes (a password MuPDF would read back differently, a non-integer /P), and on an incremental base
+// with an encryption change (MuPDF writes a new encryption only in a full rewrite).
 export function composeWriteOptions(base: string, security: PdfSecurityWriteOptions): Readonly<Record<string, string | number>> {
 	const options: Record<string, string | number> = {}
 
@@ -328,16 +398,20 @@ export function composeWriteOptions(base: string, security: PdfSecurityWriteOpti
 
 		const equals = entry.indexOf("=")
 		const key = equals < 0 ? entry : entry.slice(0, equals)
+		const value = equals < 0 ? "yes" : entry.slice(equals + 1)
 
+		if (!BASE_WORD.test(key) || !BASE_WORD.test(value)) throw new Error(`write option ${JSON.stringify(entry)} is not plain`)
 		if (SECURITY_KEYS.has(key)) throw new Error(`write option ${key} belongs to the security options`)
+		if (Object.hasOwn(options, key)) throw new Error(`write option ${key} is given twice`)
 
-		options[key] = equals < 0 ? "yes" : entry.slice(equals + 1)
+		options[key] = value
 	}
 
+	const checked = checkedSecurity(security)
 	const incremental = options["incremental"]
 
-	if (security.encrypt !== "keep" && incremental !== undefined && incremental !== "no")
+	if (checked.encrypt !== "keep" && incremental !== undefined && incremental !== "no")
 		throw new Error("an encryption change needs a full rewrite, not an incremental save")
 
-	return { ...options, ...security }
+	return { ...options, ...checked }
 }

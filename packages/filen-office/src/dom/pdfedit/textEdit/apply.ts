@@ -39,7 +39,8 @@ export function applyTextEdit(
 	mupdf: MupdfModule,
 	document: Mupdf.PDFDocument,
 	pageIndex: number,
-	target: TextEditTarget,
+	// Only its glyphs are needed (what a logged step keeps).
+	target: Pick<TextEditTarget, "chars">,
 	overlay: Uint8Array | null
 ): TextEditResult {
 	const page = document.loadPage(pageIndex)

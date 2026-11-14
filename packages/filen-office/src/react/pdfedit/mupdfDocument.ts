@@ -171,6 +171,9 @@ class MupdfPage implements PdfPage<ReadableStream> {
 		const width = context.canvas.width
 		const height = context.canvas.height
 		const size = this.store.tileSize
+		// Printing draws the page as printed (pending redaction marks filled); pdf.js AnnotationMode 0 leaves annotations
+		// and form fields out.
+		const print = params.intent === "print" ? { annotations: params.annotationMode !== 0 } : undefined
 		const cancels: (() => void)[] = []
 		const tiles: Promise<void>[] = []
 		let cancelled = false
@@ -178,7 +181,14 @@ class MupdfPage implements PdfPage<ReadableStream> {
 		for (let y = 0; y < height; y += size) {
 			for (let x = 0; x < width; x += size) {
 				const tile: PdfTile = [x, y, Math.min(width, x + size), Math.min(height, y + size)]
-				const queued = this.store.engine.queued("render", { page: this.index, scale, rotation, tile, priority: "visible" })
+				const queued = this.store.engine.queued("render", {
+					page: this.index,
+					scale,
+					rotation,
+					tile,
+					priority: "visible",
+					...(print === undefined ? {} : { print })
+				})
 
 				cancels.push(queued.cancel)
 				tiles.push(
@@ -262,6 +272,14 @@ export class MupdfPdfDocument implements PdfDomDocument {
 		this.store.touch(pages)
 
 		return new MupdfPdfDocument(this.store, pageCount, this.facts)
+	}
+
+	// The same revision without the author's restrictions (the owner password unlocked them, or a save made them the
+	// user's own): its permissions read as none.
+	unrestricted(): MupdfPdfDocument {
+		return this.facts.permissions === null
+			? this
+			: new MupdfPdfDocument(this.store, this.numPages, { ...this.facts, permissions: null })
 	}
 
 	getPage(pageNumber: number): Promise<PdfPage<ReadableStream>> {

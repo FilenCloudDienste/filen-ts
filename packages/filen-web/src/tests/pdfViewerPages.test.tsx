@@ -386,7 +386,7 @@ describe("PdfViewer", () => {
 		// in the pages the keys scroll a zoomed page sideways.
 		expect(isTextEditingTarget(scroller ?? null)).toBe(true)
 		expect(isTextEditingTarget(page ?? null)).toBe(true)
-		expect(isTextEditingTarget(scroller?.parentElement?.parentElement ?? null)).toBe(false)
+		expect(isTextEditingTarget(scroller?.closest("[data-preview-surface]")?.parentElement ?? null)).toBe(false)
 	})
 
 	it("goes to the command bar with F6 pressed outside the viewer", async () => {

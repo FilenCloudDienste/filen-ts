@@ -1,3 +1,4 @@
+import type { PdfSecurityChoice, PdfSecuritySummary } from "./security"
 import type { PdfRestrictions, PdfSignatureState, PdfToolAvailability, PdfToolClass } from "./signaturePolicy"
 
 // What the editor knows of its document, as plain data the page holds: the snapshot every change answers with, and the
@@ -8,6 +9,11 @@ import type { PdfRestrictions, PdfSignatureState, PdfToolAvailability, PdfToolCl
 export type PdfRect = readonly [number, number, number, number]
 
 export type PdfWidgetType = "text" | "checkbox" | "radio" | "combobox" | "listbox" | "button" | "signature"
+
+export interface PdfWidgetOption {
+	readonly value: string
+	readonly label: string
+}
 
 export interface PdfWidgetSummary {
 	// The widget annotation's object number: stable while the document is open, and the id pdf.js gives the same
@@ -21,18 +27,20 @@ export interface PdfWidgetSummary {
 	readonly field: string
 	// The field's tooltip (/TU), its accessible name; "" without one.
 	readonly label: string
-	// Text, the chosen option, a checkbox's or radio button's state ("Off" when off).
+	// Text, the first chosen option's export value, a checkbox's or radio button's state ("Off" when off).
 	readonly value: string
+	// A choice field's chosen export values (several in a multiple-selection list).
+	readonly selected: readonly string[]
 	// A checkbox's or radio button's "on" state; null for other types.
 	readonly onState: string | null
-	// A choice field's options (shown text).
-	readonly options: readonly string[]
+	// A choice field's options: the export value stored, the text shown.
+	readonly options: readonly PdfWidgetOption[]
 	// 0: no limit.
 	readonly maxLength: number
 	readonly readOnly: boolean
 	readonly required: boolean
 	readonly multiline: boolean
-	// The document asks for masked input (it is never a password field here).
+	// The document's password flag: shown masked, never filled (its value would be stored in the file).
 	readonly password: boolean
 	readonly comb: boolean
 	readonly multiSelect: boolean
@@ -51,6 +59,12 @@ export interface PdfEncryptionState {
 	// "None", or the method ("Standard V5 R6 256-bit AES" and the like).
 	readonly method: string
 	readonly access: "none" | "user" | "owner"
+}
+
+// The document's protection, and the protection the next save writes when the user chose one in the Protect dialog
+// (its kind; null: the file keeps what it has).
+export interface PdfEditSecurity extends PdfSecuritySummary {
+	readonly pending: PdfSecurityChoice["kind"] | null
 }
 
 export interface PdfFormState {
@@ -80,6 +94,7 @@ export interface PdfEditState {
 	readonly restrictions: PdfRestrictions
 	readonly tools: PdfToolAvailability
 	readonly encryption: PdfEncryptionState
+	readonly security: PdfEditSecurity
 	// The document carries accessibility tags (/MarkInfo /Marked and a structure tree).
 	readonly tagged: boolean
 	readonly form: PdfFormState
@@ -91,4 +106,6 @@ export interface PdfCommandResult {
 	readonly state: PdfEditState
 	// The widgets of the pages that changed.
 	readonly widgets: readonly PdfPageWidgets[]
+	// What the command made, for the page to select (an annotation: its page and object number).
+	readonly created?: { readonly page: number; readonly id: number }
 }

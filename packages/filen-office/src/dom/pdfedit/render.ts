@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
-import type { MupdfModule, PdfTile } from "./protocol"
+import type { MupdfModule, PdfPrintRender, PdfTile } from "./protocol"
+import { drawPendingRedactions } from "./redact/print"
 
 // Tile rendering from a cached display list per page: zooming and panning re-run the list without interpreting the
 // page's content again. A tile is an opaque white pixmap of just its rectangle, drawn by a DrawDevice and copied once
@@ -28,6 +29,13 @@ export class TileRenderer {
 	private readonly maxLists: number
 	// Least recently used first.
 	private readonly lists = new Map<number, { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect }>()
+	// The page being printed: its own list (a print reruns it for each tile of one page, then moves on).
+	private printing: {
+		readonly page: number
+		readonly annotations: boolean
+		readonly list: Mupdf.DisplayList
+		readonly bounds: Mupdf.Rect
+	} | null = null
 
 	constructor(mupdf: MupdfModule, document: Mupdf.PDFDocument, maxLists = DEFAULT_LISTS) {
 		this.mupdf = mupdf
@@ -61,6 +69,46 @@ export class TileRenderer {
 		return entry
 	}
 
+	// A page as printed: its content, its annotations and form fields when asked, and every pending redaction mark
+	// filled (the printed raster never shows what a mark covers, applied or not). Never cached with the view's lists.
+	private printList(page: number, print: PdfPrintRender): { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect } {
+		const held = this.printing
+
+		if (held !== null && held.page === page && held.annotations === print.annotations) return held
+
+		held?.list.destroy()
+		this.printing = null
+
+		const { mupdf } = this
+		const loaded = this.document.loadPage(page)
+		const bounds = loaded.getBounds()
+		const list = new mupdf.DisplayList(bounds)
+		const device = new mupdf.DisplayListDevice(list)
+
+		try {
+			loaded.runPageContents(device, mupdf.Matrix.identity)
+
+			if (print.annotations) {
+				loaded.runPageAnnots(device, mupdf.Matrix.identity)
+				loaded.runPageWidgets(device, mupdf.Matrix.identity)
+			}
+
+			drawPendingRedactions(mupdf, loaded, device, mupdf.Matrix.identity)
+			device.close()
+		} catch (error) {
+			list.destroy()
+
+			throw error
+		} finally {
+			device.destroy()
+			loaded.destroy()
+		}
+
+		this.printing = { page, annotations: print.annotations, list, bounds }
+
+		return this.printing
+	}
+
 	// The page's device transform: scaled, rotated and moved so the page's top left is the origin.
 	transform(
 		bounds: Mupdf.Rect,
@@ -75,9 +123,10 @@ export class TileRenderer {
 		return { ctm, size: [Math.ceil(box[2] - box[0]), Math.ceil(box[3] - box[1])] }
 	}
 
-	render(page: number, scale: number, rotation: PdfRotation, tile: PdfTile): RenderedTile {
+	// A tile of the page; `print`: as printed (printList).
+	render(page: number, scale: number, rotation: PdfRotation, tile: PdfTile, print?: PdfPrintRender): RenderedTile {
 		const { mupdf } = this
-		const { list, bounds } = this.list(page)
+		const { list, bounds } = print === undefined ? this.list(page) : this.printList(page, print)
 		const { ctm, size } = this.transform(bounds, scale, rotation)
 		const x0 = Math.max(0, Math.floor(tile[0]))
 		const y0 = Math.max(0, Math.floor(tile[1]))
@@ -116,6 +165,12 @@ export class TileRenderer {
 	evict(pages: readonly number[]): void {
 		let dropped = false
 
+		if (this.printing !== null && pages.includes(this.printing.page)) {
+			this.printing.list.destroy()
+			this.printing = null
+			dropped = true
+		}
+
 		for (const page of pages) {
 			const entry = this.lists.get(page)
 
@@ -131,6 +186,9 @@ export class TileRenderer {
 	}
 
 	destroy(): void {
+		this.printing?.list.destroy()
+		this.printing = null
+
 		for (const entry of this.lists.values()) entry.list.destroy()
 
 		this.lists.clear()

@@ -1,12 +1,22 @@
 import { savePortAnnounced } from "@filen/shared/savePort"
 import type { PdfMemoryProfile } from "@filen/office/core/pdfedit"
-import { createSyncRangeBuffer, type PdfAfterSave, type PdfSaveBegun, type PdfSaveEnded } from "@filen/office/dom/pdfedit"
+import type { RedactionFailure, RedactionManifest } from "@filen/office/core/pdfedit/redactVerify"
+import {
+	createSyncRangeBuffer,
+	type PdfAfterSave,
+	type PdfSaveBegun,
+	type PdfSaveCheck,
+	type PdfSaveEnded,
+	type PdfSaveExpectation,
+	type PdfSaveProtection
+} from "@filen/office/dom/pdfedit"
 import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import type { SaveResult } from "@filen/office/dom/presentation"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { editedSaveTimes, SaveRefusedError, type PresentationSaveEdits } from "@/features/drive/lib/previewSave.logic"
 import type { PdfEngine } from "@/features/pdf/session/engineWorker"
+import type { PdfSignedSaveJob } from "@/features/pdf/signing/signDocument"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
@@ -40,6 +50,32 @@ export interface PdfSaveDeps {
 	readonly respawn: (saved: DriveItem) => Promise<void>
 	// The history started again (the user is told).
 	readonly onHistoryReset: () => void
+	// Asked before a save that invalidates `count` signatures; false cancels it. Without it such a save is refused.
+	readonly confirmInvalidation?: (count: number) => Promise<boolean>
+	// A new version was written with new protection: the password that opens it now (its owner password), undefined
+	// when it has none.
+	readonly onProtected?: (password: string | undefined) => void
+	// A new version was written whose changes since the last save removed content (deleted pages, redacted, cropped-away
+	// or replaced content), and the account keeps earlier versions (they still hold it): the user is offered deleting
+	// them.
+	readonly onEarlierVersions?: (saved: DriveItem) => void
+}
+
+// A redacted file that failed the redaction check: nothing was uploaded. `failure` says what remained.
+export class PdfRedactionRefusedError extends SaveRefusedError {
+	readonly failure: RedactionFailure
+
+	constructor(failure: RedactionFailure) {
+		super("previewPdfSaveVerifyFailed", { silent: true })
+		this.name = "PdfRedactionRefusedError"
+		this.failure = failure
+	}
+}
+
+// The password a written file opens with: its new owner password, none once its protection was removed, else the
+// document's own.
+function openingPassword(protection: PdfSaveProtection, password: string | undefined): string | undefined {
+	return protection.kind === "new" ? protection.ownerPassword : protection.kind === "none" ? undefined : password
 }
 
 function refusalKey(reason: Extract<PdfSaveBegun, { status: "refused" }>["reason"]): PreviewKey {
@@ -58,36 +94,92 @@ function refusalKey(reason: Extract<PdfSaveBegun, { status: "refused" }>["reason
 async function writeAndCheck(deps: PdfSaveDeps, inputBytes: number): Promise<Extract<PdfSaveBegun, { status: "written" }>> {
 	const { client } = deps.engine
 	const state = deps.session.getSnapshot().state
-	const begun = await client.call("saveBegin", { inputBytes, memory: deps.memory, invalidateConfirmed: false })
+	const begin = (invalidateConfirmed: boolean) => client.call("saveBegin", { inputBytes, memory: deps.memory, invalidateConfirmed })
+	let begun = await begin(false)
+
+	// A rewrite that breaks signatures happens only once the user agreed.
+	if (begun.status === "refused" && begun.reason === "invalidatesSignatures" && deps.confirmInvalidation !== undefined) {
+		if (!(await deps.confirmInvalidation(begun.plan.invalidates.length)))
+			throw new SaveRefusedError("previewPdfSaveFailed", { silent: true })
+
+		begun = await begin(true)
+	}
 
 	if (begun.status === "refused") throw new SaveRefusedError(refusalKey(begun.reason))
 
-	const buffer = createSyncRangeBuffer(8, BLOCK_BYTES)
-	const channel = new MessageChannel()
-	const check = await client
-		.call("serveOutput", { buffer, port: channel.port1 }, [channel.port1])
-		.then(() => deps.openVerifier({ buffer, port: channel.port2, length: begun.size }, deps.password))
-		.then(async verifier => {
-			const result = await verifier.client.call("checkSaved", {
-				pageCount: state.pageCount,
-				versions: begun.versions,
-				encryption: state.encryption.method
-			})
+	const redaction = begun.redaction
 
-			void verifier.close()
-
-			return result
-		})
-		.catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
-
-	if (!check.ok) {
-		log.warn("pdf", "the written file failed its check", { reason: check.reason })
-		await end(deps, "failed", "continue")
-
-		throw new SaveRefusedError("previewPdfSaveVerifyFailed")
-	}
+	await checkWritten(
+		deps,
+		begun.size,
+		{ pageCount: state.pageCount, versions: begun.versions, encryption: begun.encryption, protection: begun.protection },
+		openingPassword(begun.protection, deps.password),
+		redaction === null ? undefined : verifier => redactionCheck(verifier, redaction)
+	)
 
 	return begun
+}
+
+// What the steps redacted, checked in the verifying engine (after checkSaved: it changes the document in memory).
+async function redactionCheck(verifier: PdfEngine, manifest: RedactionManifest): Promise<HeldOutputCheck> {
+	const verdict = await verifier.client.call("verifyRedaction", { manifest })
+
+	return verdict.ok ? { ok: true } : { ok: false, redaction: verdict.failure }
+}
+
+// The written file checked (checkHeldOutput, with `more` on top); a file that fails is dropped, the save ended, and
+// nothing is uploaded.
+async function checkWritten(
+	deps: PdfSaveDeps,
+	size: number,
+	expected: PdfSaveExpectation,
+	password: string | undefined,
+	more?: (verifier: PdfEngine) => Promise<HeldOutputCheck>
+): Promise<void> {
+	const check = await checkHeldOutput(deps.engine.client, deps.openVerifier, password, size, expected, more)
+
+	if (!check.ok) {
+		log.warn(
+			"pdf",
+			"the written file failed its check",
+			"redaction" in check ? { redaction: check.redaction } : { reason: check.reason }
+		)
+		await end(deps, "failed", "continue")
+
+		throw "redaction" in check ? new PdfRedactionRefusedError(check.redaction) : new SaveRefusedError("previewPdfSaveVerifyFailed")
+	}
+}
+
+// What a check of a held file found: a failed redaction check says what remained.
+export type HeldOutputCheck = PdfSaveCheck | { readonly ok: false; readonly redaction: RedactionFailure }
+
+// The file an engine holds (a save's output, a new file of pages) checked by a second, short-lived engine reading it
+// from the first one's heap, opened with `password`: pages, revisions and encryption, then `more` (what a redaction
+// removed, a new signature).
+export async function checkHeldOutput(
+	client: Pick<PdfEngine["client"], "call">,
+	openVerifier: PdfSaveDeps["openVerifier"],
+	password: string | undefined,
+	size: number,
+	expected: PdfSaveExpectation,
+	more?: (verifier: PdfEngine) => Promise<HeldOutputCheck>
+): Promise<HeldOutputCheck> {
+	const buffer = createSyncRangeBuffer(8, BLOCK_BYTES)
+	const channel = new MessageChannel()
+
+	return client
+		.call("serveOutput", { buffer, port: channel.port1 }, [channel.port1])
+		.then(() => openVerifier({ buffer, port: channel.port2, length: size }, password))
+		.then(async (verifier): Promise<HeldOutputCheck> => {
+			try {
+				const saved = await verifier.client.call("checkSaved", expected)
+
+				return !saved.ok || more === undefined ? saved : await more(verifier)
+			} finally {
+				void verifier.close()
+			}
+		})
+		.catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
 }
 
 async function end(deps: PdfSaveDeps, outcome: "saved" | "copied" | "failed", next: PdfAfterSave): Promise<PdfSaveEnded> {
@@ -100,14 +192,21 @@ async function end(deps: PdfSaveDeps, outcome: "saved" | "copied" | "failed", ne
 
 // Streams the held file to an upload over a new channel; resolves whether the upload made the file. `port` is the
 // upload's end.
-function stream(deps: PdfSaveDeps): {
+function stream(deps: PdfSaveDeps): HeldOutputStream {
+	return streamHeldOutput(deps.engine.client)
+}
+
+export interface HeldOutputStream {
 	readonly port: MessagePort
 	readonly announced: Promise<boolean>
 	readonly uploaded: Promise<boolean>
-} {
+}
+
+// The file an engine holds streamed to an upload over a new channel; `port` is the upload's end.
+export function streamHeldOutput(client: Pick<PdfEngine["client"], "call">): HeldOutputStream {
 	const channel = new MessageChannel()
 	const announced = savePortAnnounced(channel.port2)
-	const uploaded = deps.engine.client.call("writeOutput", { port: channel.port1 }, [channel.port1]).then(
+	const uploaded = client.call("writeOutput", { port: channel.port1 }, [channel.port1]).then(
 		written => written.uploaded,
 		() => false
 	)
@@ -141,10 +240,16 @@ export async function savePdfVersion(deps: PdfSaveDeps, item: DriveItem): Promis
 			const next: PdfAfterSave = keepsOld || begun.size > PDF_ADOPT_MAX_BYTES ? "continue" : "adopt"
 			const ended = await end(deps, "saved", next)
 
+			// The file opens with its new passwords from now on (a respawn reads it with them).
+			if (begun.protection.kind !== "keep") deps.onProtected?.(openingPassword(begun.protection, undefined))
+
 			if ((!keepsOld && next === "continue") || deps.needsRespawn(ended.heapBytes)) {
 				await deps.respawn(saved)
 				deps.onHistoryReset()
 			} else if (ended.history === "reset") deps.onHistoryReset()
+
+			// Earlier versions still hold what this one removed.
+			if (begun.removesContent && keepsOld) deps.onEarlierVersions?.(saved)
 
 			return { dirty: deps.session.getSnapshot().state.dirty }
 		}
@@ -172,4 +277,85 @@ export async function savePdfCopy(
 	await end(deps, made ? "copied" : "failed", "continue")
 
 	return written
+}
+
+// The engine's digests answered by the signer worker, over a channel the signing save holds.
+function signerChannel(job: PdfSignedSaveJob): MessagePort {
+	const channel = new MessageChannel()
+
+	channel.port2.onmessage = (event: MessageEvent<{ readonly digest: Uint8Array }>) => {
+		void job.signer.sign(event.data.digest).then(
+			cms => {
+				channel.port2.postMessage({ cms }, [cms.buffer])
+			},
+			(error: unknown) => {
+				channel.port2.postMessage({ error: error instanceof Error ? error.message : String(error) })
+			}
+		)
+	}
+
+	return channel.port1
+}
+
+// The last segment of a field's name: its own name (/T), as pdf.js reports a signature.
+function partialName(field: string): string {
+	return field.slice(field.lastIndexOf(".") + 1)
+}
+
+// Save, signing the placed signature as its last step (signBegin): the signer worker makes the CMS and is terminated as
+// soon as it did; the written file is checked like any save, and the new signature must read "unchanged since signing"
+// to our verifier (cross-checked against the signatures already known) before it is uploaded. Kept, the session goes
+// on on the signed file, its history starting there (a step back past a signing would bring back its placeholder).
+export async function signPdfVersion(deps: PdfSaveDeps, item: DriveItem, job: PdfSignedSaveJob): Promise<PresentationSaveEdits> {
+	const port = signerChannel(job)
+	const begun = await deps.engine.client
+		.call("signBegin", { inputBytes: Number(item.data.size), memory: deps.memory, digest: job.digest, signer: port }, [port])
+		.finally(() => {
+			job.signer.terminate()
+		})
+
+	if (begun.status === "refused") throw new SaveRefusedError("previewPdfOverBudget")
+
+	const known = await job.hints()
+	const hints = [...(known ?? []), { name: partialName(begun.field), byteRange: begun.byteRange }]
+
+	const state = deps.session.getSnapshot().state
+
+	await checkWritten(deps, begun.size, { pageCount: state.pageCount, versions: begun.versions, encryption: state.encryption.method }, deps.password, async verifier => {
+		const report = await verifier.client.call("verifySignatures", { fields: hints })
+		const signature = report.signatures.find(entry => entry.field === begun.field)
+
+		return signature?.state === "unchanged"
+			? { ok: true }
+			: { ok: false, reason: `the new signature is ${signature?.state ?? "missing"}` }
+	})
+
+	const upload = stream(deps)
+	const result: Promise<SaveResult> = upload.uploaded.then(async uploaded => {
+		if (uploaded) return { kind: "written", bytes: begun.size, revision: 0, notices: [] }
+
+		await end(deps, "failed", "continue").catch(() => undefined)
+
+		return { kind: "refused", reason: "failed" }
+	})
+
+	return {
+		kind: "port",
+		port: upload.port,
+		announced: upload.announced,
+		result,
+		size: begun.size,
+		times: editedSaveTimes(item, Date.now()),
+		commit: async saved => {
+			const ended = await end(deps, "saved", "adopt")
+
+			job.onSigned(begun.field, begun.byteRange)
+
+			if (deps.needsRespawn(ended.heapBytes)) await deps.respawn(saved)
+
+			deps.onHistoryReset()
+
+			return { dirty: deps.session.getSnapshot().state.dirty }
+		}
+	}
 }

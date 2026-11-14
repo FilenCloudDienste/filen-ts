@@ -44,12 +44,43 @@ export class PdfAnnotationError extends Error {
 	}
 }
 
+// The pages loaded inside withPageScope, closed when it ends.
+let scope: { readonly document: PDFDocument; readonly pages: Map<number, PDFPage> }[] = []
+
+// Runs `run` with the pages it loads of `document` shared and closed at its end. MuPDF keeps a page open while any
+// wrapper of it lives, and an open page's annotation list does not follow a change made beside it (a flatten): an
+// engine runs every call in a scope so no page stays open between its requests.
+export function withPageScope<T>(document: PDFDocument, run: () => T): T {
+	const entry = { document, pages: new Map<number, PDFPage>() }
+
+	scope = [...scope, entry]
+
+	try {
+		return run()
+	} finally {
+		scope = scope.filter(other => other !== entry)
+
+		for (const page of entry.pages.values()) page.destroy()
+	}
+}
+
 export function loadPage(document: PDFDocument, index: number): PDFPage {
 	if (!Number.isInteger(index) || index < 0 || index >= document.countPages()) {
 		throw new PdfAnnotationError("notFound", `no page ${String(index)}`)
 	}
 
-	return document.loadPage(index)
+	const open = scope.findLast(entry => entry.document === document)
+
+	if (open === undefined) return document.loadPage(index)
+
+	let page = open.pages.get(index)
+
+	if (page === undefined) {
+		page = document.loadPage(index)
+		open.pages.set(index, page)
+	}
+
+	return page
 }
 
 export function annotationId(annotation: PDFAnnotation): number {

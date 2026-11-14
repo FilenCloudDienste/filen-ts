@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { loadPdfSignatureFields, type PdfDocument } from "@filen/office/dom/pdf"
+import { loadPdfSignatureFields, type PdfSignatureSource } from "@filen/office/dom/pdf"
 import type { PdfSignatureReport } from "@filen/office/core/pdfsign"
 import type { PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureVerifier"
 import { log } from "@/lib/log"
@@ -11,7 +11,7 @@ export type PdfSignatureCheck =
 	| { readonly status: "failed" }
 
 interface Checked {
-	readonly document: PdfDocument
+	readonly document: PdfSignatureSource
 	readonly attempt: number
 	readonly check: PdfSignatureCheck
 }
@@ -19,7 +19,7 @@ interface Checked {
 // The signatures of a document, checked once per document (and again on retry). pdf.js says whether there are any
 // from the form alone; only then is the verifier asked, so an unsigned document never starts the engine.
 export function usePdfSignatureReport(
-	document: PdfDocument,
+	document: PdfSignatureSource,
 	verify: PdfSignatureVerify | null
 ): { check: PdfSignatureCheck; retry: () => void } {
 	const [attempt, setAttempt] = useState(0)

@@ -10,14 +10,12 @@ import {
 	PDF_PERMISSIONS_ALL,
 	planSecurity,
 	upgradeRefusal,
-	type PdfAllowed,
 	type PdfEncryptFields,
-	type PdfEncryptionMethod,
 	type PdfHeldAccess,
 	type PdfSecurityChoice,
 	type PdfSecurityPlan,
-	type PdfSecurityRefusal,
-	type PdfSecurityState
+	type PdfSecurityState,
+	type PdfSecuritySummary
 } from "../../../core/pdfedit/security"
 import type { PdfPermission } from "../protocol"
 
@@ -26,21 +24,9 @@ import type { PdfPermission } from "../protocol"
 // write options take effect in the save (`saveToBuffer`), which also gives the session's document the new encryption.
 
 // What the Protect dialog and the tools read. Carries no password.
-export interface PdfSecurityDescription {
-	readonly method: PdfEncryptionMethod
-	readonly rc4: boolean
-	// Opening needs a password.
-	readonly openPassword: boolean
-	// The file's /P (PDF_PERMISSIONS_ALL without encryption), and what it allows in the dialog's terms.
-	readonly permissions: number
-	readonly restricted: boolean
-	readonly allowed: PdfAllowed
-	// The session may change or remove the encryption.
-	readonly ownerAccess: boolean
+export interface PdfSecurityDescription extends PdfSecuritySummary {
 	// What the session may do now (MuPDF's hasPermission: everything with owner rights). Tools honour these.
 	readonly granted: Readonly<Record<PdfPermission, boolean>>
-	// Why the RC4 → AES-256 upgrade is not possible, or null.
-	readonly upgrade: PdfSecurityRefusal | null
 }
 
 const PERMISSIONS: readonly (readonly [PdfPermission, Mupdf.DocumentPermission])[] = [
@@ -115,8 +101,8 @@ export function grantedPermissions(document: Mupdf.PDFDocument): Readonly<Record
 	return granted
 }
 
-// The document's security as the dialog and the tools read it. Reads the trailer only; touches no pages.
-export function describeSecurity(document: Mupdf.PDFDocument, held: PdfHeldAccess): PdfSecurityDescription {
+// The document's protection as the editor reports it (the session's snapshot). Reads the trailer only.
+export function securitySummary(document: Mupdf.PDFDocument, held: PdfHeldAccess): PdfSecuritySummary {
 	const state = securityState(document, held)
 
 	return {
@@ -127,9 +113,13 @@ export function describeSecurity(document: Mupdf.PDFDocument, held: PdfHeldAcces
 		restricted: state.method !== "none" && isRestricted(state.permissions),
 		allowed: allowedFromPermissions(state.permissions),
 		ownerAccess: hasOwnerAccess(state),
-		granted: grantedPermissions(document),
 		upgrade: isRc4(state.method) ? upgradeRefusal(state) : "notRc4"
 	}
+}
+
+// The document's security as the dialog and the tools read it. Reads the trailer only; touches no pages.
+export function describeSecurity(document: Mupdf.PDFDocument, held: PdfHeldAccess): PdfSecurityDescription {
+	return { ...securitySummary(document, held), granted: grantedPermissions(document) }
 }
 
 // What a freshly opened document is authenticated with: call once, right after opening and before any unlock (it

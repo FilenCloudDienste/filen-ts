@@ -41,6 +41,9 @@ export interface OpenDocument {
 	readonly heap: Mupdf.Buffer | null
 	// The file the editor's history starts at, when it is a written save in the heap; null: the file behind the reader.
 	readonly base: Mupdf.Buffer | null
+	// The bytes `document` reads from, when they are a buffer in the heap (a written save opened in place, or the base
+	// a step back rebuilt it from); absent or null: the file behind the reader.
+	readonly source?: Mupdf.Buffer | null
 }
 
 export interface PdfEngineContext {

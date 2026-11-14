@@ -143,5 +143,17 @@ export const previewPdfRedaction = {
 	/** Reason: thumbnails or alternate images remained on a redacted page */
 	previewPdfRedactReasonHiddenData: "a thumbnail or alternate image remains on a redacted page",
 	/** Reason: a page could not be checked */
-	previewPdfRedactReasonUnreadable: "page {{page}} couldn't be checked"
+	previewPdfRedactReasonUnreadable: "page {{page}} couldn't be checked",
+	/** Toast after a redacted copy was saved; the open PDF goes back to how it was saved */
+	previewPdfRedactSavedCopy: "The redacted copy was saved as {{name}}. This file is unchanged.",
+	/** Toast after the redacted file was saved as a new version of the open file */
+	previewPdfRedactSaved: "The redacted file was saved.",
+	/** Toast when saving the redacted file failed for another reason than the redaction check */
+	previewPdfRedactSaveFailed: "The redacted file couldn't be saved. Nothing was changed.",
+	/** Accessible name of a page while the Area redaction tool is active */
+	previewPdfRedactAreaSurface: "Page {{page}}: drag to mark an area for redaction, or press Enter to place one",
+	/** Accessible name of a page while the Text redaction tool is active */
+	previewPdfRedactTextSurface: "Page {{page}}: drag over text to mark it for redaction",
+	/** Keyboard shortcut description: the redaction tool of the PDF editor */
+	previewPdfKeyRedact: "Redact (PDF)"
 }

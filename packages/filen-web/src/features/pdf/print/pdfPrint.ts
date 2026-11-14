@@ -1,11 +1,13 @@
 import { pageRangesCount, pageRangesPages, type PageRange } from "@filen/office/core/pdfedit/pageRanges"
-import type { PdfPage } from "@filen/office/dom/pdf"
+import { pdfBox, type PdfPage, type PdfViewport } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { createPrintRoot, type PrintRoot } from "@/lib/print/printRoot"
 import { pdfPrintCanvas, pdfPrintEncoding } from "@/features/pdf/print/pdfPrint.logic"
 
 // Prints a PDF's pages from pdf.js: each page rendered with the print intent (the annotations flagged for printing)
-// onto a canvas at the chosen resolution, encoded, and shown in the shared print root at the page's own size. Pages
+// onto a canvas at the chosen resolution, encoded, and shown in the shared print root at the page's own size. Pending
+// redaction marks (Redact annotations not yet applied) are filled black over the rendering, so what they cover never
+// reaches the printer (after the swap the editor's engine draws them so itself). Pages
 // are rendered one after another and each canvas is released once its picture is made, so one page's pixels are alive
 // at a time. Firefox renders each page itself while it prints (mozPrintCallback), so nothing is made beforehand there.
 
@@ -76,6 +78,42 @@ function pageLayout(page: PdfPage, job: PdfPrintJob) {
 	return { width: viewport.width, height: viewport.height, canvas, viewport: page.getViewport({ scale: canvas.scale }) }
 }
 
+// The rectangle of each pending redaction mark of the page (pdf.js annotation data), in the page's user space.
+export function redactionRects(annotations: readonly unknown[]): (readonly [number, number, number, number])[] {
+	const rects: (readonly [number, number, number, number])[] = []
+
+	for (const annotation of annotations) {
+		if (typeof annotation !== "object" || annotation === null || Reflect.get(annotation, "subtype") !== "Redact") continue
+
+		const rect: unknown = Reflect.get(annotation, "rect")
+
+		if (Array.isArray(rect) && rect.length === 4 && rect.every(value => typeof value === "number" && Number.isFinite(value)))
+			rects.push([rect[0] as number, rect[1] as number, rect[2] as number, rect[3] as number])
+	}
+
+	return rects
+}
+
+async function fillRedactions(page: PdfPage, viewport: PdfViewport, context: CanvasRenderingContext2D): Promise<void> {
+	const rects = redactionRects(await page.getAnnotations({ intent: "print" }))
+
+	if (rects.length === 0) return
+
+	context.save()
+	context.setTransform(1, 0, 0, 1, 0, 0)
+	context.fillStyle = "#000"
+
+	for (const [x0, y0, x1, y1] of rects) {
+		const [ax, ay] = viewport.convertToViewportPoint(x0, y0)
+		const [bx, by] = viewport.convertToViewportPoint(x1, y1)
+		const box = pdfBox(Number(ax), Number(ay), Number(bx), Number(by))
+
+		context.fillRect(Math.floor(box.left), Math.floor(box.top), Math.ceil(box.width) + 1, Math.ceil(box.height) + 1)
+	}
+
+	context.restore()
+}
+
 async function renderInto(
 	page: PdfPage,
 	layout: PageLayout,
@@ -98,6 +136,12 @@ async function renderInto(
 	await task.promise.finally(() => {
 		job.signal.removeEventListener("abort", cancel)
 	})
+
+	const drawn = context ?? canvas.getContext("2d")
+
+	if (drawn === null) throw new Error("no canvas to print on")
+
+	await fillRedactions(page, layout.viewport, drawn)
 }
 
 // Every page as an encoded picture in the root.

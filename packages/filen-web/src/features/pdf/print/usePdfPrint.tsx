@@ -24,13 +24,15 @@ export interface PdfPrintInput {
 	readonly size: number
 	// Asked before every page of a large file is read (false cancels the print), and held while it prints.
 	readonly fullRead?: PdfPrintFullRead | undefined
+	// Starts fetching the editor (printing a changed document renders through it): on Print… and Mod+P.
+	readonly prefetch?: (() => void) | undefined
 }
 
 // Printing a PDF from the viewer: the File menu's Print… and office.print (Mod+P) open the print dialog. A print is a
 // copy of the file like a download, so it is offered only where the file may be downloaded, and only where the
 // document's author allows printing; the key is taken anyway, so the browser's own print (the app's chrome) never runs
 // from it, with a notice saying why nothing prints.
-export function usePdfPrint({ document, current, size, fullRead }: PdfPrintInput): PdfPrint {
+export function usePdfPrint({ document, current, size, fullRead, prefetch }: PdfPrintInput): PdfPrint {
 	const downloadable = usePreviewDownloadable()
 	const [opened, setOpened] = useState(0)
 	const [permissions, setPermissions] = useState<{ readonly document: PdfDomDocument; readonly value: PdfPrintPermissions } | null>(null)
@@ -65,6 +67,7 @@ export function usePdfPrint({ document, current, size, fullRead }: PdfPrintInput
 		!downloadable || !(allowed?.print ?? false)
 			? undefined
 			: () => {
+					prefetch?.()
 					setOpened(opened + 1)
 				}
 
@@ -77,6 +80,8 @@ export function usePdfPrint({ document, current, size, fullRead }: PdfPrintInput
 				return
 			}
 
+			prefetch?.()
+
 			if (open !== undefined) {
 				open()
 			} else if (!downloadable) {
@@ -86,7 +91,7 @@ export function usePdfPrint({ document, current, size, fullRead }: PdfPrintInput
 			}
 		},
 		IN_EDITORS_AND_FIELDS,
-		[open, downloadable, allowed]
+		[open, downloadable, allowed, prefetch]
 	)
 
 	return {

@@ -578,7 +578,9 @@ export function addPdfSignatureField(mupdf: MupdfModule, document: PDFDocument, 
 // the caller reopens it on the signed output, or on the original file when signing failed.
 
 export interface PdfSignedRevision {
-	// The whole output; a view into MuPDF's heap, valid until destroy().
+	// The whole output, in MuPDF's heap until destroy().
+	readonly buffer: Mupdf.Buffer
+	// A view of it, valid until destroy() (or the heap grows).
 	readonly bytes: Uint8Array
 	readonly byteRange: ByteRange
 	// Offset of the `<` of /Contents.
@@ -597,9 +599,7 @@ export interface WritePdfSignatureOptions {
 	readonly capacity: number
 }
 
-interface WrittenRevision extends PdfSignedRevision {
-	readonly buffer: Mupdf.Buffer
-}
+type WrittenRevision = PdfSignedRevision
 
 function sentinelRange(document: PDFDocument): PDFObject {
 	const range = document.newArray()
@@ -612,13 +612,13 @@ function sentinelRange(document: PDFDocument): PDFObject {
 }
 
 // The placeholder as written by addPdfSignatureField, sized `capacity` (a reopened first output carries its patched
-// /ByteRange, which goes back to the sentinels).
+// /ByteRange, which goes back to the sentinels). A document whose file already holds the placeholder (rewritten after
+// the field was placed) gets it written anew, so the signature dictionary is part of the revision the save appends.
 function setPlaceholder(document: PDFDocument, draft: PdfSignatureDraft, capacity: number): void {
 	const signature = document.newIndirect(draft.signatureNum)
 	const contents = deref(signature.get("Contents"))
 	const range = deref(signature.get("ByteRange"))
-
-	if (!contents.isString() || contents.asByteString().length !== capacity) {
+	if (!contents.isString() || contents.asByteString().length !== capacity || !document.hasUnsavedChanges()) {
 		signature.put("Contents", document.newByteString(new Uint8Array(capacity)))
 	}
 

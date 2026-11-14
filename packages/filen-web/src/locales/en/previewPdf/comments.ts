@@ -15,6 +15,8 @@ export const previewPdfComments = {
 	previewPdfCommentPlaceholder: "Add a comment",
 	/** PDF Comments panel — placeholder of the reply field, and the button opening it */
 	previewPdfCommentReplyPlaceholder: "Reply",
+	/** PDF Comments panel — posts a new comment (a sticky note placed on the page, or the first note of an annotation) */
+	previewPdfCommentPost: "Comment",
 	/** PDF Comments panel — posts a reply */
 	previewPdfCommentReply: "Reply",
 	/** PDF Comments panel — saves an edited comment */

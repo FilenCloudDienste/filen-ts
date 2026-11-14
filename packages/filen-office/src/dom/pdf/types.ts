@@ -61,7 +61,7 @@ export interface PdfPage<S = unknown> {
 	// The text content as a stream, for the text layer.
 	streamTextContent(): S
 	getTextContent(): Promise<PdfTextContent>
-	getAnnotations(params: { intent: "display" }): Promise<unknown[]>
+	getAnnotations(params: { intent: "display" | "print" }): Promise<unknown[]>
 	cleanup(): unknown
 }
 

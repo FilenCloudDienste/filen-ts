@@ -86,5 +86,43 @@ export const previewPdfAnnotations = {
 	/** Standard stamp name */
 	previewPdfAnnotStampDraft: "Draft",
 	/** Standard stamp name */
-	previewPdfAnnotStampForPublicRelease: "For public release"
+	previewPdfAnnotStampForPublicRelease: "For public release",
+	/** Annotation tool: drag the pages to move around them */
+	previewPdfAnnotToolHand: "Hand",
+	/** Annotation tool with a menu of shapes (rectangle, ellipse, line, arrow) to draw on a PDF page */
+	previewPdfAnnotToolShapes: "Shapes",
+	/** Ribbon: the button opening a tool's menu of variants. {{tool}}: the tool's name, e.g. "Highlight" */
+	previewPdfToolVariants: "{{tool}} options",
+	/** Ribbon group of the PDF annotation tools (select, hand, text box, draw, highlight, shapes, image and stamps) */
+	previewPdfRibbonGroupAnnotate: "Annotate",
+	/** Ribbon group of the PDF comment tools (new comment, the Comments panel, attachments) */
+	previewPdfRibbonGroupComment: "Comment",
+	/** Shortcuts list — the PDF editor's key choosing the Select tool */
+	previewPdfKeyToolSelect: "Select tool (PDF)",
+	/** Shortcuts list — the PDF editor's key choosing the Hand tool (drag to move around the pages) */
+	previewPdfKeyToolHand: "Hand tool (PDF)",
+	/** Shortcuts list — the PDF editor's key choosing the Text box tool */
+	previewPdfKeyToolTextBox: "Text box tool (PDF)",
+	/** Shortcuts list — the PDF editor's key choosing the Draw tool (freehand) */
+	previewPdfKeyToolDraw: "Draw tool (PDF)",
+	/** Shortcuts list — the PDF editor's key choosing the Highlight tool (and its underline, strikethrough and squiggly variants) */
+	previewPdfKeyToolHighlight: "Highlight tool (PDF)",
+	/** Shortcuts list — the PDF editor's key choosing the Comment tool (places a sticky note) */
+	previewPdfKeyToolNote: "Comment tool (PDF)",
+	/** Image stamp: a picture from the user's Filen drive, placed on a PDF page */
+	previewPdfAnnotImageFromFilen: "Image from Filen",
+	/** Image stamp: the description of the Filen picture picker */
+	previewPdfAnnotImageFromFilenBody: "Choose a picture to place on the page.",
+	/** Image stamp: the picture could not be read or is too large */
+	previewPdfAnnotImageFailed: "This picture couldn't be added.",
+	/** Ribbon button and dialog title listing the files attached to a PDF */
+	previewPdfAnnotAttachments: "Attachments",
+	/** Attachments dialog: what it lists and what it does with them */
+	previewPdfAnnotAttachmentsBody: "Files attached to this PDF. They are downloaded, never opened here.",
+	/** Attachments dialog: while the list is read */
+	previewPdfAnnotAttachmentsLoading: "Reading attachments…",
+	/** Attachments dialog: the PDF has no attached files */
+	previewPdfAnnotAttachmentsEmpty: "This PDF has no attachments.",
+	/** Annotation toolbar: downloads the file a file attachment annotation carries */
+	previewPdfAnnotAttachmentDownloadAny: "Download attachment"
 } as const

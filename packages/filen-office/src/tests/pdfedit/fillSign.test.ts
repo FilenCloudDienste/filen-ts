@@ -130,7 +130,6 @@ describe("form fields", () => {
 		set(document, "notes", { kind: "text", text: "line one\r\nline two" })
 		set(document, "code", { kind: "text", text: "AB12CD99" })
 		set(document, "zip", { kind: "text", text: "12345678" })
-		set(document, "password", { kind: "text", text: "s3cret" })
 		set(document, "required", { kind: "text", text: "single\nline" })
 		set(document, "agree", { kind: "checkbox", checked: true })
 		set(document, "country", { kind: "choice", values: ["France"] })
@@ -153,9 +152,8 @@ describe("form fields", () => {
 		expect(field(after, "code").value).toBe("AB12CD")
 		expect(field(after, "zip").value).toBe("12345")
 		expect(field(after, "required").value).toBe("single")
-		expect(field(after, "password").value).toBe("s3cret")
+		expect(field(after, "password").value).toBe("")
 
-		// A password field's appearance shows bullets, never the text (rendered, extracted, printed).
 		const shown = (name: string): string =>
 			after
 				.loadPage(0)
@@ -166,8 +164,6 @@ describe("form fields", () => {
 				.asText() ?? ""
 
 		expect(shown("name")).toContain("Jane Doe")
-		expect(shown("password")).toContain("•".repeat(6))
-		expect(shown("password")).not.toContain("s3cret")
 		expect(field(after, "agree").value).toBe("Yes")
 		expect(field(after, "choice", 0).value).toBe("B")
 		expect(field(after, "country").selected).toEqual(["France"])
@@ -183,7 +179,7 @@ describe("form fields", () => {
 		expect(value("notes")).toBe("line one\nline two")
 		expect(value("code")).toBe("AB12CD")
 		expect(value("zip")).toBe("12345")
-		expect(value("password")).toBe("s3cret")
+		expect(value("password")).toBe("")
 		expect(value("agree")).toBe("Yes")
 		expect(theirs.get("choice")?.map(item => item.value)).toEqual(["B", "B"])
 		expect(theirs.get("choice")?.map(item => item.annotation["buttonValue"])).toEqual(["A", "B"])
@@ -230,11 +226,14 @@ describe("form fields", () => {
 		}
 
 		expect(refusal("readonly", { kind: "text", text: "changed" })).toBe("readOnly")
+		// A password field's value would be stored in the file: never filled.
+		expect(refusal("password", { kind: "text", text: "s3cret" })).toBe("password")
 		expect(refusal("agree", { kind: "text", text: "x" })).toBe("wrongKind")
 		expect(refusal("country", { kind: "choice", values: ["Spain"] })).toBe("notAnOption")
 		expect(refusal("colour", { kind: "choice", values: ["Purple"] })).toBe("notAnOption")
 		expect(refusal("country", { kind: "text", text: "Spain" })).toBe("wrongKind")
 		expect(field(document, "readonly").value).toBe("fixed")
+		expect(field(document, "password").value).toBe("")
 		expect(field(document, "country").selected).toEqual([])
 	})
 

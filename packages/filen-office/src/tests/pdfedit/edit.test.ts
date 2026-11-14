@@ -2,13 +2,12 @@ import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import { createSyncRangeBuffer, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import type { PdfSaveCheck, PdfSaveExpectation } from "../../dom/pdfedit/protocol"
 import { makeFormPdf } from "./fixtures"
-import { spawnEngine, startEngine, stopEngines } from "./harness"
+import { spawnEngine, startEngine, stopEngines, upload } from "./harness"
 import { signedFixture } from "../pdfSignFixtures"
 import { pdfSignatureFields } from "../../dom/pdf/signatureFields"
 import { budget } from "../timing"
@@ -64,37 +63,6 @@ async function checkInVerifier(client: PdfEngineClient, size: number, expected: 
 	return check
 }
 
-// The held output streamed over a save port, read here as an upload would; `fail` aborts it halfway.
-async function upload(client: PdfEngineClient, fail = false): Promise<{ readonly uploaded: boolean; readonly bytes: Uint8Array }> {
-	const channel = new MessageChannel()
-	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
-	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
-	const chunks: Uint8Array[] = []
-
-	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) {
-		chunks.push(chunk)
-
-		if (fail) {
-			reader.abort("upload")
-
-			break
-		}
-	}
-
-	if (!fail) reader.settled(true)
-
-	const { uploaded } = await written
-	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		bytes.set(chunk, at)
-		at += chunk.length
-	}
-
-	return { uploaded, bytes }
-}
-
 async function pdfjsFieldValues(bytes: Uint8Array): Promise<Record<string, unknown>> {
 	const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
 	const document = await task.promise
@@ -130,7 +98,7 @@ describe("editing a form in the engine", () => {
 			expect(await widget(engine.client, "fixed")).toMatchObject({ readOnly: true, value: "Locked" })
 			expect(await widget(engine.client, "colour")).toMatchObject({
 				type: "combobox",
-				options: ["Red", "Green", "Blue"],
+				options: ["Red", "Green", "Blue"].map(value => ({ value, label: value })),
 				value: "Red"
 			})
 			expect(await widget(engine.client, "choiceB")).toMatchObject({ type: "radio", page: 1 })
@@ -160,44 +128,56 @@ describe("editing a form in the engine", () => {
 
 			const name = await widget(engine.client, "name")
 			const typed = await engine.client.call("dispatch", {
-				command: "forms.setText",
-				args: { page: 0, widget: name.id, value: "Ada Lovelace, Countess of Lovelace" }
+				command: "forms.setField",
+				args: { page: 0, widget: name.id, value: { kind: "text", text: "Ada Lovelace, Countess of Lovelace" } }
 			})
 
 			expect(typed.pages).toEqual([0])
-			expect(typed.state).toMatchObject({ dirty: true, canUndo: true, undoLabel: "forms.setText", changes: ["formFill"] })
+			expect(typed.state).toMatchObject({ dirty: true, canUndo: true, undoLabel: "forms.setField", changes: ["formFill"] })
 			// The field's /MaxLen.
 			expect(typed.widgets[0]?.widgets.find(entry => entry.id === name.id)?.value).toBe("Ada Lovelace, Counte")
 
 			const radio = await widget(engine.client, "choiceA")
-			const toggled = await engine.client.call("dispatch", { command: "forms.toggle", args: { page: 0, widget: radio.id } })
+			const toggled = await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: radio.id, value: { kind: "radio" } }
+			})
 
 			// The group's other button is on page 2.
 			expect(toggled.pages).toEqual([0, 1])
 
 			const colour = await widget(engine.client, "colour")
 
-			await engine.client.call("dispatch", { command: "forms.setChoice", args: { page: 0, widget: colour.id, value: "Blue" } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: colour.id, value: { kind: "choice", values: ["Blue"] } }
+			})
 			await expect(
-				engine.client.call("dispatch", { command: "forms.setChoice", args: { page: 0, widget: colour.id, value: "Purple" } })
+				engine.client.call("dispatch", {
+					command: "forms.setField",
+					args: { page: 0, widget: colour.id, value: { kind: "choice", values: ["Purple"] } }
+				})
 			).rejects.toMatchObject({ failure: "badRequest" })
 
 			const fixed = await widget(engine.client, "fixed")
 
 			await expect(
-				engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: fixed.id, value: "x" } })
+				engine.client.call("dispatch", {
+					command: "forms.setField",
+					args: { page: 0, widget: fixed.id, value: { kind: "text", text: "x" } }
+				})
 			).rejects.toMatchObject({ failure: "notAllowed" })
-			await expect(engine.client.call("dispatch", { command: "forms.setText", args: { page: 0 } })).rejects.toMatchObject({
+			await expect(engine.client.call("dispatch", { command: "forms.setField", args: { page: 0 } })).rejects.toMatchObject({
 				failure: "badRequest"
 			})
 			await expect(engine.client.call("dispatch", { command: "nope", args: {} })).rejects.toMatchObject({ failure: "badRequest" })
 
 			// A refused command left no step behind.
-			expect((await engine.client.call("state", {})).undoLabel).toBe("forms.setChoice")
+			expect((await engine.client.call("state", {})).undoLabel).toBe("forms.setField")
 
 			const undone = await engine.client.call("undo", {})
 
-			expect(undone.state).toMatchObject({ canRedo: true, redoLabel: "forms.setChoice" })
+			expect(undone.state).toMatchObject({ canRedo: true, redoLabel: "forms.setField" })
 			expect((await widget(engine.client, "colour")).value).toBe("Red")
 
 			await engine.client.call("undo", {})
@@ -225,8 +205,8 @@ describe("editing a form in the engine", () => {
 
 			for (const [index, value] of ["A", "Ab", "Abc"].entries()) {
 				await engine.client.call("dispatch", {
-					command: "forms.setText",
-					args: { page: 0, widget: name.id, value },
+					command: "forms.setField",
+					args: { page: 0, widget: name.id, value: { kind: "text", text: value } },
 					op: { id: "typing", final: index === 2 }
 				})
 			}
@@ -254,8 +234,14 @@ describe("saving an edited document", () => {
 			const name = await widget(engine.client, "name")
 			const agree = await widget(engine.client, "agreeYes")
 
-			await engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: name.id, value: "Hello" } })
-			await engine.client.call("dispatch", { command: "forms.toggle", args: { page: 0, widget: agree.id } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: name.id, value: { kind: "text", text: "Hello" } }
+			})
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: agree.id, value: { kind: "checkbox", checked: true } }
+			})
 
 			const begun = await engine.client.call("saveBegin", {
 				inputBytes: source.length,
@@ -268,7 +254,10 @@ describe("saving an edited document", () => {
 			expect(begun.plan.mode).toBe("full")
 			// No edits while a save is held.
 			await expect(
-				engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: name.id, value: "x" } })
+				engine.client.call("dispatch", {
+					command: "forms.setField",
+					args: { page: 0, widget: name.id, value: { kind: "text", text: "x" } }
+				})
 			).rejects.toMatchObject({ failure: "badRequest" })
 
 			const check = await checkInVerifier(engine.client, begun.size, {
@@ -298,11 +287,11 @@ describe("saving an edited document", () => {
 			const ended = await engine.client.call("saveEnd", { outcome: "saved", next: "continue" })
 
 			expect(ended.history).toBe("kept")
-			expect(ended.state).toMatchObject({ dirty: false, canUndo: true, undoLabel: "forms.toggle" })
+			expect(ended.state).toMatchObject({ dirty: false, canUndo: true, undoLabel: "forms.setField" })
 
 			const undone = await engine.client.call("undo", {})
 
-			expect(undone.state).toMatchObject({ dirty: true, undoLabel: "forms.setText" })
+			expect(undone.state).toMatchObject({ dirty: true, undoLabel: "forms.setField" })
 			expect((await widget(engine.client, "agreeYes")).value).toBe("Off")
 
 			// Past the save: the document as opened, its earlier steps run again.
@@ -334,7 +323,10 @@ describe("saving an edited document", () => {
 
 			const name = await widget(engine.client, "name")
 
-			await engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: name.id, value: "Hello" } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: name.id, value: { kind: "text", text: "Hello" } }
+			})
 
 			const save = () =>
 				engine.client.call("saveBegin", { inputBytes: source.length, memory: PDF_DESKTOP_MEMORY, invalidateConfirmed: false })
@@ -360,7 +352,10 @@ describe("saving an edited document", () => {
 
 			const name = await widget(engine.client, "name")
 
-			await engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: name.id, value: "Kept" } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: name.id, value: { kind: "text", text: "Kept" } }
+			})
 			await engine.client.call("saveBegin", { inputBytes: source.length, memory: PDF_DESKTOP_MEMORY, invalidateConfirmed: false })
 			await upload(engine.client)
 
@@ -374,7 +369,10 @@ describe("saving an edited document", () => {
 			expect(adopted.value).toBe("Kept")
 
 			// Edits and renders go on on the adopted document.
-			await engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: adopted.id, value: "Again" } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: adopted.id, value: { kind: "text", text: "Again" } }
+			})
 			await engine.client.call("render", { page: 0, scale: 0.25, rotation: 0, tile: [0, 0, 100, 100], priority: "visible" })
 			expect((await engine.client.call("state", {})).dirty).toBe(true)
 		},
@@ -432,7 +430,10 @@ describe("saving an edited document", () => {
 			const save = async (value: string): Promise<Uint8Array> => {
 				const field = await textField(engine.client)
 
-				await engine.client.call("dispatch", { command: "forms.setText", args: { page: 0, widget: field.id, value } })
+				await engine.client.call("dispatch", {
+					command: "forms.setField",
+					args: { page: 0, widget: field.id, value: { kind: "text", text: value } }
+				})
 
 				const begun = await engine.client.call("saveBegin", {
 					inputBytes: source.length,

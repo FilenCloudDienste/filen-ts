@@ -1,4 +1,5 @@
 import type { PDFDocument } from "mupdf"
+import { composeWriteOptions, isWriteOptionText, PDF_PERMISSIONS_ALL } from "../../../core/pdfedit/security"
 import type { MupdfModule } from "../protocol"
 import { copyPages } from "./copy"
 import { at, catalog } from "./objects"
@@ -50,29 +51,36 @@ export interface CarriedPasswords {
 }
 
 export type ExtractSaveOptions =
-	| { readonly ok: true; readonly options: string; readonly encrypted: boolean }
-	// MuPDF's option string cannot carry a comma inside a password.
+	// `options` go to saveToBuffer as they are: an object, which MuPDF reads as JSON, so passwords need no escaping.
+	| { readonly ok: true; readonly options: Readonly<Record<string, string | number>>; readonly encrypted: boolean }
+	// A password MuPDF's option parser would read back differently (a control character).
 	| { readonly ok: false; readonly reason: "unsupportedPassword" }
 
 const BASE_OPTIONS = "garbage=compact,compress,objstms"
 
 // The write options for a document made from `source`: a full rewrite, encrypted like the source when it is (AES-256
-// whatever the source used, its permissions kept) unless `protect` is false.
+// whatever the source used, its permissions kept) unless `protect` is false. Passwords reach MuPDF only through
+// composeWriteOptions, never inside the comma-separated option string.
 export function extractSaveOptions(source: PDFDocument, passwords: CarriedPasswords | null, protect = true): ExtractSaveOptions {
 	const encrypt = at(source.getTrailer(), "Encrypt")
 
-	if (!protect || !encrypt.isDictionary() || passwords === null) return { ok: true, options: BASE_OPTIONS, encrypted: false }
+	if (!protect || !encrypt.isDictionary() || passwords === null)
+		return { ok: true, options: composeWriteOptions(BASE_OPTIONS, { encrypt: "none" }), encrypted: false }
 
 	const owner = passwords.owner ?? passwords.user
 
-	if (passwords.user.includes(",") || owner.includes(",")) return { ok: false, reason: "unsupportedPassword" }
+	if (!isWriteOptionText(passwords.user) || !isWriteOptionText(owner)) return { ok: false, reason: "unsupportedPassword" }
 
 	const permissions = at(encrypt, "P")
-	const flags = permissions.isInteger() ? `,permissions=${String(permissions.asNumber())}` : ""
 
 	return {
 		ok: true,
-		options: `${BASE_OPTIONS},encrypt=aes-256,user-password=${passwords.user},owner-password=${owner}${flags}`,
+		options: composeWriteOptions(BASE_OPTIONS, {
+			encrypt: "aes-256",
+			"user-password": passwords.user,
+			"owner-password": owner,
+			permissions: permissions.isInteger() ? permissions.asNumber() | 0 : PDF_PERMISSIONS_ALL
+		}),
 		encrypted: true
 	}
 }

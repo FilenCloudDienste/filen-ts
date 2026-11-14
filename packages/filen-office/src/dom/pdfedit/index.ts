@@ -1,18 +1,39 @@
 export { PdfEngineClient, PdfEngineError, PDF_RENDER_WATCHDOG_MS, type PdfEngineClientOptions, type PdfEngineWorkerLike } from "./client"
 export {
+	ANNOTATION_COMMANDS,
+	FILL_SIGN_COMMANDS,
 	FORM_COMMANDS,
+	outcomePages,
+	PDF_STAMP_MAX_BYTES,
+	type PdfAnnotationCommands,
+	type PdfCommandOutcome,
 	isIndex,
 	isRecord,
 	isText,
 	PDF_COMMANDS,
 	pdfCommand,
+	REDACT_COMMANDS,
+	redactionManifest,
 	type PdfCommand,
 	type PdfCommandArgs,
 	type PdfCommandContext,
 	type PdfCommandName,
 	type PdfCommandTable,
-	type PdfFormCommands
+	type PdfCropCommands,
+	type PdfFillPlacement,
+	type PdfFillSignCommands,
+	type PdfFormCommands,
+	type PdfOcrCommands,
+	type PdfPageCommands,
+	type PdfRedactCommands,
+	type PdfRedactFinding,
+	type PdfSignCommands,
+	type PdfSignFieldArgs,
+	type PdfTextEditCommands,
+	TEXT_EDIT_UNSAFE
 } from "./commands/index"
+export type { PdfExtractArgs, PdfExtractBegun } from "./pages/extractRequest"
+export type { PdfSourceAttach } from "./pages/sources"
 export { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost } from "./context"
 export {
 	isFromPdfEngine,
@@ -35,16 +56,26 @@ export {
 	type PdfEngineValue,
 	type PdfHeapReport,
 	type PdfOpenResult,
+	type PdfPageAnnotations,
 	type PdfPageInfo,
 	type PdfPermission,
+	type PdfPrintRender,
 	type PdfRenderArgs,
 	type PdfRenderPriority,
 	type PdfRenderValue,
+	type PdfRequiredFields,
 	type PdfSaveBegun,
 	type PdfSaveCheck,
 	type PdfSaveEnded,
 	type PdfSaveExpectation,
 	type PdfSaveOutcome,
+	type PdfSaveProtection,
+	type PdfTextGeometryLine,
+	type PdfSignAnswer,
+	type PdfSignBegun,
+	type PdfSignBeginArgs,
+	type PdfSignPort,
+	type PdfSignRequest,
 	type PdfTile,
 	type ToPdfEngine
 } from "./protocol"
