@@ -7,3 +7,8 @@ export function isAppleMobile(): boolean {
 
 	return os === "iOS" || os === "iPadOS" || (os === "macOS" && navigator.maxTouchPoints > 1)
 }
+
+// The WebKit engine: Safari, and every browser on iOS and iPadOS.
+export function isWebKitEngine(): boolean {
+	return isAppleMobile() || parseUserAgent(navigator.userAgent).browser === "Safari"
+}
