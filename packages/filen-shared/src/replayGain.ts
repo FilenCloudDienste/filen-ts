@@ -66,8 +66,10 @@ export function parseGainDb(raw: string): number | null {
 	return value !== null && Math.abs(value) <= GAIN_LIMIT_DB ? value : null
 }
 
+// The whole string must be the number: parseFloat would read "0.9abc" as 0.9.
 export function parsePeak(raw: string): number | null {
-	const value = Number.parseFloat(raw.trim())
+	const trimmed = raw.trim()
+	const value = trimmed.length === 0 ? Number.NaN : Number(trimmed)
 
 	return Number.isFinite(value) && value > 0 && value <= PEAK_LIMIT ? value : null
 }
