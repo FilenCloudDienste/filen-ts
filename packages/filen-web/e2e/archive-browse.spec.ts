@@ -541,8 +541,8 @@ test.describe("archive browser", () => {
 
 		const items = page.getByRole("menu").first().getByRole("menuitem")
 
-		await expect(items.nth(0)).toHaveAccessibleName("Open")
-		await expect(items.nth(1)).toHaveAccessibleName("Extract")
+		await expect(items.nth(0)).toHaveAccessibleName(menuItemName("Open"))
+		await expect(items.nth(1)).toHaveAccessibleName(menuItemName("Extract"))
 		await page.keyboard.press("Escape")
 
 		expect(cspViolations).toEqual([])

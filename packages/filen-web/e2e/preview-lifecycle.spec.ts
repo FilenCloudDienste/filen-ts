@@ -325,7 +325,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 // shared-root items to open a preview on (project_filen_web_free_e2e_account).
 test("the preview header's own item menu: matches the row menu's set (no Download), favorite round-trips, trash advances to the next sibling", async ({
 	page
-}) => {
+}, testInfo) => {
 	const contentA = Buffer.from("Preview menu content A\n", "utf8")
 	const contentB = Buffer.from("Preview menu content B\n", "utf8")
 
@@ -431,7 +431,21 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		await expect(dialog).toBeVisible()
 		await expect(dialog.getByText("Preview menu content B")).toBeVisible({ timeout: 30_000 })
 
+		// Diagnostic: on WebKit this Escape has stopped closing the preview; says where focus was left after the confirm.
+		const focused = await page.evaluate(() => {
+			const element = document.activeElement
+
+			return element === null
+				? "(none)"
+				: `<${element.tagName.toLowerCase()} role=${element.getAttribute("role") ?? ""} label=${element.getAttribute("aria-label") ?? ""}> in dialog: ${String(element.closest('[role="dialog"]') !== null)}`
+		})
+
 		await page.keyboard.press("Escape")
-		await expect(dialog).toHaveCount(0)
+		await expect(dialog)
+			.toHaveCount(0)
+			.catch(async (error: unknown) => {
+				await testInfo.attach("focus-before-escape", { body: focused, contentType: "text/plain" })
+				throw error
+			})
 	})
 })

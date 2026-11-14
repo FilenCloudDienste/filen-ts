@@ -1,11 +1,11 @@
 import type { Locator } from "@playwright/test"
 
 // A menu item's accessible name ends in its key hint where the surface binds one (MenuShortcut/MenuKbd): the keys are
-// spoken words ("Open Enter", "Info Alt Enter", "Download Control S"), each starting with a capital, a digit or a
-// symbol. Matches `label` alone or followed by such words, so "Open" never matches "Open in new tab" or "Open
-// containing directory" (sentence-case labels go on in lower case) and a test does not depend on the user's bindings.
+// spoken words ("Open Enter", "Info Alt Enter", "Open Enter Command Down arrow"), the first starting with a capital, a
+// digit or a symbol. Matches `label` alone or followed by such a hint, so "Open" never matches "Open in new tab" or
+// "Open containing directory" (sentence-case labels go on in lower case) and a test does not depend on the bindings.
 export function menuItemName(label: string): RegExp {
-	return new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")}(?: [^\\sa-z]\\S*)*$`, "u")
+	return new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")}(?: [^\\sa-z].*)?$`, "u")
 }
 
 // The menu items' labels without their key hints, in order (textContent, as toHaveText reads it, past the hint slot).
