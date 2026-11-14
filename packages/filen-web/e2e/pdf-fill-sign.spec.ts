@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { resolveModKey } from "./helpers/modkey"
+import { pdfPageScroller } from "./helpers/pdfSurface"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
 
@@ -18,6 +19,8 @@ test.describe.configure({ mode: "default" })
 const FIXTURE = new URL("../../filen-office/src/tests/fixtures/pdfforms/acroform.pdf", import.meta.url)
 const PDF_MIME = "application/pdf"
 const SWAP_TIMEOUT_MS = 60_000
+// Reading the account's synced saved signatures (one small file).
+const SAVED_SIGNATURES_READ_MS = 15_000
 
 async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 	await listbox.getByRole("option", { name }).dblclick()
@@ -25,6 +28,9 @@ async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 }
 
 async function close(page: Page): Promise<void> {
+	// Escape from the document: in the ribbon (where focus goes back once a tool's dialog closes) it returns to the pages.
+	await pdfPageScroller(page.getByRole("dialog").first()).focus()
+
 	// Diagnostic (WebKit has kept the viewer open here): where focus was when Escape was pressed.
 	const focused = await page.evaluate(() => {
 		const element = document.activeElement
@@ -100,6 +106,52 @@ async function scribble(page: Page, pad: Locator): Promise<void> {
 	await page.mouse.up()
 }
 
+// Settings › Office: every saved signature and initials deleted (they live with the account, so a run that stopped
+// early leaves its own behind), until the row says there are none.
+async function clearSavedSignatures(page: Page): Promise<void> {
+	await bootTo(page, "/settings/office")
+	await expect(page.getByText(settings.settingsOfficePdfSavingNote)).toBeVisible()
+
+	const none = page.getByText(settings.settingsOfficeSavedSignaturesNone, { exact: true })
+	const manage = page.getByRole("button", { name: settings.settingsOfficeSavedSignaturesManageLabel })
+	// The row reads "None" with Manage disabled until the synced file is read, and says nothing of that: Manage that
+	// stays disabled this long means there are none.
+	const some = await expect(manage)
+		.toBeEnabled({ timeout: SAVED_SIGNATURES_READ_MS })
+		.then(
+			() => true,
+			() => false
+		)
+
+	if (!some) {
+		await expect(none).toBeVisible()
+
+		return
+	}
+
+	await manage.click()
+
+	const dialog = page.getByRole("dialog", { name: settings.settingsOfficeSavedSignaturesDialogTitle })
+	const remove = dialog.getByRole("button", { name: /^Delete (signature|initials) \d+$/u })
+
+	await expect(dialog).toBeVisible()
+
+	while ((await remove.count()) > 0) {
+		const left = await remove.count()
+
+		await remove.first().click()
+		await page
+			.getByRole("alertdialog")
+			.getByRole("button", { name: settings.settingsOfficeSavedSignaturesDeleteConfirm, exact: true })
+			.click()
+		await expect(remove).toHaveCount(left - 1, { timeout: LIVE_WRITE_TIMEOUT_MS })
+	}
+
+	await page.keyboard.press("Escape")
+	await expect(dialog).toHaveCount(0)
+	await expect(none).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+}
+
 function fillSignTab(page: Page): Locator {
 	return page.getByRole("tab", { name: "Fill & Sign" })
 }
@@ -112,6 +164,8 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 	const cspViolations = trackCspViolations(page)
 	const mod = await resolveModKey(page)
 
+	// The first signature drawn here is the account's only one (the dialog offers the pad, not a saved one).
+	await clearSavedSignatures(page)
 	await withScratchDirectory(page, "pdf-fill-sign", async ({ listbox, runId }) => {
 		const first = `e2e-${runId}-first.pdf`
 		const second = `e2e-${runId}-second.pdf`
@@ -200,12 +254,13 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		await close(page)
 	})
 
-	// Settings › Office: the saved signature is listed and deleted everywhere.
+	// Settings › Office: the one saved signature is listed and deleted everywhere.
 	await page.goto("/settings/office")
 	await expect(page.getByText(settings.settingsOfficePdfSavingNote)).toBeVisible()
-	await page.getByRole("button", { name: settings.settingsOfficeSavedSignatures }).click()
-	await page.getByRole("button", { name: "Delete signature 1" }).click()
-	await expect(page.getByText(settings.settingsOfficeSavedSignaturesNone)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	await expect(page.getByText(settings.settingsOfficeSavedSignaturesCount_one.replace("{{count}}", "1"), { exact: true })).toBeVisible({
+		timeout: LIVE_WRITE_TIMEOUT_MS
+	})
+	await clearSavedSignatures(page)
 
 	expect(cspViolations).toEqual([])
 })
@@ -213,6 +268,8 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 test("the signature pad draws with touch on a phone viewport", async ({ page, browserName }) => {
 	test.skip(browserName !== "webkit", "touch drawing is checked on mobile WebKit")
 
+	// With none saved the dialog opens on the drawing pad.
+	await clearSavedSignatures(page)
 	await page.setViewportSize({ width: 390, height: 844 })
 
 	await withScratchDirectory(page, "pdf-fill-sign-touch", async ({ listbox, runId }) => {

@@ -111,8 +111,9 @@ test("the editor not loading leaves the viewer working and says so", async ({ pa
 		})
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(formPdf()) }], listbox)
-		// The engine's wasm cannot be fetched: as offline on first use, or WebAssembly turned off.
-		await page.route(/mupdf-wasm.*\.wasm$/, route => {
+		// The engine's wasm cannot be fetched: as offline on first use, or WebAssembly turned off. Routed on the context:
+		// the engine worker fetches it, and WebKit's page routes never see a worker's requests (the context's do).
+		await page.context().route(/mupdf-wasm.*\.wasm$/, route => {
 			seen.push(`aborted ${route.request().url()}`)
 
 			return route.abort()

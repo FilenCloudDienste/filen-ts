@@ -12,8 +12,8 @@ export function pdfLiveRegion(dialog: Locator): Locator {
 	return dialog.locator("[data-pdf-live-region]")
 }
 
-// The editor's save ended with nothing left to save: Save is disabled and no longer busy (it is disabled while it runs).
+// The editor's save ended with nothing left to save: Save disabled and not busy at once (before the save it is idle
+// and enabled, while it runs busy and disabled, so the two are never checked one after the other).
 export async function expectPdfSaved(save: Locator, timeout: number): Promise<void> {
-	await expect(save).toHaveAttribute("aria-busy", "false", { timeout })
-	await expect(save).toBeDisabled()
+	await expect(save.and(save.page().locator('[aria-busy="false"]:disabled'))).toHaveCount(1, { timeout })
 }

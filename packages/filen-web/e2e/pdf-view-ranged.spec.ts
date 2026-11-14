@@ -130,6 +130,9 @@ test("a large PDF shows its first page after reading part of the file", async ({
 			observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-rendered"] })
 		})
 
+		// A desktop window: page 1 alone in view. The listing's 8000px viewport (setTallListingViewport) shows seven
+		// pages at once, and the viewer rightly reads every page in view before the first one paints.
+		await page.setViewportSize({ width: 1280, height: 720 })
 		openedAt = Date.now()
 
 		const dialog = await openPdf(page, listbox, name)
