@@ -43,9 +43,9 @@ export const audio = {
 	/** Why blending each track into the next (a crossfade, never song picking) stopped: the device's audio mixer failed,
 	 *  so tracks switch at once until the page is reloaded */
 	smoothTransitionsUnavailableDegraded: "Off until you reload: this device stopped the audio mixer.",
-	/** Why blending each track into the next (a crossfade, never song picking) can't be used for what is playing: this
-	 *  browser can't mix tracks streamed this way */
-	smoothTransitionsUnavailableSource: "This browser can't mix these tracks here.",
+	/** Why blending each track into the next (a crossfade, never song picking) can't be used: Safari loaded this page
+	 *  without the app's background service, so its tracks can't be mixed until the page is reloaded */
+	smoothTransitionsUnavailableSource: "Safari can't blend tracks until you reload this page.",
 
 	// ── Now-playing surface ────────────────────────────────────────────────
 	/** Shown in place of a track name before anything is queued */

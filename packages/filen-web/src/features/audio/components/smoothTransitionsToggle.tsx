@@ -1,10 +1,11 @@
-import { useEffect, useId } from "react"
+import { useId } from "react"
 import { useTranslation } from "react-i18next"
 import { Blend } from "lucide-react"
 import { useShallow } from "zustand/shallow"
-import { hydrateSmoothTransitionsPrefs, useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
+import { useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
 import {
 	SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS,
+	smoothTransitionsActive,
 	smoothTransitionsLocked,
 	toggleSmoothTransitionsByUser
 } from "@/features/audio/lib/smoothTransitionsUi"
@@ -13,9 +14,9 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@filen/shared"
 
-// Beside Shuffle and Repeat, in their style; a 44 px target on a phone's touch screen. The tooltip names the blend
-// length; while the feature is unavailable it says why instead, and the button stays hoverable (aria-disabled) so it
-// can.
+// Beside Shuffle and Repeat, in their style, pressed while tracks blend. The tooltip names the blend length; while the
+// feature is unavailable it says why instead, and the button stays hoverable (aria-disabled) so it can. A device that
+// can never blend gets no toggle: a touch screen has no tooltip, so Settings › Audio says why.
 export function SmoothTransitionsToggleButton({ className }: { className?: string }) {
 	const { t } = useTranslation("audio")
 	const { enabled, fadeSeconds, unavailable } = useSmoothTransitionsStore(
@@ -26,11 +27,12 @@ export function SmoothTransitionsToggleButton({ className }: { className?: strin
 		}))
 	)
 	const reasonId = useId()
-	const reason = unavailable === null ? null : t(SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS[unavailable])
 
-	useEffect(() => {
-		void hydrateSmoothTransitionsPrefs()
-	}, [])
+	if (unavailable === "appleMobileGated") {
+		return null
+	}
+
+	const reason = unavailable === null ? null : t(SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS[unavailable])
 
 	return (
 		<Tooltip>
@@ -40,11 +42,11 @@ export function SmoothTransitionsToggleButton({ className }: { className?: strin
 						variant="ghost"
 						size="icon-sm"
 						aria-label={t("smoothTransitions")}
-						aria-pressed={enabled}
+						aria-pressed={smoothTransitionsActive({ enabled, unavailable })}
 						aria-describedby={reason === null ? undefined : reasonId}
 						disabled={smoothTransitionsLocked({ enabled, unavailable })}
 						focusableWhenDisabled
-						className={cn(TOGGLE_ON_CLASS, "aria-disabled:opacity-50 max-sm:pointer-coarse:size-11", className)}
+						className={cn(TOGGLE_ON_CLASS, "aria-disabled:opacity-50", className)}
 						onClick={toggleSmoothTransitionsByUser}
 					>
 						<Blend />

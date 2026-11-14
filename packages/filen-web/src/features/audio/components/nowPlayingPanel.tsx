@@ -5,7 +5,7 @@ import { useAudioStore, useAudioQueue } from "@/features/audio/store/useAudioSto
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
-import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
+import { ShuffleToggleButton, LoopToggleButton, NOW_PLAYING_CONTROL_CLASS } from "@/features/audio/components/queueToggles"
 import { SmoothTransitionsToggleButton } from "@/features/audio/components/smoothTransitionsToggle"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -32,13 +32,14 @@ export function NowPlayingPanel() {
 					<p className="text-xs text-muted-foreground">{t("queueCount", { count: queue.length })}</p>
 				</div>
 				<div className="flex items-center gap-1">
-					<ShuffleToggleButton />
-					<LoopToggleButton />
-					<SmoothTransitionsToggleButton />
+					<ShuffleToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
+					<LoopToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
+					<SmoothTransitionsToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
 					<Button
 						variant="ghost"
 						size="icon-sm"
 						aria-label={t("clearQueue")}
+						className={NOW_PLAYING_CONTROL_CLASS}
 						onClick={() => {
 							audioEngine.clearQueue()
 						}}
@@ -123,7 +124,10 @@ function QueueRow({
 				variant="ghost"
 				size="icon-xs"
 				aria-label={removeLabel}
-				className="shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100"
+				className={cn(
+					"shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4",
+					NOW_PLAYING_CONTROL_CLASS
+				)}
 				onClick={() => {
 					void audioEngine.removeAt(index)
 				}}

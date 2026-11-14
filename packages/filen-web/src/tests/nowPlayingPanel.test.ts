@@ -21,9 +21,15 @@ const { audioEngine } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/features/audio/lib/audioEngine", () => ({ audioEngine }))
+vi.mock("@/lib/storage/preference", () => ({
+	kvPreference: () => ({ get: () => new Promise(() => undefined), set: () => Promise.resolve() })
+}))
 
 const { useAudioStore } = await import("@/features/audio/store/useAudioStore")
 const { NowPlayingPanel } = await import("@/features/audio/components/nowPlayingPanel")
+const { NOW_PLAYING_CONTROL_CLASS } = await import("@/features/audio/components/queueToggles")
+const { useSmoothTransitionsStore } = await import("@/features/audio/store/useSmoothTransitionsStore")
+const { DEFAULT_SMOOTH_TRANSITIONS_PREFS } = await import("@/features/audio/lib/smoothTransitions.types")
 
 function track(uuid: string, name: string): QueueTrack {
 	return { uuid, name, mime: "audio/mpeg", contentType: "audio/mpeg", file: {} as unknown as AnyFile }
@@ -32,6 +38,7 @@ function track(uuid: string, name: string): QueueTrack {
 afterEach(() => {
 	cleanup()
 	vi.clearAllMocks()
+	useSmoothTransitionsStore.setState({ prefs: DEFAULT_SMOOTH_TRANSITIONS_PREFS, unavailable: null })
 	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle", lastError: null, lastErrorTrack: null, coverUrlsByUuid: {} })
 })
 
@@ -130,5 +137,63 @@ describe("NowPlayingPanel — queue-only popover", () => {
 		expect(rowButton(/one\.mp3$/).querySelector("img")).toBeNull()
 		expect(rowButton(/one\.mp3$/).querySelector("svg.text-destructive")).not.toBeNull()
 		expect(rowButton(/two\.mp3$/).textContent).toBe("2two.mp3")
+	})
+})
+
+describe("NowPlayingPanel — controls", () => {
+	function smoothToggle(): HTMLElement | null {
+		return screen.queryByRole("button", { name: "Smooth transitions" })
+	}
+
+	it("sizes every control for a coarse pointer the same way", () => {
+		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
+
+		render(createElement(NowPlayingPanel))
+
+		const rowButton = screen.getByRole("button", { name: /one\.mp3$/ })
+		const controls = screen.getAllByRole("button").filter(button => button !== rowButton)
+
+		expect(controls.map(button => button.getAttribute("aria-label"))).toEqual([
+			"Shuffle",
+			"Repeat off",
+			"Smooth transitions",
+			"Clear queue",
+			"Remove from queue"
+		])
+
+		for (const control of controls) {
+			expect(control.className).toContain(NOW_PLAYING_CONTROL_CLASS)
+		}
+	})
+
+	it("shows no smooth transitions toggle on a device that can never blend", () => {
+		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
+		useSmoothTransitionsStore.setState({ unavailable: "appleMobileGated" })
+
+		render(createElement(NowPlayingPanel))
+
+		expect(smoothToggle()).toBeNull()
+		expect(screen.getByRole("button", { name: "Shuffle" })).toBeTruthy()
+	})
+
+	it("shows whether tracks blend now, and turns the kept pref off while they can't", () => {
+		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
+		useSmoothTransitionsStore.setState({ prefs: { ...DEFAULT_SMOOTH_TRANSITIONS_PREFS, enabled: true } })
+
+		render(createElement(NowPlayingPanel))
+
+		expect(smoothToggle()?.getAttribute("aria-pressed")).toBe("true")
+
+		act(() => {
+			useSmoothTransitionsStore.setState({ unavailable: "degraded" })
+		})
+
+		expect(smoothToggle()?.getAttribute("aria-pressed")).toBe("false")
+		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(true)
+
+		fireEvent.click(screen.getByRole("button", { name: "Smooth transitions" }))
+
+		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(false)
+		expect(smoothToggle()?.getAttribute("aria-disabled")).toBe("true")
 	})
 })

@@ -17,6 +17,9 @@ const LOOP_LABEL_KEYS = {
 // Keyed on aria-pressed so it also outranks the ghost variant's hover/aria-expanded foreground.
 export const TOGGLE_ON_CLASS = "aria-pressed:text-blue-500"
 
+// Every control of the now-playing panel: 44 px under a coarse pointer.
+export const NOW_PLAYING_CONTROL_CLASS = "pointer-coarse:size-11"
+
 // Shared by the player bar and the now-playing panel. Each reads only its own store field, so a toggle
 // re-renders itself rather than its host surface.
 export function ShuffleToggleButton({ className }: { className?: string }) {
