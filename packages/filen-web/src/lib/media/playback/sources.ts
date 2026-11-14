@@ -62,6 +62,11 @@ export function remuxSource(file: AnyFile): RemuxSource {
 	return takeWarmRemux(file.uuid) ?? createRemuxSource(file)
 }
 
+// An audio file's bytes for its edge analysis: always a port of its own, never the file warmed for playback.
+export function analysisRemuxSource(file: AnyFile): RemuxSource {
+	return createRemuxSource(file)
+}
+
 // A public link's file, read without a session; never prewarmed.
 export function linkedRemuxSource(file: AnyFile): RemuxSource {
 	return createRemuxSource(file, { access: "anon" })

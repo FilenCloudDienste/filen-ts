@@ -1,4 +1,5 @@
 import type { ProbeIndex } from "@filen/shared/videos"
+import type { TrackEdges } from "@/features/audio/lib/smoothTransitions.types"
 
 // The contract between the page's MSE controller and the remux worker. Plain data only: it crosses a
 // worker boundary.
@@ -150,6 +151,25 @@ export interface RemuxStats {
 	decodeWaitSeconds: number
 	transcodedMediaSeconds: number
 }
+
+export function emptyRemuxStats(): RemuxStats {
+	return {
+		blockReads: 0,
+		bytesRead: 0,
+		rangeReads: 0,
+		readAheadBlocks: 0,
+		segmentsOut: 0,
+		bytesOut: 0,
+		transcodeSeconds: 0,
+		decodeWaitSeconds: 0,
+		transcodedMediaSeconds: 0
+	}
+}
+
+// An audio file's smart edges as the worker's analyzeEdges measured them: the analysis record the page caches.
+// `failed`: nothing in the file could be decoded. A read that failed is not an answer: it rejects with
+// SourceReadError instead.
+export type EdgeAnalysis = TrackEdges
 
 // An audio file decoded into a WAV stream (the worker's openPcm): what the service worker serves it as.
 export interface PcmStreamInfo {

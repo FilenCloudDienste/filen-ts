@@ -30,7 +30,7 @@ export function id3v2Bytes(head: Uint8Array): number {
 	return ID3V2_HEADER_BYTES + size + (((head[5] ?? 0) & 0x10) !== 0 ? ID3V2_HEADER_BYTES : 0)
 }
 
-interface Frame {
+export interface Frame {
 	bytes: number
 	samples: number
 	rate: number
@@ -92,6 +92,11 @@ function adtsFrame(bytes: Uint8Array, at: number): Frame | null {
 	}
 
 	return { bytes: frameBytes, samples: 1024 * (((bytes[at + 6] ?? 0) & 0x03) + 1), rate, shape: (b1 << 8) | (b2 & 0xfc), tagAt: null }
+}
+
+// The MPEG audio or ADTS frame header at `at`, or null where none starts.
+export function frameAt(stream: FrameStream, bytes: Uint8Array, at: number): Frame | null {
+	return stream === "mp3" ? mpegFrame(bytes, at) : adtsFrame(bytes, at)
 }
 
 function isTagFrame(bytes: Uint8Array, frame: Frame, at: number): boolean {

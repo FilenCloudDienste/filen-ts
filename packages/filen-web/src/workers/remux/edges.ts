@@ -1,0 +1,315 @@
+import { ADTS, CustomSource, FLAC, Input, MP3, type AudioSample, type InputFormat } from "mediabunny"
+import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
+import { emptyRemuxStats, isSourceReadError, type EdgeAnalysis } from "@/lib/media/remuxTypes"
+import { log } from "@/lib/log"
+import { openAudioInput, streamStart, type AudioInput } from "@/workers/remux/audioInput"
+import { sampleReader, type SampleReader } from "@/workers/remux/audioTranscode"
+import {
+	accumulateEnvelope,
+	createEnvelope,
+	EDGE_WINDOWS,
+	findBoundaryLevels,
+	findEdges,
+	finishEnvelope,
+	windowsFor,
+	type EdgeWindows
+} from "@/workers/remux/edges.logic"
+import {
+	edgeWindowBytes,
+	flacMetadataBlock,
+	flacStreamInfo,
+	flacVirtualHeader,
+	isFlacMagic,
+	isStreamInfoBlock,
+	METADATA_HEADER_BYTES,
+	RESYNC_BYTES,
+	STREAMINFO_BYTES,
+	syncFlacFrame,
+	syncFrameStream,
+	tailWindowOffset,
+	type FlacStreamInfo,
+	type TailStream
+} from "@/workers/remux/tailWindow.logic"
+
+// Reads an audio file's head and tail windows and measures its smart edges (edges.logic). One decoder is alive at a
+// time: the head reader is closed before the tail one opens. An MP3, ADTS or FLAC tail is reached by byte offset
+// (tailWindow.logic), everything else through its container's seek.
+
+const FAILED: EdgeAnalysis = {
+	status: "failed",
+	durationSec: null,
+	inStartMs: null,
+	outEndFromEndMs: null,
+	fadeOutFromEndMs: null,
+	boundary: null
+}
+
+// Metadata blocks walked to find a FLAC stream's frames at most.
+const MAX_FLAC_BLOCKS = 64
+
+// Where a byte-seekable stream's audio lies: its first frame, and what a frame header of it must match.
+type StreamLayout =
+	| { stream: "mp3" | "adts"; audioStart: number; shape: number | null }
+	| { stream: "flac"; audioStart: number; streamInfo: Uint8Array; info: FlacStreamInfo }
+
+// One pass over decoded audio: each sample's planes copied into one scratch buffer, folded into the envelope and
+// closed at once.
+class EnvelopeReader {
+	private scratch = new Float32Array(0)
+
+	public async read(reader: SampleReader, from: number, until: number, capacity: number): Promise<Float32Array> {
+		const envelope = createEnvelope(capacity)
+		let rate = 0
+
+		try {
+			for (let item = await reader.first(from); item !== null; item = await reader.next(item)) {
+				const { sample } = item
+
+				if (sample.timestamp >= until) {
+					sample.close()
+					break
+				}
+
+				rate = sample.sampleRate
+				this.add(envelope, sample)
+				sample.close()
+			}
+		} finally {
+			await reader.close()
+		}
+
+		return finishEnvelope(envelope, rate)
+	}
+
+	private add(envelope: ReturnType<typeof createEnvelope>, sample: AudioSample): void {
+		const frames = sample.numberOfFrames
+
+		if (this.scratch.length < frames) {
+			this.scratch = new Float32Array(frames)
+		}
+
+		const scratch = this.scratch.subarray(0, frames)
+
+		accumulateEnvelope(envelope, sample.numberOfChannels, frames, sample.sampleRate, channel => {
+			sample.copyTo(scratch, { planeIndex: channel, format: "f32-planar" })
+
+			return scratch
+		})
+	}
+}
+
+// The last `windows` windows of an envelope.
+function lastWindows(envelope: Float32Array, windows: number): Float32Array {
+	return envelope.subarray(Math.max(0, envelope.length - windows))
+}
+
+const NOT_CANCELLED = (): boolean => false
+
+async function streamLayout(input: AudioInput): Promise<StreamLayout | null> {
+	const stream = input.info.tailStream
+
+	if (stream === undefined) {
+		return null
+	}
+
+	const { cache } = input
+	const start = await streamStart(cache)
+
+	if (stream !== "flac") {
+		const head = await cache.read(start, Math.min(cache.size, start + RESYNC_BYTES))
+		const synced = syncFrameStream(head, 0, stream, null, start + head.length === cache.size)
+
+		return { stream, audioStart: start + (synced?.at ?? 0), shape: synced?.shape ?? null }
+	}
+
+	if (start + METADATA_HEADER_BYTES > cache.size || !isFlacMagic(await cache.read(start, start + METADATA_HEADER_BYTES))) {
+		return null
+	}
+
+	let at = start + METADATA_HEADER_BYTES
+	let streamInfo: Uint8Array | null = null
+
+	for (let i = 0; i < MAX_FLAC_BLOCKS && at + METADATA_HEADER_BYTES <= cache.size; i++) {
+		const block = flacMetadataBlock(await cache.read(at, at + METADATA_HEADER_BYTES))
+
+		if (block === null) {
+			return null
+		}
+
+		if (isStreamInfoBlock(block) && at + METADATA_HEADER_BYTES + STREAMINFO_BYTES <= cache.size) {
+			streamInfo = (await cache.read(at + METADATA_HEADER_BYTES, at + METADATA_HEADER_BYTES + STREAMINFO_BYTES)).slice()
+		}
+
+		at += METADATA_HEADER_BYTES + block.size
+
+		if (block.last) {
+			break
+		}
+	}
+
+	const info = streamInfo === null ? null : flacStreamInfo(streamInfo)
+
+	return streamInfo === null || info === null ? null : { stream: "flac", audioStart: at, streamInfo, info }
+}
+
+// An Input over the file from `from` to its end, behind `prefix`: the tail window as a file of its own.
+function windowInput(cache: BlockCache, prefix: Uint8Array, from: number, format: InputFormat): Input {
+	const head = prefix.length
+	const size = head + cache.size - from
+
+	const read = async (start: number, end: number): Promise<Uint8Array> => {
+		if (end <= head) {
+			return prefix.subarray(start, end)
+		}
+
+		if (start >= head) {
+			return await cache.read(from + start - head, from + end - head)
+		}
+
+		const out = new Uint8Array(end - start)
+
+		out.set(prefix.subarray(start))
+		out.set(await cache.read(from, from + end - head), head - start)
+
+		return out
+	}
+
+	return new Input({
+		formats: [format],
+		source: new CustomSource({ getSize: () => size, read, prefetchProfile: "none", maxCacheSize: 0 })
+	})
+}
+
+const TAIL_FORMATS: Record<TailStream, InputFormat> = { mp3: MP3, adts: ADTS, flac: FLAC }
+
+// The envelope of the last `seconds`, ending at the end of the file; null when no frame could be found to start
+// a byte-offset window at.
+async function tailEnvelope(
+	input: AudioInput,
+	layout: StreamLayout | null,
+	seconds: number,
+	envelopes: EnvelopeReader
+): Promise<Float32Array | null> {
+	const { cache, info } = input
+	const windows = windowsFor(seconds)
+
+	if (layout === null) {
+		const reader = input.reader(emptyRemuxStats(), NOT_CANCELLED)
+
+		return lastWindows(await envelopes.read(reader, Math.max(0, info.duration - seconds), Number.POSITIVE_INFINITY, windows), windows)
+	}
+
+	const offset = tailWindowOffset({ size: cache.size, audioStart: layout.audioStart, duration: info.duration, seconds })
+	const end = Math.min(cache.size, offset + RESYNC_BYTES)
+	const bytes = await cache.read(offset, end)
+	const at =
+		layout.stream === "flac"
+			? syncFlacFrame(bytes, 0, layout.info)
+			: (syncFrameStream(bytes, 0, layout.stream, layout.shape, end === cache.size)?.at ?? null)
+
+	if (at === null) {
+		return null
+	}
+
+	const prefix = layout.stream === "flac" ? flacVirtualHeader(layout.streamInfo) : new Uint8Array(0)
+	const window = windowInput(cache, prefix, offset + at, TAIL_FORMATS[layout.stream])
+
+	try {
+		const track = await window.getPrimaryAudioTrack()
+
+		if (track === null) {
+			return null
+		}
+
+		const reader = sampleReader(track, emptyRemuxStats(), NOT_CANCELLED)
+
+		return lastWindows(await envelopes.read(reader, 0, Number.POSITIVE_INFINITY, windows), windows)
+	} finally {
+		window.dispose()
+	}
+}
+
+// The analysis of an opened file; the caller closes `input`. Rejects only for a read that failed or was
+// aborted; whatever else goes wrong in decoding is a `failed` answer.
+export async function analyzeInput(input: AudioInput, windows: EdgeWindows = EDGE_WINDOWS): Promise<EdgeAnalysis> {
+	const { duration } = input.info
+	const envelopes = new EnvelopeReader()
+
+	try {
+		const layout = await streamLayout(input)
+		const bytes = edgeWindowBytes({
+			size: input.cache.size,
+			audioStart: layout?.audioStart ?? 0,
+			duration,
+			headSeconds: windows.headSeconds,
+			tailSeconds: windows.tailSeconds
+		})
+
+		const headOf = async (seconds: number): Promise<Float32Array> =>
+			await envelopes.read(input.reader(emptyRemuxStats(), NOT_CANCELLED), 0, seconds, windowsFor(Math.min(seconds, duration)) + 1)
+
+		// Past the budget: the boundary seconds alone, which an album's track boundary still needs.
+		if (bytes > windows.maxWindowBytes) {
+			const head = await headOf(windows.boundarySeconds)
+			const tail = await tailEnvelope(input, layout, windows.boundarySeconds, envelopes)
+
+			return {
+				...FAILED,
+				status: "skipped",
+				durationSec: duration,
+				boundary: findBoundaryLevels(head, tail, windows.boundarySeconds)
+			}
+		}
+
+		let head: Float32Array
+		let tail: Float32Array | null
+
+		if (duration <= windows.headSeconds + windows.tailSeconds) {
+			// Both windows cover the whole track: one pass.
+			const whole = await headOf(Number.POSITIVE_INFINITY)
+
+			head = whole.subarray(0, windowsFor(windows.headSeconds))
+			tail = lastWindows(whole, windowsFor(windows.tailSeconds))
+		} else {
+			head = await headOf(windows.headSeconds)
+			tail = await tailEnvelope(input, layout, windows.tailSeconds, envelopes)
+		}
+
+		return {
+			status: "ok",
+			durationSec: duration,
+			...findEdges(head, tail),
+			boundary: findBoundaryLevels(head, tail, windows.boundarySeconds)
+		}
+	} catch (error) {
+		return undecodable(error)
+	}
+}
+
+// A read that failed or was aborted says nothing about the file: it rejects. Anything else is the file's answer.
+function undecodable(error: unknown): EdgeAnalysis {
+	if (isSourceReadError(error) || error instanceof BlockAbortError) {
+		throw error
+	}
+
+	log.info("audio-edges", "edge analysis could not decode the file", error)
+
+	return FAILED
+}
+
+// Opens the file a range port serves and analyses it.
+export async function analyzeEdges(port: MessagePort, size: number): Promise<EdgeAnalysis> {
+	let input: AudioInput
+
+	try {
+		input = await openAudioInput(port, size, "analysis")
+	} catch (error) {
+		return undecodable(error)
+	}
+
+	try {
+		return await analyzeInput(input)
+	} finally {
+		await input.close()
+	}
+}

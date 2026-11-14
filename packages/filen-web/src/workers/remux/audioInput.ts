@@ -12,7 +12,7 @@ import {
 } from "mediabunny"
 import { BlockSource, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
-import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
+import { openBlockInput, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
 import { AUDIO_UNSUPPORTED_ERROR, type RemuxStats } from "@/lib/media/remuxTypes"
 import { sampleReader, type SampleItem, type SampleReader } from "@/workers/remux/audioTranscode"
 import { estimateFrameStreamDuration, ID3V2_HEADER_BYTES, id3v2Bytes } from "@/workers/remux/audioDuration.logic"
@@ -33,6 +33,7 @@ import {
 	type RawStreamInfo,
 	type RawTimeline
 } from "@/workers/remux/rawAudio.logic"
+import type { TailStream } from "@/workers/remux/tailWindow.logic"
 
 // An audio file opened for decoding, whatever holds it: a container mediabunny reads (its default
 // decodable audio track), a codec only FFmpeg decodes inside one (TrueHD, ALAC), or a bare AC-3, E-AC-3 or
@@ -62,6 +63,8 @@ export interface AudioInputInfo {
 	duration: number
 	// The speakers an AC-3/E-AC-3/DTS stream's frames name, for the downmix.
 	header: Speaker[] | null
+	// A bare MP3, ADTS or FLAC stream, whose demuxer reaches a time only by reading every frame before it.
+	tailStream?: TailStream
 }
 
 export interface AudioInput {
@@ -572,7 +575,8 @@ export async function estimatedStreamDuration(cache: BlockCache, format: InputFo
 	}
 }
 
-async function estimate(cache: BlockCache, stream: "mp3" | "adts"): Promise<number | null> {
+// Where a stream starts behind the ID3v2 tags at the head of its file.
+export async function streamStart(cache: BlockCache): Promise<number> {
 	let start = 0
 
 	for (let i = 0; i < MAX_ID3_TAGS && start + ID3V2_HEADER_BYTES <= cache.size; i++) {
@@ -584,6 +588,12 @@ async function estimate(cache: BlockCache, stream: "mp3" | "adts"): Promise<numb
 
 		start += tag
 	}
+
+	return start
+}
+
+async function estimate(cache: BlockCache, stream: "mp3" | "adts"): Promise<number | null> {
+	const start = await streamStart(cache)
 
 	if (start >= cache.size) {
 		return null
@@ -650,8 +660,10 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 		headerSpeakers(track, chosen.codec)
 	])
 
+	const tailStream: TailStream | null = format === MP3 ? "mp3" : format === ADTS ? "adts" : format === FLAC ? "flac" : null
+
 	return {
-		info: { codec: chosen.codec, sampleRate, channels, duration, header },
+		info: { codec: chosen.codec, sampleRate, channels, duration, header, ...(tailStream === null ? {} : { tailStream }) },
 		cache,
 		reader: (stats, isCancelled) =>
 			ffmpeg === null
@@ -674,10 +686,10 @@ async function estimatedOrComputed(cache: BlockCache, input: Input, format: Inpu
 	return format === MP3 || format === ADTS ? await estimatedStreamDuration(cache, format) : await input.computeDuration()
 }
 
-// Opens the file a range port serves. Throws AudioUnsupportedError when nothing in it can be decoded.
-export async function openAudioInput(port: MessagePort, size: number): Promise<AudioInput> {
-	// Audio is read in order and at a low bitrate.
-	const source = openBlockInput(port, size, "audio")
+// Opens the file a range port serves. Throws AudioUnsupportedError when nothing in it can be decoded. Audio is
+// read in order and at a low bitrate; an analysis reads two windows of it without read-ahead.
+export async function openAudioInput(port: MessagePort, size: number, profile: BlockInputProfile = "audio"): Promise<AudioInput> {
+	const source = openBlockInput(port, size, profile)
 
 	try {
 		const raw = await rawStreamOf(source.cache, source.input)

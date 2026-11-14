@@ -1,6 +1,8 @@
 import * as Comlink from "comlink"
 import {
+	emptyRemuxStats,
 	WarmGoneError,
+	type EdgeAnalysis,
 	type PcmStreamInfo,
 	type RemuxAdoptParams,
 	type RemuxAudioStart,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/media/remuxTypes"
 import { RemuxEngine } from "@/workers/remux/engine"
 import { openAudioInput } from "@/workers/remux/audioInput"
+import { analyzeEdges } from "@/workers/remux/edges"
 import { PcmStream } from "@/workers/remux/pcmStream"
 import { WAV_CONTENT_TYPE } from "@/workers/remux/wav.logic"
 import { probeEncodeCapabilities } from "@/workers/remux/encodeCaps"
@@ -88,20 +91,6 @@ async function closeSession(id: number): Promise<void> {
 const pcmStreams = new Map<number, AbortController>()
 let nextPcm = 0
 
-function pcmStats(): RemuxStats {
-	return {
-		blockReads: 0,
-		bytesRead: 0,
-		rangeReads: 0,
-		readAheadBlocks: 0,
-		segmentsOut: 0,
-		bytesOut: 0,
-		transcodeSeconds: 0,
-		decodeWaitSeconds: 0,
-		transcodedMediaSeconds: 0
-	}
-}
-
 const api = {
 	// Decodes the audio file `params.port` serves into a WAV stream served by range on `output` (the service
 	// worker reads it there), until the reader closes `output`. Rejects with AudioUnsupportedError when nothing
@@ -113,7 +102,7 @@ const api = {
 			const input = await openAudioInput(params.port, params.size)
 
 			try {
-				stream = await PcmStream.open(input, pcmStats())
+				stream = await PcmStream.open(input, emptyRemuxStats())
 			} catch (error) {
 				await input.close()
 
@@ -149,6 +138,12 @@ const api = {
 			sampleRate: info.sampleRate,
 			channels: info.channels
 		}
+	},
+	// The smart edges of the audio file `params.port` serves, from its head and tail windows (workers/remux/edges).
+	// Closes the port when done. Rejects with SourceReadError when the bytes did not arrive; a file nothing in
+	// which decodes is a `failed` answer.
+	analyzeEdges(params: { port: MessagePort; size: number }): Promise<EdgeAnalysis> {
+		return analyzeEdges(params.port, params.size)
 	},
 	// Ends a stream openPcm opened, whether or not its reader ever closed the port (a registration the service
 	// worker refused leaves nobody reading it).
