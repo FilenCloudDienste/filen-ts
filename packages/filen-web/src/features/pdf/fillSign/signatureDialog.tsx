@@ -19,19 +19,25 @@ import { createHistory } from "@/lib/editHistory"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { log } from "@/lib/log"
 import { SignaturePad } from "@/features/pdf/fillSign/signaturePad"
+import { SignatureStylePicker } from "@/features/pdf/fillSign/signatureStylePicker"
 import {
 	imageFileSignature,
-	loadSignatureFont,
+	loadSignatureFonts,
 	renderTypedSignature,
-	SIGNATURE_FONT_FAMILY,
 	SIGNATURE_INK,
 	strokesPath
 } from "@/features/pdf/fillSign/signatureRender"
+import {
+	needsSignatureFallback,
+	rememberedSignatureStyle,
+	SIGNATURE_STYLES,
+	type SignatureStyle
+} from "@/features/pdf/fillSign/signatureStyles"
 import { loadSavedSignatures, savedSignatures, savedVisualSignature, useSavedSignatures } from "@/features/pdf/fillSign/savedSignatures"
 
-// "Add signature" / "Add initials": a row of the saved ones (and New), or a new one drawn, typed in the signature
-// font or taken from a picture; "Save for reuse" keeps a new one for every device. Place hands the result to
-// `onPlace` (the caller places it on the page) and closes.
+// "Add signature" / "Add initials": a row of the saved ones (and New), or a new one drawn, typed in one of the
+// handwriting styles or taken from a picture; "Save for reuse" keeps a new one for every device. Place hands the
+// result to `onPlace` (the caller places it on the page) and closes.
 
 export interface SignatureDialogProps {
 	open: boolean
@@ -111,7 +117,13 @@ function SignatureDialogBody({
 	const [history] = useState(() => createHistory<Strokes>([]))
 	const [strokes, setStrokes] = useState<Strokes>([])
 	const [typed, setTyped] = useState(() => (role === "initials" ? initialsOf(defaultName ?? "") : (defaultName ?? "").trim()))
-	const [fontReady, setFontReady] = useState(false)
+	// The style picked on the Type tab; until then the one the newest saved typed signature was drawn in.
+	const [pickedStyle, setPickedStyle] = useState<SignatureStyle | null>(null)
+	const style = pickedStyle ?? rememberedSignatureStyle(list)
+	// What the loaded faces cover: every style's own, and the fallback once a typed character needed it.
+	const [fonts, setFonts] = useState<{ styles: boolean; fallback: boolean }>({ styles: false, fallback: false })
+	const needsFallback = SIGNATURE_STYLES.some(item => needsSignatureFallback(typed, item))
+	const fontsReady = fonts.styles && (fonts.fallback || !needsFallback)
 	// The chosen picture and an object URL showing it (revoked when replaced or on close).
 	const [picture, setPicture] = useState<{ image: PdfSignatureImage; url: string } | null>(null)
 	const image = picture?.image ?? null
@@ -129,23 +141,23 @@ function SignatureDialogBody({
 	}, [])
 
 	useEffect(() => {
-		if (tab !== "type" || fontReady) return
+		if (tab !== "type" || fontsReady) return
 
 		let live = true
 
-		loadSignatureFont().then(
+		loadSignatureFonts(SIGNATURE_STYLES, needsFallback).then(
 			() => {
-				if (live) setFontReady(true)
+				if (live) setFonts(loaded => ({ styles: true, fallback: loaded.fallback || needsFallback }))
 			},
 			(error: unknown) => {
-				log.warn("pdf", "signature font not loaded", { error })
+				log.warn("pdf", "signature fonts not loaded", { error })
 			}
 		)
 
 		return () => {
 			live = false
 		}
-	}, [tab, fontReady])
+	}, [tab, fontsReady, needsFallback])
 
 	useEffect(() => {
 		if (picture === null) return
@@ -164,7 +176,7 @@ function SignatureDialogBody({
 
 	function newSignature(): Promise<PdfVisualSignature | null> {
 		if (tab === "draw") return Promise.resolve(normalizeStrokes(strokes))
-		if (tab === "type") return renderTypedSignature(typed)
+		if (tab === "type") return renderTypedSignature(typed, style)
 
 		return Promise.resolve(image)
 	}
@@ -184,7 +196,10 @@ function SignatureDialogBody({
 				if (signature === null) return
 
 				if (saveForReuse && canSave) {
-					savedSignatures.save(role, signature).catch((error: unknown) => {
+					// A typed name keeps the style it was drawn in.
+					const saving = tab === "type" ? savedSignatures.save(role, signature, style) : savedSignatures.save(role, signature)
+
+					saving.catch((error: unknown) => {
 						log.warn("pdf", "signature not saved for reuse", { error })
 						toast.error(t("previewPdfSignatureSaveFailed"))
 					})
@@ -224,7 +239,7 @@ function SignatureDialogBody({
 	}
 
 	const ready =
-		selected !== null || (tab === "draw" ? strokes.length > 0 : tab === "type" ? typed.trim() !== "" && fontReady : image !== null)
+		selected !== null || (tab === "draw" ? strokes.length > 0 : tab === "type" ? typed.trim() !== "" && fontsReady : image !== null)
 	const empty = tab === "draw" ? strokes.length === 0 : tab === "type" ? typed === "" : image === null
 
 	return (
@@ -341,13 +356,11 @@ function SignatureDialogBody({
 								setTyped(event.target.value)
 							}}
 						/>
-						<div
-							aria-hidden
-							className="flex h-28 items-center justify-center overflow-hidden rounded-xl border border-input bg-white px-4 text-5xl"
-							style={{ fontFamily: fontReady ? `"${SIGNATURE_FONT_FAMILY}"` : undefined, color: SIGNATURE_INK }}
-						>
-							<span className="truncate">{typed}</span>
-						</div>
+						<SignatureStylePicker
+							text={typed}
+							value={style}
+							onChange={setPickedStyle}
+						/>
 					</TabsContent>
 					<TabsContent
 						value="image"

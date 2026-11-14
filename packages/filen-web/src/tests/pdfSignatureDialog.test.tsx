@@ -21,8 +21,9 @@ function emptyView(): SavedSignaturesView {
 const hooks = vi.hoisted(() => ({
 	view: emptyView(),
 	online: true,
-	save: vi.fn<(role: PdfSignatureRole, signature: PdfVisualSignature) => Promise<unknown>>(),
-	typed: vi.fn<(text: string) => Promise<PdfSignatureImage | null>>(),
+	save: vi.fn<(role: PdfSignatureRole, signature: PdfVisualSignature, style?: string) => Promise<unknown>>(),
+	typed: vi.fn<(text: string, style: string) => Promise<PdfSignatureImage | null>>(),
+	loadFonts: vi.fn<(styles: readonly string[], fallback: boolean) => Promise<void>>(),
 	picked: vi.fn<(file: File) => Promise<PdfSignatureImage>>(),
 	toastError: vi.fn()
 }))
@@ -35,8 +36,7 @@ vi.mock("@/features/pdf/fillSign/savedSignatures", () => ({
 }))
 vi.mock("@/features/pdf/fillSign/signatureRender", () => ({
 	SIGNATURE_INK: "rgb(13 26 89)",
-	SIGNATURE_FONT_FAMILY: "Filen Signature",
-	loadSignatureFont: () => Promise.resolve("Filen Signature"),
+	loadSignatureFonts: hooks.loadFonts,
 	renderTypedSignature: hooks.typed,
 	imageFileSignature: hooks.picked,
 	drawStrokes: () => undefined,
@@ -54,6 +54,7 @@ beforeEach(() => {
 	hooks.online = true
 	hooks.save.mockResolvedValue(undefined)
 	hooks.typed.mockResolvedValue(typedImage)
+	hooks.loadFonts.mockResolvedValue(undefined)
 	hooks.picked.mockResolvedValue(pickedImage)
 	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
 	HTMLElement.prototype.setPointerCapture = () => undefined
@@ -172,9 +173,77 @@ describe("SignatureDialog", () => {
 		fireEvent.click(place())
 		await settle()
 
-		expect(hooks.typed).toHaveBeenCalledWith("JD")
+		expect(hooks.typed).toHaveBeenCalledWith("JD", "dancing-script")
 		expect(onPlace).toHaveBeenCalledWith(typedImage)
 		expect(hooks.save).not.toHaveBeenCalled()
+	})
+
+	it("draws the typed name in each handwriting style, picked from a radio group, and saves the style with it", async () => {
+		const { onPlace } = open("signature", "Zoë Łukasz Ştefan")
+
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureType }))
+		await settle()
+
+		const group = screen.getByRole("radiogroup", { name: EN.previewPdfSignatureStyle })
+		const radios = screen.getAllByRole("radio")
+		const checked = () => radios.map(radio => radio.getAttribute("aria-checked"))
+
+		expect(radios.map(radio => radio.textContent)).toEqual([
+			`Zoë Łukasz Ştefan${EN.previewPdfSignatureStyleFlowing}`,
+			`Zoë Łukasz Ştefan${EN.previewPdfSignatureStyleQuick}`,
+			`Zoë Łukasz Ştefan${EN.previewPdfSignatureStyleFormal}`
+		])
+		expect(screen.getByRole("radio", { name: EN.previewPdfSignatureStyleQuick })).toBe(radios[1])
+		// The first style by default; the fonts of all three (the name needs no fallback) load for the previews.
+		expect(checked()).toEqual(["true", "false", "false"])
+		expect(hooks.loadFonts).toHaveBeenLastCalledWith(["dancing-script", "ms-madi", "pinyon-script"], false)
+
+		fireEvent.click(screen.getByRole("radio", { name: EN.previewPdfSignatureStyleFormal }))
+		expect(checked()).toEqual(["false", "false", "true"])
+		expect(group.contains(radios[2] ?? null)).toBe(true)
+
+		fireEvent.click(screen.getByRole("radio", { name: EN.previewPdfSignatureStyleQuick }))
+		expect(checked()).toEqual(["false", "true", "false"])
+
+		fireEvent.click(place())
+		await settle()
+
+		expect(hooks.typed).toHaveBeenCalledWith("Zoë Łukasz Ştefan", "ms-madi")
+		expect(onPlace).toHaveBeenCalledWith(typedImage)
+		expect(hooks.save).toHaveBeenCalledWith("signature", typedImage, "ms-madi")
+	})
+
+	it("starts on the style of the newest saved typed signature, and loads the fallback only for text that needs it", async () => {
+		hooks.view = {
+			...emptyView(),
+			signatures: [
+				{ id: "drawn", role: "signature", at: 3, data: { kind: "strokes", width: 10, height: 10, strokes: [[0, 0, 10, 10]] } },
+				{
+					id: "typed",
+					role: "signature",
+					at: 2,
+					data: { kind: "image", width: 10, height: 5, png: "AAAA", style: "pinyon-script" }
+				},
+				{ id: "older", role: "signature", at: 1, data: { kind: "image", width: 10, height: 5, png: "AAAA", style: "ms-madi" } }
+			]
+		}
+		open("signature", "Jane")
+
+		fireEvent.click(screen.getByRole("button", { name: EN.previewPdfSignatureNew }))
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureType }))
+		await settle()
+
+		expect(screen.getByRole("radio", { name: EN.previewPdfSignatureStyleFormal }).getAttribute("aria-checked")).toBe("true")
+		expect(hooks.loadFonts).toHaveBeenLastCalledWith(["dancing-script", "ms-madi", "pinyon-script"], false)
+		expect(place()).toHaveProperty("disabled", false)
+
+		// Cyrillic is in none of the styles: Gelasio Italic draws it, and Place waits for it.
+		hooks.loadFonts.mockReturnValueOnce(new Promise(() => undefined))
+		fireEvent.change(screen.getByLabelText(EN.previewPdfSignatureTypeLabel), { target: { value: "Жанна" } })
+		await settle()
+
+		expect(hooks.loadFonts).toHaveBeenLastCalledWith(["dancing-script", "ms-madi", "pinyon-script"], true)
+		expect(place()).toHaveProperty("disabled", true)
 	})
 
 	it("places a picked image, and says when a file is not one", async () => {

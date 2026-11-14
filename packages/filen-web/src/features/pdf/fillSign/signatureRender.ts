@@ -3,43 +3,66 @@ import type { PdfSignatureImage } from "@filen/office/core/pdfedit/visualSignatu
 import { PDF_SIGNATURE_MAX_PNG_BYTES } from "@filen/shared/pdfSignatures"
 import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
+import {
+	needsSignatureFallback,
+	SIGNATURE_FALLBACK_FAMILY,
+	signatureFontFamily,
+	signatureStyleFamily,
+	signatureStyleFont,
+	type SignatureStyle
+} from "@/features/pdf/fillSign/signatureStyles"
 
 // The signature dialog's drawing and encoding (plain functions, off the components): strokes on a canvas and as an
-// SVG path, a typed name rendered in the signature font, a picked image turned into a small PNG.
+// SVG path, a typed name rendered in a handwriting style, a picked image turned into a small PNG.
 
 // The ink of drawn and typed signatures (Fill & Sign's default, PDF_FILL_DEFAULT_INK).
 export const SIGNATURE_INK = "rgb(13 26 89)"
-// The typed signature's family: the office set's calligraphic italic (Gelasio Italic), registered once.
-export const SIGNATURE_FONT_FAMILY = "Filen Signature"
-
-const SIGNATURE_FONT_FILE = "gelasio/Gelasio-Italic-VF.woff2"
+// The fallback for characters the handwriting styles lack: the office set's calligraphic italic.
+const FALLBACK_FONT_FILE = "gelasio/Gelasio-Italic-VF.woff2"
 // A typed signature is drawn at this size (CSS px) before cropping: sharp at any placed size.
 const TYPED_FONT_PX = 120
+// The widest draft a typed signature is drawn on.
+const TYPED_MAX_SIDE = 4000
 // The longest side of an image signature; larger pictures are scaled down.
 const IMAGE_MAX_SIDE = 1200
 
-let fontLoad: Promise<string> | null = null
+const fontLoads = new Map<string, Promise<void>>()
 
-// Registers the signature font (fetched once, HTTP-cached); resolves with its family. A failure is not cached.
-export function loadSignatureFont(): Promise<string> {
-	const url = OFFICE_FONT_URLS[SIGNATURE_FONT_FILE]
+// Fetches a face once (HTTP-cached) and registers it for the page and its canvases. A failure is not cached.
+function loadFace(family: string, url: string | undefined, unicodeRange?: string): Promise<void> {
+	const cached = fontLoads.get(family)
 
-	if (url === undefined) return Promise.reject(new Error("signature font missing"))
+	if (cached !== undefined) return cached
+	if (url === undefined) return Promise.reject(new Error(`${family} missing`))
 
-	fontLoad ??= new FontFace(SIGNATURE_FONT_FAMILY, `url(${JSON.stringify(url)})`)
+	const load = new FontFace(family, `url(${JSON.stringify(url)}) format("woff2")`, unicodeRange === undefined ? {} : { unicodeRange })
 		.load()
 		.then(face => {
 			document.fonts.add(face)
-
-			return SIGNATURE_FONT_FAMILY
 		})
 		.catch((error: unknown) => {
-			fontLoad = null
+			fontLoads.delete(family)
 
 			throw error
 		})
 
-	return fontLoad
+	fontLoads.set(family, load)
+
+	return load
+}
+
+// Registers the faces of `styles`, and the fallback when asked (only text with a character a style lacks needs it).
+// The dialog loads every style (its previews show them all) the first time the Type tab opens.
+export async function loadSignatureFonts(styles: readonly SignatureStyle[], fallback: boolean): Promise<void> {
+	const loads = styles.map(style => {
+		const font = signatureStyleFont(style)
+
+		return loadFace(signatureStyleFamily(style), font.url, font.unicodeRange)
+	})
+
+	if (fallback) loads.push(loadFace(SIGNATURE_FALLBACK_FAMILY, OFFICE_FONT_URLS[FALLBACK_FONT_FILE]))
+
+	await Promise.all(loads)
 }
 
 // Strokes (flat x, y runs) as one SVG path, for thumbnails.
@@ -118,23 +141,43 @@ function inkBounds(
 	return maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
 }
 
-// A typed name in the signature font as a transparent PNG cropped to its ink; null for empty text.
-export async function renderTypedSignature(text: string): Promise<PdfSignatureImage | null> {
+// A typed name in a handwriting style as a transparent PNG cropped to its ink (so it shows the same in every PDF
+// viewer, no font embedded); null for empty text.
+export async function renderTypedSignature(text: string, style: SignatureStyle): Promise<PdfSignatureImage | null> {
 	const trimmed = text.trim()
 
 	if (trimmed === "") return null
 
-	const family = await loadSignatureFont()
-	const font = `${String(TYPED_FONT_PX)}px "${family}"`
+	await loadSignatureFonts([style], needsSignatureFallback(trimmed, style))
+
 	const measure = document.createElement("canvas").getContext("2d")
 
 	if (measure === null) throw new Error("no 2d context")
 
-	measure.font = font
+	// Script faces swash past their advance and line box: the draft holds the ink's measured box (at least the em),
+	// scaled down when a long name would pass the widest canvas.
+	const box = (px: number) => {
+		measure.font = `${String(px)}px ${signatureFontFamily(style)}`
 
-	const pad = Math.round(TYPED_FONT_PX * 0.3)
-	const width = Math.min(4000, Math.ceil(measure.measureText(trimmed).width) + pad * 2)
-	const height = Math.ceil(TYPED_FONT_PX * 1.6)
+		const metrics = measure.measureText(trimmed)
+		const left = Math.ceil(Math.max(0, metrics.actualBoundingBoxLeft))
+		const ascent = Math.ceil(Math.max(px, metrics.actualBoundingBoxAscent))
+		const pad = Math.round(px * 0.1)
+
+		return {
+			px,
+			pad,
+			left,
+			ascent,
+			width: left + Math.ceil(Math.max(metrics.width, metrics.actualBoundingBoxRight)) + pad * 2,
+			height: ascent + Math.ceil(Math.max(px * 0.5, metrics.actualBoundingBoxDescent)) + pad * 2
+		}
+	}
+	const natural = box(TYPED_FONT_PX)
+	const fit = Math.min(1, TYPED_MAX_SIDE / natural.width, TYPED_MAX_SIDE / natural.height)
+	const draw = fit < 1 ? box(Math.max(8, Math.floor(TYPED_FONT_PX * fit))) : natural
+	const width = Math.min(TYPED_MAX_SIDE, draw.width)
+	const height = Math.min(TYPED_MAX_SIDE, draw.height)
 	const draft = document.createElement("canvas")
 
 	draft.width = width
@@ -144,10 +187,10 @@ export async function renderTypedSignature(text: string): Promise<PdfSignatureIm
 
 	if (context === null) throw new Error("no 2d context")
 
-	context.font = font
+	context.font = measure.font
 	context.fillStyle = SIGNATURE_INK
 	context.textBaseline = "alphabetic"
-	context.fillText(trimmed, pad, Math.round(TYPED_FONT_PX * 1.15))
+	context.fillText(trimmed, draw.pad + draw.left, draw.pad + draw.ascent)
 
 	const bounds = inkBounds(context, width, height)
 

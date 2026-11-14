@@ -676,9 +676,10 @@ function assistantModelNotice(manifest: AssistantModelManifest): Collected {
 /**
  * The third-party material @filen/office brings into the app, read from the records that package keeps:
  *
- * - The document fonts the app serves at /office/fonts/ (vite/office-fonts-plugin.ts), from
- *   assets/fonts/manifest.json, each family with its own licence file and the record THIRD_PARTY_NOTICES.md
- *   keeps of it (its per-file hash list left to the manifest, which the notice already names the files from).
+ * - The document fonts and the typed-signature handwriting fonts the app serves at /office/fonts/
+ *   (vite/office-fonts-plugin.ts), from assets/fonts/manifest.json, each family with its own licence file and the
+ *   record THIRD_PARTY_NOTICES.md keeps of it (its per-file hash list left to the manifest, which the notice already
+ *   names the files from).
  * - Code derived from other projects, from THIRD_PARTY_NOTICES.md. This table names its sections, how to
  *   read a version off each section's Source line, and the licence text that applies; everything else,
  *   the notice texts included, is read from that file. AGPL-3.0 is the repository's own LICENSE.
@@ -954,6 +955,50 @@ function officeFallbackFontNotices(fonts: ReturnType<typeof officeFontRecords>):
 						`The ${name} typeface, ${source}, embedded as glyph subsets in PDF files the app exports when their text has a script, symbols or math operators the bundled typefaces lack.`,
 						`Bundled by @filen/office (${OFFICE_REPO_DIR}/assets/fonts in the filen-ts repository, ${FILEN_TS_REPOSITORY}) and served with the app as ${records.map(face => stringField(face, "file", OFFICE_FONTS_MANIFEST)).join(", ")}, fetched only when needed.`,
 						...conversions
+					].join(" "),
+					fonts.take(name, version),
+					fonts.preamble,
+					license.terms
+				]
+			},
+			"vendored"
+		)
+	})
+}
+
+/** The handwriting families a typed PDF signature is drawn in (manifest "signatures"). */
+function officeSignatureFontNotices(fonts: ReturnType<typeof officeFontRecords>): Collected[] {
+	const signatures = requireJson(OFFICE_FONTS_MANIFEST)["signatures"]
+
+	if (!Array.isArray(signatures) || signatures.length === 0) {
+		throw new Error(`${OFFICE_FONTS_MANIFEST}: "signatures" is missing`)
+	}
+
+	return signatures.map(value => {
+		const family = asRecord(value, OFFICE_FONTS_MANIFEST)
+		const name = stringField(family, "name", OFFICE_FONTS_MANIFEST)
+		const source = stringField(family, "source", OFFICE_FONTS_MANIFEST)
+		const faces = family["faces"]
+
+		if (!Array.isArray(faces) || faces.length === 0) {
+			throw new Error(`${OFFICE_FONTS_MANIFEST}: ${name} has no faces`)
+		}
+
+		const records = faces.map(face => asRecord(face, OFFICE_FONTS_MANIFEST))
+		const license = splitCopyright(readFileSync(`${OFFICE_FONTS}/${stringField(family, "licenseFile", OFFICE_FONTS_MANIFEST)}`, "utf8"))
+		const version = stringField(family, "version", OFFICE_FONTS_MANIFEST)
+
+		return vendoredNotice(
+			{
+				name,
+				version,
+				license: stringField(family, "license", OFFICE_FONTS_MANIFEST),
+				copyright: license.copyright,
+				repository: source,
+				terms: [
+					[
+						`The ${name} typeface, ${source} at commit ${stringField(family, "commit", OFFICE_FONTS_MANIFEST)}, one of the handwriting styles a typed PDF signature is drawn in (placed in the PDF as a picture, no font embedded).`,
+						`Bundled by @filen/office (${OFFICE_REPO_DIR}/assets/fonts in the filen-ts repository, ${FILEN_TS_REPOSITORY}) and served with the app as ${records.map(face => stringField(face, "file", OFFICE_FONTS_MANIFEST)).join(", ")}, the upstream WOFF2 file unchanged, fetched only when the signature dialog's Type tab is used.`
 					].join(" "),
 					fonts.take(name, version),
 					fonts.preamble,
@@ -1594,6 +1639,7 @@ const fontRecords = officeFontRecords()
 const office = [
 	...officeFontNotices(fontRecords),
 	...officeFallbackFontNotices(fontRecords),
+	...officeSignatureFontNotices(fontRecords),
 	...officeDerivedNotices(),
 	...officeHyphenationNotices()
 ]

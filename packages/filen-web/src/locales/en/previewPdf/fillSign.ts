@@ -57,6 +57,14 @@ export const previewPdfFillSign = {
 	previewPdfSignatureTypeLabel: "Your name",
 	/** Signature dialog — label of the text field on the Type tab when adding initials */
 	previewPdfInitialsTypeLabel: "Your initials",
+	/** Signature dialog — label above the handwriting styles on the Type tab, each showing the typed name drawn in it */
+	previewPdfSignatureStyle: "Style",
+	/** Signature dialog — handwriting style: a rounded, flowing script */
+	previewPdfSignatureStyleFlowing: "Flowing",
+	/** Signature dialog — handwriting style: a fast, slanted hand, like a quickly written signature */
+	previewPdfSignatureStyleQuick: "Quick",
+	/** Signature dialog — handwriting style: an elegant calligraphic script */
+	previewPdfSignatureStyleFormal: "Formal",
 	/** Signature dialog — button on the Image tab opening the device's file picker */
 	previewPdfSignatureChooseImage: "Choose image…",
 	/** Signature dialog — the chosen file could not be read as an image */

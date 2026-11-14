@@ -119,6 +119,23 @@ describe("saved PDF signatures store", () => {
 		expect(savedVisualSignature(view.initials[0] ?? neverSaved())).toBe(image)
 	})
 
+	it("remembers the handwriting style of a typed name with it", async () => {
+		const drive = fakeDrive()
+		const store = new SavedSignaturesStore(drive.sdk, () => 1000, counter())
+
+		await store.load()
+		await store.save("signature", picture, "pinyon-script")
+		await store.save("initials", picture)
+
+		const stored = parsePdfSignatures(drive.uploads.at(-1) ?? "")
+		const typed = stored.items.find(item => item.role === "signature")
+
+		expect(typed?.data).toMatchObject({ kind: "image", style: "pinyon-script" })
+		expect(stored.items.find(item => item.role === "initials")?.data).not.toHaveProperty("style")
+		// Placed as the image it was saved as.
+		expect(savedVisualSignature(typed ?? neverSaved())).toEqual(picture)
+	})
+
 	it("deletes, and merges with another device's additions instead of dropping them", async () => {
 		const drive = fakeDrive()
 		const store = new SavedSignaturesStore(drive.sdk, () => 2000, counter())

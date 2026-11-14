@@ -10,13 +10,16 @@ import { COI_HEADERS } from "./sdk-artifacts-plugin"
 // every other asset there); `virtual:office-fonts` maps each manifest path to that URL for the viewer, whose
 // worker fetches the bytes and registers them with `new FontFace`. The licence files keep their manifest
 // paths under OFFICE_FONTS_BASE (unhashed, so revalidated). The dev server serves everything from
-// OFFICE_FONTS_BASE.
+// OFFICE_FONTS_BASE. The handwriting faces of the PDF signature dialog are served the same way and listed apart in
+// `virtual:office-signature-fonts`, each with the unicode-range of its cmap.
 export const OFFICE_FONTS_BASE = "/office/fonts/"
 
 const VIRTUAL_ID = "virtual:office-fonts"
 const RESOLVED_ID = `\0${VIRTUAL_ID}`
 const PDF_VIRTUAL_ID = "virtual:office-pdf-fonts"
 const PDF_RESOLVED_ID = `\0${PDF_VIRTUAL_ID}`
+const SIGNATURE_VIRTUAL_ID = "virtual:office-signature-fonts"
+const SIGNATURE_RESOLVED_ID = `\0${SIGNATURE_VIRTUAL_ID}`
 
 // A face's URL in a build: its manifest path with the first 8 hex digits of its SHA-256 before the extension.
 function hashedPath(face: Face): string {
@@ -50,15 +53,44 @@ function faceOf(value: unknown, owner: string): Face {
 	return { file, bytes, sha256 }
 }
 
-// Every face (web fonts, and the PDF faces apart) and each family's licence file, as paths under the fonts
-// directory.
-function readManifest(): { faces: Face[]; pdfFaces: Face[]; licences: string[] } {
+interface SignatureFace extends Face {
+	id: string
+	unicodeRange: string
+}
+
+// The signature families, one face each, in the manifest's order (the dialog's first style is its default).
+function signatureFacesOf(value: unknown, licences: Set<string>): SignatureFace[] {
+	if (!Array.isArray(value) || value.length === 0) {
+		throw new Error(`${MANIFEST} lists no signature families`)
+	}
+
+	return value.map(record).map(family => {
+		const id = family["id"]
+		const licence = family["licenseFile"]
+		const familyFaces = family["faces"]
+		const first: unknown = Array.isArray(familyFaces) && familyFaces.length === 1 ? familyFaces[0] : undefined
+		const unicodeRange = record(first)["unicodeRange"]
+
+		if (typeof id !== "string" || typeof licence !== "string" || typeof unicodeRange !== "string") {
+			throw new Error(`${MANIFEST}: signature family ${String(id)} is malformed`)
+		}
+
+		licences.add(licence)
+
+		return { ...faceOf(first, id), id, unicodeRange }
+	})
+}
+
+// Every face (web fonts, and the PDF and signature faces apart) and each family's licence file, as paths under the
+// fonts directory.
+function readManifest(): { faces: Face[]; pdfFaces: Face[]; signatureFaces: SignatureFace[]; licences: string[] } {
 	const manifest = record(JSON.parse(readFileSync(MANIFEST, "utf8")))
 	const families = manifest["families"]
 	const fallbacks = manifest["fallbacks"]
 	const faces: Face[] = []
 	const pdfFaces: Face[] = []
 	const licences = new Set<string>()
+	const signatureFaces = signatureFacesOf(manifest["signatures"], licences)
 
 	if (!Array.isArray(families) || families.length === 0) {
 		throw new Error(`${MANIFEST} lists no families`)
@@ -95,13 +127,14 @@ function readManifest(): { faces: Face[]; pdfFaces: Face[]; licences: string[] }
 		}
 	}
 
-	return { faces, pdfFaces, licences: [...licences] }
+	return { faces, pdfFaces, signatureFaces, licences: [...licences] }
 }
 
 export function officeFonts(): Plugin {
-	const { faces, pdfFaces, licences } = readManifest()
+	const { faces, pdfFaces, signatureFaces, licences } = readManifest()
 	// Exactly the manifest's files, so the dev middleware needs no path containment of its own.
-	const served = new Set([...faces.map(face => face.file), ...pdfFaces.map(face => face.file), ...licences])
+	const served = new Set([...[...faces, ...pdfFaces, ...signatureFaces].map(face => face.file), ...licences])
+	const urlOf = (face: Face) => (build ? `/${hashedPath(face)}` : OFFICE_FONTS_BASE + face.file)
 	const outDir = OFFICE_FONTS_BASE.slice(1)
 	let build = false
 
@@ -111,15 +144,27 @@ export function officeFonts(): Plugin {
 			build = config.command === "build"
 		},
 		resolveId(id) {
-			return id === VIRTUAL_ID ? RESOLVED_ID : id === PDF_VIRTUAL_ID ? PDF_RESOLVED_ID : null
+			return id === VIRTUAL_ID
+				? RESOLVED_ID
+				: id === PDF_VIRTUAL_ID
+					? PDF_RESOLVED_ID
+					: id === SIGNATURE_VIRTUAL_ID
+						? SIGNATURE_RESOLVED_ID
+						: null
 		},
 		load(id) {
+			if (id === SIGNATURE_RESOLVED_ID) {
+				const list = signatureFaces.map(face => ({ id: face.id, url: urlOf(face), unicodeRange: face.unicodeRange }))
+
+				return `export const OFFICE_SIGNATURE_FONTS = Object.freeze(${JSON.stringify(list)})\n`
+			}
+
 			if (id !== RESOLVED_ID && id !== PDF_RESOLVED_ID) {
 				return null
 			}
 
 			const list = id === RESOLVED_ID ? faces : pdfFaces
-			const urls = Object.fromEntries(list.map(face => [face.file, build ? `/${hashedPath(face)}` : OFFICE_FONTS_BASE + face.file]))
+			const urls = Object.fromEntries(list.map(face => [face.file, urlOf(face)]))
 
 			return `export const ${id === RESOLVED_ID ? "OFFICE_FONT_URLS" : "OFFICE_PDF_FONT_URLS"} = Object.freeze(${JSON.stringify(urls)})\n`
 		},
@@ -153,7 +198,7 @@ export function officeFonts(): Plugin {
 			})
 		},
 		generateBundle() {
-			for (const face of [...faces, ...pdfFaces]) {
+			for (const face of [...faces, ...pdfFaces, ...signatureFaces]) {
 				const source = readFileSync(join(FONTS_DIR, face.file))
 				const sha256 = createHash("sha256").update(source).digest("hex")
 

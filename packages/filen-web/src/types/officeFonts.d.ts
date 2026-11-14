@@ -7,3 +7,9 @@ declare module "virtual:office-fonts" {
 declare module "virtual:office-pdf-fonts" {
 	export const OFFICE_PDF_FONT_URLS: Readonly<Record<string, string>>
 }
+
+// vite/office-fonts-plugin.ts: the PDF signature dialog's handwriting faces, in the manifest's order, each with the
+// unicode-range of its cmap.
+declare module "virtual:office-signature-fonts" {
+	export const OFFICE_SIGNATURE_FONTS: readonly { readonly id: string; readonly url: string; readonly unicodeRange: string }[]
+}

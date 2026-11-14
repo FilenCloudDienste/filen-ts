@@ -28,7 +28,8 @@ import { base64ToBytes, bytesToBase64 } from "@/features/videos/lib/frames.logic
 // The user's saved visual signatures and initials for Fill & Sign, synced end-to-end encrypted as
 // `.filen/office/pdf-signatures.v1.json` (lib/syncedDotFilenFile.ts, format in @filen/shared/pdfSignatures): read
 // when the signature dialog or Settings › Office first needs them; a save or delete shows at once and is merged into
-// the file as it stands before the upload. Strokes are stored as compact integer vectors, images as small PNGs.
+// the file as it stands before the upload. Strokes are stored as compact integer vectors, images as small PNGs (a typed
+// name as its image, with the handwriting style it was drawn in).
 
 const CODEC: SyncedFileCodec<PdfSignaturesDoc> = {
 	fileName: PDF_SIGNATURES_FILE_NAME,
@@ -55,11 +56,15 @@ export interface SavedSignaturesView {
 	readonly initials: readonly SavedPdfSignature[]
 }
 
-// The stored form of a signature the dialog made.
-export function storedSignatureData(signature: PdfVisualSignature): SavedPdfSignatureData {
-	return signature.kind === "strokes"
-		? { kind: "strokes", width: signature.width, height: signature.height, strokes: signature.strokes }
-		: { kind: "image", width: signature.width, height: signature.height, png: bytesToBase64(signature.png) }
+// The stored form of a signature the dialog made; `style` is the handwriting style of a typed name.
+export function storedSignatureData(signature: PdfVisualSignature, style?: string): SavedPdfSignatureData {
+	if (signature.kind === "strokes") {
+		return { kind: "strokes", width: signature.width, height: signature.height, strokes: signature.strokes }
+	}
+
+	const data = { kind: "image", width: signature.width, height: signature.height, png: bytesToBase64(signature.png) } as const
+
+	return style === undefined ? data : { ...data, style }
 }
 
 // Saved entries are immutable: each decodes once.
@@ -127,8 +132,8 @@ export class SavedSignaturesStore {
 
 	// Shown at once; resolves with the entry once stored (rejects when the upload failed or the file is read-only:
 	// the entry is then not kept for later, the signature is still placed).
-	async save(role: PdfSignatureRole, signature: PdfVisualSignature): Promise<SavedPdfSignature> {
-		const item: SavedPdfSignature = { id: this.newId(), role, at: this.now(), data: storedSignatureData(signature) }
+	async save(role: PdfSignatureRole, signature: PdfVisualSignature, style?: string): Promise<SavedPdfSignature> {
+		const item: SavedPdfSignature = { id: this.newId(), role, at: this.now(), data: storedSignatureData(signature, style) }
 
 		if (!isStorablePdfSignature(item.data)) throw new Error("signature too large to save")
 
