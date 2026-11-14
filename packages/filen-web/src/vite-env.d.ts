@@ -12,4 +12,6 @@ interface ImportMetaEnv {
 	// The directory the assistant's model files are served from; defaults to the Filen CDN
 	// (features/assistant/runtime/manifest.ts). vite.config.ts adds its origin to connect-src.
 	readonly VITE_ASSISTANT_MODEL_BASE_URL?: string
+	// "1" builds the throwaway smooth transitions hardware gate page (routes/_app/dev); absent otherwise.
+	readonly VITE_SMOOTH_TRANSITIONS_SPIKE?: string
 }
