@@ -2373,6 +2373,16 @@ export function SheetGrid({
 		renderer.setEditor(element)
 	}
 
+	// The handle's calls into this render's closures (they read the latest props: onShortcut, bindings, onEditorKey).
+	// Through a ref, so the handle itself changes only with the grid and the renderer: a handle made again on every
+	// render would leave the ref null while the overlays' layout effects run (children's run before this one's), and an
+	// overlay that places itself from the handle on mount (the touch menu, a note's card) would never show.
+	const latest = useRef({ editByTouch, handleEditorKey })
+
+	useLayoutEffect(() => {
+		latest.current = { editByTouch, handleEditorKey }
+	})
+
 	useImperativeHandle(
 		ref,
 		() => ({
@@ -2396,12 +2406,14 @@ export function SheetGrid({
 				return new DOMRect(origin.left + box.x, origin.top + box.y, box.width, box.height)
 			},
 			onFrame: listener => renderer.onFrame(listener),
-			editActive: () => editByTouch(),
+			editActive: () => latest.current.editByTouch(),
 			rangeRect: range => renderer.rangeRect(range),
-			editorKey: event => handleEditorKey(event),
+			editorKey: event => {
+				latest.current.handleEditorKey(event)
+			},
 			renderer
 		}),
-		[grid, renderer, onEditorKey, onShortcut, bindings, numberFormats, onMac]
+		[grid, renderer]
 	)
 
 	return (

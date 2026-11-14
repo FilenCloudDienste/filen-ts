@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createRef, useEffect } from "react"
+import { act, createRef, useEffect, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../core/sheet/protocol"
@@ -517,6 +517,57 @@ describe("SheetGrid", () => {
 		await act(async () => root.render(<App theme="light" />))
 
 		expect(background()).toBe(BACKGROUNDS.light)
+	})
+
+	it("keeps one handle across renders with new callbacks, so an overlay mounting in a later render can reach it", async () => {
+		const host = inThreadSheetHost()
+		const opened = await host.open(buildFixture(BASIC), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
+
+		if (opened.kind !== "opened") throw new Error(opened.kind)
+
+		const model = new SheetGridModel({ session: opened.session, info: opened.info })
+		const container = document.createElement("div")
+		const ref = createRef<SheetGridHandle>()
+		const root = createRoot(container)
+		const seen: (SheetGridHandle | null)[] = []
+
+		// What the touch menu and a note's card do: read the handle in a layout effect on mount, to place themselves.
+		function Overlay() {
+			useLayoutEffect(() => {
+				seen.push(ref.current)
+			}, [])
+
+			return null
+		}
+
+		// An app passing a new shortcut callback on every render, as a component without memoization does.
+		function App({ overlay }: { overlay: boolean }) {
+			return (
+				<SheetGrid
+					ref={ref}
+					grid={model}
+					label="Sheet"
+					editorLabel="Cell entry"
+					resizeLabel={(axis, px) => `${axis} ${String(px)}`}
+					onShortcut={() => overlay}
+				>
+					{overlay ? <Overlay /> : null}
+				</SheetGrid>
+			)
+		}
+
+		roots.push(root)
+		document.body.appendChild(container)
+		await act(async () => root.render(<App overlay={false} />))
+		await settle()
+
+		const first = ref.current
+
+		await act(async () => root.render(<App overlay />))
+
+		expect(first).not.toBeNull()
+		expect(ref.current).toBe(first)
+		expect(seen).toEqual([first])
 	})
 
 	it("keeps each sheet's scroll position and selection when switching back to it", async () => {
