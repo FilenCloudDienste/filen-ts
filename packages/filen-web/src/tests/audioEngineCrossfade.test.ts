@@ -88,7 +88,7 @@ function makeGain(): FakeGain {
 			scheduleFade: (curve, start, duration) => {
 				fake.events.push({ kind: "curve", curve, start, duration })
 			},
-			whenAudible: () => Promise.resolve(),
+			whenAudible: () => Promise.resolve(true),
 			release: () => {
 				fake.released = true
 			}

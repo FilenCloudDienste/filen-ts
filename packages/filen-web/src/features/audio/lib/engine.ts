@@ -68,11 +68,12 @@ const AUDIBLE_TIMEOUT_MS = 600
 // How long a warm element takes from play() to being heard, before one was measured, and how much one measurement
 // moves it.
 const INITIAL_START_LATENCY_MS = 50
-// WebKit hands a routed element's sound to the graph about half a second after it starts.
+// WebKit hands a routed element's sound to the graph about half a second after it starts, sooner for an element
+// already sought into its audio: never assumed shorter than this there.
 const WEBKIT_START_LATENCY_MS = 450
 const START_LATENCY_WEIGHT = 0.3
 const START_LATENCY_MARGIN = 1.5
-const MAX_START_LATENCY_MS = 300
+const MAX_START_LATENCY_MS = 1_000
 
 // Turning loudness matching on or off moves the trims this smoothly.
 const TRIM_RAMP_SECONDS = 0.2
@@ -302,6 +303,7 @@ export class AudioEngine {
 	private watchdog: WatchdogState = INITIAL_WATCHDOG_STATE
 	// How long a warm element takes from play() to being heard here, smoothed: a gapless switch is asked for that early.
 	private startLatencyMs = INITIAL_START_LATENCY_MS
+	private minStartLatencyMs = 0
 
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
@@ -322,6 +324,7 @@ export class AudioEngine {
 			const output = deps.smoothTransitions.output
 
 			this.startLatencyMs = deps.smoothTransitions.webkit ? WEBKIT_START_LATENCY_MS : INITIAL_START_LATENCY_MS
+			this.minStartLatencyMs = deps.smoothTransitions.webkit ? WEBKIT_START_LATENCY_MS : 0
 
 			output.setMaster(masterLevel(useMediaVolumeStore.getState()))
 			output.onStateChange(() => {
@@ -951,8 +954,13 @@ export class AudioEngine {
 			const plan = starting.plan
 
 			this.watchOverlapStalls(fading, starting.incoming, starting.source)
-			void inRouted.gain.whenAudible(AUDIBLE_TIMEOUT_MS).then(() => {
-				this.crossOnceAudible(fading, starting.incoming, outRouted, inRouted, plan, askedAt, starting.advance === null)
+			void inRouted.gain.whenAudible(AUDIBLE_TIMEOUT_MS).then(heard => {
+				// Only a start that was heard measures the latency: a track opening with silence would inflate it.
+				if (heard) {
+					this.measureStartLatency(askedAt)
+				}
+
+				this.crossOnceAudible(fading, starting.incoming, outRouted, inRouted, plan, starting.advance === null)
 			})
 		}
 
@@ -980,7 +988,6 @@ export class AudioEngine {
 		outRouted: Routed,
 		inRouted: Routed,
 		plan: TransitionPlan,
-		askedAt: number,
 		manual: boolean
 	): void {
 		const smooth = this.deps.smoothTransitions
@@ -995,11 +1002,6 @@ export class AudioEngine {
 
 			return
 		}
-
-		this.startLatencyMs = Math.min(
-			MAX_START_LATENCY_MS,
-			this.startLatencyMs + (this.now() - askedAt - this.startLatencyMs) * START_LATENCY_WEIGHT
-		)
 
 		// A skip the user asked for fades over its full length from here; a natural transition must be over where the
 		// outgoing's audio ends.
@@ -1020,6 +1022,15 @@ export class AudioEngine {
 		inRouted.gain.scheduleFade(curves.in, t0, inFadeMs / 1000)
 		outRouted.gain.scheduleFade(curves.out, t0, outRemainingMs / 1000)
 		this.rescheduleFadeEnd(fading, outRemainingMs)
+	}
+
+	private measureStartLatency(askedAt: number): void {
+		const measured = this.now() - askedAt
+
+		this.startLatencyMs = Math.min(
+			MAX_START_LATENCY_MS,
+			Math.max(this.minStartLatencyMs, this.startLatencyMs + (measured - this.startLatencyMs) * START_LATENCY_WEIGHT)
+		)
 	}
 
 	private rescheduleFadeEnd(fading: Fading, durationMs: number): void {

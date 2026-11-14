@@ -52,8 +52,8 @@ export interface ElementGain {
 	holdFade: (value: number) => void
 	// Cancels any fade automation and plays `curve` from `startSeconds` over `durationSeconds`.
 	scheduleFade: (curve: Float32Array, startSeconds: number, durationSeconds: number) => void
-	// Resolves once the element's sound reaches the graph (or after `timeoutMs`, or on release).
-	whenAudible: (timeoutMs: number) => Promise<void>
+	// Resolves true once the element's sound reaches the graph; false after `timeoutMs` of silence, or on release.
+	whenAudible: (timeoutMs: number) => Promise<boolean>
 	release: () => void
 }
 
@@ -239,7 +239,7 @@ class WebAudioOutput implements AudioOutput {
 				fade.gain.setValueCurveAtTime(curve, start, Math.max(0.001, durationSeconds))
 			},
 			whenAudible: timeoutMs =>
-				new Promise<void>(resolve => {
+				new Promise<boolean>(resolve => {
 					const probe = context.createAnalyser()
 					const samples = new Float32Array(PROBE_SIZE)
 					const deadline = Date.now() + timeoutMs
@@ -250,9 +250,11 @@ class WebAudioOutput implements AudioOutput {
 					const check = (): void => {
 						probe.getFloatTimeDomainData(samples)
 
-						if (released || Date.now() >= deadline || samples.some(value => value !== 0)) {
+						const heard = samples.some(value => value !== 0)
+
+						if (released || heard || Date.now() >= deadline) {
 							source.disconnect(probe)
-							resolve()
+							resolve(heard)
 
 							return
 						}
