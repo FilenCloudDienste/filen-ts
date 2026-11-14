@@ -1,6 +1,6 @@
 import { ADTS, CustomSource, FLAC, Input, MP3, type AudioSample, type InputFormat } from "mediabunny"
 import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
-import { emptyRemuxStats, isSourceReadError, type EdgeAnalysis } from "@/lib/media/remuxTypes"
+import { emptyRemuxStats, isSourceReadError, type EdgeAnalysis, type WindowPermits } from "@/lib/media/remuxTypes"
 import { log } from "@/lib/log"
 import { openAudioInput, streamStart, type AudioInput } from "@/workers/remux/audioInput"
 import { sampleReader, type SampleReader } from "@/workers/remux/audioTranscode"
@@ -33,7 +33,8 @@ import {
 
 // Reads an audio file's head and tail windows and measures its smart edges (edges.logic). One decoder is alive at a
 // time: the head reader is closed before the tail one opens. An MP3, ADTS or FLAC tail is reached by byte offset
-// (tailWindow.logic), everything else through its container's seek.
+// (tailWindow.logic), everything else through its container's seek. Each window's reads run in a background
+// range-read permit of its own, so the page's other background reads go between them.
 
 const FAILED: EdgeAnalysis = {
 	status: "failed",
@@ -42,6 +43,47 @@ const FAILED: EdgeAnalysis = {
 	outEndFromEndMs: null,
 	fadeOutFromEndMs: null,
 	boundary: null
+}
+
+// No permits to wait for: a caller outside the page's budget.
+export const FREE_PERMITS: WindowPermits = { acquire: () => Promise.resolve(), release: () => undefined }
+
+// The permit of the window being read: taken before its first read, given back once it is done.
+export class WindowPermit {
+	private readonly permits: WindowPermits
+	private held = false
+
+	public constructor(permits: WindowPermits = FREE_PERMITS) {
+		this.permits = permits
+	}
+
+	public async take(): Promise<void> {
+		if (this.held) {
+			return
+		}
+
+		await this.permits.acquire()
+		this.held = true
+	}
+
+	public give(): void {
+		if (!this.held) {
+			return
+		}
+
+		this.held = false
+		void Promise.resolve(this.permits.release()).catch(() => undefined)
+	}
+
+	public async window<T>(read: () => Promise<T>): Promise<T> {
+		await this.take()
+
+		try {
+			return await read()
+		} finally {
+			this.give()
+		}
+	}
 }
 
 // Metadata blocks walked to find a FLAC stream's frames at most.
@@ -230,12 +272,19 @@ async function tailEnvelope(
 }
 
 // The analysis of an opened file; the caller closes `input`. Rejects only for a read that failed or was
-// aborted; whatever else goes wrong in decoding is a `failed` answer.
-export async function analyzeInput(input: AudioInput, windows: EdgeWindows = EDGE_WINDOWS): Promise<EdgeAnalysis> {
+// aborted; whatever else goes wrong in decoding is a `failed` answer. The head window (with the file's layout)
+// and the tail window each read in a permit of their own; `permit` may already hold the first.
+export async function analyzeInput(
+	input: AudioInput,
+	windows: EdgeWindows = EDGE_WINDOWS,
+	permit: WindowPermit = new WindowPermit()
+): Promise<EdgeAnalysis> {
 	const { duration } = input.info
 	const envelopes = new EnvelopeReader()
 
 	try {
+		await permit.take()
+
 		const layout = await streamLayout(input)
 		const bytes = edgeWindowBytes({
 			size: input.cache.size,
@@ -251,7 +300,10 @@ export async function analyzeInput(input: AudioInput, windows: EdgeWindows = EDG
 		// Past the budget: the boundary seconds alone, which an album's track boundary still needs.
 		if (bytes > windows.maxWindowBytes) {
 			const head = await headOf(windows.boundarySeconds)
-			const tail = await tailEnvelope(input, layout, windows.boundarySeconds, envelopes)
+
+			permit.give()
+
+			const tail = await permit.window(() => tailEnvelope(input, layout, windows.boundarySeconds, envelopes))
 
 			return {
 				...FAILED,
@@ -272,7 +324,8 @@ export async function analyzeInput(input: AudioInput, windows: EdgeWindows = EDG
 			tail = lastWindows(whole, windowsFor(windows.tailSeconds))
 		} else {
 			head = await headOf(windows.headSeconds)
-			tail = await tailEnvelope(input, layout, windows.tailSeconds, envelopes)
+			permit.give()
+			tail = await permit.window(() => tailEnvelope(input, layout, windows.tailSeconds, envelopes))
 		}
 
 		return {
@@ -283,6 +336,8 @@ export async function analyzeInput(input: AudioInput, windows: EdgeWindows = EDG
 		}
 	} catch (error) {
 		return undecodable(error)
+	} finally {
+		permit.give()
 	}
 }
 
@@ -297,19 +352,27 @@ function undecodable(error: unknown): EdgeAnalysis {
 	return FAILED
 }
 
-// Opens the file a range port serves and analyses it.
-export async function analyzeEdges(port: MessagePort, size: number): Promise<EdgeAnalysis> {
-	let input: AudioInput
+// Opens the file a range port serves and analyses it, the open in the head window's permit.
+export async function analyzeEdges(port: MessagePort, size: number, permits: WindowPermits = FREE_PERMITS): Promise<EdgeAnalysis> {
+	const permit = new WindowPermit(permits)
 
 	try {
-		input = await openAudioInput(port, size, "analysis")
-	} catch (error) {
-		return undecodable(error)
-	}
+		await permit.take()
 
-	try {
-		return await analyzeInput(input)
+		let input: AudioInput
+
+		try {
+			input = await openAudioInput(port, size, "analysis")
+		} catch (error) {
+			return undecodable(error)
+		}
+
+		try {
+			return await analyzeInput(input, EDGE_WINDOWS, permit)
+		} finally {
+			await input.close()
+		}
 	} finally {
-		await input.close()
+		permit.give()
 	}
 }

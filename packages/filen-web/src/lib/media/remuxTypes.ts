@@ -171,6 +171,13 @@ export function emptyRemuxStats(): RemuxStats {
 // SourceReadError instead.
 export type EdgeAnalysis = TrackEdges
 
+// The page's background range-read permits as an analysis takes them: one per window it reads, given back
+// between windows so other background reads go in between. Over Comlink both calls are asynchronous.
+export interface WindowPermits {
+	acquire(): Promise<void>
+	release(): void | Promise<void>
+}
+
 // An audio file decoded into a WAV stream (the worker's openPcm): what the service worker serves it as.
 export interface PcmStreamInfo {
 	// The worker's handle on the stream (closePcm).

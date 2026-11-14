@@ -361,6 +361,65 @@ describe("analyzeEdges", () => {
 		expectShape(await analyzeEdges(source.port, source.size), 80)
 	})
 
+	it("reads each window in a permit of its own, given back between the windows", async () => {
+		const bytes = mp3File(LONG)
+		const { port1, port2 } = new MessageChannel()
+		const events: string[] = []
+		let held = 0
+		let readsOutsidePermit = 0
+
+		exposeRangePort(
+			port1,
+			(start, end) => {
+				if (held !== 1) {
+					readsOutsidePermit++
+				}
+
+				return Promise.resolve(bytes.slice(start, end))
+			},
+			new AbortController()
+		)
+
+		const edges = await analyzeEdges(port2, bytes.length, {
+			acquire: () => {
+				held++
+				events.push("acquire")
+
+				return Promise.resolve()
+			},
+			release: () => {
+				held--
+				events.push("release")
+			}
+		})
+
+		expectShape(edges, 80, LONG)
+		expect(events).toEqual(["acquire", "release", "acquire", "release"])
+		expect(held).toBe(0)
+		expect(readsOutsidePermit).toBe(0)
+	})
+
+	it("gives its permit back when the bytes do not arrive", async () => {
+		const source = serve(mp3File(), true)
+		let held = 0
+		const outcome = await analyzeEdges(source.port, source.size, {
+			acquire: () => {
+				held++
+
+				return Promise.resolve()
+			},
+			release: () => {
+				held--
+			}
+		}).then(
+			() => null,
+			(error: unknown) => error
+		)
+
+		expect(isSourceReadError(outcome)).toBe(true)
+		expect(held).toBe(0)
+	})
+
 	it("answers failed for a file nothing in which decodes", async () => {
 		const garbage = new Uint8Array(200_000).fill(0x42)
 		const source = serve(garbage)

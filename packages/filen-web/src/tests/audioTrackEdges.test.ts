@@ -356,4 +356,91 @@ describe("TrackEdgesService", () => {
 		expect(await service.get(track("a"), "direct", live(), { cachedOnly: true })).toBeNull()
 		expect(deps.deleteRecord).toHaveBeenCalledWith("a")
 	})
+
+	it("takes a permit per window, letting a cover read go between the windows", async () => {
+		const reads = new RangeReadBudget(1, 1, 0)
+		const order: string[] = []
+		const coverQueued = Promise.withResolvers<undefined>()
+		let cover: Promise<void> = Promise.resolve()
+		const { service } = makeService({
+			reads,
+			analyze: async (_track, _signal, permits) => {
+				await permits.acquire()
+				order.push("head")
+				// A cover asks for the only permit while the head window holds it.
+				cover = reads.run(
+					() => rowRank(500, { startIndex: 0, endIndex: 10 }),
+					() => {
+						order.push("cover")
+
+						return Promise.resolve()
+					}
+				)
+				coverQueued.resolve(undefined)
+				await permits.release()
+				await permits.acquire()
+				order.push("tail")
+				await permits.release()
+
+				return OK
+			}
+		})
+
+		expect(await service.get(track("a"), "direct", live())).toEqual(OK)
+		await coverQueued.promise
+		await cover
+
+		expect(order).toEqual(["head", "cover", "tail"])
+
+		// Every permit is back.
+		await reads.run(
+			() => 0,
+			() => Promise.resolve()
+		)
+	})
+
+	it("asks the worker only once the first window's permit is held", async () => {
+		const reads = new RangeReadBudget(1, 1, 0)
+		const { service, deps } = makeService({ reads })
+
+		await reads.acquire(() => 0)
+
+		const edges = service.get(track("a"), "direct", live())
+
+		await flush()
+
+		expect(deps.analyze).not.toHaveBeenCalled()
+
+		reads.release()
+
+		expect(await edges).toEqual(OK)
+		expect(deps.analyze).toHaveBeenCalledOnce()
+	})
+
+	it("gives back every permit an analysis still holds when it ends, and one granted after", async () => {
+		const reads = new RangeReadBudget(2, 2, 0)
+		const late: Promise<unknown>[] = []
+		const { service } = makeService({
+			reads,
+			analyze: async (_track, _signal, permits) => {
+				await permits.acquire()
+				// A worker that died mid-window: its permits never come back from it.
+				await permits.acquire()
+				late.push(permits.acquire().catch((error: unknown) => error))
+
+				return Promise.reject(new SourceReadError(new Error("worker gone")))
+			}
+		})
+
+		expect(await service.get(track("a"), "direct", live())).toBeNull()
+
+		const [outcome] = await Promise.all(late)
+
+		expect(outcome).toBeInstanceOf(DOMException)
+
+		// Both permits are free again.
+		await Promise.all([reads.acquire(() => 0), reads.acquire(() => 0)])
+		reads.release()
+		reads.release()
+	})
 })

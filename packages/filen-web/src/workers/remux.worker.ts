@@ -13,7 +13,8 @@ import {
 	type RemuxSeekParams,
 	type RemuxSeekResult,
 	type RemuxStats,
-	type TrackKind
+	type TrackKind,
+	type WindowPermits
 } from "@/lib/media/remuxTypes"
 import { RemuxEngine } from "@/workers/remux/engine"
 import { openAudioInput } from "@/workers/remux/audioInput"
@@ -141,9 +142,16 @@ const api = {
 	},
 	// The smart edges of the audio file `params.port` serves, from its head and tail windows (workers/remux/edges).
 	// Closes the port when done. Rejects with SourceReadError when the bytes did not arrive; a file nothing in
-	// which decodes is a `failed` answer.
-	analyzeEdges(params: { port: MessagePort; size: number }): Promise<EdgeAnalysis> {
-		return analyzeEdges(params.port, params.size)
+	// which decodes is a `failed` answer. Each window reads in one of the page's background permits, `permits`.
+	async analyzeEdges(
+		params: { port: MessagePort; size: number },
+		permits: WindowPermits & Partial<Comlink.ProxyMethods>
+	): Promise<EdgeAnalysis> {
+		try {
+			return await analyzeEdges(params.port, params.size, permits)
+		} finally {
+			permits[Comlink.releaseProxy]?.()
+		}
 	},
 	// Ends a stream openPcm opened, whether or not its reader ever closed the port (a registration the service
 	// worker refused leaves nobody reading it).

@@ -5,7 +5,7 @@ import { kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { log } from "@/lib/log"
 import { rangeReads, type RangeReadBudget } from "@/lib/media/rangeReads"
 import { holdRemuxWorker } from "@/lib/media/remuxClient"
-import type { EdgeAnalysis } from "@/lib/media/remuxTypes"
+import type { EdgeAnalysis, WindowPermits } from "@/lib/media/remuxTypes"
 import { analysisRemuxSource } from "@/lib/media/playback/sources"
 import type { GetTrackEdges, SourceRoute, TrackEdges, TrackEdgesRequestOptions } from "@/features/audio/lib/smoothTransitions.types"
 import {
@@ -20,7 +20,7 @@ import type { QueueTrack } from "@/features/audio/store/audioQueue"
 
 // A track's smart edges, analysed once per file, ever: first from memory (the current and next tracks, a few more),
 // then from its kv row, else (for the incoming track only) measured in the remux worker over the file's head and
-// tail windows, behind every other background read. Only the file as it is (a direct route) is analysed: a
+// tail windows, each read behind every other background read. Only the file as it is (a direct route) is analysed: a
 // transcode would run a second decoder beside playback's, and a MediaSource session is not mixed.
 
 // Tracks kept in memory: the current one, the next, and the few before them a "previous" returns to.
@@ -30,9 +30,10 @@ export interface TrackEdgesDeps {
 	readRecord: (uuid: string) => Promise<TrackEdgesRecord | null>
 	writeRecord: (uuid: string, record: TrackEdgesRecord) => void
 	deleteRecord: (uuid: string) => Promise<void>
-	// The worker's answer; rejects when the bytes did not arrive or the signal aborted.
-	analyze: (track: QueueTrack, signal: AbortSignal) => Promise<EdgeAnalysis>
-	reads: Pick<RangeReadBudget, "run">
+	// The worker's answer; rejects when the bytes did not arrive or the signal aborted. Called once the first
+	// window's permit is held; each window takes one from `permits`.
+	analyze: (track: QueueTrack, signal: AbortSignal, permits: WindowPermits) => Promise<EdgeAnalysis>
+	reads: Pick<RangeReadBudget, "acquire" | "release">
 	now: () => number
 }
 
@@ -50,6 +51,61 @@ function analysisRank(): number {
 // A call rather than a property read: it changes across awaits.
 function isAborted(signal: AbortSignal): boolean {
 	return signal.aborted
+}
+
+// One analysis's range-read permits, a window at a time. The first is taken before the worker is asked (so it is
+// not woken to wait behind covers) and goes to the first window; every one still held is given back when the
+// analysis ends, however it ends, and one granted after that is given back at once.
+class AnalysisPermits implements WindowPermits {
+	private readonly reads: TrackEdgesDeps["reads"]
+	private held = 0
+	private primed = false
+	private closed = false
+
+	public constructor(reads: TrackEdgesDeps["reads"]) {
+		this.reads = reads
+	}
+
+	public async prime(): Promise<void> {
+		await this.acquire()
+		this.primed = true
+	}
+
+	public async acquire(): Promise<void> {
+		if (this.primed) {
+			this.primed = false
+
+			return
+		}
+
+		await this.reads.acquire(analysisRank)
+
+		if (this.closed) {
+			this.reads.release()
+
+			throw new DOMException("analysis ended", "AbortError")
+		}
+
+		this.held++
+	}
+
+	public release(): void {
+		if (this.held === 0) {
+			return
+		}
+
+		this.held--
+		this.reads.release()
+	}
+
+	public close(): void {
+		this.closed = true
+		this.primed = false
+
+		while (this.held > 0) {
+			this.release()
+		}
+	}
 }
 
 export class TrackEdgesService {
@@ -200,11 +256,12 @@ export class TrackEdgesService {
 	// neither, so a later play tries again.
 	private async analyze(track: QueueTrack, signal: AbortSignal): Promise<TrackEdges | null> {
 		const epoch = this.epoch
+		const permits = new AnalysisPermits(this.deps.reads)
 
 		try {
-			const edges = await this.deps.reads.run(analysisRank, async () =>
-				signal.aborted ? null : await this.deps.analyze(track, signal)
-			)
+			await permits.prime()
+
+			const edges = isAborted(signal) ? null : await this.deps.analyze(track, signal, permits)
 
 			if (edges === null || isAborted(signal) || epoch !== this.epoch) {
 				return null
@@ -220,13 +277,15 @@ export class TrackEdgesService {
 			}
 
 			return null
+		} finally {
+			permits.close()
 		}
 	}
 }
 
 // The analysis in the remux worker over a port of its own. An abort closes the port's download, which ends the
 // worker's reads; the worker's own answer is then dropped.
-async function analyzeInWorker(track: QueueTrack, signal: AbortSignal): Promise<EdgeAnalysis> {
+async function analyzeInWorker(track: QueueTrack, signal: AbortSignal, permits: WindowPermits): Promise<EdgeAnalysis> {
 	const hold = await holdRemuxWorker()
 	const source = analysisRemuxSource(track.file)
 	const aborted = Promise.withResolvers<never>()
@@ -240,7 +299,7 @@ async function analyzeInWorker(track: QueueTrack, signal: AbortSignal): Promise<
 
 	try {
 		const port = await Promise.race([source.openPort(), aborted.promise])
-		const answer = hold.remote.analyzeEdges(Comlink.transfer({ port, size: Number(track.file.size) }, [port]))
+		const answer = hold.remote.analyzeEdges(Comlink.transfer({ port, size: Number(track.file.size) }, [port]), Comlink.proxy(permits))
 
 		answer.catch(() => undefined)
 
