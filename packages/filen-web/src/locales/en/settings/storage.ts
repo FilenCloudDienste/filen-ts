@@ -26,10 +26,12 @@ export const settingsStorage = {
 	storageVideos: "Videos library",
 	/** Settings > Advanced, local data group — Videos row description */
 	storageVideosDescription: "Artwork, the library index and video details",
-	/** Settings > Advanced, local data group — Music row title */
-	storageMusic: "Music metadata",
-	/** Settings > Advanced, local data group — Music row description */
-	storageMusicDescription: "Titles, artists and albums read from your audio files",
+	/** Settings > Advanced, local data group — Music row title: track details read from audio files, and the analysis of
+	 *  how each track starts and ends that lets the player blend one track into the next */
+	storageMusic: "Music details and analysis",
+	/** Settings > Advanced, local data group — Music row description; "smooth transitions" is the player's feature that
+	 *  blends the end of each track into the next one (a crossfade, never song picking) */
+	storageMusicDescription: "Titles, artists and albums read from your audio files, and their analysis for smooth transitions",
 	/** Settings > Advanced, local data group — row title for the saved copy of lists and content the app shows at start */
 	storageQueryCache: "Cached lists and content",
 	/** Settings > Advanced, local data group — description of the cached lists and content row */
@@ -59,8 +61,11 @@ export const settingsStorage = {
 	/** Settings > Advanced, local data group — confirm dialog body for the Videos library: every open tab reloads, then the library is rebuilt */
 	storageVideosBody:
 		"Every open Filen tab reloads. Your video library is then indexed again, which reads its directories and parts of your videos, and artwork is made again. Watch progress is kept.",
-	/** Settings > Advanced, local data group — confirm dialog body for Music metadata */
-	storageMusicBody: "Track details are read from your audio files again the next time they are shown.",
+	/** Settings > Advanced, local data group — confirm dialog body for the Music row: track details are read again when
+	 *  shown, and tracks are analysed again for smooth transitions (blending each track into the next), which downloads
+	 *  parts of them again */
+	storageMusicBody:
+		"Track details are read from your audio files again the next time they are shown, and tracks are analysed again for smooth transitions, which downloads parts of them.",
 	/** Settings > Advanced, local data group — confirm dialog body for cached lists and content: every open tab reloads and refetches */
 	storageQueryCacheBody: "Every open Filen tab reloads, and lists and content are downloaded again as you open them.",
 	/** Settings > Advanced, local data group — confirm dialog body for the desktop browser cache */
@@ -74,7 +79,7 @@ export const settingsStorage = {
 	storageModelBody: "The assistant has to download it again ({{size}}) before you can use it.",
 	/** Settings > Advanced, local data group — confirm dialog title before clearing every cache */
 	storageClearAllTitle: "Clear all caches?",
-	/** Settings > Advanced, local data group — confirm dialog body for Clear all; {{list}} is a list of the cache row titles, e.g. "Thumbnails, Videos library and Music metadata" */
+	/** Settings > Advanced, local data group — confirm dialog body for Clear all; {{list}} is a list of the cache row titles, e.g. "Thumbnails, Videos library and Music details and analysis" */
 	storageClearAllBody:
 		"This clears {{list}}. Every open Filen tab reloads, and anything needed is downloaded again. The AI model, your settings and your history are kept.",
 	/** Settings > Advanced, local data group — added to a clear dialog when this tab is busy (a transfer, unsaved edits): it won't reload by itself */

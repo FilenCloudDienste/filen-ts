@@ -136,7 +136,7 @@ describe("Local data and caches", () => {
 		})
 		expect(within(row("Videos library")).getByText(formatBytes(1_500_000 + 5 * 1000))).toBeTruthy()
 		// Two kv families: the tags and the edge analyses.
-		expect(within(row("Music metadata")).getByText(formatBytes(2000))).toBeTruthy()
+		expect(within(row("Music details and analysis")).getByText(formatBytes(2000))).toBeTruthy()
 		expect(within(row("Cached lists and content")).getByText(formatBytes(1000))).toBeTruthy()
 		expect(await findTotal()).toContain(formatBytes(10_000_000))
 		expect(within(row("Other")).getByText(formatBytes(10_000_000 - 3_000_000 - 1_505_000 - 3000))).toBeTruthy()
@@ -151,7 +151,7 @@ describe("Local data and caches", () => {
 		renderPage()
 
 		await waitFor(() => {
-			expect(within(row("Music metadata")).getByText("—")).toBeTruthy()
+			expect(within(row("Music details and analysis")).getByText("—")).toBeTruthy()
 		})
 		expect(within(row("Cached lists and content")).getByLabelText("Couldn't be measured")).toBeTruthy()
 	})
@@ -182,6 +182,23 @@ describe("Local data and caches", () => {
 		await waitFor(() => {
 			expect(within(row("Thumbnails")).getByText(formatBytes(0))).toBeTruthy()
 		})
+	})
+
+	it("says clearing Music also redoes the smooth transition analysis", async () => {
+		renderPage()
+
+		expect(within(row("Music details and analysis")).getByText(/their analysis for smooth transitions$/)).toBeTruthy()
+
+		const clear = await within(row("Music details and analysis")).findByRole<HTMLButtonElement>("button", {
+			name: "Clear: Music details and analysis"
+		})
+
+		await waitFor(() => {
+			expect(clear.disabled).toBe(false)
+		})
+		fireEvent.click(clear)
+
+		expect(within(await screen.findByRole("alertdialog")).getByText(/analysed again for smooth transitions/)).toBeTruthy()
 	})
 
 	it("reports a clear that failed", async () => {
@@ -234,7 +251,7 @@ describe("Local data and caches", () => {
 		const dialog = await screen.findByRole("alertdialog")
 
 		expect(
-			within(dialog).getByText(/^This clears Thumbnails, Videos library, Music metadata, and Cached lists and content\./)
+			within(dialog).getByText(/^This clears Thumbnails, Videos library, Music details and analysis, and Cached lists and content\./)
 		).toBeTruthy()
 		fireEvent.click(within(dialog).getByRole("button", { name: "Clear all caches" }))
 
