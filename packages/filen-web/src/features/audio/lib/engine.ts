@@ -75,6 +75,10 @@ const START_LATENCY_WEIGHT = 0.3
 const START_LATENCY_MARGIN = 1.5
 const MAX_START_LATENCY_MS = 1_000
 
+// WebKit never suspends its context while paused (its resume can stay silent), so a long pause hands the routed element
+// back and closes the context; the next play, a gesture, starts a new one.
+const WEBKIT_IDLE_CLOSE_MS = 5 * 60_000
+
 // Turning loudness matching on or off moves the trims this smoothly.
 const TRIM_RAMP_SECONDS = 0.2
 
@@ -216,6 +220,8 @@ interface Starting {
 	incoming: AudioElementAdapter
 	source: TrackSource | null
 	index: number
+	// The track the incoming element holds: an index alone goes stale under a queue edit.
+	uuid: string
 	plan: TransitionPlan
 	// Null when the queue already moved to the incoming track (a skip the user asked for).
 	advance: AdvanceResult | null
@@ -304,6 +310,7 @@ export class AudioEngine {
 	// How long a warm element takes from play() to being heard here, smoothed: a gapless switch is asked for that early.
 	private startLatencyMs = INITIAL_START_LATENCY_MS
 	private minStartLatencyMs = 0
+	private idleCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
@@ -377,22 +384,26 @@ export class AudioEngine {
 
 	// The decision the warm-up was made for while it still holds, else a fresh one.
 	private committedOrCompute(): AdvanceResult | null {
-		const state = useAudioStore.getState()
 		const committed = this.committed
 
-		if (
-			committedValid(committed, {
-				queue: state.queue,
-				currentIndex: state.currentIndex,
-				loopMode: state.loopMode,
-				shuffleEnabled: state.shuffleEnabled,
-				shuffleOrder: state.shuffleOrder
-			})
-		) {
+		if (committed !== null && this.committedStill()) {
 			return committed.advance
 		}
 
 		return computeNext(this.nav())
+	}
+
+	// The warm-up's decision still holds for the queue as it is now.
+	private committedStill(): boolean {
+		const state = useAudioStore.getState()
+
+		return committedValid(this.committed, {
+			queue: state.queue,
+			currentIndex: state.currentIndex,
+			loopMode: state.loopMode,
+			shuffleEnabled: state.shuffleEnabled,
+			shuffleOrder: state.shuffleOrder
+		})
 	}
 
 	private commit(advance: AdvanceResult | null): void {
@@ -568,6 +579,31 @@ export class AudioEngine {
 		}
 
 		this.applyElementVolume(element, useMediaVolumeStore.getState())
+	}
+
+	// The loudness of an element already prepared (routed or not), for tags that arrived after it was prepared.
+	private refreshLevel(element: AudioElementAdapter, index: number): void {
+		const level = this.levelFor(index)
+		const routed = this.routed.get(element)
+
+		if (routed === undefined) {
+			if (level.trim !== 1) {
+				this.unroutedTrim.set(element, level.trim)
+			} else {
+				this.unroutedTrim.delete(element)
+			}
+
+			this.applyElementVolume(element, useMediaVolumeStore.getState())
+
+			return
+		}
+
+		routed.peak = level.peak
+
+		if (routed.trim !== level.trim) {
+			routed.trim = level.trim
+			routed.gain.setTrim(level.trim, 0)
+		}
 	}
 
 	private route(element: AudioElementAdapter, level: { trim: number; peak: number }, rampSeconds: number): void {
@@ -836,9 +872,12 @@ export class AudioEngine {
 			return
 		}
 
-		const advance = this.committedOrCompute()
+		// Only the decision the warm-up was made for: a changed queue, shuffle or loop mode re-derives it first.
+		const advance = this.committed?.advance ?? null
 
-		if (advance?.index !== this.prefetchIndex) {
+		if (!this.committedStill() || advance?.index !== this.prefetchIndex) {
+			void this.schedulePrefetch()
+
 			return
 		}
 
@@ -869,10 +908,18 @@ export class AudioEngine {
 			return
 		}
 
+		const uuid = useAudioStore.getState().queue[index]?.uuid
+
+		if (uuid === undefined) {
+			return
+		}
+
 		this.bumpLoadGeneration()
 
 		const source = this.prefetchSource
 
+		// Tags that arrived since the warm-up give the loudness trim it could not know then.
+		this.refreshLevel(incoming, index)
 		this.prefetchElement = null
 		this.prefetchIndex = null
 		this.prefetchSource = null
@@ -883,7 +930,7 @@ export class AudioEngine {
 		outgoing.rebind(this.fadingEvents(outgoing))
 		inRouted.gain.holdFade(0)
 
-		const starting: Starting = { incoming, source, index, plan, advance, outgoingEnded: false }
+		const starting: Starting = { incoming, source, index, uuid, plan, advance, outgoingEnded: false }
 
 		this.starting = starting
 
@@ -918,6 +965,14 @@ export class AudioEngine {
 
 		outgoing.rebind(this.playbackEvents())
 
+		// A skip the user asked for already named the target: it loads cold rather than the old track playing on
+		// under its title.
+		if (starting.advance === null) {
+			void this.loadAndPlay(useAudioStore.getState().currentIndex)
+
+			return
+		}
+
 		// The outgoing ended while the incoming's play() was pending: the track change happens now, cold.
 		if (starting.outgoingEnded) {
 			void this.handleTrackEnd()
@@ -929,14 +984,21 @@ export class AudioEngine {
 		const state = useAudioStore.getState()
 		const track = starting.advance ? state.queue[starting.advance.index] : state.queue[state.currentIndex]
 
-		this.starting = null
+		// The queue, the shuffle or the loop mode changed while the incoming was starting: the decision no longer
+		// holds. The incoming waits as the warm element again (if it still is the next track) and the outgoing plays on.
+		if (outgoing === null || track?.uuid !== starting.uuid || (starting.advance !== null && !this.committedStill())) {
+			this.parkStarting()
 
-		if (outgoing === null || !track) {
-			this.retire(starting.incoming)
-			starting.source?.release()
+			if (starting.outgoingEnded) {
+				void this.handleTrackEnd()
+			} else {
+				void this.schedulePrefetch()
+			}
 
 			return
 		}
+
+		this.starting = null
 
 		const outgoingSource = this.currentSource
 
@@ -977,7 +1039,8 @@ export class AudioEngine {
 
 		this.publishMetadata(track)
 		this.onDurationChange()
-		this.settlePlaying(starting.incoming, false)
+		// With nothing fading the next track warms now; otherwise when the fade is over.
+		this.settlePlaying(starting.incoming, this.fading === null)
 	}
 
 	// The incoming is heard: both curves start, the outgoing's over what is left of it (however late the incoming
@@ -1126,7 +1189,13 @@ export class AudioEngine {
 		this.resetFadeGain(starting.incoming)
 		this.element?.rebind(this.playbackEvents())
 
-		if (this.prefetchElement === null && starting.advance !== null) {
+		if (
+			this.prefetchElement === null &&
+			starting.advance !== null &&
+			useAudioStore.getState().queue[starting.index]?.uuid === starting.uuid
+		) {
+			// Back where the incoming audio starts, so a restarted transition is not late into it.
+			starting.incoming.seek(starting.plan.inStartMs / 1000)
 			this.prefetchElement = starting.incoming
 			this.prefetchSource = starting.source
 			this.prefetchIndex = starting.index
@@ -1474,6 +1543,8 @@ export class AudioEngine {
 			promoted.seek(0)
 		}
 
+		this.refreshLevel(promoted, index)
+
 		// Detach bookkeeping from the prefetch slot before touching the element — teardownPrefetch would
 		// otherwise dispose the very element being promoted.
 		this.prefetchElement = null
@@ -1513,7 +1584,9 @@ export class AudioEngine {
 		this.degradeRetry = false
 		this.gaplessOnlyUuid = null
 		this.planStale = true
-		this.watchdog = INITIAL_WATCHDOG_STATE
+		// A stall on the track before still counts: two within a minute degrade, whichever tracks they hit.
+		this.watchdog = { ...INITIAL_WATCHDOG_STATE, lastStallMs: this.watchdog.lastStallMs }
+		this.clearIdleClose()
 		useAudioStore.getState().setError(null)
 		useAudioStore.getState().setStatus("playing")
 		this.deps.mediaSession?.setPlaybackState("playing")
@@ -1959,6 +2032,41 @@ export class AudioEngine {
 		state.setPosition(0)
 		this.deps.mediaSession?.setPlaybackState(state.queue.length === 0 ? "none" : "paused")
 		this.deps.smoothTransitions?.output.idle()
+
+		// Stopped at the start: on WebKit, whose context never suspends itself, the output goes now.
+		if (this.deps.smoothTransitions?.webkit === true) {
+			this.releaseIdleOutput(false)
+		}
+	}
+
+	private clearIdleClose(): void {
+		if (this.idleCloseTimer !== null) {
+			clearTimeout(this.idleCloseTimer)
+			this.idleCloseTimer = null
+		}
+	}
+
+	// Hands a paused routed element back and closes the output when nothing else holds it. The track reloads on the
+	// next play (a gesture, which starts a new context), from where it stood when `keepPosition`.
+	private releaseIdleOutput(keepPosition: boolean): void {
+		const element = this.element
+
+		this.clearIdleClose()
+
+		if (element === null || !this.routed.has(element) || useAudioStore.getState().status === "playing") {
+			return
+		}
+
+		if (keepPosition && this.loadedTrackUuid !== null) {
+			this.pendingResume = { uuid: this.loadedTrackUuid, ms: element.sample().currentTimeMs }
+		}
+
+		this.teardownPrefetch()
+		this.retire(element)
+		this.element = null
+		this.loadedTrackUuid = null
+		this.swapSource(null)
+		this.deps.smoothTransitions?.output.closeIfUnused()
 	}
 
 	// The `ended` handler. Loop "one" restarts the current track; otherwise advance, and if there is
@@ -2054,6 +2162,8 @@ export class AudioEngine {
 	}
 
 	public async playCurrent(): Promise<void> {
+		this.unlockOutput()
+
 		if (useAudioStore.getState().queue.length === 0) {
 			return
 		}
@@ -2065,6 +2175,7 @@ export class AudioEngine {
 	// track — nothing yet, or the previous track because a load was paused/superseded mid-flight — this
 	// starts the current track instead of replaying stale bytes.
 	public resume(): void {
+		this.clearIdleClose()
 		this.unlockOutput()
 
 		const state = useAudioStore.getState()
@@ -2089,6 +2200,10 @@ export class AudioEngine {
 				if (!this.superseded(generation, pauseGeneration)) {
 					this.degradeRetry = false
 					this.armTransitionTimer()
+
+					if (this.prefetchElement === null) {
+						void this.schedulePrefetch()
+					}
 				}
 			},
 			(error: unknown) => {
@@ -2119,6 +2234,9 @@ export class AudioEngine {
 	public pause(): void {
 		this.pauseGeneration++
 		this.parkStarting()
+
+		const hadFade = this.fading !== null
+
 		this.dropFading()
 		this.clearTransitionTimer()
 		this.element?.pause()
@@ -2130,6 +2248,19 @@ export class AudioEngine {
 		useAudioStore.getState().setStatus("paused")
 		this.deps.mediaSession?.setPlaybackState("paused")
 		this.deps.smoothTransitions?.output.idle()
+
+		// The fade held the next warm-up back; it warms now, so a resume has its transition again.
+		if (hadFade) {
+			void this.schedulePrefetch()
+		}
+
+		if (this.deps.smoothTransitions?.webkit === true && this.element !== null && this.routed.has(this.element)) {
+			this.clearIdleClose()
+			this.idleCloseTimer = setTimeout(() => {
+				this.idleCloseTimer = null
+				this.releaseIdleOutput(true)
+			}, WEBKIT_IDLE_CLOSE_MS)
+		}
 	}
 
 	// "loading" is playback intent already in flight, so a toggle during it is a PAUSE — the transport
@@ -2149,6 +2280,22 @@ export class AudioEngine {
 	// out instead (gapless into the next one).
 	public seek(seconds: number): void {
 		const targetMs = Math.max(0, seconds * 1000)
+
+		// A skip the user asked for is still starting: the seek is into the target, which loads there cold.
+		if (this.starting?.advance === null) {
+			const state = useAudioStore.getState()
+			const target = state.queue[state.currentIndex]
+
+			this.dropStarting()
+
+			if (target) {
+				this.pendingResume = { uuid: target.uuid, ms: targetMs }
+				useAudioStore.getState().setPosition(targetMs)
+				void this.loadAndPlay(state.currentIndex)
+			}
+
+			return
+		}
 
 		this.parkStarting()
 
@@ -2252,6 +2399,8 @@ export class AudioEngine {
 		}
 
 		useAudioStore.getState().setQueueState(mutation.queue, mutation.currentIndex, mutation.shuffleOrder)
+		// A transition starting into a track the removal moved or took waits, or goes (parkStarting checks the uuid).
+		this.parkStarting()
 		void this.schedulePrefetch()
 	}
 
@@ -2260,6 +2409,7 @@ export class AudioEngine {
 	// persisted shuffle/loop prefs survive (store.reset keeps them). A routed element goes with the queue, so
 	// the output can close.
 	public clearQueue(): void {
+		this.clearIdleClose()
 		this.bumpLoadGeneration()
 		this.element?.pause()
 		this.element?.clear()
@@ -2363,6 +2513,7 @@ export class AudioEngine {
 	// Full teardown on logout: supersede any in-flight load, stop + tear down the element, release the
 	// live source, and clear the store. Nothing leaks across sessions.
 	public dispose(): void {
+		this.clearIdleClose()
 		this.bumpLoadGeneration()
 
 		if (this.visibilityHandler && typeof document !== "undefined") {

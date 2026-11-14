@@ -1123,3 +1123,297 @@ describe("degraded output", () => {
 		expect(useAudioStore.getState().status).toBe("playing")
 	})
 })
+
+describe("transition edge cases", () => {
+	const silentHead: TrackEdges = {
+		status: "ok",
+		durationSec: 200,
+		inStartMs: 1_500,
+		outEndFromEndMs: null,
+		fadeOutFromEndMs: null,
+		boundary: null
+	}
+
+	it("warms the next track when the outgoing ended before the incoming started", async () => {
+		enable()
+
+		const h = makeHarness()
+		const { out, warm } = await start(h, [track("a"), track("b"), track("c")])
+		const control = warm.holdPlay()
+
+		await reachWindow(out)
+		out.fire("onEnded")
+		control.resolve()
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(h.warms.at(-1)?.loads).toEqual(["src:c"])
+	})
+
+	it("warms the next track again after a pause dropped the fade", async () => {
+		enable()
+
+		const h = makeHarness()
+		const { out } = await start(h, [track("a"), track("b"), track("c")])
+
+		await reachWindow(out)
+		h.engine.pause()
+		await flush()
+
+		expect(out.disposed).toBe(true)
+		expect(h.warms.at(-1)?.loads).toEqual(["src:c"])
+		expect(h.warms.at(-1)?.disposed).toBe(false)
+	})
+
+	it("parks the incoming back at its audio start on a pause", async () => {
+		enable()
+
+		const h = makeHarness()
+
+		h.edges.set("b", silentHead)
+
+		const { out, warm } = await start(h)
+
+		await flush()
+		out.fire("onTimeUpdate")
+
+		const control = warm.holdPlay()
+
+		await reachWindow(out)
+		// The incoming already played a little past its start.
+		warm.setSample({ currentTimeMs: 1_900 })
+		h.engine.pause()
+		control.resolve()
+		await flush()
+
+		expect(warm.adapter.sample().currentTimeMs).toBe(1_500)
+		expect(warm.disposed).toBe(false)
+	})
+
+	it("does not finish a transition into a track a queue edit moved", async () => {
+		enable()
+
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("x"), track("a"), track("b")], 1)
+		await flush()
+
+		const out = h.mains.at(-1)
+		const warm = h.warms.at(-1)
+
+		if (out === undefined || warm === undefined) {
+			throw new Error("nothing warmed")
+		}
+
+		out.setSample({ currentTimeMs: 100_000, durationMs: DURATION_MS })
+		out.fire("onTimeUpdate")
+
+		const control = warm.holdPlay()
+
+		await reachWindow(out)
+		await h.engine.removeAt(0)
+		control.resolve()
+		await flush()
+
+		const state = useAudioStore.getState()
+
+		expect(state.queue[state.currentIndex]?.uuid).toBe("a")
+		expect(out.disposed).toBe(false)
+		expect(warm.disposed).toBe(true)
+		expect(h.warms.at(-1)?.loads).toEqual(["src:b"])
+
+		// The transition starts again into the right track.
+		out.fire("onTimeUpdate")
+		await flush()
+
+		const after = useAudioStore.getState()
+
+		expect(after.queue[after.currentIndex]?.uuid).toBe("b")
+	})
+
+	it("keeps playing the outgoing when shuffle changed while the incoming started", async () => {
+		enable()
+
+		const h = makeHarness()
+		const { out, warm } = await start(h, [track("a"), track("b"), track("c")])
+		const control = warm.holdPlay()
+
+		await reachWindow(out)
+		h.engine.setShuffleEnabled(true)
+		control.resolve()
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(out.disposed).toBe(false)
+		expect(out.gain?.events.some(event => event.kind === "curve")).toBe(false)
+	})
+
+	it("loads the target of a failed short-fade skip cold instead of reviving the old track", async () => {
+		enable({ manualTransition: "fade" })
+
+		const h = makeHarness()
+		const { warm } = await start(h)
+		const control = warm.holdPlay()
+
+		void h.engine.skipNext()
+		await flush()
+		control.reject(new Error("decode"))
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(h.mains.at(-1)?.loads.at(-1)).toBe("src:b")
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("seeks into the target of a short-fade skip that is still starting", async () => {
+		enable({ manualTransition: "fade" })
+
+		const h = makeHarness()
+		const { warm } = await start(h)
+
+		warm.holdPlay()
+		void h.engine.skipNext()
+		await flush()
+		h.engine.seek(30)
+		await flush()
+
+		const target = h.mains.at(-1)
+
+		expect(target?.loads.at(-1)).toBe("src:b")
+		expect(target?.seeks.at(-1)).toBe(30)
+		expect(warm.disposed).toBe(true)
+	})
+
+	it("starts the output from Try again", async () => {
+		enable()
+
+		const h = makeHarness()
+
+		await start(h)
+		h.engine.pause()
+
+		const before = h.output.unlocks
+
+		await h.engine.playCurrent()
+
+		expect(h.output.unlocks).toBe(before + 1)
+	})
+
+	it("counts a stall on the track before toward a degrade", async () => {
+		enable()
+
+		let wall = 0
+
+		vi.spyOn(Date, "now").mockImplementation(() => wall)
+
+		const h = makeHarness()
+		const { out, warm } = await start(h)
+
+		h.output.seconds = 10
+		out.setSample({ currentTimeMs: 100_000, paused: false })
+		out.fire("onTimeUpdate")
+		wall = 2_000
+		out.setSample({ currentTimeMs: 102_000 })
+		out.fire("onTimeUpdate")
+
+		expect(h.output.resumes).toBe(1)
+
+		wall = 2_500
+		h.output.seconds = 10.5
+		out.setSample({ currentTimeMs: 102_500 })
+		out.fire("onTimeUpdate")
+		await h.engine.skipNext()
+		await flush()
+
+		wall = 3_000
+		h.output.seconds = 11
+		warm.setSample({ currentTimeMs: 0, paused: false })
+		warm.fire("onTimeUpdate")
+		wall = 5_100
+		h.output.seconds = 11.02
+		warm.setSample({ currentTimeMs: 2_100 })
+		warm.fire("onTimeUpdate")
+		await flush()
+
+		expect(useSmoothTransitionsStore.getState().unavailable).toBe("degraded")
+	})
+
+	it("applies ReplayGain tags that arrived after the warm-up when the transition starts", async () => {
+		enable({ matchLoudness: true })
+
+		const h = makeHarness()
+		const { out, warm } = await start(h)
+		const trims = () => warm.gain?.events.filter(event => event.kind === "trim") ?? []
+
+		expect(trims().at(-1)).toEqual({ kind: "trim", value: 10 ** (-6 / 20), ramp: 0 })
+
+		putTrackTags("b", tags({ gain: { trackDb: -2, trackPeak: 0.5, albumDb: null, albumPeak: null } }))
+		await reachWindow(out)
+
+		const last = trims().at(-1)
+
+		expect(last?.kind === "trim" && last.value).toBeCloseTo(10 ** (-2 / 20), 5)
+	})
+})
+
+describe("WebKit output lifetime", () => {
+	it("closes the output when the queue ends", async () => {
+		enable()
+
+		const h = makeHarness({ webkit: true })
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		const out = h.mains[0]
+		const closes = h.output.closes
+
+		out?.fire("onEnded")
+		await flush()
+
+		expect(out?.disposed).toBe(true)
+		expect(out?.gain?.released).toBe(true)
+		expect(h.output.closes).toBe(closes + 1)
+
+		// The next play reloads the track (and routes it on a new context).
+		h.engine.resume()
+		await flush()
+
+		expect(h.mains.at(-1)?.loads).toEqual(["src:a"])
+	})
+
+	it("closes the output after a long pause and resumes the track where it stood", async () => {
+		enable()
+
+		const h = makeHarness({ webkit: true })
+		const { out } = await start(h)
+
+		out.setSample({ currentTimeMs: 120_000 })
+		h.engine.pause()
+		vi.advanceTimersByTime(5 * 60_000)
+
+		expect(out.disposed).toBe(true)
+
+		h.engine.resume()
+		await flush()
+
+		const reloaded = h.mains.at(-1)
+
+		expect(reloaded?.loads).toEqual(["src:a"])
+		expect(reloaded?.seeks.at(-1)).toBe(120)
+	})
+
+	it("keeps the output through a short pause", async () => {
+		enable()
+
+		const h = makeHarness({ webkit: true })
+		const { out } = await start(h)
+
+		h.engine.pause()
+		vi.advanceTimersByTime(60_000)
+		h.engine.resume()
+		vi.advanceTimersByTime(5 * 60_000)
+
+		expect(out.disposed).toBe(false)
+	})
+})
