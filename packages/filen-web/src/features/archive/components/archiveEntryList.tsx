@@ -33,7 +33,7 @@ import {
 	rowName,
 	rowSkip,
 	SKIP_LABEL_KEYS,
-	type BrowserKeyAction,
+	type BrowserListKeyAction,
 	type RowPosition
 } from "@/features/archive/lib/archiveBrowser.logic"
 import type { ListingSnapshot } from "@/features/archive/lib/listingSession"
@@ -41,6 +41,7 @@ import { EMPTY_SELECTION, isSelectable, rowCheck, type RowCheck, type Selection 
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 import { isEmptySpaceTarget, isPlainPointerClick } from "@/features/drive/lib/clickAway.logic"
+import { isKeyboardContextMenu, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { dirOfRef, isDirRef, type ChildSort, type ChildSortKey, type RowRef, type RowView } from "@/features/archive/lib/sortedChildren"
 import { EntryMenuContext, type RowMenu } from "@/features/archive/lib/entryMenu"
 import { ArchiveEntryRow } from "@/features/archive/components/archiveEntryRow"
@@ -67,7 +68,7 @@ export interface ArchiveEntryListProps {
 	onSort: (key: ChildSortKey) => void
 	onHeaderCheck: () => void
 	// The cursor's new index, which the list scrolls to; null when it didn't move.
-	onKeyAction: (action: BrowserKeyAction, pageSize: number) => number | null
+	onKeyAction: (action: BrowserListKeyAction, pageSize: number) => number | null
 	onPointer: (index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (ref: RowRef) => void
 	onCheck: (index: number, ref: RowRef) => void
@@ -123,6 +124,8 @@ export function ArchiveEntryList({
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const focusedOnce = useRef(false)
+	// A keyboard menu asked for while the cursor row was out of the mounted rows.
+	const menuPending = useRef(false)
 	const handlers = useLatestRef({ onPointer, onOpen, onCheck })
 	const store = snapshot.store
 	const getItemKey = useCallback((index: number) => rows.at(index), [rows])
@@ -204,6 +207,46 @@ export function ArchiveEntryList({
 		})
 	}, [rows.count, scrollElement])
 
+	// The cursor row's context menu, as a right-click on it opens it and where drive's keyboard menu places it. A cursor
+	// scrolled out of the mounted rows is brought in first, its menu opening once it is.
+	function openCursorMenu(): void {
+		if (cursorIndex < 0) {
+			return
+		}
+
+		if (!openOptionContextMenu(document.getElementById(rowElementId(listId, rows.at(cursorIndex))))) {
+			menuPending.current = true
+			virtualizer.scrollToIndex(cursorIndex, {
+				align: "auto"
+			})
+		}
+	}
+
+	const openPendingMenu = useEffectEvent(() => {
+		if (menuPending.current) {
+			menuPending.current = false
+			openCursorMenu()
+		}
+	})
+
+	useEffect(() => {
+		if (cursorShown) {
+			openPendingMenu()
+		}
+	}, [cursorShown])
+
+	// The keyboard's context menu lands on the listbox, which keeps focus while aria-activedescendant names the cursor:
+	// it is the cursor row's. A pointer's on the list's empty space stays the trigger's, which opens nothing there.
+	function handleContextMenuCapture(event: MouseEvent<HTMLDivElement>): void {
+		if (event.target !== event.currentTarget || !isKeyboardContextMenu(event.nativeEvent)) {
+			return
+		}
+
+		event.preventDefault()
+		event.stopPropagation()
+		openCursorMenu()
+	}
+
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		if (event.target !== event.currentTarget || isImeKeydown(event.nativeEvent) || isRecordingCombo()) {
 			return
@@ -217,9 +260,16 @@ export function ArchiveEntryList({
 
 		event.preventDefault()
 		event.stopPropagation()
+		menuPending.current = false
 
 		// Held, only the cursor moves on.
 		if (event.repeat && action.type !== "move") {
+			return
+		}
+
+		if (action.type === "openMenu") {
+			openCursorMenu()
+
 			return
 		}
 
@@ -341,6 +391,7 @@ export function ArchiveEntryList({
 							tabIndex={0}
 							className="group min-h-0 flex-1 overflow-y-auto outline-none"
 							onKeyDown={handleKeyDown}
+							onContextMenuCapture={handleContextMenuCapture}
 							onPointerDown={marquee.onPointerDown}
 							onClick={handleBackgroundClick}
 						/>

@@ -229,6 +229,12 @@ export function listboxPageStep(viewportHeight: number, rowHeight: number, perRo
 	return Math.max(1, Math.floor(viewportHeight / rowHeight)) * perRow
 }
 
+// A contextmenu the keyboard raised (the Menu key, Shift+F10), not a pointer: a PointerEvent with no pointer type.
+// Safari's are plain MouseEvents, and it raises none from the keyboard.
+export function isKeyboardContextMenu(event: Event): boolean {
+	return "pointerType" in event && event.pointerType === ""
+}
+
 // Opens the item menu of the option holding `target`, the keyboard twin of right-clicking it: the context menu the
 // row or tile is the trigger of, placed over the option's leading edge, where Shift+F10 on Windows places it. False
 // when `target` is in no option.

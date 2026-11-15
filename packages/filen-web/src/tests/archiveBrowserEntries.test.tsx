@@ -402,6 +402,59 @@ describe("an archive entry on its own", () => {
 		expect(row("z.bin").getAttribute("aria-selected")).toBe("true")
 	})
 
+	// The Menu key raises a pointer-less contextmenu on the focused listbox, which names its cursor by
+	// aria-activedescendant.
+	function keyboardMenu(): void {
+		act(() => {
+			list().dispatchEvent(new PointerEvent("contextmenu", { bubbles: true, cancelable: true, pointerType: "" }))
+		})
+	}
+
+	it("opens the cursor row's menu from the Menu key, raised at the row, and none before a cursor", async () => {
+		show([
+			{ path: "readme.md", size: 3, access: DIRECT },
+			{ path: "z.bin", size: 3, access: DIRECT }
+		])
+
+		keyboardMenu()
+		expect(screen.queryByRole("menu")).toBeNull()
+
+		const raised = vi.fn<(target: EventTarget | null) => void>()
+		// Taken now: the open menu hides the list from the accessible tree.
+		const readme = row("readme.md")
+		const zbin = row("z.bin")
+
+		list().addEventListener("contextmenu", event => {
+			raised(event.target)
+		})
+		press("ArrowDown")
+		press("ArrowDown")
+		keyboardMenu()
+
+		expect(await screen.findByRole("menuitem", { name: "Download" })).toBeTruthy()
+		expect(raised).toHaveBeenLastCalledWith(zbin)
+		expect(zbin.getAttribute("aria-selected")).toBe("true")
+		expect(readme.getAttribute("aria-selected")).toBe("false")
+	})
+
+	it("opens the cursor row's menu on Shift+F10, a directory's included", async () => {
+		show([
+			{ path: "docs/a.txt", size: 3, access: DIRECT },
+			{ path: "z.bin", size: 3, access: DIRECT }
+		])
+
+		const docs = row("docs")
+
+		press("ArrowDown")
+		act(() => {
+			fireEvent.keyDown(list(), withCode({ key: "F10", shiftKey: true }))
+		})
+
+		expect(await screen.findByRole("menuitem", { name: "Extract" })).toBeTruthy()
+		expect(screen.getByRole("menuitem", { name: "Open" })).toBeTruthy()
+		expect(docs.getAttribute("aria-selected")).toBe("true")
+	})
+
 	it("previews but never saves from a link that allows no downloads", async () => {
 		show(
 			[

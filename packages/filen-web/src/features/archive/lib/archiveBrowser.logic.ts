@@ -56,9 +56,13 @@ export type BrowserKeyAction =
 	| { type: "focusSearch" }
 	// The cursor's file.
 	| { type: "download" }
+	// The cursor row's context menu.
 	| { type: "openMenu" }
 	| { type: "extractSelected" }
 	| { type: "extractAll" }
+
+// What the list hands the browser: it opens the cursor row's context menu itself.
+export type BrowserListKeyAction = Exclude<BrowserKeyAction, { type: "openMenu" }>
 
 export type KeyInput = ChordEvent
 

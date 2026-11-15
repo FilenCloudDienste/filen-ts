@@ -47,7 +47,6 @@ import {
 	positionIndex,
 	readsWholeArchive,
 	refsView,
-	rowElementId,
 	marqueeSelection,
 	rangeSelection,
 	rowMenuOf,
@@ -55,7 +54,7 @@ import {
 	selectionTotalsOf,
 	splitCrumbs,
 	summaryOf,
-	type BrowserKeyAction,
+	type BrowserListKeyAction,
 	type RowPosition
 } from "@/features/archive/lib/archiveBrowser.logic"
 import { useArchiveListing } from "@/features/archive/components/useArchiveListing"
@@ -480,7 +479,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		proceed({ target: ask.target, resolved: resolveAt(selection, ask.common), baseDir: ask.common })
 	}
 
-	function handleKeyAction(action: BrowserKeyAction, pageSize: number): number | null {
+	function handleKeyAction(action: BrowserListKeyAction, pageSize: number): number | null {
 		const cursorIndex = cursorIndexNow()
 
 		switch (action.type) {
@@ -538,21 +537,11 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 				searchBoxRef.current?.querySelector("input")?.focus()
 
 				return null
-			case "download":
-			case "openMenu": {
+			case "download": {
 				const ref = cursorIndex < 0 ? null : rows.at(cursorIndex)
 
-				if (ref === null || isDirRef(ref)) {
-					return null
-				}
-
-				if (action.type === "download") {
-					if (entries.offers({ store, slot: ref }).download) {
-						entries.request({ store, slot: ref }, "download")
-					}
-				} else {
-					// The row's own ⋯ trigger, so the menu is the one a click opens; a row without one has no menu.
-					document.getElementById(rowElementId(listId, ref))?.querySelector<HTMLElement>("[aria-haspopup]")?.click()
+				if (ref !== null && !isDirRef(ref) && entries.offers({ store, slot: ref }).download) {
+					entries.request({ store, slot: ref }, "download")
 				}
 
 				return null
