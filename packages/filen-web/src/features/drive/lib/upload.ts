@@ -34,6 +34,7 @@ import {
 	maybeConvertHeicUpload
 } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
@@ -63,6 +64,10 @@ export interface RunUploadDeps {
 	// thumbnail instead of letting the listing download them straight back. Synchronous and
 	// fire-and-forget by contract — see warmUploadThumbnail (thumbGenerators.ts) for why.
 	warmThumbnail?: (uploaded: SdkFile, file: File) => void
+	// Optional for the same DI reason: holds the socket echoes of the file's name in its directory until the
+	// upload settled, so its own result lands the row and that warm claims the thumbnail first (uploadEchoes.ts).
+	// Returns the release, called once the upload settled either way.
+	holdEchoes?: (parentUuid: string | null, name: string) => () => void
 }
 
 export type UploadOutcome = VoidActionOutcome | { status: "cancelled" }
@@ -147,24 +152,43 @@ export async function runUpload(
 
 	stop?.inFlight.add(id)
 
-	let uploaded: SdkFile
-	try {
-		uploaded = await runOp(deps.upload(parentUuid, id, file))
-	} catch (e) {
+	return await withEchoesHeld(deps, parentUuid, file, async () => {
+		let uploaded: SdkFile
+		try {
+			uploaded = await runOp(deps.upload(parentUuid, id, file))
+		} catch (e) {
+			stop?.inFlight.delete(id)
+
+			const failure = quotaStopFailure(deps, stop, asErrorDTO(e))
+
+			return settleTransferFailure(deps.store, id, failure) ? { status: "cancelled" } : { status: "error", dto: failure }
+		}
+
 		stop?.inFlight.delete(id)
 
-		const failure = quotaStopFailure(deps, stop, asErrorDTO(e))
+		deps.store.settle(id, "done")
+		deps.store.setItem(id, narrowItem(uploaded))
+		landUpload(deps, parentUuid, uploaded, file)
 
-		return settleTransferFailure(deps.store, id, failure) ? { status: "cancelled" } : { status: "error", dto: failure }
+		return { status: "success" }
+	})
+}
+
+// Runs one file's upload with the socket echoes of its name held (RunUploadDeps.holdEchoes), released once it
+// settled: after its own result landed the row, or after it failed.
+async function withEchoesHeld(
+	deps: Pick<RunUploadDeps, "holdEchoes">,
+	parentUuid: string | null,
+	file: File,
+	upload: () => Promise<UploadOutcome>
+): Promise<UploadOutcome> {
+	const release = deps.holdEchoes?.(parentUuid, file.name)
+
+	try {
+		return await upload()
+	} finally {
+		release?.()
 	}
-
-	stop?.inFlight.delete(id)
-
-	deps.store.settle(id, "done")
-	deps.store.setItem(id, narrowItem(uploaded))
-	landUpload(deps, parentUuid, uploaded, file)
-
-	return { status: "success" }
 }
 
 // The first storage refusal stops the batch's other files (their aborts reject as Cancelled, read back here
@@ -208,27 +232,29 @@ async function runRunFileUpload(
 
 	stop?.inFlight.add(batch.id)
 
-	let uploaded: SdkFile
-	try {
-		uploaded = await runOp(deps.upload(parentUuid, id, file, batch.id))
-	} catch (e) {
-		const dto = quotaStopFailure(deps, stop, asErrorDTO(e))
+	return await withEchoesHeld(deps, parentUuid, file, async () => {
+		let uploaded: SdkFile
+		try {
+			uploaded = await runOp(deps.upload(parentUuid, id, file, batch.id))
+		} catch (e) {
+			const dto = quotaStopFailure(deps, stop, asErrorDTO(e))
 
-		if (dto.kind === "Cancelled") {
-			deps.store.settleRunFile(id, "cancelled")
+			if (dto.kind === "Cancelled") {
+				deps.store.settleRunFile(id, "cancelled")
 
-			return { status: "cancelled" }
+				return { status: "cancelled" }
+			}
+
+			deps.store.settleRunFile(id, "error", dto, { name: args.name ?? file.name, parentUuid })
+
+			return { status: "error", dto }
 		}
 
-		deps.store.settleRunFile(id, "error", dto, { name: args.name ?? file.name, parentUuid })
+		deps.store.settleRunFile(id, "done")
+		landUpload(deps, parentUuid, uploaded, file)
 
-		return { status: "error", dto }
-	}
-
-	deps.store.settleRunFile(id, "done")
-	landUpload(deps, parentUuid, uploaded, file)
-
-	return { status: "success" }
+		return { status: "success" }
+	})
 }
 
 // What a landed file changes: its listing, the account's storage used, and (with the browser File still in hand) its
@@ -335,7 +361,8 @@ export const defaultUploadDeps: RunUploadDeps = {
 	invalidateDirectorySizes: invalidateUploadedDirectorySizes,
 	markAccountStale,
 	addStorageUsed: addAccountStorageUsed,
-	warmThumbnail: warmUploadThumbnail
+	warmThumbnail: warmUploadThumbnail,
+	holdEchoes: holdUploadEchoes
 }
 
 // The run side of the transfers store's upload runs (UploadBatch), which the target directory's listing

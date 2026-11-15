@@ -39,6 +39,7 @@ import {
 	markDriveEventsMissed
 } from "@/features/drive/lib/socketHandlers"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
+import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import { testUuid } from "@/tests/support/uuid"
@@ -196,6 +197,77 @@ describe("drive socket handlers — additions", () => {
 		seedRootUuid()
 		seedListing(null, [])
 		handleCreated({ type: "fileNew", file: mockFile({ parent: ROOT_UUID }) })
+
+		expect(getListing(null).map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	// The upload's own result lands the row and seeds its thumbnail from the local file; landed first, the echo's
+	// row would download the file for it.
+	it("fileNew of a name this tab is uploading there waits for that upload to settle", () => {
+		seedListing(PARENT_A, [])
+		seedRecents([])
+
+		const release = holdUploadEchoes(PARENT_A, "Report.PDF")
+
+		handleCreated({ type: "fileNew", file: mockFile() })
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getRecents()).toEqual([])
+
+		release()
+		flushListingCreates()
+
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
+		expect(getRecents()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("fileNew of another name, or of the name in another directory, lands while an upload runs", () => {
+		seedListing(PARENT_A, [])
+		seedListing(PARENT_B, [])
+
+		const release = holdUploadEchoes(PARENT_A, "other.pdf")
+		const releaseB = holdUploadEchoes(PARENT_B, "report.pdf")
+
+		handleCreated({ type: "fileNew", file: mockFile() })
+
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
+		release()
+		releaseB()
+		flushListingCreates()
+		expect(getListing(PARENT_B)).toEqual([])
+	})
+
+	it("an echo held for two uploads of one name lands once both settled, and a release twice counts once", () => {
+		seedListing(PARENT_A, [])
+
+		const first = holdUploadEchoes(PARENT_A, "report.pdf")
+		const second = holdUploadEchoes(PARENT_A, "report.pdf")
+
+		handleCreated({ type: "fileNew", file: mockFile() })
+		first()
+		first()
+		flushListingCreates()
+
+		expect(getListing(PARENT_A)).toEqual([])
+
+		second()
+		flushListingCreates()
+
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("fileNew into the root is held by an upload into the null-keyed root", () => {
+		seedRootUuid()
+		seedListing(null, [])
+
+		const release = holdUploadEchoes(null, "report.pdf")
+
+		handleCreated({ type: "fileNew", file: mockFile({ parent: ROOT_UUID }) })
+
+		expect(getListing(null)).toEqual([])
+
+		release()
+		flushListingCreates()
 
 		expect(getListing(null).map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})

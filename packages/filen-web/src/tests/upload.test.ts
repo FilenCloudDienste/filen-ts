@@ -55,6 +55,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 
 import {
 	landUpload,
+	newQuotaStop,
 	runUpload,
 	startUploads,
 	defaultUploadDeps,
@@ -62,6 +63,7 @@ import {
 	type RunUploadDeps
 } from "@/features/drive/lib/upload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { queryClient } from "@/queries/client"
@@ -131,13 +133,16 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
 		const markAccountStale = vi.fn<() => void>()
 		const addStorageUsed = vi.fn<(bytes: bigint) => void>()
+		const releaseEchoes = vi.fn<() => void>()
+		const holdEchoes = vi.fn<(parentUuid: string | null, name: string) => () => void>(() => releaseEchoes)
 		const deps: RunUploadDeps = {
 			upload,
 			store: { add, startRunFile, settleRunFile, settle, setItem, remove },
 			patchCreated,
 			markAccountStale,
 			addStorageUsed,
-			warmThumbnail
+			warmThumbnail,
+			holdEchoes
 		}
 		return {
 			deps,
@@ -151,7 +156,9 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			patchCreated,
 			markAccountStale,
 			addStorageUsed,
-			warmThumbnail
+			warmThumbnail,
+			holdEchoes,
+			releaseEchoes
 		}
 	}
 
@@ -232,6 +239,76 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
 
 		expect(order).toEqual(["warm", "patch"])
+	})
+
+	// The file's socket echo would otherwise land the row first, whose tile then downloads the file for its
+	// thumbnail before the warm can claim it.
+	it("holds the echoes of the file's name from before the upload until after the row landed", async () => {
+		const h = makeHarness()
+		const order: string[] = []
+
+		h.holdEchoes.mockImplementation((parentUuid, name) => {
+			order.push(`hold ${String(parentUuid)} ${name}`)
+
+			return () => {
+				order.push("release")
+			}
+		})
+		h.upload.mockImplementation(() => {
+			order.push("upload")
+
+			return Promise.resolve(mockSdkFile())
+		})
+		h.warmThumbnail.mockImplementation(() => {
+			order.push("warm")
+		})
+		h.patchCreated.mockImplementation(() => {
+			order.push("patch")
+		})
+
+		await runUpload(h.deps, { parentUuid: "parent-uuid", file: mockBrowserFile("photo.jpg") })
+
+		expect(order).toEqual(["hold parent-uuid photo.jpg", "upload", "warm", "patch", "release"])
+	})
+
+	it.each([["UploadFailed"], ["Cancelled"]])("releases the held echoes when the upload ends %s", async kind => {
+		const h = makeHarness()
+		h.upload.mockRejectedValue(sdkDto(kind))
+
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+
+		expect(h.holdEchoes).toHaveBeenCalledExactlyOnceWith(null, "report.pdf")
+		expect(h.releaseEchoes).toHaveBeenCalledOnce()
+	})
+
+	it("holds a directory run's file by its own name in its own directory, released once it landed", async () => {
+		const h = makeHarness()
+		const order: string[] = []
+		const run: UploadBatchRef = { id: "run", parentUuid: null, directoryName: "photos" }
+
+		h.releaseEchoes.mockImplementation(() => {
+			order.push("release")
+		})
+		h.patchCreated.mockImplementation(() => {
+			order.push("patch")
+		})
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runUpload(h.deps, { parentUuid: "sub", file: mockBrowserFile("a.txt"), batch: run, name: "photos/sub/a.txt" })
+
+		expect(h.holdEchoes).toHaveBeenCalledExactlyOnceWith("sub", "a.txt")
+		expect(order).toEqual(["patch", "release"])
+	})
+
+	it("holds nothing for a file refused before it started", async () => {
+		const h = makeHarness()
+		const quotaStop = newQuotaStop()
+
+		quotaStop.refusal = sdkDto("MaxStorageReached")
+
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile(), quotaStop })
+
+		expect(h.holdEchoes).not.toHaveBeenCalled()
 	})
 
 	it("never warms when the upload fails", async () => {
@@ -825,6 +902,12 @@ describe("defaultUploadDeps.addStorageUsed", () => {
 describe("defaultUploadDeps.warmThumbnail", () => {
 	it("is wired to the real warmUploadThumbnail", () => {
 		expect(defaultUploadDeps.warmThumbnail).toBe(warmUploadThumbnail)
+	})
+})
+
+describe("defaultUploadDeps.holdEchoes", () => {
+	it("is wired to the real holdUploadEchoes", () => {
+		expect(defaultUploadDeps.holdEchoes).toBe(holdUploadEchoes)
 	})
 })
 

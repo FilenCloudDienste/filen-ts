@@ -5,7 +5,7 @@ import { testUuid } from "@/tests/support/uuid"
 const ROOT_UUID = testUuid("root")
 const PARENT_UUID = testUuid("parent")
 
-const { sdk, takenNames, patchListing, warmUploadThumbnail } = vi.hoisted(() => ({
+const { sdk, takenNames, patchListing, warmUploadThumbnail, holdUploadEchoes, releaseEchoes } = vi.hoisted(() => ({
 	sdk: {
 		uploadFileFromPort: vi.fn(),
 		uploadFileFromBlob: vi.fn(),
@@ -14,13 +14,16 @@ const { sdk, takenNames, patchListing, warmUploadThumbnail } = vi.hoisted(() => 
 	},
 	takenNames: vi.fn<(parent: string | null) => Promise<ReadonlySet<string>>>(),
 	patchListing: vi.fn(),
-	warmUploadThumbnail: vi.fn()
+	warmUploadThumbnail: vi.fn(),
+	holdUploadEchoes: vi.fn<(parentUuid: string | null, name: string) => () => void>(),
+	releaseEchoes: vi.fn<() => void>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: sdk }))
 vi.mock("@/features/preview/imageEdit/editSession", () => ({ takenNames }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => ROOT_UUID }))
 vi.mock("@/features/drive/lib/thumbGenerators", () => ({ warmUploadThumbnail }))
+vi.mock("@/features/drive/lib/uploadEchoes", () => ({ holdUploadEchoes }))
 vi.mock("@/features/drive/lib/quota", () => ({
 	checkUploadQuota: () => Promise.resolve({ status: "fits" }),
 	quotaExceededMessage: () => "exceeds"
@@ -71,6 +74,9 @@ function suffix(number: number): string {
 beforeEach(() => {
 	vi.clearAllMocks()
 	takenNames.mockResolvedValue(new Set(["report (edited).pdf"]))
+	holdUploadEchoes.mockReturnValue(releaseEchoes)
+	releaseEchoes.mockReturnValue(undefined)
+	warmUploadThumbnail.mockReturnValue(undefined)
 })
 
 describe("writeEditedCopy", () => {
@@ -112,6 +118,36 @@ describe("writeEditedCopy", () => {
 		expect(sdk.uploadFileFromBlob).toHaveBeenCalledWith(PARENT_UUID, blob, "report (edited 2).jpg", "", expect.any(Object))
 		expect(sdk.uploadFileFromPort).not.toHaveBeenCalled()
 		expect(warmUploadThumbnail).toHaveBeenCalledTimes(1)
+		expect(written?.outcome.status).toBe("success")
+	})
+
+	// Its echo landed first would mount the row, which downloads the file for a thumbnail the warm has not claimed yet.
+	it("holds the Blob upload's echoes until its thumbnail is warmed, and after a failed upload too", async () => {
+		const order: string[] = []
+
+		holdUploadEchoes.mockImplementationOnce((parentUuid, name) => {
+			order.push(`hold ${String(parentUuid)} ${name}`)
+
+			return releaseEchoes
+		})
+		releaseEchoes.mockImplementationOnce(() => {
+			order.push("release")
+		})
+		warmUploadThumbnail.mockImplementationOnce(() => {
+			order.push("warm")
+		})
+		sdk.uploadFileFromBlob.mockResolvedValueOnce(sdkFile("report (edited).jpg", "copy"))
+		takenNames.mockResolvedValue(new Set())
+
+		await writeEditedCopy(item(), { blob: new Blob(["jpeg"], { type: "image/jpeg" }) }, "jpg", suffix)
+
+		expect(order).toEqual([`hold ${PARENT_UUID} report (edited).jpg`, "warm", "release"])
+
+		sdk.uploadFileFromBlob.mockRejectedValueOnce(new Error("offline"))
+
+		await writeEditedCopy(item(), { blob: new Blob(["jpeg"], { type: "image/jpeg" }) }, "jpg", suffix)
+
+		expect(releaseEchoes).toHaveBeenCalledTimes(2)
 	})
 
 	it("tells the writer of a port whose names cannot be read that nothing comes, so it never blocks", async () => {

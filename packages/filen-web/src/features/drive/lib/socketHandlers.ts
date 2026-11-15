@@ -45,6 +45,7 @@ import {
 	emitPreviewResync
 } from "@/features/preview/lib/previewReconcile"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
+import { holdUploadEcho } from "@/features/drive/lib/uploadEchoes"
 
 // The realtime DRIVE event handlers — a faithful port of filen-mobile's drive socketHandlers.ts
 // SEMANTICS onto the wasm surface (flat discriminated `event.inner.type`), registered on the generic
@@ -333,8 +334,14 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// way so a re-delivered event never duplicates, and into Recents, which it joins by definition
 			// (mobile inserts unconditionally too).
 			const item = narrowItem(inner.file)
+			const parentUuid = normalizeParentUuid(inner.file.parent, rootUuid)
+			const recent = newFileJoinsRecents()
 
-			queueListingCreate(normalizeParentUuid(inner.file.parent, rootUuid), item, { recent: newFileJoinsRecents() })
+			// The echo of this tab's own upload waits for that upload's result (uploadEchoes.ts).
+			if (!holdUploadEcho(parentUuid, item, recent)) {
+				queueListingCreate(parentUuid, item, { recent })
+			}
+
 			rejoinFavorites(item, true)
 			// A save anywhere, this editor's own included, lands as a new file of the same lineage: an open
 			// preview of that lineage decides what to do with it.

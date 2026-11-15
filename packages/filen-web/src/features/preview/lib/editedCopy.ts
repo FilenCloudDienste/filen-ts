@@ -5,6 +5,7 @@ import { editedCopyName } from "@/features/drive/lib/copyName"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { editedSaveTimes, runPreviewSave, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { takenNames } from "@/features/preview/imageEdit/editSession"
 import type { ActionOutcome } from "@/lib/actions/outcome"
@@ -15,12 +16,20 @@ import { sdkApi } from "@/lib/sdk/client"
 export function imageSaveDeps(): PreviewSaveDeps {
 	return {
 		uploadFileBytes: (parentUuid, data, name, mime, options) => sdkApi.uploadFileBytes(parentUuid, data, name, mime, options),
-		uploadFileBlob: (parentUuid, blob, name, mime, options) =>
-			sdkApi.uploadFileFromBlob(parentUuid, blob, name, mime, options).then(file => {
+		uploadFileBlob: async (parentUuid, blob, name, mime, options) => {
+			// Its echo waits for the result, which seeds the thumbnail first (uploadEchoes.ts).
+			const release = holdUploadEchoes(parentUuid, name)
+
+			try {
+				const file = await sdkApi.uploadFileFromBlob(parentUuid, blob, name, mime, options)
+
 				warmUploadThumbnail(file, new File([blob], name, { type: blob.type }))
 
 				return file
-			}),
+			} finally {
+				release()
+			}
+		},
 		rewriteOrientation: (file, orientation, parentUuid, name, mime, options) =>
 			sdkApi.rewriteJpegOrientation(file, orientation, parentUuid, name, mime, options),
 		patchListing: driveListingQueryUpdate,
