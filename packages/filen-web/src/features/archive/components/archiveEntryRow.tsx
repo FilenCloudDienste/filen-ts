@@ -5,8 +5,13 @@ import { cn, formatBytes } from "@filen/shared"
 import { formatShortDate } from "@/lib/formatDate"
 import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
-import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
-import { ARCHIVE_MENU_COLUMN_CLASS, ARCHIVE_ROW_HEIGHT, type EntryRowKind } from "@/features/archive/lib/archiveBrowser.logic"
+import {
+	LIST_MODIFIED_COLUMN_CLASS,
+	LIST_NAME_CLASS,
+	LIST_SIZE_COLUMN_CLASS,
+	LIST_TRAILING_SLOT_CLASS
+} from "@/features/drive/lib/listingCells"
+import { ARCHIVE_ROW_HEIGHT, type EntryRowKind } from "@/features/archive/lib/archiveBrowser.logic"
 import type { RowCheck } from "@/features/archive/lib/selection"
 import type { RowRef } from "@/features/archive/lib/sortedChildren"
 import { ArchiveEntryMenuContent } from "@/features/archive/components/archiveEntryMenu"
@@ -200,7 +205,8 @@ export function ArchiveEntryRow({
 					<ArchiveEntryMenuContent slot={rowRef} />
 				</DropdownMenu>
 			) : (
-				<span className={ARCHIVE_MENU_COLUMN_CLASS} />
+				// The ⋯ trigger's slot, kept by rows without a menu so the columns line up.
+				<span className={LIST_TRAILING_SLOT_CLASS} />
 			)}
 		</div>
 	)

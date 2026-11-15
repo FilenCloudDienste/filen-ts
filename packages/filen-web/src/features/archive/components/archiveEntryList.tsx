@@ -20,10 +20,9 @@ import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isImeKeydown } from "@filen/shared/keymap"
-import { LIST_MODIFIED_COLUMN_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
+import { LIST_MODIFIED_COLUMN_CLASS, LIST_SIZE_COLUMN_CLASS, LIST_TRAILING_SLOT_CLASS } from "@/features/drive/lib/listingCells"
 import {
 	ARCHIVE_LIST_OVERSCAN,
-	ARCHIVE_MENU_COLUMN_CLASS,
 	ARCHIVE_ROW_HEIGHT,
 	browserKeyAction,
 	entryRowKind,
@@ -326,7 +325,7 @@ export function ArchiveEntryList({
 						</button>
 					)
 				})}
-				<span className={ARCHIVE_MENU_COLUMN_CLASS} />
+				<span className={LIST_TRAILING_SLOT_CLASS} />
 			</div>
 			{/* One context menu for every row, its trigger the listbox itself: no row mounts a menu root of its
 			    own, and which row it is for is read off the event when it opens. */}
