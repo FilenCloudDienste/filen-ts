@@ -654,6 +654,78 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		expect(selectedNames()).toEqual([])
 	})
 
+	// Rows are 36px: docs 0-36, readme.md 36-72, z.bin 72-108.
+	it("selects the rows a drag covers, from a row's plain area, without the release's click undoing it", async () => {
+		show(fakeSession(done(), storeOf(TREE)))
+		Object.defineProperty(list(), "scrollHeight", { configurable: true, value: 108 })
+
+		const name = screen.getByText("readme.md")
+
+		fireEvent.pointerDown(name, { pointerType: "mouse", button: 0, clientX: 10, clientY: 40 })
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
+		})
+
+		expect(selectedNames()).toEqual([expect.stringContaining("readme.md"), expect.stringContaining("z.bin")])
+		expect(screen.getByText("2 files selected · 2 B")).toBeTruthy()
+
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 100 }))
+		})
+		fireEvent.click(list(), { detail: 1 })
+
+		expect(selectedNames()).toHaveLength(2)
+		expect(cursorName()).toContain("z.bin")
+
+		// Covering the whole directory selects it as one rule; Escape mid-drag puts the selection back.
+		fireEvent.pointerDown(screen.getByText("docs"), { pointerType: "mouse", button: 0, clientX: 10, clientY: 10 })
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
+		})
+
+		expect(screen.getByRole("checkbox", { name: "Select all" }).getAttribute("aria-checked")).toBe("true")
+
+		act(() => {
+			window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		})
+
+		expect(selectedNames()).toEqual([expect.stringContaining("readme.md"), expect.stringContaining("z.bin")])
+
+		// The swallowed click was the release's alone: a plain click on empty space clears the selection.
+		await wait(0)
+		fireEvent.click(list(), { detail: 1 })
+
+		expect(selectedNames()).toEqual([])
+	})
+
+	it("adds the rows a drag covers to the selection under the toggle modifier, never starting on the checkbox", () => {
+		show(fakeSession(done(), storeOf(TREE)))
+		Object.defineProperty(list(), "scrollHeight", { configurable: true, value: 108 })
+
+		fireEvent.click(screen.getByText("docs"), { detail: 1 })
+
+		const check = options()[1]?.querySelector("[data-marquee-skip]")
+
+		if (!(check instanceof HTMLElement)) {
+			throw new Error("checkbox missing")
+		}
+
+		fireEvent.pointerDown(check, { pointerType: "mouse", button: 0, clientX: 10, clientY: 40 })
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
+			window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 100 }))
+		})
+
+		expect(selectedNames()).toEqual([expect.stringContaining("docs")])
+
+		fireEvent.pointerDown(screen.getByText("z.bin"), { pointerType: "mouse", button: 0, clientX: 10, clientY: 80, ctrlKey: true })
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
+		})
+
+		expect(selectedNames()).toEqual([expect.stringContaining("docs"), expect.stringContaining("z.bin")])
+	})
+
 	it("selects and clears every search match with the header checkbox, keeping the rest of the selection", async () => {
 		show(fakeSession(done(), storeOf(TREE)))
 

@@ -16,7 +16,9 @@ import {
 	hasFlag,
 	headerCheck,
 	holdsSlot,
+	marqueeSelection,
 	positionIndex,
+	rangeSelection,
 	readsWholeArchive,
 	refsView,
 	rowElementId,
@@ -209,6 +211,39 @@ describe("rows and positions", () => {
 	it("takes a range either way round", () => {
 		expect(rowRange(rows, 2, 1)).toEqual([0, 2])
 		expect(rowRange(rows, 0, 9)).toEqual([dirRef(a), 0, 2])
+	})
+
+	it("selects a range alone, the whole directory as its one rule", () => {
+		expect(rangeSelection(store, rows, 0, 2, 1).rules).toEqual(
+			new Map([
+				[0, true],
+				[2, true]
+			])
+		)
+		expect(rangeSelection(store, rows, 0, 2, 0)).toEqual(selectAll(store, 0))
+		// Search matches are no directory: each row is its own rule.
+		expect(rangeSelection(store, rows, null, 0, 2).rules.size).toBe(3)
+	})
+
+	it("selects what a marquee covers, alone or added to where the drag started", () => {
+		const preset = setMany(store, EMPTY_SELECTION, [dirRef(a)], true)
+
+		expect(marqueeSelection(store, rows, 0, [1, 2], null).rules).toEqual(
+			new Map([
+				[0, true],
+				[2, true]
+			])
+		)
+		expect(marqueeSelection(store, rows, 0, [0, 1, 2], null)).toEqual(selectAll(store, 0))
+		expect(marqueeSelection(store, rows, 0, [2], preset).rules).toEqual(
+			new Map([
+				[dirRef(a), true],
+				[2, true]
+			])
+		)
+		// Covering nothing: nothing, or the selection it started from.
+		expect(marqueeSelection(store, rows, 0, [], null)).toBe(EMPTY_SELECTION)
+		expect(marqueeSelection(store, rows, 0, [], preset)).toBe(preset)
 	})
 
 	it("names each row's element after its ref", () => {

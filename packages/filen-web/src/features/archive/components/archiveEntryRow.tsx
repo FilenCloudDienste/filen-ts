@@ -10,6 +10,7 @@ import { ARCHIVE_MENU_COLUMN_CLASS, ARCHIVE_ROW_HEIGHT, type EntryRowKind } from
 import type { RowCheck } from "@/features/archive/lib/selection"
 import type { RowRef } from "@/features/archive/lib/sortedChildren"
 import { ArchiveEntryMenuContent } from "@/features/archive/components/archiveEntryMenu"
+import { MARQUEE_SKIP_PROPS } from "@/features/drive/hooks/useMarqueeSelection"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 
@@ -120,6 +121,8 @@ export function ArchiveEntryRow({
 		>
 			<span
 				aria-hidden="true"
+				// A press on it toggles the row; it never starts a marquee.
+				{...MARQUEE_SKIP_PROPS}
 				className={cn(
 					"flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input",
 					check !== "off" && "border-primary bg-primary text-primary-foreground",

@@ -21,7 +21,15 @@ import {
 	type ResolvedSelection
 } from "@/features/archive/lib/extractSelection"
 import { EMPTY_SELECTION, selectAll, setMany, toggle, type Selection } from "@/features/archive/lib/selection"
-import { dirOfRef, dirRef, isDirRef, type ChildSort, type ChildSortKey, type RowRef } from "@/features/archive/lib/sortedChildren"
+import {
+	dirOfRef,
+	dirRef,
+	isDirRef,
+	type ChildSort,
+	type ChildSortKey,
+	type RowRef,
+	type RowView
+} from "@/features/archive/lib/sortedChildren"
 import {
 	ARCHIVE_PROGRESS_DELAY_MS,
 	ARCHIVE_SPINNER_DELAY_MS,
@@ -40,7 +48,8 @@ import {
 	readsWholeArchive,
 	refsView,
 	rowElementId,
-	rowRange,
+	marqueeSelection,
+	rangeSelection,
 	selectionTotalsOf,
 	splitCrumbs,
 	summaryOf,
@@ -81,6 +90,14 @@ interface PasswordAsk {
 	wrong: boolean
 	// The extract to start once the password checks out; null when asked from the listing's banner.
 	extract: PendingExtract | null
+}
+
+interface MarqueeStep {
+	rows: RowView
+	preset: Selection | null
+	first: number
+	last: number
+	result: Selection
 }
 
 const DEFAULT_SORT: ChildSort = { key: "name", descending: false }
@@ -142,6 +159,8 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	const entries = useEntryActions({ source, session: listing.session, downloadable, isOnline })
 	// Ends the wait for a password check that an extract is waiting on.
 	const pendingCheck = useRef<(() => void) | null>(null)
+	// The last marquee step: the rows it covered and the selection that made.
+	const marqueeStep = useRef<MarqueeStep | null>(null)
 
 	// A new run (List again, a password) lists into a fresh store: the view starts over at its root. A
 	// store replacing one that holds nothing (the placeholder before the session opened, a run that read
@@ -185,7 +204,9 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	}
 
 	function select(next: Selection): void {
-		setPicked({ store, selection: next })
+		if (next !== selection) {
+			setPicked({ store, selection: next })
+		}
 	}
 
 	function placeCursor(position: RowPosition | null, moveAnchor: boolean): void {
@@ -213,12 +234,26 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	}
 
 	// Rows `from` to `to`, and only those; the whole directory is one rule.
-	function rangeSelection(from: number, to: number): Selection {
-		if (searchRefs === null && Math.min(from, to) === 0 && Math.max(from, to) === rows.count - 1) {
-			return selectAll(store, dir)
+	function rangeOf(from: number, to: number): Selection {
+		return rangeSelection(store, rows, searchRefs === null ? dir : null, from, to)
+	}
+
+	// A marquee step: a pointer move over the rows the last step covered selects nothing anew, so it
+	// re-renders nothing.
+	function coverMarquee(indices: readonly number[], preset: Selection | null): Selection {
+		const first = indices[0] ?? -1
+		const last = indices.at(-1) ?? -1
+		const step = marqueeStep.current
+
+		if (step !== null && step.rows === rows && step.preset === preset && step.first === first && step.last === last) {
+			return step.result
 		}
 
-		return setMany(store, EMPTY_SELECTION, rowRange(rows, from, to), true)
+		const result = marqueeSelection(store, rows, searchRefs === null ? dir : null, indices, preset)
+
+		marqueeStep.current = { rows, preset, first, last, result }
+
+		return result
 	}
 
 	function toggleAt(index: number): void {
@@ -240,7 +275,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		if (event.shiftKey) {
 			const anchorIndex = anchorIndexNow()
 
-			select(rangeSelection(anchorIndex < 0 ? index : anchorIndex, index))
+			select(rangeOf(anchorIndex < 0 ? index : anchorIndex, index))
 			placeCursor(position, false)
 
 			return
@@ -425,7 +460,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 				if (action.extend) {
 					const anchorIndex = anchorIndexNow()
 
-					select(rangeSelection(anchorIndex < 0 ? next : anchorIndex, next))
+					select(rangeOf(anchorIndex < 0 ? next : anchorIndex, next))
 				}
 
 				placeCursor(position, !action.extend)
@@ -727,6 +762,11 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 					onPointer={handlePointer}
 					onOpen={handleOpen}
 					onCheck={toggleAt}
+					onSelect={select}
+					onMarquee={coverMarquee}
+					onCursor={index => {
+						placeCursor({ ref: rows.at(index), index }, true)
+					}}
 				/>
 			</EntryMenuContext>
 			<ArchiveFooter

@@ -14,9 +14,12 @@ import { listboxKeyTarget } from "@/features/drive/lib/listbox"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
 import {
+	EMPTY_SELECTION,
 	isSelectable,
 	rowCheck,
+	selectAll,
 	selectionTotals,
+	setMany,
 	type RowCheck,
 	type Selection,
 	type SelectionTotals
@@ -213,6 +216,35 @@ export function rowRange(rows: RowView, from: number, to: number): RowRef[] {
 	}
 
 	return refs
+}
+
+// Rows `from` to `to`, and only those, selected. `dir` is the directory the rows list (null for search
+// matches): covering all of it, the selection is the one rule for the directory.
+export function rangeSelection(store: EntryStore, rows: RowView, dir: number | null, from: number, to: number): Selection {
+	if (dir !== null && Math.min(from, to) === 0 && Math.max(from, to) === rows.count - 1) {
+		return selectAll(store, dir)
+	}
+
+	return setMany(store, EMPTY_SELECTION, rowRange(rows, from, to), true)
+}
+
+// What a marquee covering rows `indices` (ascending and contiguous: the list is one column) selects: that
+// range alone, or added to `preset`, the selection the drag started from.
+export function marqueeSelection(
+	store: EntryStore,
+	rows: RowView,
+	dir: number | null,
+	indices: readonly number[],
+	preset: Selection | null
+): Selection {
+	const first = indices[0]
+	const last = indices.at(-1)
+
+	if (first === undefined || last === undefined) {
+		return preset ?? EMPTY_SELECTION
+	}
+
+	return preset === null ? rangeSelection(store, rows, dir, first, last) : setMany(store, preset, rowRange(rows, first, last), true)
 }
 
 export function selectionTotalsOf(snapshot: ListingSnapshot, selection: Selection): SelectionTotals {

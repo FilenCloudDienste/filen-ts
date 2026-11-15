@@ -36,7 +36,10 @@ import {
 	type RowPosition
 } from "@/features/archive/lib/archiveBrowser.logic"
 import type { ListingSnapshot } from "@/features/archive/lib/listingSession"
-import { isSelectable, rowCheck, type RowCheck, type Selection } from "@/features/archive/lib/selection"
+import { EMPTY_SELECTION, isSelectable, rowCheck, type RowCheck, type Selection } from "@/features/archive/lib/selection"
+import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { MarqueeRect } from "@/features/drive/components/marqueeRect"
+import { isEmptySpaceTarget, isPlainPointerClick } from "@/features/drive/lib/clickAway.logic"
 import { dirOfRef, isDirRef, type ChildSort, type ChildSortKey, type RowRef, type RowView } from "@/features/archive/lib/sortedChildren"
 import { ArchiveEntryRow } from "@/features/archive/components/archiveEntryRow"
 
@@ -64,6 +67,11 @@ export interface ArchiveEntryListProps {
 	onPointer: (index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (ref: RowRef) => void
 	onCheck: (index: number, ref: RowRef) => void
+	onSelect: (next: Selection) => void
+	// The selection a marquee over rows `indices` makes (MarqueeIndexSelection's cover).
+	onMarquee: (indices: readonly number[], preset: Selection | null) => Selection
+	// Puts the cursor (and the range anchor) on the row at `index`.
+	onCursor: (index: number) => void
 }
 
 const SORT_COLUMNS: readonly { key: ChildSortKey; className: string }[] = [
@@ -103,7 +111,10 @@ export function ArchiveEntryList({
 	onKeyAction,
 	onPointer,
 	onOpen,
-	onCheck
+	onCheck,
+	onSelect,
+	onMarquee,
+	onCursor
 }: ArchiveEntryListProps) {
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
@@ -142,6 +153,20 @@ export function ArchiveEntryList({
 	})
 	const virtualRows = virtualizer.getVirtualItems()
 	const cursorShown = virtualRows.some(row => row.index === cursorIndex)
+	// Rubber-band selection, as in the drive listing, by row index over the browser's own selection: the
+	// rows are store refs, none of which is handed over as an item. Rows are no drag sources, so a press on
+	// a row's plain area starts one too.
+	const marquee = useMarqueeSelection<Selection>({
+		itemCount: rows.count,
+		viewMode: "list",
+		columns: 1,
+		// One column: no tile to hit-test.
+		geometry: { rowHeight: ARCHIVE_ROW_HEIGHT, tileWidth: 0 },
+		selection: { read: () => selection, write: onSelect, cover: onMarquee },
+		scrollElement,
+		setCursor: onCursor,
+		startsOnItems: true
+	})
 
 	const revealCursor = useEffectEvent(() => {
 		virtualizer.scrollToIndex(Math.max(cursorIndex, 0), {
@@ -198,6 +223,19 @@ export function ArchiveEntryList({
 			virtualizer.scrollToIndex(next, {
 				align: "auto"
 			})
+		}
+	}
+
+	// A plain click on the list's empty space drops the selection, as in the drive listing (whose
+	// window-wide click-away stands down inside the preview overlay this list lives in).
+	function handleBackgroundClick(event: MouseEvent<HTMLDivElement>): void {
+		const bounds = event.currentTarget.getBoundingClientRect()
+
+		if (
+			isPlainPointerClick(event) &&
+			isEmptySpaceTarget(event.target, event.currentTarget, event.clientX - bounds.left, event.clientY - bounds.top)
+		) {
+			onSelect(EMPTY_SELECTION)
 		}
 	}
 
@@ -270,6 +308,8 @@ export function ArchiveEntryList({
 				tabIndex={0}
 				className="group min-h-0 flex-1 overflow-y-auto outline-none"
 				onKeyDown={handleKeyDown}
+				onPointerDown={marquee.onPointerDown}
+				onClick={handleBackgroundClick}
 			>
 				{rows.count === 0 ? (
 					empty
@@ -278,6 +318,7 @@ export function ArchiveEntryList({
 						className="relative w-full"
 						style={{ height: virtualizer.getTotalSize() }}
 					>
+						<MarqueeRect store={marquee.rectStore} />
 						{virtualRows.map(virtualRow => {
 							const ref = rows.at(virtualRow.index)
 							const isDir = isDirRef(ref)
