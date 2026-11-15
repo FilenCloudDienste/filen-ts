@@ -257,8 +257,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const downloadNotice =
 		download.status !== "idle" && download.status !== "running" && download.forUuid === current.uuid ? download : null
 
+	// Fills the page's main and no more, the list scrolling its rows; with no min-h-0 it stays its content's height
+	// where the page has less room than the list's floor, and main scrolls instead.
 	return (
-		<div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-3 px-4 pt-4 pb-3 sm:px-6 sm:pt-6">
+		<div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-3 px-4 pt-4 pb-3 sm:px-6 sm:pt-6">
 			<Breadcrumbs
 				stack={stack}
 				onJump={jumpTo}
@@ -342,7 +344,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				</div>
 			</div>
 
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+			{/* Never below the header and a few rows. Size containment keeps the rows' own height out of the page's: the
+			    floor is all the list asks of it. */}
+			<div className="flex min-h-60 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background contain-size">
 				{listing.status === "pending" ? (
 					<LoadingState size="md" />
 				) : listing.status === "error" ? (

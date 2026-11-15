@@ -123,6 +123,24 @@ describe("DirectoryBrowser — the list", () => {
 		expect(screen.getByRole("button", { name: /^Name/ })).toBeDefined()
 	})
 
+	// jsdom lays nothing out: the classes are the contract. The list fills the page's main and scrolls its rows, but
+	// never below its floor, past which the page (no min-h-0 above the list) grows and main scrolls instead.
+	it("keeps the list a floor where the page is short, its rows out of the page's height", () => {
+		renderBrowser()
+		fireEvent.click(option("a.txt"), { detail: 1 })
+
+		const listbox = screen.getByRole("listbox")
+		const frame = listbox.parentElement
+		const page = frame?.parentElement
+
+		expect(listbox.className.split(" ")).toEqual(expect.arrayContaining(["min-h-0", "flex-1", "overflow-y-auto"]))
+		expect(frame?.className.split(" ")).toEqual(expect.arrayContaining(["min-h-60", "flex-1", "contain-size", "overflow-hidden"]))
+		expect(page?.className.split(" ")).toContain("flex-1")
+		expect(page?.className.split(" ")).not.toContain("min-h-0")
+		// The selection bar sits below the list at its own height.
+		expect(screen.getByRole("toolbar", { name: "Selection actions" }).closest(".shrink-0")?.parentElement).toBe(page)
+	})
+
 	it("selects on a click, toggles with Ctrl and extends with Shift", () => {
 		renderBrowser()
 
