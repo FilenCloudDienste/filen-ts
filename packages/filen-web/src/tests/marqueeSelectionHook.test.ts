@@ -358,6 +358,41 @@ describe("useMarqueeSelection — starting on an item", () => {
 		expect(onClick).toHaveBeenCalledOnce()
 	})
 
+	it("takes a press on an item's icon for one on the item", () => {
+		const el = container()
+		const { name } = optionIn(el)
+		const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+
+		name.appendChild(icon)
+
+		const { result, write } = renderIndexMarquee(el)
+
+		act(() => {
+			pressOn(el, icon as unknown as HTMLElement, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+
+		expect(write).not.toHaveBeenCalled()
+	})
+
+	// A menu portalled out of the list (a row's context menu) still bubbles its presses to the list
+	// through the React tree.
+	it("never arms from a press outside the list's own DOM", () => {
+		const el = container()
+		const portalled = document.createElement("div")
+
+		document.body.appendChild(portalled)
+
+		const { result, write } = renderIndexMarquee(el)
+
+		act(() => {
+			pressOn(el, portalled, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+
+		expect(write).not.toHaveBeenCalled()
+	})
+
 	it("keeps the click after a drag where items never arm it", () => {
 		const el = container()
 		const { result } = renderIndexMarquee(el)

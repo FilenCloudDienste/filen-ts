@@ -481,15 +481,21 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 			return
 		}
 
-		const target = event.target instanceof HTMLElement ? event.target : null
+		// Any element: an icon's SVG inside a row is a press on the row.
+		const target = event.target instanceof Element ? event.target : null
+		const el = event.currentTarget
 
-		// Starting on a row/tile (or its menu chrome) leaves click-selection untouched, unless the list
-		// marquees from its items too (never from their controls).
-		if (target?.closest('[role="option"]') && (params.startsOnItems !== true || target.closest(ITEM_CONTROL_SELECTOR) !== null)) {
+		// A press in a menu portalled out of the list still bubbles to it through the React tree.
+		if (target === null || !el.contains(target)) {
 			return
 		}
 
-		const el = event.currentTarget
+		// Starting on a row/tile (or its menu chrome) leaves click-selection untouched, unless the list
+		// marquees from its items too (never from their controls).
+		if (target.closest('[role="option"]') && (params.startsOnItems !== true || target.closest(ITEM_CONTROL_SELECTOR) !== null)) {
+			return
+		}
+
 		const bounds = el.getBoundingClientRect()
 		const offsetX = event.clientX - bounds.left
 		const offsetY = event.clientY - bounds.top
