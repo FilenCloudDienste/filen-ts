@@ -43,7 +43,7 @@ import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { SaveToDriveButton, SaveToDriveDialog } from "@/features/publicLinks/components/saveToDrive"
 import { SaveAsArchiveButton } from "@/features/publicLinks/components/publicArchive"
-import { BrowseList, type BrowseListHandle } from "@/features/publicLinks/components/browseList"
+import { BrowseList, type BrowseListHandle, type BrowseResume } from "@/features/publicLinks/components/browseList"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
@@ -83,6 +83,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const [selection, setSelection] = useState<BrowseSelection>(EMPTY_SELECTION)
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
 	const [saveTarget, setSaveTarget] = useState<SaveTarget | null>(null)
+	// The list unmounts under an opened file; this is where it comes back.
+	const [resume, setResume] = useState<BrowseResume | null>(null)
 	const listRef = useRef<BrowseListHandle>(null)
 
 	const current = stack[stack.length - 1] ?? rootCrumb(info)
@@ -116,8 +118,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 			setFilter("")
 			clearSelection()
 			setSelected(null)
+			setResume(null)
 			dropDownloadNotice()
 		} else {
+			setResume({ key: entryKey(entry), scrollOffset: listRef.current?.scrollOffset() ?? 0 })
 			setSelected({ item: entry.item, file: entry.file })
 		}
 	}
@@ -127,6 +131,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		setFilter("")
 		clearSelection()
 		setSelected(null)
+		setResume(null)
 		dropDownloadNotice()
 	}
 
@@ -230,7 +235,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	useAction("drive.clearSelection", clearSelection, { ...OUTSIDE_OVERLAYS, enabled: selected === null && selection.size > 0 })
 
 	// An opened child file takes over the whole surface (it carries its own back bar); the browse chrome
-	// returns when it is dismissed.
+	// returns when it is dismissed, its list resumed (scroll, cursor, focus) rather than kept mounted out of sight.
 	if (selected !== null) {
 		return (
 			<FileHero
@@ -365,6 +370,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					<BrowseList
 						key={current.uuid}
 						ref={listRef}
+						resume={resume}
+						onResumed={() => {
+							setResume(null)
+						}}
 						entries={visible}
 						selection={selection}
 						onSelectionChange={setSelection}

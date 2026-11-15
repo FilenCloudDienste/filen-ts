@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile, LinkedDir } from "@filen/sdk-rs"
 import type { AnonDownloadOutcome } from "@/features/publicLinks/lib/download"
 import type { SaveToDriveDialogProps } from "@/features/publicLinks/components/saveToDrive"
@@ -27,7 +27,9 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	usePublicDirSize: () => ({ data: undefined }),
 	usePublicVisitorSignedIn: () => ({ data: false })
 }))
-vi.mock("@/features/publicLinks/components/fileHero", () => ({ FileHero: () => "file hero" }))
+vi.mock("@/features/publicLinks/components/fileHero", () => ({
+	FileHero: ({ onBack }: { onBack: () => void }) => createElement("button", { type: "button", onClick: onBack }, "file hero")
+}))
 vi.mock("@/features/publicLinks/components/saveToDrive", () => ({
 	SaveToDriveButton: () => null,
 	SaveToDriveDialog: (props: SaveToDriveDialogProps) => {
@@ -259,6 +261,50 @@ describe("DirectoryBrowser — the list", () => {
 		fireEvent.doubleClick(option("b.txt"))
 
 		expect(screen.getByText("file hero")).toBeDefined()
+	})
+
+	it("comes back from an opened file scrolled where it was, focused on the file's row, the selection kept", async () => {
+		renderBrowser()
+
+		fireEvent.click(option("a.txt"), { detail: 1 })
+		screen.getByRole("listbox").scrollTop = 24
+		fireEvent.doubleClick(option("c.txt"))
+		fireEvent.click(screen.getByRole("button", { name: "file hero" }))
+
+		expect(screen.getByRole("listbox").scrollTop).toBe(24)
+		await waitFor(() => {
+			expect(document.activeElement).toBe(option("c.txt"))
+		})
+		expect(selectedNames()).toEqual(["a.txt"])
+
+		// The keys go on from the opened file's row.
+		fireEvent.keyDown(option("c.txt"), withCode({ key: "ArrowUp" }))
+		expect(option("b.txt").tabIndex).toBe(0)
+
+		// Escape leaves the next one the same way.
+		press(option("b.txt"), { key: "Enter" })
+		fireEvent.keyDown(document.body, withCode({ key: "Escape" }))
+		await waitFor(() => {
+			expect(document.activeElement).toBe(option("b.txt"))
+		})
+	})
+
+	it("starts a subdirectory fresh after a file was opened and closed", async () => {
+		renderBrowser()
+
+		screen.getByRole("listbox").scrollTop = 24
+		fireEvent.doubleClick(option("c.txt"))
+		fireEvent.click(screen.getByRole("button", { name: "file hero" }))
+		await waitFor(() => {
+			expect(document.activeElement).toBe(option("c.txt"))
+		})
+
+		fireEvent.doubleClick(option("Sub"))
+
+		expect(screen.getByRole("heading", { name: "Sub" })).toBeDefined()
+		expect(screen.getByRole("listbox").scrollTop).toBe(0)
+		expect(option("Sub").tabIndex).toBe(0)
+		expect(option("c.txt").tabIndex).toBe(-1)
 	})
 
 	it("saves the selection to the visitor's drive in one job, a directory with its link", () => {

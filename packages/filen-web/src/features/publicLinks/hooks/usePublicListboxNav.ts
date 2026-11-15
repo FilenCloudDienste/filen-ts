@@ -24,6 +24,8 @@ interface UsePublicListboxNavParams {
 	virtualizer: Pick<Virtualizer<HTMLDivElement, Element>, "scrollToIndex">
 	focusItem: (index: number) => void
 	onOpen: (index: number) => void
+	// The row the cursor and the range anchor start on, by uuid; null for none yet.
+	initialKey: string | null
 }
 
 export interface PublicListboxNav {
@@ -51,11 +53,12 @@ export function usePublicListboxNav({
 	onSelectionChange,
 	virtualizer,
 	focusItem,
-	onOpen
+	onOpen,
+	initialKey
 }: UsePublicListboxNavParams): PublicListboxNav {
 	// By uuid, not position: a sort or a filter keystroke reorders the rows under the cursor.
-	const [activeKey, setActiveKey] = useState<string | null>(null)
-	const [anchorKey, setAnchorKey] = useState<string | null>(null)
+	const [activeKey, setActiveKey] = useState<string | null>(initialKey)
+	const [anchorKey, setAnchorKey] = useState<string | null>(initialKey)
 	// Where each last resolved, for when its row leaves the list (React's adjust-during-render pattern).
 	const [activeFallback, setActiveFallback] = useState(0)
 	const [anchorFallback, setAnchorFallback] = useState(0)

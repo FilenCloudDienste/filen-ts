@@ -1,4 +1,4 @@
-import { useCallback, useImperativeHandle, useMemo, useState, type MouseEvent, type Ref } from "react"
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -29,10 +29,21 @@ const LIST_OVERSCAN = 8
 export interface BrowseListHandle {
 	// The filter's ArrowDown: the list takes focus on its cursor row.
 	focusCursor: () => void
+	// How far the rows are scrolled, kept as a file opens from them.
+	scrollOffset: () => number
+}
+
+// Where the list stood as a file opened from it: the list it returns to starts there, focused on that row.
+export interface BrowseResume {
+	key: string
+	scrollOffset: number
 }
 
 export interface BrowseListProps {
 	ref: Ref<BrowseListHandle>
+	// Read as the list mounts; onResumed says it is spent.
+	resume: BrowseResume | null
+	onResumed: () => void
 	entries: BrowseEntry[]
 	selection: BrowseSelection
 	onSelectionChange: (next: BrowseSelection) => void
@@ -47,12 +58,14 @@ export interface BrowseListProps {
 
 // The level's entries as drive's list view: its column header with a select-all box ahead, a virtualized
 // listbox with drive's keyboard and pointer selection, and its marquee over blank space. The browser remounts
-// it per level, so the cursor and scroll start fresh.
+// it per level, so the cursor and scroll start fresh, and as an opened file closes, which resumes them.
 //
 // useVirtualizer opts this component out of the React Compiler, so what the rows get is memoized by hand: the
 // row handlers never change identity.
 export function BrowseList({
 	ref,
+	resume,
+	onResumed,
 	entries,
 	selection,
 	onSelectionChange,
@@ -66,6 +79,8 @@ export function BrowseList({
 }: BrowseListProps) {
 	const { t } = useTranslation(["drive", "publicLinks"])
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	// The mount's resume until it is spent: its offset as the listbox attaches, its row's focus once it has.
+	const pendingResume = useRef(resume)
 	const { registerRef, focusItem } = useRovingItemRefs()
 	const items = useMemo<DriveItem[]>(() => entries.map(entry => entry.item), [entries])
 	const getItemKey = useCallback((index: number) => items[index]?.data.uuid ?? index, [items])
@@ -91,7 +106,8 @@ export function BrowseList({
 			if (entry !== undefined) {
 				onOpen(entry)
 			}
-		}
+		},
+		initialKey: resume?.key ?? null
 	})
 
 	const marquee = useMarqueeSelection({
@@ -109,10 +125,24 @@ export function BrowseList({
 		setCursor: nav.setCursor
 	})
 
-	useImperativeHandle(ref, () => ({ focusCursor: nav.focusCursor }), [nav.focusCursor])
+	useImperativeHandle(ref, () => ({ focusCursor: nav.focusCursor, scrollOffset: () => scrollElement?.scrollTop ?? 0 }), [
+		nav.focusCursor,
+		scrollElement
+	])
 
 	// The rows' handlers read the latest render through one ref, so a row only re-renders for its own values.
-	const latest = useLatestRef({ nav, entries, selection, onSelectionChange, onOpen, onAction })
+	const latest = useLatestRef({ nav, entries, selection, onSelectionChange, onOpen, onAction, onResumed })
+
+	// Back from an opened file: the keys go on from its row (already in view at the restored offset).
+	useEffect(() => {
+		if (scrollElement === null || pendingResume.current === null) {
+			return
+		}
+
+		pendingResume.current = null
+		latest.current.nav.focusCursor()
+		latest.current.onResumed()
+	}, [scrollElement, latest])
 	const handlePointerSelect = useCallback(
 		(index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => {
 			latest.current.nav.handlePointerSelect(index, event, pointerType)
@@ -182,6 +212,11 @@ export function BrowseList({
 
 	const listboxRef = useCallback(
 		(element: HTMLDivElement | null) => {
+			// Before the virtualizer attaches, which reads the offset as it does: the rows render where they stood.
+			if (element !== null && pendingResume.current !== null) {
+				element.scrollTop = pendingResume.current.scrollOffset
+			}
+
 			setScrollElement(element)
 			openRef(element)
 			itemMenuRef(element)
