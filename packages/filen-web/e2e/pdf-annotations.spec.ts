@@ -140,6 +140,9 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await expect(dialog.locator('[data-annotation-type="Text"]')).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 		await expect(panel.getByText("Please check this page")).toBeVisible()
 
+		// The thread's Reply opens the reply field (the shared comments pane's placeholder button).
+		await panel.getByRole("button", { name: preview.previewPdfCommentReplyPlaceholder, exact: true }).click()
+
 		const reply = panel.getByRole("textbox", { name: preview.previewPdfCommentReplyPlaceholder })
 
 		await reply.fill("Checked")
