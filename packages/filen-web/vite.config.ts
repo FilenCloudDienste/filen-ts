@@ -150,7 +150,9 @@ function assistantModelSources(mode: string): string[] {
 const contentSecurityPolicy = (connectExtra: readonly string[]) =>
 	[
 		"default-src 'none'",
-		"script-src 'self' 'wasm-unsafe-eval'",
+		// challenges.cloudflare.com: the Turnstile challenge on the public link pages' abuse report.
+		"script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
+		"frame-src https://challenges.cloudflare.com",
 		"worker-src 'self' blob:",
 		"style-src 'self' 'unsafe-inline'",
 		"font-src 'self'",
@@ -167,8 +169,9 @@ const contentSecurityPolicy = (connectExtra: readonly string[]) =>
 		// filen-controlled domains only — the .net / .filen-N.net families are the SDK's baked-in
 		// failover hosts (present in the wasm binary); removing them silently breaks failover.
 		// cdn.filen.io also serves the assistant's model files (fetched by its worker); see assistantModelSources.
+		// filen.io (the apex, outside *.filen.io) takes the public link pages' abuse reports.
 		[
-			"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net",
+			"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net https://filen.io",
 			...connectExtra
 		].join(" "),
 		"manifest-src 'none'",
