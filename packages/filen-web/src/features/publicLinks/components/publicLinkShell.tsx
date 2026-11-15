@@ -80,7 +80,12 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 			<footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-0.5 border-t border-border px-4 py-2 text-xs text-muted-foreground sm:justify-between sm:px-6">
 				<div className="flex flex-wrap items-center justify-center gap-x-2">
 					<span>{t("footerTagline")}</span>
-					<span aria-hidden="true">·</span>
+					<span
+						aria-hidden="true"
+						className="hidden sm:inline"
+					>
+						·
+					</span>
 					<a
 						href={REPORT_ABUSE_MAILTO}
 						className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground"
