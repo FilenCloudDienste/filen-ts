@@ -276,6 +276,7 @@ describe("ArchiveSourceBrowser extracts", () => {
 
 	it("takes a subdirectory's paths relative to it, its new directory named after it", async () => {
 		show(fakeSession({ type: "done", summary: SUMMARY }, storeOf(TREE)), "parent-dir")
+		press("ArrowDown")
 		press("Enter")
 		press("a", { ctrlKey: true })
 		await openMenu("Extract selected")

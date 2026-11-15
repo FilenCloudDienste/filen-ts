@@ -414,6 +414,7 @@ describe("ArchiveSourceBrowser states", () => {
 
 		expect(options()).toHaveLength(3)
 
+		press("ArrowDown")
 		press(" ")
 
 		expect(selectedNames()).toHaveLength(1)
@@ -493,7 +494,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		parentKeyDown.mockClear()
 	})
 
-	it("lists directories first and focuses the list", () => {
+	it("lists directories first and focuses the list, with no row current until a key moves there", () => {
 		show(fakeSession(done(), storeOf(TREE)))
 
 		expect(options().map(option => option.textContent)).toEqual([
@@ -502,11 +503,15 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 			expect.stringContaining("z.bin")
 		])
 		expect(document.activeElement).toBe(list())
+		expect(list().hasAttribute("aria-activedescendant")).toBe(false)
+		expect(options().some(option => option.hasAttribute("data-cursor"))).toBe(false)
 	})
 
 	it("moves the cursor on its own keys, leaving Left and Right to the overlay", () => {
 		show(fakeSession(done(), storeOf(TREE)))
 
+		expect(cursorName()).toBeNull()
+		expect(press("ArrowDown")).toBe(false)
 		expect(cursorName()).toContain("docs")
 		expect(press("ArrowDown")).toBe(false)
 		expect(cursorName()).toContain("readme.md")
@@ -522,6 +527,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 	it("toggles with Space, ranges with Shift, and keeps Escape while something is selected", () => {
 		show(fakeSession(done(), storeOf(TREE)))
 
+		press("ArrowDown")
 		press("ArrowDown")
 		press(" ")
 
@@ -556,6 +562,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 
 		show(fake)
 		press("a", { ctrlKey: true })
+		press("ArrowDown")
 		press("Enter")
 
 		expect(fake.session.rememberDirPath).toHaveBeenLastCalledWith("docs")
@@ -578,6 +585,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		const fake = fakeSession(done(), storeOf(TREE))
 
 		show(fake)
+		press("ArrowDown")
 		press("Enter")
 		press("ArrowDown")
 

@@ -157,6 +157,9 @@ test.describe("archive browser", () => {
 
 		await expectRows(list, ["docs", "empty-dir", "photos", "readme.txt"])
 		await expect(list).toBeFocused()
+		// Nothing shows as current until a key places the cursor.
+		await expect(list.locator("[data-cursor]")).toHaveCount(0)
+		await expect(list).not.toHaveAttribute("aria-activedescendant")
 
 		await page.keyboard.press("Home")
 		await expect(browser.row("docs")).toHaveAttribute("data-cursor", "")

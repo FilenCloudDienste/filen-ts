@@ -414,7 +414,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 
 		switch (action.type) {
 			case "move": {
-				const next = cursorTarget(action.move, Math.max(cursorIndex, 0), rows.count, pageSize)
+				const next = cursorTarget(action.move, cursorIndex, rows.count, pageSize)
 
 				if (next === null) {
 					return null

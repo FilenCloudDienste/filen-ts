@@ -190,6 +190,7 @@ describe("an archive entry on its own", () => {
 			{ path: "z.bin", size: 3, access: DIRECT }
 		])
 
+		press("ArrowDown")
 		press("Enter")
 
 		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
@@ -224,6 +225,7 @@ describe("an archive entry on its own", () => {
 	it("only toggles a tar's member, which reads front to back", () => {
 		show([{ path: "readme.md", size: 3, access: { type: "sequential" } }])
 
+		press("ArrowDown")
 		press("Enter")
 
 		expect(row("readme.md").getAttribute("aria-selected")).toBe("true")
@@ -245,6 +247,7 @@ describe("an archive entry on its own", () => {
 			}
 		])
 
+		press("ArrowDown")
 		press("Enter")
 
 		const dialog = await screen.findByRole("alertdialog")
@@ -296,6 +299,7 @@ describe("an archive entry on its own", () => {
 		})
 		show([{ path: "notes.txt", size: 3, access: DIRECT }])
 
+		press("ArrowDown")
 		press("Enter")
 
 		expect(await screen.findByText("Waiting for another archive job")).toBeTruthy()
@@ -344,6 +348,7 @@ describe("an archive entry on its own", () => {
 	it("keeps Left and Right from paging the overlay while an entry is open, on the viewer and inside it", async () => {
 		show([{ path: "readme.md", size: 3, access: DIRECT }])
 
+		press("ArrowDown")
 		press("Enter")
 
 		const body = await screen.findByText("markdown: hi!")
@@ -359,6 +364,7 @@ describe("an archive entry on its own", () => {
 	it("goes back to the list on Escape after a click into the viewer", async () => {
 		show([{ path: "readme.md", size: 3, access: DIRECT }])
 
+		press("ArrowDown")
 		press("Enter")
 
 		const body = await screen.findByText("markdown: hi!")
@@ -385,6 +391,7 @@ describe("an archive entry on its own", () => {
 
 		const unchecked = show([{ path: "notes.txt", size: 3, access: DIRECT, encrypted: true }], { password: "pw" })
 
+		press("ArrowDown")
 		press("Enter")
 
 		expect(await screen.findByText("text: hi!")).toBeTruthy()
@@ -397,6 +404,7 @@ describe("an archive entry on its own", () => {
 
 		const checked = show([{ path: "notes.txt", size: 3, access: DIRECT, encrypted: true }], { password: "pw" })
 
+		press("ArrowDown")
 		press("Enter")
 
 		expect(await screen.findByText("text: hi!")).toBeTruthy()

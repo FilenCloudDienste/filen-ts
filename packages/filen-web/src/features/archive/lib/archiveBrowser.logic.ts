@@ -128,10 +128,15 @@ const LIST_KEYS = { up: "ArrowUp", down: "ArrowDown", home: "Home", end: "End" }
 	string
 >
 
-// Where a move puts the cursor, clamped; null for an empty list.
+// Where a move puts the cursor, clamped; null for an empty list. Without a cursor yet (-1), any move but End
+// lands on the first row, so the first key press shows where the cursor starts.
 export function cursorTarget(move: CursorMove, cursor: number, count: number, pageSize: number): number | null {
 	if (count === 0) {
 		return null
+	}
+
+	if (cursor < 0) {
+		return move === "end" ? count - 1 : 0
 	}
 
 	const page = Math.max(pageSize, 1)
@@ -187,14 +192,11 @@ export interface RowPosition {
 	index: number
 }
 
-// The cursor's index now: the first row before any move, -1 in an empty list.
+// The cursor's index now; -1 before the user placed one (nothing shows as current on open) and in an empty
+// list.
 export function positionIndex(rows: RowView, position: RowPosition | null): number {
-	if (rows.count === 0) {
+	if (rows.count === 0 || position === null) {
 		return -1
-	}
-
-	if (position === null) {
-		return 0
 	}
 
 	return findRow(rows, position.ref, position.index) ?? Math.min(Math.max(position.index, 0), rows.count - 1)

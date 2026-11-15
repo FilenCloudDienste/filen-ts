@@ -173,6 +173,16 @@ describe("cursorTarget", () => {
 
 	it("has nowhere to go in an empty list", () => {
 		expect(cursorTarget("down", 0, 0, 3)).toBeNull()
+		expect(cursorTarget("down", -1, 0, 3)).toBeNull()
+	})
+
+	// Nothing shows as current on open: the first key places the cursor rather than moving it.
+	it("starts on the first row without a cursor, or the last for End", () => {
+		expect(cursorTarget("down", -1, 5, 3)).toBe(0)
+		expect(cursorTarget("up", -1, 5, 3)).toBe(0)
+		expect(cursorTarget("pageDown", -1, 5, 3)).toBe(0)
+		expect(cursorTarget("home", -1, 5, 3)).toBe(0)
+		expect(cursorTarget("end", -1, 5, 3)).toBe(4)
 	})
 })
 
@@ -189,8 +199,8 @@ describe("rows and positions", () => {
 		expect(findRow(rows, 99, 0)).toBeNull()
 	})
 
-	it("resolves a position: the first row at first, the nearest once its row is gone", () => {
-		expect(positionIndex(rows, null)).toBe(0)
+	it("resolves a position: none before the first move, the nearest once its row is gone", () => {
+		expect(positionIndex(rows, null)).toBe(-1)
 		expect(positionIndex(rows, { ref: 2, index: 0 })).toBe(2)
 		expect(positionIndex(rows, { ref: 99, index: 7 })).toBe(2)
 		expect(positionIndex(refsView(new Int32Array(0)), null)).toBe(-1)
