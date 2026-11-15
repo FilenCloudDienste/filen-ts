@@ -15,8 +15,13 @@ export function startCopyWithCard(items: DriveItem[], destination: CopyDestinati
 	return id
 }
 
-export function startLinkedCopyWithCard(item: AnyItemWithContext, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
-	const id = startLinkedCopy(item, name, glyph, destination)
+export function startLinkedCopyWithCard(
+	items: AnyItemWithContext[],
+	name: string,
+	glyph: CopyJobGlyph,
+	destination: CopyDestination
+): string {
+	const id = startLinkedCopy(items, name, glyph, destination)
 
 	showJobToast(id)
 

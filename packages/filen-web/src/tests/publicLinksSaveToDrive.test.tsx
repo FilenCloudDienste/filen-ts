@@ -151,6 +151,6 @@ describe("SaveToDriveButton", () => {
 
 		dialogProps.current?.onCopy?.(destination)
 
-		expect(startLinkedCopyWithCard).toHaveBeenCalledExactlyOnceWith(item, "a.txt", "file", destination)
+		expect(startLinkedCopyWithCard).toHaveBeenCalledExactlyOnceWith([item], "a.txt", "file", destination)
 	})
 })

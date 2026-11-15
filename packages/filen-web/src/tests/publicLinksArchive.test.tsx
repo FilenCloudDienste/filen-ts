@@ -9,6 +9,7 @@ import type { JobDestination } from "@filen/shared"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ListingCache } from "@/features/archive/lib/listingCache"
 import "@/lib/i18n"
+import { mockViewportHeight } from "@/tests/support/viewport"
 
 // A public link's archive actions: signed-in visitors only, nothing read before a click, extracting only
 // with downloads allowed, and the listings kept for as long as the link stays open.
@@ -160,6 +161,8 @@ function queryButton(name: string): HTMLElement | null {
 }
 
 beforeEach(() => {
+	// The listing is virtualized: its listbox needs a height for any row to render.
+	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	queryClient.clear()
 	vi.clearAllMocks()
 	online.current = true
@@ -354,7 +357,7 @@ describe("DirectoryBrowser — a linked directory", () => {
 	it("hands a child archive's own listing File to its hero, which reads nothing before Browse", async () => {
 		await renderDirectory(true, true)
 
-		fireEvent.click(screen.getByText("photos.zip"))
+		fireEvent.doubleClick(screen.getByText("photos.zip"))
 		await settle()
 
 		fireEvent.click(screen.getByRole("button", { name: "Extract to my Cloud Drive" }))

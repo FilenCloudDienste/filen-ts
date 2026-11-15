@@ -288,6 +288,26 @@ describe("React Compiler coverage", () => {
 		}
 	})
 
+	it("compiles a public directory's browser, rows and listbox, leaving only BrowseList to the virtualizer", () => {
+		const list = compile("src/features/publicLinks/components/browseList.tsx")
+
+		expect(list.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+
+		for (const [file, fnName] of [
+			["src/features/publicLinks/components/directoryBrowser.tsx", "DirectoryBrowser"],
+			["src/features/publicLinks/components/browseRow.tsx", "BrowseRow"],
+			["src/features/publicLinks/components/browseRow.tsx", "SelectionBox"],
+			["src/features/publicLinks/hooks/usePublicListboxNav.ts", "usePublicListboxNav"]
+		] as const) {
+			const events = compile(file)
+
+			expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+	})
+
 	it("compiles QueueRow, so a track change re-renders only the queue rows whose props changed", () => {
 		const events = compile("src/features/audio/components/nowPlayingPanel.tsx")
 

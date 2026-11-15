@@ -461,16 +461,17 @@ export function startCopy(items: DriveItem[], destination: CopyDestination): str
 	return id
 }
 
-// Saves what a public link points at (the whole linked file or directory) into the caller's own drive.
-export function startLinkedCopy(item: AnyItemWithContext, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
+// Saves what a public link points at (the linked file or directory, or items of a linked directory) into the
+// caller's own drive, in one job. `name` is the first item's.
+export function startLinkedCopy(items: AnyItemWithContext[], name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
 	const id = crypto.randomUUID()
 
 	void runCopyJob(defaultCopyDeps, {
 		id,
-		source: { kind: "linked", items: [item], destinationUuid: destination.uuid },
+		source: { kind: "linked", items, destinationUuid: destination.uuid },
 		destination,
-		itemCount: 1,
-		name,
+		itemCount: items.length,
+		name: copyRowName(items.length, name),
 		glyph
 	})
 

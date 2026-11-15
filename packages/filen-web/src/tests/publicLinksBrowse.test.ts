@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { File as SdkFile, LinkedDir, LinkedDirsAndFiles, DirPublicInfo } from "@filen/sdk-rs"
+import type { File as SdkFile, LinkedDir, LinkedDirsAndFiles, DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import {
 	rootCrumb,
 	enterCrumb,
@@ -8,10 +8,20 @@ import {
 	filterEntries,
 	sortEntries,
 	entryName,
+	entryKey,
+	browseEntryActions,
+	selectedEntries,
+	selectionCheck,
+	toggleAllSelection,
+	toggleSelection,
+	selectionBytes,
+	browseSaveItems,
+	browseSaveGlyph,
 	DEFAULT_PUBLIC_SORT,
+	EMPTY_SELECTION,
 	type BrowseEntry
 } from "@/features/publicLinks/lib/browse.logic"
-import { DRIVE_SORT_FROM_PARTS, sortDriveItems } from "@/features/drive/lib/sort"
+import { sortDriveItems } from "@/features/drive/lib/sort"
 
 function makeFile(uuid: `${string}-${string}-${string}-${string}`, name: string, size: bigint, modified: bigint): SdkFile {
 	return {
@@ -106,20 +116,20 @@ describe("sortEntries", () => {
 	})
 
 	it("sorts files by size within the file group", () => {
-		const sorted = sortEntries(entries, { field: "size", direction: "asc" })
+		const sorted = sortEntries(entries, "sizeAsc")
 		const files = sorted.filter(entry => entry.kind === "file")
 
 		expect(files.map(entryName)).toEqual(["apricot.txt", "banana.txt"])
 	})
 
 	it("reverses within groups on descending, folders still first", () => {
-		const sorted = sortEntries(entries, { field: "name", direction: "desc" })
+		const sorted = sortEntries(entries, "nameDesc")
 
 		expect(sorted.map(entryName)).toEqual(["Zebra", "Apple", "banana.txt", "apricot.txt"])
 	})
 
 	it("sorts files by modified date", () => {
-		const sorted = sortEntries(entries, { field: "date", direction: "asc" })
+		const sorted = sortEntries(entries, "lastModifiedAsc")
 		const files = sorted.filter(entry => entry.kind === "file")
 
 		// banana modified 200 < apricot modified 500
@@ -139,14 +149,10 @@ describe("sortEntries", () => {
 		const forward = toBrowseEntries(tied)
 		const reversed = [...forward].reverse()
 
-		for (const sort of [
-			DEFAULT_PUBLIC_SORT,
-			{ field: "size", direction: "asc" } as const,
-			{ field: "date", direction: "desc" } as const
-		]) {
+		for (const sort of [DEFAULT_PUBLIC_SORT, "sizeAsc", "lastModifiedDesc"] as const) {
 			const expected = sortDriveItems(
 				forward.map(entry => entry.item),
-				DRIVE_SORT_FROM_PARTS[sort.field === "date" ? "lastModified" : sort.field][sort.direction]
+				sort
 			).map(item => item.data.uuid)
 
 			expect(sortEntries(forward, sort).map(entry => entry.item.data.uuid)).toEqual(expected)
@@ -168,12 +174,7 @@ describe("sortEntries", () => {
 			]
 		})
 
-		for (const sort of [
-			DEFAULT_PUBLIC_SORT,
-			{ field: "name", direction: "desc" } as const,
-			{ field: "size", direction: "asc" } as const,
-			{ field: "date", direction: "desc" } as const
-		]) {
+		for (const sort of [DEFAULT_PUBLIC_SORT, "nameDesc", "sizeAsc", "lastModifiedDesc"] as const) {
 			// Reversed input too: tied items (the dirs' equal timestamps) keep their input order either way.
 			for (const input of [mixed, [...mixed].reverse()]) {
 				for (const query of ["", "ap", "APR", "zzz"]) {
@@ -223,5 +224,85 @@ describe("navigation stack", () => {
 
 		expect(jumpToCrumb(start, 5)).toHaveLength(1)
 		expect(jumpToCrumb(start, -1)).toHaveLength(1)
+	})
+})
+
+describe("browseEntryActions", () => {
+	it("offers a file Open, Download where the link allows it, and Save where saveable", () => {
+		expect(browseEntryActions("file", true, true)).toEqual(["open", "download", "saveToDrive"])
+		expect(browseEntryActions("file", true, false)).toEqual(["open", "download"])
+		expect(browseEntryActions("file", false, false)).toEqual(["open"])
+	})
+
+	it("offers a directory Open and its zip, never a row's own Save", () => {
+		expect(browseEntryActions("dir", true, true)).toEqual(["open", "download"])
+		expect(browseEntryActions("dir", false, false)).toEqual(["open"])
+	})
+})
+
+describe("selection", () => {
+	const entries = sortEntries(toBrowseEntries(listing), DEFAULT_PUBLIC_SORT)
+	const keys = entries.map(entryKey)
+	const files = entries.filter(entry => entry.kind === "file")
+
+	it("lists the selected entries in listing order, whatever order they were picked in", () => {
+		const selection = new Set([keys[3] ?? "", keys[0] ?? ""])
+
+		expect(selectedEntries(entries, selection).map(entryKey)).toEqual([keys[0], keys[3]])
+		expect(selectedEntries(entries, EMPTY_SELECTION)).toEqual([])
+	})
+
+	it("ignores a selected uuid the level no longer shows", () => {
+		expect(selectedEntries(entries, new Set(["gone", keys[1] ?? ""])).map(entryKey)).toEqual([keys[1]])
+	})
+
+	it("checks the header off, mixed, then on", () => {
+		expect(selectionCheck(entries, EMPTY_SELECTION)).toBe("off")
+		expect(selectionCheck(entries, new Set([keys[0] ?? ""]))).toBe("mixed")
+		expect(selectionCheck(entries, new Set(keys))).toBe("on")
+		expect(selectionCheck([], new Set(keys))).toBe("off")
+	})
+
+	it("selects everything from off or mixed, and nothing once everything is", () => {
+		expect([...toggleAllSelection(entries, EMPTY_SELECTION)].sort()).toEqual([...keys].sort())
+		expect([...toggleAllSelection(entries, new Set([keys[2] ?? ""]))].sort()).toEqual([...keys].sort())
+		expect(toggleAllSelection(entries, new Set(keys)).size).toBe(0)
+	})
+
+	it("toggles one uuid without touching the set it was given", () => {
+		const before = new Set([keys[0] ?? ""])
+		const added = toggleSelection(before, keys[1] ?? "")
+
+		expect([...added]).toEqual([keys[0], keys[1]])
+		expect([...toggleSelection(added, keys[0] ?? "")]).toEqual([keys[1]])
+		expect([...before]).toEqual([keys[0]])
+	})
+
+	it("adds up the selected files, and says nothing once a directory is among them", () => {
+		expect(selectionBytes(files)).toBe(files.reduce((sum, entry) => sum + entry.file.size, 0n))
+		expect(selectionBytes([])).toBe(0n)
+		expect(selectionBytes(entries)).toBeNull()
+	})
+})
+
+describe("browseSaveItems", () => {
+	const link = { enableDownload: true } as unknown as DirPublicLink
+	const entries = sortEntries(toBrowseEntries(listing), DEFAULT_PUBLIC_SORT)
+
+	it("hands the SDK a file as listed and a directory with the link it was listed under", () => {
+		const items = browseSaveItems(entries, link)
+
+		entries.forEach((entry, index) => {
+			expect(items[index]).toStrictEqual(entry.kind === "file" ? entry.file : { dir: entry.dir, link })
+		})
+	})
+
+	it("names the copy's glyph after one item's kind, or items for several", () => {
+		const dir = entries.find(entry => entry.kind === "dir")
+		const file = entries.find(entry => entry.kind === "file")
+
+		expect(dir && browseSaveGlyph([dir])).toBe("directory")
+		expect(file && browseSaveGlyph([file])).toBe("file")
+		expect(browseSaveGlyph(entries)).toBe("items")
 	})
 })

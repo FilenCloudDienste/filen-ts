@@ -13,7 +13,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/compon
 export const BULK_BAR_MIN_SELECTION = 2
 
 // Bottom-anchored floating selection pill: clear + count on the left, the surface's actions on the right.
-export function SelectionActionBar(props: { count: number; onClear: () => void; clearKbdAction: string; children: ReactNode }) {
+// `countLabel` replaces the plain count with a surface's own line (the count and what it adds up to).
+export function SelectionActionBar(props: {
+	count: number
+	countLabel?: string | undefined
+	onClear: () => void
+	clearKbdAction: string
+	children: ReactNode
+}) {
 	const { t } = useTranslation("common")
 
 	return (
@@ -31,7 +38,7 @@ export function SelectionActionBar(props: { count: number; onClear: () => void; 
 				>
 					<XIcon />
 				</TooltipIconButton>
-				<p className="text-sm text-muted-foreground">{t("selectedCount", { count: props.count })}</p>
+				<p className="text-sm text-muted-foreground">{props.countLabel ?? t("selectedCount", { count: props.count })}</p>
 			</div>
 			<div className="flex items-center gap-2">{props.children}</div>
 		</div>

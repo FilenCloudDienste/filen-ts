@@ -14,6 +14,7 @@ import type {
 	LinkedDirsAndFiles
 } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { mockViewportHeight } from "@/tests/support/viewport"
 
 const {
 	getLinkedFileAnon,
@@ -176,6 +177,8 @@ async function submitPassword(password: string): Promise<void> {
 }
 
 beforeEach(() => {
+	// The listing is virtualized: its listbox needs a height for any row to render.
+	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	vi.clearAllMocks()
 	hasClient.mockResolvedValue(false)
 	ownsItem.mockResolvedValue(false)
@@ -207,7 +210,7 @@ describe("public directory link request count", () => {
 	it("serves a visited level on a breadcrumb jump back: 0 extra listing or size reads", async () => {
 		await openDirectoryLink(nextInfo(false))
 
-		fireEvent.click(screen.getByText("Sub"))
+		fireEvent.doubleClick(screen.getByText("Sub"))
 		await drain()
 		expect(screen.getByText("inner.txt")).toBeTruthy()
 		expect(listLinkedDirAnon).toHaveBeenCalledTimes(2)

@@ -2,10 +2,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import type { AnonDownloadOutcome } from "@/features/publicLinks/lib/download"
 import "@/lib/i18n"
+import { mockViewportHeight } from "@/tests/support/viewport"
 
 // A failed or oversized "Download all" says so instead of quietly resetting the button.
 
@@ -63,6 +64,8 @@ async function downloadAll(outcome: AnonDownloadOutcome): Promise<void> {
 }
 
 beforeEach(() => {
+	// The listing is virtualized: its listbox needs a height for any row to render.
+	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	startAnonDirZipDownload.mockReset()
 	desktop.platform = undefined
 })
@@ -116,7 +119,7 @@ describe("DirectoryBrowser — Download all", () => {
 		)
 		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
 		fireEvent.click(screen.getByRole("button", { name: "Download all" }))
-		fireEvent.click(within(screen.getByRole("listitem")).getByRole("button"))
+		fireEvent.doubleClick(screen.getByText("Sub"))
 
 		await act(async () => {
 			finish(outcome)

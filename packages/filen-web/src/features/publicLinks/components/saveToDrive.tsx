@@ -60,17 +60,38 @@ export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: S
 				{compact ? <span className="hidden sm:inline">{t("saveToDrive")}</span> : t("saveToDrive")}
 			</Button>
 			{open ? (
-				<MoveTargetDialog
-					items={[]}
-					mode="copy"
-					onCopy={destination => {
-						startLinkedCopyWithCard(item, name, glyph, destination)
-					}}
+				<SaveToDriveDialog
+					items={[item]}
+					name={name}
+					glyph={glyph}
 					onClose={() => {
 						setOpen(false)
 					}}
 				/>
 			) : null}
 		</>
+	)
+}
+
+export interface SaveToDriveDialogProps {
+	// What the link shares, as the SDK copies it: the linked item, or items of a linked directory.
+	items: AnyItemWithContext[]
+	// The first item's name.
+	name: string
+	glyph: CopyJobGlyph
+	onClose: () => void
+}
+
+// Drive's destination picker, then one copy job for every item with its card.
+export function SaveToDriveDialog({ items, name, glyph, onClose }: SaveToDriveDialogProps) {
+	return (
+		<MoveTargetDialog
+			items={[]}
+			mode="copy"
+			onCopy={destination => {
+				startLinkedCopyWithCard(items, name, glyph, destination)
+			}}
+			onClose={onClose}
+		/>
 	)
 }

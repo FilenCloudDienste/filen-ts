@@ -89,14 +89,14 @@ export const publicLinks = {
 	emptyDirectory: "This directory is empty",
 	/** Directory view — no items match the active filter */
 	noMatches: "No items match your search",
-	/** Directory view — sort control label */
-	sortLabel: "Sort",
-	/** Directory view — sort by name */
-	sortName: "Name",
-	/** Directory view — sort by size */
-	sortSize: "Size",
-	/** Directory view — sort by modified date */
-	sortDate: "Modified",
+	/** Directory view — row ⋯ and right-click menu entry on a subdirectory: downloads it as one zip */
+	downloadAsZip: "Download as ZIP",
+	/** Directory view — accessible name of the column header's checkbox that selects every item on screen */
+	selectAll: "Select all",
+	/** Directory view — selection bar line when only files are selected: how many and their total size, singular */
+	selectedSummary_one: "{{count}} selected · {{size}}",
+	/** Directory view — selection bar line when only files are selected: how many and their total size, plural */
+	selectedSummary_other: "{{count}} selected · {{size}}",
 	/** Directory view — item + size summary, singular */
 	itemSummary_one: "{{count}} item · {{size}}",
 	/** Directory view — item + size summary, plural */

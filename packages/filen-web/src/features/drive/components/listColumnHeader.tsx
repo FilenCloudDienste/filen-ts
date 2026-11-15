@@ -1,3 +1,4 @@
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react"
 import { DRIVE_SORT_PARTS, nextColumnSort, type DriveSortBy, type DriveSortField } from "@/features/drive/lib/sort"
@@ -10,6 +11,8 @@ export interface ListColumnHeaderProps {
 	onSortChange: (next: DriveSortBy | null) => void
 	// Recents is a fixed chronological view, same gate as the Sort by menu.
 	disabled: boolean
+	// Ahead of the icon column, over the rows' own leading control (a public link's select-all box).
+	leading?: ReactNode
 }
 
 function ColumnButton({
@@ -62,6 +65,7 @@ export function ListColumnHeader(props: ListColumnHeaderProps) {
 
 	return (
 		<div className="flex h-8 shrink-0 items-center gap-3 border-b border-border/50 px-3 text-xs font-medium text-muted-foreground">
+			{props.leading}
 			<span
 				aria-hidden="true"
 				className="size-6 shrink-0"
