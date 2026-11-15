@@ -19,7 +19,11 @@ export interface PdfTextLayerParams {
 	readonly viewport: PdfViewport
 }
 
-// The host's pdf.js module as the pages use it: the loader's part plus the text layer.
+// The host's pdf.js module as the pages use it: the loader's part plus the text layer. `cleanup` removes the
+// canvases pdf.js appends to the body to measure spans (it does nothing while a layer is still rendering).
 export interface PdfJsDom extends PdfJs<ReadableStream> {
-	readonly TextLayer: new (params: PdfTextLayerParams) => PdfTextLayer
+	readonly TextLayer: {
+		new (params: PdfTextLayerParams): PdfTextLayer
+		cleanup(): void
+	}
 }

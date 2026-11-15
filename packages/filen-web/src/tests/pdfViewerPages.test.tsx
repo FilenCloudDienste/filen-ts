@@ -89,6 +89,10 @@ vi.mock("pdfjs-dist", () => ({
 		cancel(): void {
 			// Renders at once.
 		}
+
+		static cleanup(): void {
+			// No measuring canvases.
+		}
 	},
 	getDocument: () => ({
 		promise: Promise.resolve({

@@ -79,6 +79,7 @@ function fakePage(text: readonly string[], annotations: unknown[] = [], tall = 1
 const textLayers: FakeTextLayer[] = []
 
 class FakeTextLayer {
+	static readonly cleanup = vi.fn()
 	readonly textDivs: HTMLElement[] = []
 	readonly textContentItemsStr: string[] = []
 	readonly updates: PdfViewport[] = []
@@ -203,6 +204,7 @@ beforeEach(() => {
 	observers.length = 0
 	scrolled.length = 0
 	textLayers.length = 0
+	FakeTextLayer.cleanup.mockClear()
 	vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver)
 	vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
 		scrolled.push(this)
@@ -357,6 +359,25 @@ describe("PdfPages", () => {
 		expect(canvas?.width).toBe(0)
 		expect(pageElement(2).querySelector(".text-layer")?.childElementCount).toBe(0)
 		expect(pageElement(2).dataset["rendered"]).toBe("false")
+	})
+
+	it("removes pdf.js's measuring canvases once the last text layer goes, not while another stays", async () => {
+		const pages = [fakePage(["one"]), fakePage(["two"])]
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		await show(1)
+		await show(2)
+		fire("evict", 2, false)
+		await settle()
+
+		expect(textLayers).toHaveLength(2)
+		expect(FakeTextLayer.cleanup).not.toHaveBeenCalled()
+
+		for (const root of roots.splice(0)) act(() => root.unmount())
+		await settle()
+
+		expect(FakeTextLayer.cleanup).toHaveBeenCalledTimes(1)
 	})
 
 	it("renders allowed external links as new-tab anchors and drops the rest", async () => {

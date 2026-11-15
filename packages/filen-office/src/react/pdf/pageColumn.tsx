@@ -36,6 +36,12 @@ import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
 // in on a high-density screen would pass that. Above it the page renders at a lower pixel ratio.
 export const PDF_MAX_PAGE_CANVAS_BYTES = 64 * 1024 * 1024
 
+// The text layers built and not yet torn down, per pdf.js module. pdf.js measures spans on canvases it appends to the
+// body and removes them only in TextLayer.cleanup(), which it runs as one of its own documents is destroyed; the
+// editor's MuPDF document never is, and a pdf.js document destroyed while a layer still renders leaves them too. So
+// the last layer to go cleans up once it has settled (cleanup skips while any layer is pending).
+const liveTextLayers = new Map<PdfJsDom["TextLayer"], number>()
+
 // Joined to the package's own classes, which @filen/office/css/pdf.css styles (the host imports it).
 export interface PdfPagesClassNames {
 	readonly column?: string
@@ -734,7 +740,9 @@ function PdfPageView({
 		let unwatch: (() => void) | null = null
 
 		layerRef.current = layer
-		layer.render().then(
+		liveTextLayers.set(pdfjs.TextLayer, (liveTextLayers.get(pdfjs.TextLayer) ?? 0) + 1)
+
+		const settled = layer.render().then(
 			() => {
 				if (layerRef.current !== layer) return
 
@@ -757,6 +765,20 @@ function PdfPageView({
 			unwatch?.()
 			// render() appends as it streams and the constructor never clears, so a rebuild would stack spans.
 			container.replaceChildren()
+
+			const live = (liveTextLayers.get(pdfjs.TextLayer) ?? 1) - 1
+
+			if (live > 0) {
+				liveTextLayers.set(pdfjs.TextLayer, live)
+
+				return
+			}
+
+			liveTextLayers.delete(pdfjs.TextLayer)
+			// A layer built meanwhile (the next page in the same commit, a reopened viewer) keeps the canvases.
+			void settled.then(() => {
+				if (!liveTextLayers.has(pdfjs.TextLayer)) pdfjs.TextLayer.cleanup()
+			})
 		}
 	}, [pdfjs, proxy, nearView, inView])
 
