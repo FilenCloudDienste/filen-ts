@@ -391,6 +391,42 @@ describe("the annotation store", () => {
 		expect(store.commentThreads()).toEqual([thread])
 	})
 
+	it("hands its threads and attachments to views in its state, a new snapshot each time they are read", async () => {
+		const session = fakeSession(new Map([[0, []]]), [])
+		const thread = { page: 0, root: { page: 0, id: 7 } } as unknown as PdfCommentThread
+		const attachment = { name: "a.txt", size: 1, source: { kind: "document", key: "a.txt" } }
+		const live = {
+			...session,
+			engine: {
+				call: (op: string): Promise<unknown> =>
+					Promise.resolve(op === "comments" ? [thread] : op === "attachments" ? [attachment] : [])
+			}
+		}
+		const store = new PdfAnnotationStore()
+
+		store.bind(live as unknown as PdfEditSessionModel)
+
+		// A view compiled by the React Compiler reads what the store holds from its snapshot only (a method's answer is
+		// cached while the store stays the same object).
+		const before = store.getState()
+
+		store.openComments(true)
+		store.openAttachments(true)
+		await flush()
+
+		const after = store.getState()
+
+		expect(after).not.toBe(before)
+		expect(after.threads).toEqual([thread])
+		expect(after.attachments).toEqual([attachment])
+
+		// A change drops the attachments read and reads them again while they are open.
+		session.change([0])
+		expect(store.getState().attachments).toBeNull()
+		await flush()
+		expect(store.getState().attachments).toEqual([attachment])
+	})
+
 	it("joins an ink stroke to the drawing only while nothing else changed", () => {
 		const store = new PdfAnnotationStore()
 

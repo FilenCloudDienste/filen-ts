@@ -75,12 +75,12 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 	const selected = state.selected
 	const composing = state.composing
 	const attachmentWords = { failed: t("previewPdfAnnotAttachmentFailed"), missing: t("previewPdfAnnotAttachmentMissing") }
-	const attachments = state.attachmentsOpen ? store.attachments() : null
+	const attachments = state.attachmentsOpen ? state.attachments : null
 
 	return (
 		<>
 			<PdfCommentsPanel
-				threads={store.commentThreads() ?? []}
+				threads={state.threads ?? []}
 				editable={context.editable}
 				phone={phone}
 				open={state.commentsOpen}

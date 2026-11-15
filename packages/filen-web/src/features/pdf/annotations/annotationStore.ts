@@ -35,6 +35,11 @@ export interface PdfAnnotationState {
 	// A place clicked for a picture not chosen yet: the host asks for one.
 	readonly imageWanted: PdfStampPlacement | null
 	readonly attachmentsOpen: boolean
+	// Every page's comment threads in page order, null until read; and the document's attachments, null until read
+	// (asked for while the attachments are open). Held here, not handed out by a method: a view compiled by the React
+	// Compiler caches a method's answer for as long as the store is the same object.
+	readonly threads: readonly PdfCommentThread[] | null
+	readonly attachments: readonly PdfAttachmentInfo[] | null
 	// Bumped when the editor's annotations or threads change (a view reads them through the store).
 	readonly revision: number
 }
@@ -47,6 +52,8 @@ const INITIAL: PdfAnnotationState = {
 	image: null,
 	imageWanted: null,
 	attachmentsOpen: false,
+	threads: null,
+	attachments: null,
 	revision: 0
 }
 
@@ -66,7 +73,8 @@ export class PdfAnnotationStore {
 	// Comment threads by page once read (all pages), null before.
 	private threads: Map<number, readonly PdfCommentThread[]> | null = null
 	private threadsAsked = false
-	private attachmentList: readonly PdfAttachmentInfo[] | null = null
+	// The attachments read under way (for the session it was asked of).
+	private attachmentsReading: PdfEditSessionModel | null = null
 	// The drawing the ink tool's next stroke joins, while nothing else changed the document.
 	private ink: { readonly page: number; readonly id: number; readonly revision: number } | null = null
 	private askAuthor: (() => Promise<string | null>) | null = null
@@ -105,7 +113,7 @@ export class PdfAnnotationStore {
 		this.wanted = []
 		this.threads = null
 		this.threadsAsked = false
-		this.attachmentList = null
+		this.attachmentsReading = null
 		this.ink = null
 
 		if (session !== null) {
@@ -115,7 +123,9 @@ export class PdfAnnotationStore {
 			})
 		}
 
-		this.set({ selected: null, composing: null, revision: this.state.revision + 1 })
+		this.set({ selected: null, composing: null, threads: null, attachments: null, revision: this.state.revision + 1 })
+
+		if (this.state.attachmentsOpen) this.readAttachments()
 	}
 
 	// A change made a new revision of the document: what it touched is read again when next wanted.
@@ -131,8 +141,10 @@ export class PdfAnnotationStore {
 
 		if (this.threads !== null && snapshot.touched.length > 0) void this.readThreads(snapshot.touched)
 
-		this.attachmentList = null
-		this.changed()
+		this.attachmentsReading = null
+		this.set({ attachments: null, revision: this.state.revision + 1 })
+
+		if (this.state.attachmentsOpen) this.readAttachments()
 	}
 
 	// --- The editor's annotations ---
@@ -241,9 +253,7 @@ export class PdfAnnotationStore {
 
 	// Every page's threads in page order, null until read.
 	commentThreads(): readonly PdfCommentThread[] | null {
-		if (this.threads === null) return null
-
-		return [...this.threads.entries()].sort((a, b) => a[0] - b[0]).flatMap(([, threads]) => threads)
+		return this.state.threads
 	}
 
 	// Reads the threads of `pages` (every page when null) again.
@@ -272,7 +282,10 @@ export class PdfAnnotationStore {
 		for (const thread of read) threads.set(thread.page, [...(threads.get(thread.page) ?? []), thread])
 
 		this.threads = threads
-		this.changed()
+		this.set({
+			threads: [...threads.entries()].sort((a, b) => a[0] - b[0]).flatMap(([, list]) => list),
+			revision: this.state.revision + 1
+		})
 
 		if (pages === null && this.shown !== asOf) void this.readThreads(null)
 	}
@@ -281,25 +294,32 @@ export class PdfAnnotationStore {
 
 	openAttachments(open: boolean): void {
 		this.set({ attachmentsOpen: open })
+
+		if (open) this.readAttachments()
 	}
 
-	// The document's attachments, null while read (asked for here).
+	// The document's attachments (state.attachments), null while read.
 	attachments(): readonly PdfAttachmentInfo[] | null {
+		return this.state.attachments
+	}
+
+	private readAttachments(): void {
 		const session = this.session
 
-		if (this.attachmentList !== null || session === null) return this.attachmentList
+		if (session === null || this.state.attachments !== null || this.attachmentsReading === session) return
 
+		this.attachmentsReading = session
 		void session.engine.call("attachments", {}).then(
 			list => {
-				if (session !== this.session) return
+				if (session !== this.session || this.attachmentsReading !== session) return
 
-				this.attachmentList = list
-				this.changed()
+				this.attachmentsReading = null
+				this.set({ attachments: list, revision: this.state.revision + 1 })
 			},
-			() => undefined
+			() => {
+				if (this.attachmentsReading === session) this.attachmentsReading = null
+			}
 		)
-
-		return null
 	}
 
 	// --- The author, the ink drawing, the stamp picture, the hand, keys ---
