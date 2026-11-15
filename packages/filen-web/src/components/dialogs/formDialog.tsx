@@ -9,7 +9,8 @@ interface FormDialogProps {
 	open: boolean
 	pending: boolean
 	title: string
-	description: string
+	// Omitted when the form's own first label asks the question.
+	description?: string | undefined
 	submitLabel: string
 	cancelLabel: string
 	// The caller's whole submit gate (validity AND online); the button is also held disabled while pending.
@@ -58,7 +59,7 @@ function FormDialog({
 				>
 					<DialogHeader>
 						<DialogTitle>{title}</DialogTitle>
-						<DialogDescription>{description}</DialogDescription>
+						{description === undefined ? null : <DialogDescription>{description}</DialogDescription>}
 					</DialogHeader>
 					{children}
 					<DialogFooter>

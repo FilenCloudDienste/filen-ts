@@ -7,15 +7,15 @@ import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicL
 import { useDismissBootSplash } from "@/lib/bootSplash"
 import { ThirdPartyNoticesLink } from "@/features/settings/components/advanced/thirdPartyNoticesLink"
 import { desktopPlatform } from "@/lib/desktop"
+import { ReportAbuseButton } from "@/features/publicLinks/components/reportAbuseDialog"
 
 const FILEN_HOME_URL = "https://filen.io"
-const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
 
 // The shared shell for BOTH public-link routes — a slim, marketing-light chrome around whatever surface
 // the link resolves to (invalid / password / file / directory). This page deliberately drops
 // old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA (for a
 // signed-in visitor, a single way back to Cloud Drive instead), and a one-line footer with the e2e
-// tagline, a minimal report-abuse affordance and, quieter at its far end, the open source licenses. Exactly
+// tagline, a report-abuse dialog and, quieter at its far end, the open source licenses. Exactly
 // one viewport tall with both bars pinned: only `main` scrolls, and a surface that fills it (a preview, a
 // directory's list) sizes to it through its own min-h-0 chain. Theme-aware via the app's existing tokens (the
 // ambient ThemeProvider resolves system default for an anonymous visitor, so nothing theme-specific is
@@ -86,12 +86,10 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 					>
 						·
 					</span>
-					<a
-						href={REPORT_ABUSE_MAILTO}
+					<ReportAbuseButton
+						signedIn={signedIn.data === true}
 						className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground"
-					>
-						{t("reportAbuse")}
-					</a>
+					/>
 				</div>
 				<ThirdPartyNoticesLink className="rounded-md text-[0.6875rem] text-muted-foreground/70 focus-ring transition-colors outline-none hover:text-foreground hover:underline hover:underline-offset-4" />
 			</footer>

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes, type CopyJobGlyph } from "@filen/shared"
+import { driveItemName, formatBytes, type CopyJobGlyph } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 import type { AnyItemWithContext, DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -52,6 +52,7 @@ import { BulkActionButton, SelectionActionBar } from "@/components/selectionActi
 import { DownloadTooLargeNote, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { useReportViewing } from "@/features/publicLinks/lib/reportSubject"
 
 // One download at a time, the whole directory's zip ("zip") or a row's file or subdirectory ("item").
 type DownloadUiState =
@@ -96,6 +97,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	// Archive actions ask nothing of the link's owner: signed in with downloads allowed is enough.
 	const signedIn = usePublicVisitorSignedIn().data === true
 	const linkScope = linkFingerprint(link)
+
+	// An abuse report names where in the link the visitor is.
+	useReportViewing(selected === null ? stack.map(crumb => crumb.name) : [...stack.map(crumb => crumb.name), driveItemName(selected.item)])
 
 	const sorted = listing.data === undefined ? [] : sortEntries(toBrowseEntries(listing.data), sort)
 	// The sort is stable and the filter order-preserving, so a keystroke narrows the sorted level as it is.

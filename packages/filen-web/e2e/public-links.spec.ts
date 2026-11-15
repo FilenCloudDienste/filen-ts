@@ -14,6 +14,8 @@ import { BOOT_SETTLE_TIMEOUT_MS, SIGN_IN_HEADING } from "./helpers/listing"
 // and actually issues the anonymous worker round trip rather than short-circuiting on a bad key.
 const RANDOM_UUID = "deadbeef-0000-4000-8000-0123456789ab"
 const HEX_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+const TURNSTILE_SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+const REPORT_ENDPOINT = "https://filen.io/api/v1/abuse-report"
 
 test.describe("public links (unauthenticated)", () => {
 	test.use({ injectSession: false })
@@ -70,10 +72,10 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(cta).toBeVisible()
 		await expect(cta).toHaveAttribute("href", "https://filen.io")
 
-		// A one-line footer: the e2e tagline plus a minimal report-abuse affordance (a mailto, no API), and the
-		// open source licenses the page's bundle ships, quieter at its far end.
+		// A one-line footer: the e2e tagline plus the report-abuse dialog's trigger, and the open source licenses
+		// the page's bundle ships, quieter at its far end.
 		await expect(page.getByText("Shared securely with end-to-end encryption")).toBeVisible()
-		await expect(page.getByRole("link", { name: "Report abuse" })).toHaveAttribute("href", "mailto:abuse@filen.io")
+		await expect(page.getByRole("button", { name: "Report abuse" })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Open source licenses" })).toBeVisible()
 	})
 
@@ -92,6 +94,50 @@ test.describe("public links (unauthenticated)", () => {
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight))
 			.toBeLessThanOrEqual(0)
+	})
+
+	// The challenge script and the report endpoint are both stubbed: no real report is ever sent. The stub
+	// still crosses the page's CSP and cross-origin isolation, as Cloudflare's script does.
+	test("sends an abuse report through the footer's dialog", async ({ page }) => {
+		const reports: unknown[] = []
+
+		await page.route(TURNSTILE_SCRIPT, route =>
+			route.fulfill({
+				contentType: "text/javascript",
+				headers: { "Cross-Origin-Resource-Policy": "cross-origin", "Access-Control-Allow-Origin": "*" },
+				body: `window.turnstile = { render: (el, o) => { setTimeout(() => o.callback("e2e-token"), 0); return "w" }, reset() {}, remove() {} }`
+			})
+		)
+		await page.route(REPORT_ENDPOINT, route => {
+			reports.push(route.request().postDataJSON())
+
+			return route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				headers: { "Access-Control-Allow-Origin": "*" },
+				body: JSON.stringify({ success: true })
+			})
+		})
+		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
+		await page.getByRole("button", { name: "Report abuse" }).click()
+
+		const dialog = page.getByRole("dialog", { name: "Report abuse" })
+		const send = dialog.getByRole("button", { name: "Send" })
+
+		await expect(dialog).toBeVisible()
+		await expect(send).toBeDisabled()
+
+		await dialog.getByRole("radio", { name: "Malware" }).click()
+		await dialog.getByLabel("Your email").fill("visitor@example.com")
+		await dialog.getByLabel("Details (optional)").fill("e2e")
+		await expect(send).toBeEnabled()
+		await send.click()
+
+		await expect(dialog).toBeHidden()
+		await expect(page.getByText("Report sent. Thank you.")).toBeVisible()
+		expect(reports).toEqual([
+			{ turnstileToken: "e2e-token", email: "visitor@example.com", reason: "malware", link: page.url(), comment: "e2e" }
+		])
 	})
 
 	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {

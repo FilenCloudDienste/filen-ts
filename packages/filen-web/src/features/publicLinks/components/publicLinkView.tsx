@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { resolveRouteLink, type PublicLinkKind } from "@/features/publicLinks/lib/format.logic"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
@@ -6,6 +6,8 @@ import { PublicLinkShell } from "@/features/publicLinks/components/publicLinkShe
 import { PublicLinkInvalid } from "@/features/publicLinks/components/publicLinkStates"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
 import { DirectoryLinkView } from "@/features/publicLinks/components/directoryLinkView"
+import { EMPTY_REPORT_SUBJECT, ReportSubjectContext } from "@/features/publicLinks/lib/reportSubject"
+import type { ReportSubject } from "@/features/publicLinks/lib/report.logic"
 
 // The UNAUTHENTICATED public-link viewer. Rendered by both /f/ (file) and /d/ (dir), gated ONLY by the
 // root BootGate (no auth redirect either way), so an anonymous visitor and a signed-in visitor both
@@ -19,6 +21,8 @@ export function PublicLinkView({ kind, uuid }: { kind: PublicLinkKind; uuid: str
 	// navigation), so reading it straight off the live location is sufficient.
 	const hash = typeof window === "undefined" ? "" : window.location.hash
 	const resolved = resolveRouteLink(uuid, hash)
+	// What an abuse report from the shell's footer says the visitor is on, written by the views below.
+	const reportSubjectRef = useRef<ReportSubject>(EMPTY_REPORT_SUBJECT)
 
 	// The preview buffers this link loaded stay only while it is open: leaving it (Back, sign-in, Open
 	// Cloud Drive, another link) drops them. Hiding a preview keeps them for a Download or a revisit.
@@ -31,22 +35,24 @@ export function PublicLinkView({ kind, uuid }: { kind: PublicLinkKind; uuid: str
 	// The archive listings a signed-in visitor browsed live as long as the link: hiding the contents or
 	// stepping between a directory link's files reopens them, and another link starts without them.
 	return (
-		<PublicLinkShell>
-			<ArchiveListingScope key={uuid}>
-				{resolved === null ? (
-					<PublicLinkInvalid />
-				) : kind === "file" ? (
-					<FileLinkView
-						uuid={resolved.uuid}
-						linkKey={resolved.key}
-					/>
-				) : (
-					<DirectoryLinkView
-						uuid={resolved.uuid}
-						linkKey={resolved.key}
-					/>
-				)}
-			</ArchiveListingScope>
-		</PublicLinkShell>
+		<ReportSubjectContext value={reportSubjectRef}>
+			<PublicLinkShell>
+				<ArchiveListingScope key={uuid}>
+					{resolved === null ? (
+						<PublicLinkInvalid />
+					) : kind === "file" ? (
+						<FileLinkView
+							uuid={resolved.uuid}
+							linkKey={resolved.key}
+						/>
+					) : (
+						<DirectoryLinkView
+							uuid={resolved.uuid}
+							linkKey={resolved.key}
+						/>
+					)}
+				</ArchiveListingScope>
+			</PublicLinkShell>
+		</ReportSubjectContext>
 	)
 }

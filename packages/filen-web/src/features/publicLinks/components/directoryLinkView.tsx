@@ -8,17 +8,21 @@ import { rootCrumb } from "@/features/publicLinks/lib/browse.logic"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
 import { PublicLinkLoading } from "@/features/publicLinks/components/publicLinkStates"
 import { LinkAccessGate } from "@/features/publicLinks/components/linkAccessGate"
+import { useReportPassword } from "@/features/publicLinks/lib/reportSubject"
 
 // The /d/ route body. Resolves the directory info (root + link handle + hasPassword) up front; a
 // protected link is validated by LISTING the root with the typed password set — success accepts it,
 // a throw is a wrong password. The accepted password lives ONLY in this component's state and is
 // threaded into every browse call via linkForBrowsing, so navigating into subfolders never re-prompts;
-// a reload drops it and re-prompts by construction.
+// a reload drops it and re-prompts by construction. An abuse report reads it from memory too.
 export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: string }) {
 	const info = usePublicDirInfo(uuid, linkKey)
 	const [accepted, setAccepted] = useState<string | undefined>(undefined)
 	const [verifying, setVerifying] = useState(false)
 	const [failed, setFailed] = useState(false)
+
+	// An abuse report carries the accepted password, so staff can open the link.
+	useReportPassword(accepted)
 
 	const access = dirAccessState({
 		infoStatus: info.status,

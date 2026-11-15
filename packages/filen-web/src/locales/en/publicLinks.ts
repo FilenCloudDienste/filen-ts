@@ -28,8 +28,46 @@ export const publicLinks = {
 	homeLabel: "Filen home",
 	/** Footer — end-to-end-encryption tagline */
 	footerTagline: "Shared securely with end-to-end encryption",
-	/** Footer — report-abuse affordance */
+	/** Footer — opens the report-abuse dialog; also the dialog's title */
 	reportAbuse: "Report abuse",
+	/** Report dialog — label of the reason choices */
+	reportReasonLabel: "What's wrong with this link?",
+	/** Report dialog — reason */
+	reportReasonCopyright: "Copyright infringement",
+	/** Report dialog — reason */
+	reportReasonStolen: "Stolen data",
+	/** Report dialog — reason */
+	reportReasonMalware: "Malware",
+	/** Report dialog — reason */
+	reportReasonCsam: "Child sexual abuse material",
+	/** Report dialog — reason */
+	reportReasonSpam: "Spam",
+	/** Report dialog — reason */
+	reportReasonOther: "Other",
+	/** Report dialog — email field label */
+	reportEmailLabel: "Your email",
+	/** Report dialog — email field placeholder */
+	reportEmailPlaceholder: "you@example.com",
+	/** Report dialog — free-text field label */
+	reportDetailsLabel: "Details (optional)",
+	/** Report dialog — note on what the report shares, for a link without a password */
+	reportNote: "Your report includes this link so our team can review it.",
+	/** Report dialog — the same note when the visitor unlocked the link with a password */
+	reportNoteWithPassword: "Your report includes this link and its password so our team can review it.",
+	/** Report dialog — submit button */
+	reportSend: "Send",
+	/** Toast after a report was sent */
+	reportSent: "Report sent. Thank you.",
+	/** Report dialog — the server rejected the submitted fields */
+	reportErrorInvalid: "Some details are not valid. Check them and try again.",
+	/** Report dialog — the anti-bot check was rejected */
+	reportErrorTurnstile: "We couldn't verify you're human. Please try again.",
+	/** Report dialog — too many reports from this visitor */
+	reportErrorRateLimited: "Too many reports. Try again later.",
+	/** Report dialog — server error, network failure or timeout */
+	reportErrorServer: "Couldn't send your report. Please try again.",
+	/** Report dialog — the anti-bot check could not run */
+	reportChallengeFailed: "The security check couldn't load. Check your connection and try again.",
 
 	/** Password-protected surface — title */
 	passwordTitle: "Password required",

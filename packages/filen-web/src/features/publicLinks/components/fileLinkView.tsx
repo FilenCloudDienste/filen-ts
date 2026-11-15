@@ -6,6 +6,7 @@ import { secretFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { PublicLinkLoading } from "@/features/publicLinks/components/publicLinkStates"
 import { LinkAccessGate } from "@/features/publicLinks/components/linkAccessGate"
+import { useReportPassword } from "@/features/publicLinks/lib/reportSubject"
 
 // The /f/ route body. Resolves a LinkedFile against the anon worker surface, driving the password gate
 // off the resolve outcome (a protected file throws until the password matches — there is no up-front
@@ -20,6 +21,9 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 	const access = fileAccessState({ status: query.status, error: query.error, submitted })
 	// Not asked for a link whose file may not be taken, a copy included.
 	const saveable = useLinkSaveable("file", query.data?.downloadable === true ? query.data.uuid : null)
+
+	// Only a password that opened the link goes into an abuse report; a wrong one is never sent.
+	useReportPassword(access === "ready" ? password : undefined)
 
 	if (access !== "ready") {
 		return (
