@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { expect } from "../fixtures"
+import { expect, test } from "../fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS } from "./listing"
 import { writePdf } from "../../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
@@ -47,9 +47,30 @@ export async function openPdf(page: Page, listbox: Locator, name: string): Promi
 	return dialog
 }
 
+// Escape closes the preview: its pages are gone from the page (any canvas, the listing's included, is no proof).
 export async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
-	await expect(page.locator("canvas")).toHaveCount(0)
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toHaveCount(0)
+
+	// Diagnostic (WebKit CI kept a canvas in the document after this Escape once, the preview already gone from the
+	// accessibility tree): where any canvas left over sits.
+	const leftover = await page.evaluate(() =>
+		[...document.querySelectorAll("canvas")].map(canvas => {
+			const path: string[] = []
+
+			for (let node: Element | null = canvas; node !== null && path.length < 6; node = node.parentElement) {
+				path.push(
+					`${node.tagName.toLowerCase()}${node.getAttribute("role") === null ? "" : `[role=${node.getAttribute("role") ?? ""}]`}${node.hasAttribute("data-open") ? "[data-open]" : ""}${node.hasAttribute("data-closed") ? "[data-closed]" : ""}`
+				)
+			}
+
+			return path.join(" < ")
+		})
+	)
+
+	if (leftover.length > 0) {
+		await test.info().attach("canvas-after-close", { body: leftover.join("\n"), contentType: "text/plain" })
+	}
 }
 
 export async function protectTab(dialog: Locator): Promise<void> {

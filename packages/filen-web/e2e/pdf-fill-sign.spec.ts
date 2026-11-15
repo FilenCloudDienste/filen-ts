@@ -214,7 +214,33 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		// A cross placed from the keyboard: Enter puts it at the page's centre, arrows move it, Enter places it.
 		// Each step is said in the editor's live region ("left, top pt, width × height pt").
 		await page.getByRole("button", { name: preview.previewPdfFillCross }).click()
+		// Diagnostic (Chromium CI: focus ended on the preview dialog before this Enter, the editor long ready): every
+		// focus move from here, and whether the page surface focused below is the one still shown or was replaced.
+		await page.evaluate(() => {
+			const moves: string[] = []
+			const describe = (node: EventTarget | null): string =>
+				node instanceof Element
+					? `<${node.tagName.toLowerCase()} role=${node.getAttribute("role") ?? ""} label=${node.getAttribute("aria-label") ?? ""}>`
+					: "(none)"
+
+			Reflect.set(window, "__e2eFocusMoves", moves)
+
+			for (const type of ["focusin", "focusout"]) {
+				document.addEventListener(
+					type,
+					event => {
+						moves.push(
+							`${String(Math.round(performance.now()))} ${type} ${describe(event.target)} -> ${describe((event as FocusEvent).relatedTarget)}`
+						)
+					},
+					true
+				)
+			}
+		})
 		await pageSurface.focus()
+		await pageSurface.evaluate(element => {
+			element.setAttribute("data-e2e-focused", "")
+		})
 		await page.keyboard.press("Enter")
 
 		const live = pdfLiveRegion(page.getByRole("dialog").first())
@@ -223,16 +249,19 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		await expect(live)
 			.toHaveText(position)
 			.catch(async (error: unknown) => {
-				// Diagnostic (Chromium CI lost this cross once, with no placement ever announced): where Enter went.
-				const focused = await page.evaluate(() => {
+				const report = await page.evaluate(() => {
 					const element = document.activeElement
+					const marked = document.querySelector("[data-e2e-focused]")
+					const moves = (Reflect.get(window, "__e2eFocusMoves") as string[] | undefined) ?? []
 
-					return element === null
-						? "(none)"
-						: `<${element.tagName.toLowerCase()} role=${element.getAttribute("role") ?? ""} label=${element.getAttribute("aria-label") ?? ""}> connected: ${String(element.isConnected)}`
+					return [
+						`active: ${element === null ? "(none)" : `<${element.tagName.toLowerCase()} role=${element.getAttribute("role") ?? ""} label=${element.getAttribute("aria-label") ?? ""}>`}`,
+						`the surface focused is ${marked === null ? "gone (replaced)" : "still shown"}`,
+						...moves
+					].join("\n")
 				})
 
-				await testInfo.attach("cross-placement-focus", { body: focused, contentType: "text/plain" })
+				await testInfo.attach("cross-placement-focus", { body: report, contentType: "text/plain" })
 				throw error
 			})
 
