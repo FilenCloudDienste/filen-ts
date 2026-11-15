@@ -116,18 +116,19 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// Opens the pdf.js lazy chunk for the first time this run (fetch + compile + a dedicated worker
 	// spin-up), on top of the buffered download every whole-buffer preview already pays.
 	await row.dblclick()
-	const firstPageCanvas = page.locator('canvas[aria-label*="Page 1 of 2"]')
-	await expect(firstPageCanvas).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// Each page is a region named "<file> — Page n of N", sized to its canvas (which is decoration, aria-hidden).
+	const firstPage = page.getByRole("region", { name: /Page 1 of 2$/u })
+	await expect(firstPage).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByText("Page 1 of 2")).toBeVisible()
 
 	// The selectable text layer: only present once TextLayer has actually rendered.
 	const pageOneSpan = page.getByText("Page One")
 	await expect(pageOneSpan).toBeVisible({ timeout: 30_000 })
 
-	// STILL present after the canvas has finished (the spinner is gone / the canvas is no longer
-	// `invisible`). Direct regression net for the effect-lifecycle trap: a text layer wiped by the
+	// STILL present after the canvas has finished (the page says data-rendered once its bitmap is painted at this
+	// scale). Direct regression net for the effect-lifecycle trap: a text layer wiped by the
 	// canvas render effect's own cleanup would pass a racy "appears" check and fail this one.
-	await expect(firstPageCanvas).not.toHaveClass(/invisible/)
+	await expect(firstPage).toHaveAttribute("data-rendered", "true", { timeout: 60_000 })
 	await expect(pageOneSpan).toBeVisible()
 
 	// The span must be laid out to the RIGHT SIZE, not merely present. A "non-zero bounding box"
@@ -146,7 +147,7 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// the band — a failure that says the layer is broken when it is only mid-layout.
 	await expect(async () => {
 		const spanBox = await boxOf(pageOneSpan)
-		const canvasBox = await boxOf(firstPageCanvas)
+		const canvasBox = await boxOf(firstPage)
 
 		expect(spanBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
 		expect(spanBox.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
@@ -163,7 +164,10 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// the scroll settles rather than updating synchronously with the click.
 	await page.getByRole("button", { name: "Next page" }).click()
 	await expect(page.getByText("Page 2 of 2")).toBeVisible({ timeout: 30_000 })
-	await expect(page.locator('canvas[aria-label*="Page 2 of 2"]')).toBeVisible({ timeout: 30_000 })
+	const secondPage = page.getByRole("region", { name: /Page 2 of 2$/u })
+
+	await expect(secondPage).toBeInViewport({ timeout: 30_000 })
+	await expect(secondPage).toHaveAttribute("data-rendered", "true", { timeout: 30_000 })
 
 	// Find: the toolbar's field searches every page's text and paints the matches into the text layer. It
 	// starts at the page in view (page 2, the second match) and steps on round to page 1, scrolling it back
@@ -182,14 +186,14 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	await expect(page.getByText("Page 1 of 2")).toBeVisible({ timeout: 30_000 })
 
 	await page.keyboard.press("Escape")
-	await expect(firstPageCanvas).toHaveCount(0)
+	await expect(firstPage).toHaveCount(0)
 
 	// The link overlay: real positioned <a> elements built from getAnnotations() data. Only the
 	// https: annotation renders — the javascript: one is dropped before it ever reaches the DOM
 	// (unlike the docx sweep, which strips an href after render).
 	await linksRow.dblclick()
-	const linksPageCanvas = page.locator('canvas[aria-label*="Page 1 of 1"]')
-	await expect(linksPageCanvas).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	const linksPage = page.getByRole("region", { name: /Page 1 of 1$/u })
+	await expect(linksPage).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	const annotationLink = page.getByRole("dialog").getByRole("link")
 	await expect(annotationLink).toHaveCount(1)
@@ -201,7 +205,7 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// the canvas's measured box, so a pair sampled mid-layout is self-consistent and still out of bounds.
 	await expect(async () => {
 		const linkBox = await boxOf(annotationLink)
-		const linksCanvasBox = await boxOf(linksPageCanvas)
+		const linksCanvasBox = await boxOf(linksPage)
 
 		expect(linkBox.x).toBeGreaterThanOrEqual(linksCanvasBox.x - 1)
 		expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(linksCanvasBox.x + linksCanvasBox.width + 1)
@@ -210,7 +214,7 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	}).toPass({ timeout: 30_000 })
 
 	await page.keyboard.press("Escape")
-	await expect(linksPageCanvas).toHaveCount(0)
+	await expect(linksPage).toHaveCount(0)
 
 	expect(cspViolations).toEqual([])
 })
@@ -249,11 +253,12 @@ test("PDF preview prompts for a password, retries after a wrong one, and renders
 
 	await passwordField.fill(PDF_PASSWORD_CORRECT)
 	await page.getByRole("button", { name: "Unlock" }).click()
-	const canvas = page.locator('canvas[aria-label*="Page 1 of 2"]')
-	await expect(canvas).toBeVisible({ timeout: 30_000 })
+	const firstPage = page.getByRole("region", { name: /Page 1 of 2$/u })
+	await expect(firstPage).toBeVisible({ timeout: 30_000 })
+	await expect(firstPage).toHaveAttribute("data-rendered", "true", { timeout: 30_000 })
 
 	await page.keyboard.press("Escape")
-	await expect(canvas).toHaveCount(0)
+	await expect(firstPage).toHaveCount(0)
 
 	expect(cspViolations).toEqual([])
 })

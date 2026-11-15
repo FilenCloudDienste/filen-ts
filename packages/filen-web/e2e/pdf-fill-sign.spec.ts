@@ -5,7 +5,7 @@ import { test, expect, settleLeases } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { resolveModKey } from "./helpers/modkey"
-import { expectPdfSaved, pdfPageScroller } from "./helpers/pdfSurface"
+import { expectPdfSaved, pdfLiveRegion, pdfPageScroller } from "./helpers/pdfSurface"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
 
@@ -212,10 +212,35 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		await pageSurface.click({ position: { x: 120, y: 220 } })
 
 		// A cross placed from the keyboard: Enter puts it at the page's centre, arrows move it, Enter places it.
+		// Each step is said in the editor's live region ("left, top pt, width × height pt").
 		await page.getByRole("button", { name: preview.previewPdfFillCross }).click()
 		await pageSurface.focus()
 		await page.keyboard.press("Enter")
+
+		const live = pdfLiveRegion(page.getByRole("dialog").first())
+		const position = /^\d+, \d+ pt, \d+ × \d+ pt$/u
+
+		await expect(live)
+			.toHaveText(position)
+			.catch(async (error: unknown) => {
+				// Diagnostic (Chromium CI lost this cross once, with no placement ever announced): where Enter went.
+				const focused = await page.evaluate(() => {
+					const element = document.activeElement
+
+					return element === null
+						? "(none)"
+						: `<${element.tagName.toLowerCase()} role=${element.getAttribute("role") ?? ""} label=${element.getAttribute("aria-label") ?? ""}> connected: ${String(element.isConnected)}`
+				})
+
+				await testInfo.attach("cross-placement-focus", { body: focused, contentType: "text/plain" })
+				throw error
+			})
+
+		const started = await live.textContent()
+
 		await page.keyboard.press("Shift+ArrowRight")
+		await expect(live).not.toHaveText(started ?? "")
+		await expect(live).toHaveText(position)
 		await page.keyboard.press("Enter")
 
 		// A drawn signature, saved for reuse.
