@@ -52,20 +52,94 @@ interface MarqueeUniformLayout {
 	offsetTop?: number
 }
 
-type MarqueeParams<T extends MarqueeItem> = {
+interface MarqueeCommon {
+	scrollElement: HTMLDivElement | null
+	// Moves the roving cursor to the drag-end item, mirroring how a click sets it.
+	setCursor: (index: number) => void
+	// A press on an item arms the marquee too, except on its controls (a button, a link, an input, or what
+	// carries MARQUEE_SKIP_PROPS). For a list whose items are no drag sources (the archive browser);
+	// elsewhere a press on an item is left to click-selection and drag-and-drop.
+	startsOnItems?: boolean
+}
+
+type MarqueeLayout = MarqueeUniformLayout | { hitTest: MarqueeHitTest }
+
+// The marquee over an item array, the selection being the items themselves.
+export type MarqueeParams<T extends MarqueeItem> = {
 	items: T[]
 	// Selection identity for the additive union. Defaults to the uuid; drive passes its row key, since
 	// the Shared by me root lists one item once per receiver.
 	keyOf?: (item: T) => string
 	// The selection store this marquee drives — drive's useDriveStore, photos' usePhotosStore.
 	selection: { read: () => T[]; write: (items: T[]) => void }
-	scrollElement: HTMLDivElement | null
-	// Moves the roving cursor to the drag-end item, mirroring how a click sets it.
-	setCursor: (index: number) => void
-} & (MarqueeUniformLayout | { hitTest: MarqueeHitTest })
+} & MarqueeCommon &
+	MarqueeLayout
+
+// A selection the host keeps in its own shape, addressed by item index: a list too large to hand over as
+// items, or whose selection is no set of them (the archive browser's rules).
+export interface MarqueeIndexSelection<S> {
+	read: () => S
+	write: (next: S) => void
+	// The selection a drag covering `indices` (ascending) makes: those alone, or added to `preset`, the
+	// selection at the press, when the drag is additive (null otherwise).
+	cover: (indices: readonly number[], preset: S | null) => S
+}
+
+export type MarqueeIndexParams<S> = {
+	itemCount: number
+	selection: MarqueeIndexSelection<S>
+} & MarqueeCommon &
+	MarqueeLayout
+
+// Spread onto an item's own control that a press must not start a marquee from (see startsOnItems).
+export const MARQUEE_SKIP_PROPS = { "data-marquee-skip": "" }
+
+const ITEM_CONTROL_SELECTOR = "button, a, input, [data-marquee-skip]"
+
+// One drag's hold on the selection, taken at the press.
+interface MarqueeArm {
+	// Selects what the rectangle covers now.
+	cover: (indices: readonly number[]) => void
+	// Puts back the selection the drag started from (Escape).
+	restore: () => void
+}
+
+function stopClick(event: MouseEvent): void {
+	event.stopPropagation()
+}
+
+// Keeps the click a pointerup is about to produce from reaching the page. The browser dispatches it in
+// the same task as the pointerup, so a listener dropped on the next task catches that click alone.
+function swallowNextClick(): void {
+	window.addEventListener("click", stopClick, { capture: true, once: true })
+	setTimeout(() => {
+		window.removeEventListener("click", stopClick, true)
+	}, 0)
+}
 
 function uuidKey(item: MarqueeItem): string {
 	return item.data.uuid
+}
+
+// The items at `indices`, alone, or after the additive preset's minus those it already holds.
+function coverItems<T>(
+	items: readonly T[],
+	indices: readonly number[],
+	preset: T[] | null,
+	presetKeys: ReadonlySet<string>,
+	keyOf: (item: T) => string
+): T[] {
+	const next = preset === null ? [] : preset.slice()
+
+	for (const index of indices) {
+		const item = items[index]
+
+		if (item !== undefined && (preset === null || !presetKeys.has(keyOf(item)))) {
+			next.push(item)
+		}
+	}
+
+	return next
 }
 
 function uniformHitTest(itemCount: number, { viewMode, columns, geometry, offsetTop = 0 }: MarqueeUniformLayout): MarqueeHitTest {
@@ -88,18 +162,15 @@ function uniformHitTest(itemCount: number, { viewMode, columns, geometry, offset
 // Live per-drag state. Kept entirely in a ref (not React state): it mutates on every pointermove/frame
 // and must not itself drive renders — only the rendered rectangle does, via the rect store below. Keeping
 // the mutable tracking in a ref is also what keeps this compiler-safe.
-interface MarqueeDrag<T> {
+interface MarqueeDrag {
 	// content-space anchor (fixed while the listing scrolls under the pointer)
 	anchorX: number
 	anchorY: number
 	// viewport-space press origin, for the start threshold
 	startClientX: number
 	startClientY: number
-	// ctrl/cmd at arm time: union with the pre-drag set instead of replacing it
-	additive: boolean
-	preset: T[]
-	// only built for additive drags; empty otherwise
-	presetKeys: ReadonlySet<string>
+	// the selection at the press, and how the drag replaces it (or, ctrl/cmd held then, adds to it)
+	arm: MarqueeArm
 	started: boolean
 	lastClientX: number
 	lastClientY: number
@@ -153,24 +224,29 @@ export interface MarqueeSelection {
 // rectangle and continuously replaces (or, under ctrl/cmd, unions) the selection with the items it
 // covers — hit-tested in item space so scrolled-away rows count. Auto-scrolls near the edges; Escape
 // cancels and restores the arm-time selection.
-export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams<T>): MarqueeSelection {
-	const { items, selection, scrollElement, setCursor, keyOf = uuidKey } = params
-	const hitTest = "hitTest" in params ? params.hitTest : uniformHitTest(items.length, params)
+//
+// The selection is an item array (`items`), or the host's own addressed by index (`itemCount`).
+export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams<T>): MarqueeSelection
+export function useMarqueeSelection<S>(params: MarqueeIndexParams<S>): MarqueeSelection
+export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueeParams<T> | MarqueeIndexParams<S>): MarqueeSelection {
+	const { scrollElement, setCursor } = params
+	const itemCount = "items" in params ? params.items.length : params.itemCount
+	const hitTest = "hitTest" in params ? params.hitTest : uniformHitTest(itemCount, params)
 	const [rectStore] = useState(createMarqueeRectStore)
 	// The store never changes identity; a plain ref lets the mount-only teardown reach it as a stable dep.
 	const rectStoreRef = useRef(rectStore)
-	const dragRef = useRef<MarqueeDrag<T> | null>(null)
+	const dragRef = useRef<MarqueeDrag | null>(null)
 	const rafRef = useRef(0)
 	const detachRef = useRef<(() => void) | null>(null)
 
 	// Latest render values, read by the window-level listeners so they never go stale without re-binding.
 	// One object, so one effect on a hook that re-renders whenever the marqueed selection changes.
-	const latestRef = useLatestRef({ items, hitTest, selection, scrollElement, setCursor })
+	const latestRef = useLatestRef({ params, hitTest, scrollElement, setCursor })
 
 	// The container's live content box, rebuilt per move from the current clientWidth + the drag's own
 	// paddings — a container with no padding and no border reduces to the raw border-box math this hook
 	// used before.
-	function contentBoxFor(el: HTMLDivElement, drag: MarqueeDrag<T>): MarqueeContentBox {
+	function contentBoxFor(el: HTMLDivElement, drag: MarqueeDrag): MarqueeContentBox {
 		return marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, drag.paddingLeft, drag.paddingTop, drag.paddingRight)
 	}
 
@@ -194,36 +270,10 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			marqueeRectFromPoints(drag.anchorX, drag.anchorY, contentX, contentY),
 			marqueeScrollBounds(box, el.clientLeft, el.clientTop, el.clientWidth, el.scrollHeight)
 		)
-		const items = latestRef.current.items
 		const indices = latestRef.current.hitTest.indices(marqueeRect, box.width)
 
 		drag.lastHitIndex = indices.at(-1) ?? -1
-
-		const hitItems: T[] = []
-
-		for (const index of indices) {
-			const item = items[index]
-
-			if (item) {
-				hitItems.push(item)
-			}
-		}
-
-		let next: T[]
-
-		if (drag.additive) {
-			next = drag.preset.slice()
-
-			for (const item of hitItems) {
-				if (!drag.presetKeys.has(keyOf(item))) {
-					next.push(item)
-				}
-			}
-		} else {
-			next = hitItems
-		}
-
-		latestRef.current.selection.write(next)
+		drag.arm.cover(indices)
 		rectStoreRef.current.set(marqueeRect)
 	}
 
@@ -336,6 +386,12 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			drag.lastClientY = event.clientY
 			computeAndApply(event.clientX, event.clientY)
 			commitCursor()
+
+			// Where a press on an item arms the marquee, the click its release ends in (on that item, or
+			// on the list) is the drag's: it must not select or deselect again.
+			if (event.type === "pointerup" && latestRef.current.params.startsOnItems === true) {
+				swallowNextClick()
+			}
 		}
 
 		endDrag()
@@ -358,7 +414,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		event.stopPropagation()
 
 		if (drag.started) {
-			latestRef.current.selection.write(drag.preset)
+			drag.arm.restore()
 		}
 
 		endDrag()
@@ -372,6 +428,52 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		}
 	}
 
+	// Snapshots the selection at the press. Covering reads the latest render's items and selection, so a
+	// listing that changes mid-drag is hit-tested as it is now.
+	function armSelection(additive: boolean): MarqueeArm {
+		if ("items" in params) {
+			const preset = params.selection.read()
+			const keyOf = params.keyOf ?? uuidKey
+			const presetKeys = additive ? new Set(preset.map(keyOf)) : EMPTY_KEYS
+
+			return {
+				cover: indices => {
+					const latest = latestRef.current.params
+
+					if ("items" in latest) {
+						latest.selection.write(coverItems(latest.items, indices, additive ? preset : null, presetKeys, keyOf))
+					}
+				},
+				restore: () => {
+					const latest = latestRef.current.params
+
+					if ("items" in latest) {
+						latest.selection.write(preset)
+					}
+				}
+			}
+		}
+
+		const preset = params.selection.read()
+
+		return {
+			cover: indices => {
+				const latest = latestRef.current.params
+
+				if (!("items" in latest)) {
+					latest.selection.write(latest.selection.cover(indices, additive ? preset : null))
+				}
+			},
+			restore: () => {
+				const latest = latestRef.current.params
+
+				if (!("items" in latest)) {
+					latest.selection.write(preset)
+				}
+			}
+		}
+	}
+
 	function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
 		// Mouse only — touch/pen are ignored (they scroll/long-press). Primary button, no modifier
 		// required to start (ctrl/cmd only flips it additive).
@@ -381,8 +483,9 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 
 		const target = event.target instanceof HTMLElement ? event.target : null
 
-		// Starting on a row/tile (or its menu chrome) leaves click-selection untouched.
-		if (target?.closest('[role="option"]')) {
+		// Starting on a row/tile (or its menu chrome) leaves click-selection untouched, unless the list
+		// marquees from its items too (never from their controls).
+		if (target?.closest('[role="option"]') && (params.startsOnItems !== true || target.closest(ITEM_CONTROL_SELECTOR) !== null)) {
 			return
 		}
 
@@ -404,16 +507,12 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const paddingTop = parseFloat(style.paddingTop) || 0
 		const paddingRight = parseFloat(style.paddingRight) || 0
 		const box = marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, paddingLeft, paddingTop, paddingRight)
-		const preset = selection.read()
-		const additive = isToggleModifier(event)
-		const drag: MarqueeDrag<T> = {
+		const drag: MarqueeDrag = {
 			anchorX: offsetX - box.insetLeft,
 			anchorY: offsetY - box.insetTop + el.scrollTop,
 			startClientX: event.clientX,
 			startClientY: event.clientY,
-			additive,
-			preset,
-			presetKeys: additive ? new Set(preset.map(keyOf)) : EMPTY_KEYS,
+			arm: armSelection(isToggleModifier(event)),
 			started: false,
 			lastClientX: event.clientX,
 			lastClientY: event.clientY,

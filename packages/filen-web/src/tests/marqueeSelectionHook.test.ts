@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, renderHook } from "@testing-library/react"
 import { createElement, type PointerEvent as ReactPointerEvent } from "react"
-import { useMarqueeSelection, type MarqueeItem } from "@/features/drive/hooks/useMarqueeSelection"
+import { MARQUEE_SKIP_PROPS, useMarqueeSelection, type MarqueeItem } from "@/features/drive/hooks/useMarqueeSelection"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 
 afterEach(() => {
@@ -169,5 +169,209 @@ describe("useMarqueeSelection — rectangle updates", () => {
 
 		expect(result.current.rectStore.get()).toBeNull()
 		expect(view.queryByTestId("marquee-rect")).toBeNull()
+	})
+})
+
+// A selection the host keeps by index (the archive browser's rules): the hook hands it the covered indices
+// and the press-time selection, never an item array.
+type IndexSelection = readonly number[]
+
+function renderIndexMarquee(el: HTMLDivElement, { preset = [], startsOnItems }: { preset?: IndexSelection; startsOnItems?: boolean } = {}) {
+	const write = vi.fn<(next: IndexSelection) => void>()
+	const cover = vi.fn((indices: readonly number[], from: IndexSelection | null): IndexSelection => [...(from ?? []), ...indices])
+	const setCursor = vi.fn<(index: number) => void>()
+	const { result } = renderHook(() =>
+		useMarqueeSelection<IndexSelection>({
+			itemCount: 5,
+			viewMode: "list",
+			columns: 1,
+			geometry: { rowHeight: 40, tileWidth: 176 },
+			selection: { read: () => preset, write, cover },
+			scrollElement: el,
+			setCursor,
+			...(startsOnItems === undefined ? {} : { startsOnItems })
+		})
+	)
+
+	return { result, write, cover, setCursor }
+}
+
+function pressOn(
+	el: HTMLDivElement,
+	target: HTMLElement,
+	onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void,
+	ctrlKey = false
+): void {
+	onPointerDown({
+		pointerType: "mouse",
+		button: 0,
+		clientX: 10,
+		clientY: 10,
+		metaKey: false,
+		ctrlKey,
+		target,
+		currentTarget: el
+	} as unknown as ReactPointerEvent<HTMLDivElement>)
+}
+
+function release(x: number, y: number): void {
+	act(() => {
+		window.dispatchEvent(new PointerEvent("pointerup", { clientX: x, clientY: y }))
+	})
+}
+
+// An option row in the list: a marked control, its name and a button.
+function optionIn(el: HTMLDivElement): { name: HTMLSpanElement; button: HTMLButtonElement; check: HTMLSpanElement } {
+	const option = document.createElement("div")
+	const name = document.createElement("span")
+	const button = document.createElement("button")
+	const check = document.createElement("span")
+
+	option.setAttribute("role", "option")
+
+	for (const [attribute, value] of Object.entries(MARQUEE_SKIP_PROPS)) {
+		check.setAttribute(attribute, value)
+	}
+
+	option.append(check, name, button)
+	el.appendChild(option)
+
+	return { name, button, check }
+}
+
+describe("useMarqueeSelection — by index", () => {
+	it("covers the rows under the rectangle, replacing the selection", () => {
+		const el = container()
+		const { result, write, cover } = renderIndexMarquee(el, { preset: [4] })
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+
+		expect(cover).toHaveBeenLastCalledWith([0, 1, 2], null)
+		expect(write).toHaveBeenLastCalledWith([0, 1, 2])
+	})
+
+	it("adds to the press-time selection under the toggle modifier", () => {
+		const el = container()
+		const { result, write, cover } = renderIndexMarquee(el, { preset: [4] })
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown, true)
+		})
+		dragTo(10, 50)
+
+		expect(cover).toHaveBeenLastCalledWith([0, 1], [4])
+		expect(write).toHaveBeenLastCalledWith([4, 0, 1])
+	})
+
+	it("puts the press-time selection back on Escape", () => {
+		const el = container()
+		const { result, write } = renderIndexMarquee(el, { preset: [4] })
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+		act(() => {
+			window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		})
+
+		expect(write).toHaveBeenLastCalledWith([4])
+		expect(result.current.rectStore.get()).toBeNull()
+	})
+
+	it("moves the cursor to the row the drag ends on", () => {
+		const el = container()
+		const { result, setCursor } = renderIndexMarquee(el)
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+		release(10, 90)
+
+		expect(setCursor).toHaveBeenCalledWith(2)
+	})
+})
+
+describe("useMarqueeSelection — starting on an item", () => {
+	it("leaves a press on an item to click-selection by default", () => {
+		const el = container()
+		const { name } = optionIn(el)
+		const { result, write } = renderIndexMarquee(el)
+
+		act(() => {
+			pressOn(el, name, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+
+		expect(write).not.toHaveBeenCalled()
+	})
+
+	it("arms from an item's plain area where the list asks for it, never from its controls", () => {
+		const el = container()
+		const { name, button, check } = optionIn(el)
+		const { result, write } = renderIndexMarquee(el, { startsOnItems: true })
+
+		for (const control of [button, check]) {
+			act(() => {
+				pressOn(el, control, result.current.onPointerDown)
+			})
+			dragTo(10, 90)
+			release(10, 90)
+		}
+
+		expect(write).not.toHaveBeenCalled()
+
+		act(() => {
+			pressOn(el, name, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+
+		expect(write).toHaveBeenLastCalledWith([0, 1, 2])
+	})
+
+	// The click a release ends in lands on the row it started on (or the list), where it would select that
+	// row alone, or clear the selection, right after the drag made it.
+	it("swallows the click a drag's release ends in, and only that one", async () => {
+		const el = container()
+		const { name } = optionIn(el)
+		const { result } = renderIndexMarquee(el, { startsOnItems: true })
+		const onClick = vi.fn()
+
+		name.addEventListener("click", onClick)
+
+		act(() => {
+			pressOn(el, name, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+		release(10, 90)
+		name.click()
+
+		expect(onClick).not.toHaveBeenCalled()
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+		name.click()
+
+		expect(onClick).toHaveBeenCalledOnce()
+	})
+
+	it("keeps the click after a drag where items never arm it", () => {
+		const el = container()
+		const { result } = renderIndexMarquee(el)
+		const onClick = vi.fn()
+
+		el.addEventListener("click", onClick)
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+		dragTo(10, 90)
+		release(10, 90)
+		el.click()
+
+		expect(onClick).toHaveBeenCalledOnce()
 	})
 })
