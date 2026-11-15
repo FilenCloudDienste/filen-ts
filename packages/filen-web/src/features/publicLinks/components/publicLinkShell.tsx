@@ -15,9 +15,11 @@ const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
 // the link resolves to (invalid / password / file / directory). This page deliberately drops
 // old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA (for a
 // signed-in visitor, a single way back to Cloud Drive instead), and a one-line footer with the e2e
-// tagline, a minimal report-abuse affordance and the open source licenses. Fully responsive and
-// theme-aware via the app's existing tokens (the ambient ThemeProvider resolves system default for an
-// anonymous visitor, so nothing theme-specific is hardcoded here).
+// tagline, a minimal report-abuse affordance and, quieter at its far end, the open source licenses. Exactly
+// one viewport tall with both bars pinned: only `main` scrolls, and a surface that fills it (a preview, a
+// directory's list) sizes to it through its own min-h-0 chain. Theme-aware via the app's existing tokens (the
+// ambient ThemeProvider resolves system default for an anonymous visitor, so nothing theme-specific is
+// hardcoded here).
 export function PublicLinkShell({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("publicLinks")
 	const signedIn = usePublicVisitorSignedIn()
@@ -25,9 +27,9 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 	useDismissBootSplash()
 
 	return (
-		<div className="flex min-h-svh flex-col bg-canvas text-foreground">
+		<div className="flex h-svh flex-col overflow-hidden bg-canvas text-foreground">
 			{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. */}
-			<header className="sticky top-0 z-10 flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center justify-between gap-3 border-b border-border bg-canvas/80 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] backdrop-blur-sm app-region-chrome sm:px-6 sm:pl-[max(1.5rem,var(--window-inset-left))]">
+			<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center justify-between gap-3 border-b border-border px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome sm:px-6 sm:pl-[max(1.5rem,var(--window-inset-left))]">
 				<a
 					href={FILEN_HOME_URL}
 					target="_blank"
@@ -73,29 +75,20 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 				</div>
 			</header>
 
-			<main className="flex w-full flex-1 flex-col">{children}</main>
+			<main className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">{children}</main>
 
-			<footer className="flex shrink-0 flex-col items-center justify-center gap-1 border-t border-border px-4 py-3 text-center text-xs text-muted-foreground sm:flex-row sm:gap-3">
-				<span>{t("footerTagline")}</span>
-				<span
-					aria-hidden="true"
-					className="hidden sm:inline"
-				>
-					·
-				</span>
-				<a
-					href={REPORT_ABUSE_MAILTO}
-					className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground"
-				>
-					{t("reportAbuse")}
-				</a>
-				<span
-					aria-hidden="true"
-					className="hidden sm:inline"
-				>
-					·
-				</span>
-				<ThirdPartyNoticesLink className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground" />
+			<footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-0.5 border-t border-border px-4 py-2 text-xs text-muted-foreground sm:justify-between sm:px-6">
+				<div className="flex flex-wrap items-center justify-center gap-x-2">
+					<span>{t("footerTagline")}</span>
+					<span aria-hidden="true">·</span>
+					<a
+						href={REPORT_ABUSE_MAILTO}
+						className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground"
+					>
+						{t("reportAbuse")}
+					</a>
+				</div>
+				<ThirdPartyNoticesLink className="rounded-md text-[0.6875rem] text-muted-foreground/70 focus-ring transition-colors outline-none hover:text-foreground hover:underline hover:underline-offset-4" />
 			</footer>
 		</div>
 	)

@@ -70,9 +70,28 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(cta).toBeVisible()
 		await expect(cta).toHaveAttribute("href", "https://filen.io")
 
-		// A one-line footer: the e2e tagline plus a minimal report-abuse affordance (a mailto, no API).
+		// A one-line footer: the e2e tagline plus a minimal report-abuse affordance (a mailto, no API), and the
+		// open source licenses the page's bundle ships, quieter at its far end.
 		await expect(page.getByText("Shared securely with end-to-end encryption")).toBeVisible()
 		await expect(page.getByRole("link", { name: "Report abuse" })).toHaveAttribute("href", "mailto:abuse@filen.io")
+		await expect(page.getByRole("button", { name: "Open source licenses" })).toBeVisible()
+	})
+
+	test("pins the header and the footer to one viewport, the page itself never scrolling", async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 640 })
+		await page.goto(`/d/${RANDOM_UUID}#${HEX_KEY}`)
+
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+		const footer = page.getByRole("contentinfo")
+		const box = await footer.boundingBox()
+
+		expect(box).not.toBeNull()
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBeCloseTo(640, 0)
+		await expect(page.getByRole("banner")).toBeInViewport()
+		await expect
+			.poll(() => page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight))
+			.toBeLessThanOrEqual(0)
 	})
 
 	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {
