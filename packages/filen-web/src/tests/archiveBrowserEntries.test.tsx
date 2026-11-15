@@ -327,6 +327,81 @@ describe("an archive entry on its own", () => {
 		expect(screen.queryByRole("menuitem", { name: "Download" })).toBeNull()
 	})
 
+	it("offers a file row's ⋯ items on a right-click, selecting the row first", async () => {
+		show([
+			{ path: "readme.md", size: 3, access: DIRECT },
+			{ path: "z.bin", size: 3, access: DIRECT }
+		])
+
+		const readme = row("readme.md")
+		const zbin = row("z.bin")
+
+		fireEvent.click(zbin, { detail: 1 })
+		fireEvent.contextMenu(within(readme).getByText("readme.md"))
+
+		expect(await screen.findByRole("menuitem", { name: "Open" })).toBeTruthy()
+		expect(screen.getByRole("menuitem", { name: "Download" })).toBeTruthy()
+		expect(screen.getByRole("menuitem", { name: "Extract" })).toBeTruthy()
+		expect(readme.getAttribute("aria-selected")).toBe("true")
+		expect(zbin.getAttribute("aria-selected")).toBe("false")
+
+		fireEvent.click(screen.getByRole("menuitem", { name: "Download" }))
+
+		expect(runEntryDownload.mock.calls[0]?.[1]).toMatchObject({ request: { name: "readme.md" } })
+	})
+
+	it("offers the selection's Extract alone on a right-click inside a selection of several", async () => {
+		show([
+			{ path: "readme.md", size: 3, access: DIRECT },
+			{ path: "z.bin", size: 3, access: DIRECT }
+		])
+
+		const readme = row("readme.md")
+		const zbin = row("z.bin")
+
+		fireEvent.click(readme, { detail: 1 })
+		fireEvent.click(zbin, { detail: 1, ctrlKey: true })
+		fireEvent.contextMenu(zbin)
+
+		expect(await screen.findByRole("menuitem", { name: "Extract" })).toBeTruthy()
+		expect(screen.queryByRole("menuitem", { name: "Open" })).toBeNull()
+		expect(screen.queryByRole("menuitem", { name: "Download" })).toBeNull()
+		expect(readme.getAttribute("aria-selected")).toBe("true")
+		expect(zbin.getAttribute("aria-selected")).toBe("true")
+	})
+
+	it("offers a directory's Open and Extract, and opens it", async () => {
+		show([{ path: "docs/a.txt", size: 3, access: DIRECT }])
+
+		const docs = row("docs")
+
+		fireEvent.contextMenu(docs)
+
+		expect(await screen.findByRole("menuitem", { name: "Extract" })).toBeTruthy()
+		expect(docs.getAttribute("aria-selected")).toBe("true")
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("menuitem", { name: "Open" }))
+			await Promise.resolve()
+		})
+
+		expect(screen.getByRole("button", { name: "docs" }).getAttribute("aria-current")).toBe("location")
+	})
+
+	it("opens no menu on a row with nothing to offer, or on the list's empty space", () => {
+		show([
+			{ path: "z.bin", size: 3, access: DIRECT },
+			{ path: "dev", kind: { type: "device" }, skip: "device" }
+		])
+
+		fireEvent.click(row("z.bin"), { detail: 1 })
+		fireEvent.contextMenu(row("dev"))
+		fireEvent.contextMenu(list())
+
+		expect(screen.queryByRole("menu")).toBeNull()
+		expect(row("z.bin").getAttribute("aria-selected")).toBe("true")
+	})
+
 	it("previews but never saves from a link that allows no downloads", async () => {
 		show(
 			[

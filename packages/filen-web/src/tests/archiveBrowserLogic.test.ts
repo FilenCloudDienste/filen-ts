@@ -23,6 +23,8 @@ import {
 	refsView,
 	rowElementId,
 	rowFlags,
+	rowMenuOf,
+	rowMenuSelection,
 	rowRange,
 	SKIP_LABEL_KEYS,
 	splitCrumbs,
@@ -265,6 +267,42 @@ describe("rows and positions", () => {
 		expect(entryRowKind(links, 2)).toBe("file")
 		expect(entryRowKind(links, 3)).toBe("other")
 		expect(entryRowKind(links, dirRef(links.findDir("d")))).toBe("dir")
+	})
+})
+
+describe("row context menus", () => {
+	const store = storeOf([
+		"f",
+		"d/x",
+		{ path: "l", kind: { type: "symlink", target: "f" } },
+		{ path: "dev", kind: { type: "device" }, skip: "device" },
+		{ path: "e/dev", kind: { type: "device" }, skip: "device" }
+	])
+	const d = store.findDir("d")
+	const e = store.findDir("e")
+	const sole = (ref: number) => setMany(store, EMPTY_SELECTION, [ref], true)
+
+	it("takes a row outside the selection as the selection, and keeps one inside it", () => {
+		expect(rowMenuSelection(store, sole(0), 2).rules).toEqual(new Map([[2, true]]))
+		expect(rowMenuSelection(store, selectAll(store, 0), 2)).toEqual(selectAll(store, 0))
+		// A row that can't be selected leaves nothing selected.
+		expect(rowMenuSelection(store, sole(0), 3)).toBe(EMPTY_SELECTION)
+	})
+
+	it("offers a file its own items, a directory Open, anything else selectable the selection's Extract", () => {
+		expect(rowMenuOf(store, sole(0), 0)).toEqual({ type: "entry", slot: 0 })
+		expect(rowMenuOf(store, sole(dirRef(d)), dirRef(d))).toEqual({ type: "dir", dir: d, extract: true })
+		expect(rowMenuOf(store, sole(2), 2)).toEqual({ type: "selection" })
+	})
+
+	it("offers the selection's Extract on a row among several selected", () => {
+		expect(rowMenuOf(store, selectAll(store, 0), 0)).toEqual({ type: "selection" })
+		expect(rowMenuOf(store, setMany(store, EMPTY_SELECTION, [0, 2], true), 0)).toEqual({ type: "selection" })
+	})
+
+	it("opens a directory holding nothing to extract but extracts nothing, and offers nothing on an entry it can't select", () => {
+		expect(rowMenuOf(store, EMPTY_SELECTION, dirRef(e))).toEqual({ type: "dir", dir: e, extract: false })
+		expect(rowMenuOf(store, EMPTY_SELECTION, 3)).toBeNull()
 	})
 })
 

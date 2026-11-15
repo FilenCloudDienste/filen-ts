@@ -10,6 +10,7 @@ import { bindingOf } from "@/lib/keymap/bindingOf"
 import type { ActionDef } from "@/lib/keymap/registry"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
+import type { RowMenu } from "@/features/archive/lib/entryMenu"
 import { listboxKeyTarget } from "@/features/drive/lib/listbox"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
@@ -20,6 +21,7 @@ import {
 	selectAll,
 	selectionTotals,
 	setMany,
+	toggle,
 	type RowCheck,
 	type Selection,
 	type SelectionTotals
@@ -321,6 +323,34 @@ export function entryRowKind(store: EntryStore, ref: RowRef): EntryRowKind {
 		default:
 			return "other"
 	}
+}
+
+// What a row's context menu offers under `selection`, the one it opens with (see RowMenu); null for a row
+// with no menu: an entry that can't be selected and isn't a directory to open.
+export function rowMenuOf(store: EntryStore, selection: Selection, ref: RowRef): RowMenu | null {
+	const sole = selection.rules.size === 1 && selection.rules.get(ref) === true
+
+	if (!sole && rowCheck(store, selection, ref) === "on") {
+		return { type: "selection" }
+	}
+
+	const selectable = isSelectable(store, ref)
+
+	if (isDirRef(ref)) {
+		return { type: "dir", dir: dirOfRef(ref), extract: selectable }
+	}
+
+	if (!selectable) {
+		return null
+	}
+
+	return entryRowKind(store, ref) === "file" ? { type: "entry", slot: ref } : { type: "selection" }
+}
+
+// The selection a right-click on a row opens its menu with: the row alone where the selection doesn't hold
+// it (one it can't select, nothing), else the selection as it is.
+export function rowMenuSelection(store: EntryStore, selection: Selection, ref: RowRef): Selection {
+	return rowCheck(store, selection, ref) === "on" ? selection : toggle(store, EMPTY_SELECTION, ref)
 }
 
 export function rowName(store: EntryStore, ref: RowRef): string {

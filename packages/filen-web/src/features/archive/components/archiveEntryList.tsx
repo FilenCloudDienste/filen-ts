@@ -1,5 +1,6 @@
 import {
 	useCallback,
+	useContext,
 	useEffect,
 	useEffectEvent,
 	useMemo,
@@ -11,6 +12,7 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { type ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu"
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, MinusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { ENTRY_FLAG, skipReasonOf } from "@/lib/sdk/archiveListing"
@@ -41,7 +43,10 @@ import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 import { isEmptySpaceTarget, isPlainPointerClick } from "@/features/drive/lib/clickAway.logic"
 import { dirOfRef, isDirRef, type ChildSort, type ChildSortKey, type RowRef, type RowView } from "@/features/archive/lib/sortedChildren"
+import { EntryMenuContext, type RowMenu } from "@/features/archive/lib/entryMenu"
 import { ArchiveEntryRow } from "@/features/archive/components/archiveEntryRow"
+import { ArchiveRowContextMenuContent } from "@/features/archive/components/archiveEntryMenu"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 
 export interface ArchiveEntryListProps {
 	listId: string
@@ -124,6 +129,9 @@ export function ArchiveEntryList({
 	const getItemKey = useCallback((index: number) => rows.at(index), [rows])
 	const cursorIndex = useMemo(() => positionIndex(rows, cursor), [rows, cursor])
 	const bindings = useBindings()
+	const menuHost = useContext(EntryMenuContext)
+	// What the open context menu offers; set as it opens.
+	const [rowMenu, setRowMenu] = useState<RowMenu | null>(null)
 	const handlePointer = useCallback(
 		(index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => {
 			handlers.current.onPointer(index, ref, event)
@@ -226,6 +234,27 @@ export function ArchiveEntryList({
 		}
 	}
 
+	// A right-click (or a touch held) on a row: the browser selects it if need be and says what its menu
+	// offers. Anywhere else in the list, or on a row with nothing to offer, no menu opens.
+	function handleMenuOpenChange(open: boolean, details: ContextMenuPrimitive.Root.ChangeEventDetails): void {
+		if (!open) {
+			return
+		}
+
+		const target = details.event.target
+		const option = target instanceof Element ? target.closest<HTMLElement>('[role="option"]') : null
+		const index = option === null ? -1 : Number(option.dataset["index"])
+		const menu = menuHost !== null && index >= 0 && index < rows.count ? menuHost.openRowMenu(index, rows.at(index)) : null
+
+		if (menu === null) {
+			details.cancel()
+
+			return
+		}
+
+		setRowMenu(menu)
+	}
+
 	// A plain click on the list's empty space drops the selection, as in the drive listing (whose
 	// window-wide click-away stands down inside the preview overlay this list lives in).
 	function handleBackgroundClick(event: MouseEvent<HTMLDivElement>): void {
@@ -299,69 +328,78 @@ export function ArchiveEntryList({
 				})}
 				<span className={ARCHIVE_MENU_COLUMN_CLASS} />
 			</div>
-			<div
-				ref={setScrollElement}
-				role="listbox"
-				aria-label={label}
-				aria-multiselectable="true"
-				aria-activedescendant={cursorShown && cursorIndex >= 0 ? rowElementId(listId, rows.at(cursorIndex)) : undefined}
-				tabIndex={0}
-				className="group min-h-0 flex-1 overflow-y-auto outline-none"
-				onKeyDown={handleKeyDown}
-				onPointerDown={marquee.onPointerDown}
-				onClick={handleBackgroundClick}
-			>
-				{rows.count === 0 ? (
-					empty
-				) : (
-					<div
-						className="relative w-full"
-						style={{ height: virtualizer.getTotalSize() }}
-					>
-						<MarqueeRect store={marquee.rectStore} />
-						{virtualRows.map(virtualRow => {
-							const ref = rows.at(virtualRow.index)
-							const isDir = isDirRef(ref)
-							const dir = isDir ? dirOfRef(ref) : -1
-							const skip = skipReasonOf(rowSkip(store, ref))
-							const flags = rowFlags(store, ref)
-							const parent = isDir ? store.dirParent(dir) : store.parent(ref)
-							const parentPath = searchMode ? store.dirPath(parent) : ""
-							const kind = entryRowKind(store, ref)
-							const selectable = isSelectable(store, ref)
+			{/* One context menu for every row, its trigger the listbox itself: no row mounts a menu root of its
+			    own, and which row it is for is read off the event when it opens. */}
+			<ContextMenu onOpenChange={handleMenuOpenChange}>
+				<ContextMenuTrigger
+					render={
+						<div
+							ref={setScrollElement}
+							role="listbox"
+							aria-label={label}
+							aria-multiselectable="true"
+							aria-activedescendant={cursorShown && cursorIndex >= 0 ? rowElementId(listId, rows.at(cursorIndex)) : undefined}
+							tabIndex={0}
+							className="group min-h-0 flex-1 overflow-y-auto outline-none"
+							onKeyDown={handleKeyDown}
+							onPointerDown={marquee.onPointerDown}
+							onClick={handleBackgroundClick}
+						/>
+					}
+				>
+					{rows.count === 0 ? (
+						empty
+					) : (
+						<div
+							className="relative w-full"
+							style={{ height: virtualizer.getTotalSize() }}
+						>
+							<MarqueeRect store={marquee.rectStore} />
+							{virtualRows.map(virtualRow => {
+								const ref = rows.at(virtualRow.index)
+								const isDir = isDirRef(ref)
+								const dir = isDir ? dirOfRef(ref) : -1
+								const skip = skipReasonOf(rowSkip(store, ref))
+								const flags = rowFlags(store, ref)
+								const parent = isDir ? store.dirParent(dir) : store.parent(ref)
+								const parentPath = searchMode ? store.dirPath(parent) : ""
+								const kind = entryRowKind(store, ref)
+								const selectable = isSelectable(store, ref)
 
-							return (
-								<ArchiveEntryRow
-									key={virtualRow.key}
-									id={rowElementId(listId, ref)}
-									rowRef={ref}
-									index={virtualRow.index}
-									total={rows.count}
-									start={virtualRow.start}
-									name={rowName(store, ref)}
-									kind={kind}
-									size={isDir ? -1 : store.size(ref)}
-									modified={isDir ? store.dirModified(dir) : store.modified(ref)}
-									childCount={isDir ? store.childDirs(dir).length + store.childEntries(dir).length : 0}
-									check={rowCheck(store, selection, ref)}
-									selectable={selectable}
-									cursor={virtualRow.index === cursorIndex}
-									skipLabel={skip === null ? null : t(SKIP_LABEL_KEYS[skip])}
-									encrypted={hasFlag(flags, ENTRY_FLAG.encrypted)}
-									misleading={hasFlag(flags, ENTRY_FLAG.misleading)}
-									storedPath={isDir || !hasFlag(flags, ENTRY_FLAG.rewritten) ? null : (store.storedPath(ref) ?? null)}
-									linkTarget={isDir ? null : (store.link(ref)?.target ?? null)}
-									parentPath={parentPath === "" ? null : parentPath}
-									menu={kind === "file" && selectable}
-									onPointer={handlePointer}
-									onOpen={handleOpen}
-									onCheck={handleCheck}
-								/>
-							)
-						})}
-					</div>
-				)}
-			</div>
+								return (
+									<ArchiveEntryRow
+										key={virtualRow.key}
+										id={rowElementId(listId, ref)}
+										rowRef={ref}
+										index={virtualRow.index}
+										total={rows.count}
+										start={virtualRow.start}
+										name={rowName(store, ref)}
+										kind={kind}
+										size={isDir ? -1 : store.size(ref)}
+										modified={isDir ? store.dirModified(dir) : store.modified(ref)}
+										childCount={isDir ? store.childDirs(dir).length + store.childEntries(dir).length : 0}
+										check={rowCheck(store, selection, ref)}
+										selectable={selectable}
+										cursor={virtualRow.index === cursorIndex}
+										skipLabel={skip === null ? null : t(SKIP_LABEL_KEYS[skip])}
+										encrypted={hasFlag(flags, ENTRY_FLAG.encrypted)}
+										misleading={hasFlag(flags, ENTRY_FLAG.misleading)}
+										storedPath={isDir || !hasFlag(flags, ENTRY_FLAG.rewritten) ? null : (store.storedPath(ref) ?? null)}
+										linkTarget={isDir ? null : (store.link(ref)?.target ?? null)}
+										parentPath={parentPath === "" ? null : parentPath}
+										menu={kind === "file" && selectable}
+										onPointer={handlePointer}
+										onOpen={handleOpen}
+										onCheck={handleCheck}
+									/>
+								)
+							})}
+						</div>
+					)}
+				</ContextMenuTrigger>
+				{rowMenu === null ? null : <ArchiveRowContextMenuContent menu={rowMenu} />}
+			</ContextMenu>
 		</div>
 	)
 }

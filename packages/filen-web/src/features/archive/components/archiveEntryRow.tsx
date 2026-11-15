@@ -98,6 +98,8 @@ export function ArchiveEntryRow({
 			aria-disabled={selectable ? undefined : true}
 			aria-posinset={index + 1}
 			aria-setsize={total}
+			// The list's one context menu reads which row it opens on off this.
+			data-index={index}
 			data-cursor={cursor ? "" : undefined}
 			style={{
 				position: "absolute",

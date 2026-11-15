@@ -3,13 +3,17 @@ import { useTranslation } from "react-i18next"
 import { ChevronDownIcon, FolderPlusIcon, FolderSearchIcon, PackageOpenIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
-import { DirectoryTreeSubmenu, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
+import {
+	DirectoryTreeSubmenu,
+	DROPDOWN_TREE_MENU_FAMILY,
+	type DirectoryTreeMenuFamily
+} from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export interface ArchiveExtractMenuProps {
 	source: ArchiveSource
@@ -66,6 +70,7 @@ export function ArchiveExtractMenu({
 					className="w-auto max-w-80"
 				>
 					<ArchiveExtractItems
+						family={DROPDOWN_TREE_MENU_FAMILY}
 						source={source}
 						newFolderName={newFolderName}
 						onPick={onPick}
@@ -88,6 +93,8 @@ export function ArchiveExtractMenu({
 }
 
 export interface ArchiveExtractItemsProps {
+	// The menu it is drawn in: a dropdown (the footer's, a row's ⋯) or a row's context menu.
+	family: DirectoryTreeMenuFamily
 	source: ArchiveSource
 	newFolderName: string | null
 	onPick: (target: ExtractTarget) => void
@@ -96,8 +103,9 @@ export interface ArchiveExtractItemsProps {
 }
 
 // The places an extract goes, as the entries of a menu (the footer's, or a row's Extract submenu).
-export function ArchiveExtractItems({ source, newFolderName, onPick, onChooseDestination }: ArchiveExtractItemsProps) {
+export function ArchiveExtractItems({ family, source, newFolderName, onPick, onChooseDestination }: ArchiveExtractItemsProps) {
 	const { t } = useTranslation(["preview", "archive", "drive"])
+	const { Item } = family
 	const isOnline = useIsOnline()
 	// Shared with the user, linked, a chat's or in the trash: it has no directory of the user's own.
 	const beside = source.ownParent !== undefined
@@ -105,27 +113,27 @@ export function ArchiveExtractItems({ source, newFolderName, onPick, onChooseDes
 	return (
 		<>
 			{beside && newFolderName !== null ? (
-				<DropdownMenuItem
+				<Item
 					onClick={() => {
 						onPick({ type: "besideNewFolder" })
 					}}
 				>
 					<FolderPlusIcon aria-hidden="true" />
 					<span className="min-w-0 flex-1 truncate">{t("previewArchiveExtractBesideNewFolder", { name: newFolderName })}</span>
-				</DropdownMenuItem>
+				</Item>
 			) : null}
 			{beside ? (
-				<DropdownMenuItem
+				<Item
 					onClick={() => {
 						onPick({ type: "beside" })
 					}}
 				>
 					<PackageOpenIcon aria-hidden="true" />
 					{t("previewArchiveExtractBeside")}
-				</DropdownMenuItem>
+				</Item>
 			) : null}
 			<DirectoryTreeSubmenu
-				family={DROPDOWN_TREE_MENU_FAMILY}
+				family={family}
 				label={t("archive:archiveExtractTo")}
 				icon={ACTION_DEFS.extract.icon}
 				actionLabel={t("archive:archiveExtractHere")}
@@ -142,10 +150,10 @@ export function ArchiveExtractItems({ source, newFolderName, onPick, onChooseDes
 					})
 				}}
 			/>
-			<DropdownMenuItem onClick={onChooseDestination}>
+			<Item onClick={onChooseDestination}>
 				<FolderSearchIcon aria-hidden="true" />
 				{t("archive:archiveExtractChooseDestination")}
-			</DropdownMenuItem>
+			</Item>
 		</>
 	)
 }

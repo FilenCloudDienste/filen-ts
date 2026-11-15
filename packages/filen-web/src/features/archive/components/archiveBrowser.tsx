@@ -50,6 +50,8 @@ import {
 	rowElementId,
 	marqueeSelection,
 	rangeSelection,
+	rowMenuOf,
+	rowMenuSelection,
 	selectionTotalsOf,
 	splitCrumbs,
 	summaryOf,
@@ -68,7 +70,13 @@ import { ArchiveLinkTargetsDialog } from "@/features/archive/components/archiveL
 import { ArchiveExtractPicker } from "@/features/archive/components/archiveExtractMenu"
 import { ArchiveEntryViewer } from "@/features/archive/components/archiveEntryViewer"
 import { useEntryActions, type EntryTarget } from "@/features/archive/components/useEntryActions"
-import { EntryMenuContext, type EntryMenuAction, type EntryMenuHost } from "@/features/archive/lib/entryMenu"
+import {
+	EntryMenuContext,
+	type EntryMenuAction,
+	type EntryMenuHost,
+	type RowMenu,
+	type SelectionMenuAction
+} from "@/features/archive/lib/entryMenu"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { LoadingState } from "@/components/loadingState"
 
@@ -153,8 +161,9 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	const [anchor, setAnchor] = useState<RowPosition | null>(null)
 	const [passwordAsk, setPasswordAsk] = useState<PasswordAsk | null>(null)
 	const [linkAsk, setLinkAsk] = useState<LinkTargetsAsk | null>(null)
-	// A row's "Choose destination…", kept here: the row may unmount while the picker is open.
-	const [rowPick, setRowPick] = useState<EntryTarget | null>(null)
+	// A row's "Choose destination…" (for its entry, or for the selection from its context menu), kept here:
+	// the row may unmount while the picker is open.
+	const [rowPick, setRowPick] = useState<EntryTarget | "selection" | null>(null)
 	const [viewStore, setViewStore] = useState(store)
 	const entries = useEntryActions({ source, session: listing.session, downloadable, isOnline })
 	// Ends the wait for a password check that an extract is waiting on.
@@ -420,6 +429,33 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		}
 	}
 
+	function handleSelectionMenu(action: SelectionMenuAction): void {
+		switch (action.type) {
+			case "extract":
+				extractSelected(action.target)
+
+				break
+			case "chooseDestination":
+				setRowPick("selection")
+
+				break
+		}
+	}
+
+	// Like the drive listing, a right-click outside the selection makes the row the selection (and moves
+	// the cursor there, as a click would) before its menu opens.
+	function openRowMenu(index: number, ref: RowRef): RowMenu | null {
+		const next = rowMenuSelection(store, selection, ref)
+		const menu = rowMenuOf(store, next, ref)
+
+		if (menu !== null) {
+			select(next)
+			placeCursor({ ref, index }, true)
+		}
+
+		return menu
+	}
+
 	// The listing holds the page's one archive slot, which the extract needs: it stops first.
 	function extractAll(target: ExtractTarget): void {
 		if (holdsSlot(phase)) {
@@ -674,12 +710,19 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		)
 	}
 
+	const extractSelectionOff = extractOff || !canExtractSelection(phase, store.entryCount)
 	const menuHost: EntryMenuHost = {
 		source,
 		newFolderName: single ? null : baseFolderName,
-		extractDisabled: extractOff || !canExtractSelection(phase, store.entryCount),
+		extractDisabled: extractSelectionOff,
+		selectionExtractDisabled: extractSelectionOff || totals.entries === 0,
 		offers: slot => entries.offers({ store, slot }),
-		onAction: handleEntryMenu
+		onAction: handleEntryMenu,
+		openRowMenu,
+		onSelectionAction: handleSelectionMenu,
+		onOpenDir: target => {
+			navigate(target, null)
+		}
 	}
 	const running = holdsSlot(phase) || phase.type === "resolving"
 	const empty =
@@ -774,7 +817,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 				totals={totals}
 				selectedFolderName={single ? null : baseFolderName}
 				allFolderName={single ? null : (info?.defaultName ?? source.name)}
-				selectedDisabled={extractOff || !canExtractSelection(phase, store.entryCount) || totals.entries === 0}
+				selectedDisabled={extractSelectionOff || totals.entries === 0}
 				allDisabled={extractOff}
 				disabledTitle={extractOffTitle}
 				note={notAllowed}
@@ -796,7 +839,11 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 			{rowPick === null ? null : (
 				<ArchiveExtractPicker
 					onPick={target => {
-						extractEntry(target, rowPick)
+						if (rowPick === "selection") {
+							extractSelected(target)
+						} else {
+							extractEntry(target, rowPick)
+						}
 					}}
 					onClose={() => {
 						setRowPick(null)
