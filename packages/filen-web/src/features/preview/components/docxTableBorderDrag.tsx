@@ -1,5 +1,5 @@
 import { isImeKeydown } from "@filen/shared/keymap"
-import { useEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
 import { tableBorderOf, type DocxTableBorder, type PagedEditor } from "@filen/office/core/docx/paged"
@@ -36,11 +36,10 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 	// The press's border, when it is one that can be dragged (read once per press).
 	const border = press === null || readOnly ? undefined : tableBorderOf(editor, press.hit)
 	const drag: Drag | null = press === null || border === undefined ? null : { press, border }
-	// The width the pointer gives the column now (twips), for the press it was moved in; a drag ended (or
-	// cancelled) is gone until the press is done.
-	const [moved, setMoved] = useState<{ press: DocxObjectPress; twips: number; ended: boolean } | null>(null)
-	const twips = moved?.press === press ? moved.twips : border === undefined ? 0 : (border.widths[border.column] ?? 0)
-	const ended = moved?.press === press && moved.ended
+	// Where the guide shows in the container now (px), for the press it was placed for; a drag ended (or
+	// cancelled) is gone until the press is done. Placed from the container's box as each pointer event reads it,
+	// never in render: the compiler would keep a box read there for as long as the container is the same element.
+	const [guide, setGuide] = useState<{ press: DocxObjectPress; left: number | null; ended: boolean } | null>(null)
 
 	// A press on no draggable border is done at once.
 	useEffect(() => {
@@ -52,19 +51,23 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 	const dragPress = drag?.press ?? null
 	const dragBorder = drag?.border ?? null
 
-	useEffect(() => {
+	// Before paint, so the guide shows at the border from the press on.
+	useLayoutEffect(() => {
 		if (dragPress === null || dragBorder === null) {
 			return
 		}
 
 		const start = dragPress
 		const line = dragBorder
+		// Where the guide for a column `twips` wide shows, from the container's box as it is now.
+		const leftFor = (twips: number): number | null =>
+			container === null ? null : start.clientX - container.getBoundingClientRect().left + borderDragOffset(line, twips, zoom)
 		const finish = (event: PointerEvent | null): void => {
 			window.removeEventListener("pointermove", move)
 			window.removeEventListener("pointerup", up)
 			window.removeEventListener("pointercancel", cancel)
 			window.removeEventListener("keydown", key, true)
-			setMoved(previous => ({ press: start, twips: previous?.press === start ? previous.twips : 0, ended: true }))
+			setGuide(previous => ({ press: start, left: previous?.press === start ? previous.left : null, ended: true }))
 
 			if (event !== null) {
 				const width = borderDragWidth(line, event.clientX - start.clientX, zoom)
@@ -84,7 +87,7 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 		}
 		const move = (event: PointerEvent): void => {
 			if (event.pointerId === start.pointerId) {
-				setMoved({ press: start, twips: borderDragWidth(line, event.clientX - start.clientX, zoom), ended: false })
+				setGuide({ press: start, left: leftFor(borderDragWidth(line, event.clientX - start.clientX, zoom)), ended: false })
 			}
 		}
 		const up = (event: PointerEvent): void => {
@@ -105,6 +108,10 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 			}
 		}
 
+		// At the border itself until the pointer moves; a guide this press already has stays where it is.
+		const initial = leftFor(line.widths[line.column] ?? 0)
+
+		setGuide(previous => (previous?.press === start ? previous : { press: start, left: initial, ended: false }))
 		window.addEventListener("pointermove", move)
 		window.addEventListener("pointerup", up)
 		window.addEventListener("pointercancel", cancel)
@@ -116,14 +123,13 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 			window.removeEventListener("pointercancel", cancel)
 			window.removeEventListener("keydown", key, true)
 		}
-	}, [dragPress, dragBorder, editor, zoom, executeRef, doneRef])
+	}, [dragPress, dragBorder, container, editor, zoom, executeRef, doneRef])
 
-	if (drag === null || ended || container === null) {
+	const left = drag !== null && guide?.press === drag.press && !guide.ended ? guide.left : null
+
+	if (left === null) {
 		return null
 	}
-
-	const box = container.getBoundingClientRect()
-	const left = drag.press.clientX - box.left + borderDragOffset(drag.border, twips, zoom)
 
 	return (
 		<div

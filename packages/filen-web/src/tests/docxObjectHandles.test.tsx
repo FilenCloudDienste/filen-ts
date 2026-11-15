@@ -462,6 +462,52 @@ describe("DocxFieldChip", () => {
 		expect(onPressDone).toHaveBeenCalled()
 	})
 
+	// The container's box is read when the chip is placed, not kept from an earlier press on the same element.
+	it("places the chip from where the container is at each press", () => {
+		const { editor } = fakeEditor()
+		const container = document.createElement("div")
+		let left = 100
+		let top = 20
+
+		vi.spyOn(container, "getBoundingClientRect").mockImplementation(() => new DOMRect(left, top, 800, 600))
+		document.body.append(container)
+
+		const props = {
+			editor,
+			snapshot: snapshot(null, {}, field),
+			surface: "pages",
+			container,
+			zoom: 1,
+			readOnly: false,
+			execute: vi.fn(),
+			onPressDone: vi.fn(),
+			inputRequest: null,
+			requestInput: vi.fn(),
+			onInputDone: vi.fn()
+		} as const
+		const { rerender } = render(
+			<DocxFieldChip
+				{...props}
+				press={press("field", { clientX: 300, clientY: 200 })}
+			/>
+		)
+		const chip = (): HTMLElement => screen.getByRole("toolbar", { name: "Field actions" })
+
+		expect([chip().style.left, chip().style.top]).toEqual(["200px", "194px"])
+
+		left = 40
+		top = 60
+		rerender(
+			<DocxFieldChip
+				{...props}
+				press={press("field", { clientX: 300, clientY: 200 })}
+			/>
+		)
+
+		expect([chip().style.left, chip().style.top]).toEqual(["260px", "154px"])
+		container.remove()
+	})
+
 	it("is not shown while updating is off (layout resting)", () => {
 		renderChip({ "field.update": false })
 

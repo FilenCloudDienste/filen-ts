@@ -220,6 +220,51 @@ describe("DocxTableBorderDrag", () => {
 		expect(drag(true, 20, 2).execute).toHaveBeenCalledWith({ type: "table.column.width", index: 1, twips: 1850 })
 	})
 
+	// The container's box is read at each pointer event, not kept from the first read on the same element.
+	it("places the guide from where the container is at each pointer move", () => {
+		border.value = { column: 1, widths: [2000, 2000, 2000], rtl: false, minTwips: 100 }
+
+		const container = document.createElement("div")
+		let left = 100
+
+		vi.spyOn(container, "getBoundingClientRect").mockImplementation(() => new DOMRect(left, 0, 800, 600))
+		document.body.append(container)
+		render(
+			<DocxTableBorderDrag
+				editor={{ hitTest: vi.fn(), select: vi.fn() } as unknown as PagedEditor}
+				press={{
+					hit: { kind: "tableBorder", story: 0, pos: 10, part: "column:1" },
+					page: 0,
+					x: 300,
+					y: 200,
+					clientX: 500,
+					clientY: 300,
+					pointerType: "mouse",
+					pointerId: 1,
+					clicks: 1,
+					shiftKey: false
+				}}
+				onPressDone={vi.fn()}
+				container={container}
+				zoom={1}
+				readOnly={false}
+				execute={vi.fn()}
+			/>
+		)
+
+		const guide = (): HTMLElement => screen.getByRole("separator", { name: "New column border" })
+
+		expect(guide().style.left).toBe("400px")
+
+		left = 40
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 510 }))
+		})
+
+		expect(guide().style.left).toBe("470px")
+		container.remove()
+	})
+
 	it("changes nothing for a press that is no draggable border, or a drag Esc cancels", () => {
 		const execute = vi.fn()
 		const onPressDone = vi.fn()

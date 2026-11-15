@@ -1,5 +1,5 @@
 import { isImeKeydown } from "@filen/shared/keymap"
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowRightIcon, ChevronDownIcon, RefreshCwIcon } from "lucide-react"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
@@ -39,6 +39,22 @@ export function DocxFieldChip({ editor, snapshot, container, readOnly, execute, 
 	const focus = useCommandMenuFocus()
 	const chipRef = useRef<HTMLDivElement | null>(null)
 	const action = fieldChipAction(press, snapshot, readOnly)
+
+	// The chip at the press, placed from the container's box as the chip mounts, before paint: never read in render,
+	// where the compiler would keep the box for as long as the container is the same element. A scroll closes the
+	// chip, so the box read for the press stays true.
+	useLayoutEffect(() => {
+		const chip = chipRef.current
+
+		if (press === null || action === null || container === null || chip === null) {
+			return
+		}
+
+		const rect = container.getBoundingClientRect()
+
+		chip.style.left = `${String(Math.max(4, press.clientX - rect.left))}px`
+		chip.style.top = `${String(Math.max(4, press.clientY - rect.top + 14))}px`
+	}, [press, action, container])
 
 	// A press puts the selection on the field (the snapshot then says what can be done with it); a double click on
 	// a note's reference or its own mark goes to the other, as in Word.
@@ -97,8 +113,6 @@ export function DocxFieldChip({ editor, snapshot, container, readOnly, execute, 
 		return null
 	}
 
-	const rect = container.getBoundingClientRect()
-	const style = { left: Math.max(4, press.clientX - rect.left), top: Math.max(4, press.clientY - rect.top + 14) }
 	const done = (): void => {
 		onPressDone()
 	}
@@ -110,7 +124,6 @@ export function DocxFieldChip({ editor, snapshot, container, readOnly, execute, 
 			aria-label={t("previewDocxFieldChip")}
 			data-docx-field-chip
 			className="absolute z-20 flex items-center rounded-full bg-popover p-0.5 shadow-md ring-1 ring-foreground/10"
-			style={style}
 		>
 			{action === "field" ? (
 				<Button

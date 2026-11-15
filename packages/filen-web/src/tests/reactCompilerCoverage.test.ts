@@ -65,6 +65,15 @@ function unguardedCalls(code: string, fnName: string, calls: readonly string[]):
 	return calls.filter(call => body.split("\n").some(line => /^ {2}\S/.test(line) && line.includes(call)))
 }
 
+// A call the function's render makes, in its body or in one of its memo blocks: where the compiler keeps a layout
+// read (a box, a size, a scroll offset) for as long as the element read is the same one.
+function renderCalls(code: string, fnName: string, calls: readonly string[]): string[] {
+	const start = code.indexOf(`function ${fnName}(`)
+	const body = code.slice(start, code.indexOf("\n}\n", start))
+
+	return calls.filter(call => body.split("\n").some(line => /^ {2}(?: {2})?\S/.test(line) && line.includes(call)))
+}
+
 describe("React Compiler coverage", () => {
 	it("compiles useDriveDropTarget, which every directory row, tile, tree node and crumb runs", () => {
 		const events = compile("src/features/drive/hooks/useDriveDropTarget.ts")
@@ -242,6 +251,16 @@ describe("React Compiler coverage", () => {
 				true
 			)
 		}
+	})
+
+	it.each([
+		["src/features/preview/components/docxTableBorderDrag.tsx", "DocxTableBorderDrag"],
+		["src/features/preview/components/docxFieldChip.tsx", "DocxFieldChip"]
+	] as const)("reads the container's box in %s at use time, never in a render memo block", (file, fnName) => {
+		const { code } = compileWithCode(file)
+
+		expect(code).toContain("getBoundingClientRect()")
+		expect(renderCalls(code, fnName, ["getBoundingClientRect("])).toEqual([])
 	})
 
 	it("keeps DocxPages' page frames for the overlay while scrolling within the mounted pages", () => {
