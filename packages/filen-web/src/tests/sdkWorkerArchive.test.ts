@@ -601,6 +601,7 @@ describe("sdk worker archive entries", () => {
 
 		return api.downloadOriginBytes(
 			{ kind: "entry", reader, entry: PARAMS.entry, size, access: "whole", anon: false, cacheKey: reader },
+			"authed",
 			size,
 			token
 		)

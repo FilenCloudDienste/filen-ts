@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { AnyFile } from "@filen/sdk-rs"
 import { mockLinkedFile } from "@/tests/fixtures/sdk"
-import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { bytesOrigin, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import type { ByteReader } from "@/features/preview/lib/origin/byteReader"
 
 // The gate's reads go through the byte layer only: a file of at most one block is loaded whole into the preview cache
 // (the buffered viewer opening next reads nothing more), a larger one has a single block read. Counted here over the
 // worker's whole-buffer call and a reader fake.
 
-const downloadOriginBytes = vi.fn((origin: ByteOrigin, _cap: number, _token: string) =>
+const downloadOriginBytes = vi.fn((origin: ByteOrigin, _access: OriginAccess, _cap: number, _token: string) =>
 	Promise.resolve(new Uint8Array(origin.kind === "file" ? Number(origin.file.size) : 0).fill(7))
 )
 const cancelPreviewDownload = vi.fn()
@@ -21,16 +21,17 @@ vi.mock("@/lib/sdk/client", () => ({
 
 const readerReads: { offset: number; length: number }[] = []
 const closeReader = vi.fn()
-const openByteReader = vi.fn((origin: ByteOrigin, _token: string, _options?: { blocks?: number }): Promise<ByteReader> =>
-	Promise.resolve({
-		size: origin.kind === "file" ? Number(origin.file.size) : 0,
-		read: (offset: number, length: number) => {
-			readerReads.push({ offset, length })
+const openByteReader = vi.fn(
+	(origin: ByteOrigin, _token: string, _options: { access: OriginAccess; blocks?: number }): Promise<ByteReader> =>
+		Promise.resolve({
+			size: origin.kind === "file" ? Number(origin.file.size) : 0,
+			read: (offset: number, length: number) => {
+				readerReads.push({ offset, length })
 
-			return Promise.resolve(new Uint8Array(length).fill(1))
-		},
-		close: closeReader
-	})
+				return Promise.resolve(new Uint8Array(length).fill(1))
+			},
+			close: closeReader
+		})
 )
 
 vi.mock("@/features/preview/lib/origin/byteReader", () => ({ openByteReader }))
@@ -62,7 +63,7 @@ function fileOrigin(size: number): ByteOrigin {
 }
 
 function options() {
-	return { scope: "authed", signal: new AbortController().signal }
+	return { access: "authed" as const, scope: "authed", signal: new AbortController().signal }
 }
 
 beforeEach(() => {
@@ -77,13 +78,13 @@ describe("runContentSniff, head reads", () => {
 
 		await expect(runContentSniff("wordTemplate", origin, "t1", options())).resolves.toBe("wordBinary")
 		expect(downloadOriginBytes).toHaveBeenCalledOnce()
-		expect(downloadOriginBytes).toHaveBeenCalledWith(origin, BLOCK_BYTES, "t1")
+		expect(downloadOriginBytes).toHaveBeenCalledWith(origin, "authed", BLOCK_BYTES, "t1")
 		expect(openByteReader).not.toHaveBeenCalled()
 		expect(decide.mock.calls[0]?.[0]).toHaveLength(512)
 		expect(getPreviewBytes("authed", "d1000000-0000-0000-0000-000000000000")).toHaveLength(BLOCK_BYTES)
 
 		// The buffered viewer's own load.
-		await loadOriginBytes(origin, "t2", { cap: BLOCK_BYTES, scope: "authed" })
+		await loadOriginBytes(origin, "t2", { access: "authed", cap: BLOCK_BYTES, scope: "authed" })
 
 		expect(downloadOriginBytes).toHaveBeenCalledOnce()
 	})
@@ -93,7 +94,7 @@ describe("runContentSniff, head reads", () => {
 
 		await expect(runContentSniff("wordTemplate", origin, "t1", options())).resolves.toBe("notWordBinary")
 		expect(downloadOriginBytes).not.toHaveBeenCalled()
-		expect(openByteReader).toHaveBeenCalledWith(origin, "t1", { blocks: 1 })
+		expect(openByteReader).toHaveBeenCalledWith(origin, "t1", { access: "authed", blocks: 1 })
 		expect(readerReads).toEqual([{ offset: 0, length: 512 }])
 		expect(decide).toHaveBeenCalledWith(expect.any(Uint8Array), BLOCK_BYTES + 1)
 
@@ -117,7 +118,7 @@ describe("runContentSniff, head reads", () => {
 			download.reject(new Error("cancelled"))
 		})
 
-		const sniffed = runContentSniff("wordTemplate", fileOrigin(10), "t9", { scope: "authed", signal: abort.signal })
+		const sniffed = runContentSniff("wordTemplate", fileOrigin(10), "t9", { access: "authed", scope: "authed", signal: abort.signal })
 
 		abort.abort()
 

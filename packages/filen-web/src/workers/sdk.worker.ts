@@ -158,7 +158,7 @@ import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { serveFileSyncRange } from "@/lib/media/syncRangeServe"
 import type { AbortableReadRange } from "@/lib/media/blockCache"
-import { originKey, originWhole, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { originKey, originWhole, requireOriginAccess, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import {
 	clearEntryReaders,
 	entryReader,
@@ -3207,15 +3207,28 @@ const api = {
 	releaseEntryReader(id: string): void {
 		releaseEntryReader(id)
 	},
+	// The origin calls below take the asking surface's `access` and refuse, a second time after the page, an origin a
+	// public link's surface may not read.
 	// openRangePort for any origin the SDK reads. Ports opened under one token share its cancel and one source per
 	// origin; each lives until its reader closes it.
-	openOriginRangePort(port: MessagePort, origin: ByteOrigin, previewToken: string): void {
+	openOriginRangePort(port: MessagePort, origin: ByteOrigin, access: OriginAccess, previewToken: string): void {
+		requireOriginAccess(origin, access)
+
 		const { source, lifetime, done } = joinOriginServe(origin, previewToken)
 
 		exposeTrackedRangePort(port, source.read, lifetime, done)
 	},
 	// openSyncRange for an origin read by ranges; a whole one is transferred to the engine instead.
-	openOriginSyncRange(buffer: SharedArrayBuffer, port: MessagePort, origin: ByteOrigin, previewToken: string, readerLock: string): void {
+	openOriginSyncRange(
+		buffer: SharedArrayBuffer,
+		port: MessagePort,
+		origin: ByteOrigin,
+		access: OriginAccess,
+		previewToken: string,
+		readerLock: string
+	): void {
+		requireOriginAccess(origin, access)
+
 		if (originWhole(origin)) {
 			throw new Error("an origin read whole has no sync range")
 		}
@@ -3238,7 +3251,9 @@ const api = {
 	},
 	// An origin's whole bytes, at most `cap`, transferred back and never kept here (the page's loadOriginBytes caches
 	// them). Cancelled by its token.
-	async downloadOriginBytes(origin: ByteOrigin, cap: number, previewToken: string): Promise<Uint8Array> {
+	async downloadOriginBytes(origin: ByteOrigin, access: OriginAccess, cap: number, previewToken: string): Promise<Uint8Array> {
+		requireOriginAccess(origin, access)
+
 		const source = originSource(origin, originDeps)
 		const controller = new AbortController()
 
@@ -3256,7 +3271,9 @@ const api = {
 		}
 	},
 	// readVideoProbe for any origin the SDK reads.
-	async readOriginProbe(origin: ByteOrigin, tier: ProbeTier, previewToken: string): Promise<VideoProbe | null> {
+	async readOriginProbe(origin: ByteOrigin, access: OriginAccess, tier: ProbeTier, previewToken: string): Promise<VideoProbe | null> {
+		requireOriginAccess(origin, access)
+
 		const source = originSource(origin, originDeps)
 
 		try {
@@ -3266,22 +3283,24 @@ const api = {
 		}
 	},
 	// fetchRawPreview for a drive or public-link file origin; the other kinds have no ranged embedded-preview read.
-	fetchOriginRawPreview(origin: ByteOrigin, previewToken: string): Promise<RawPreviewResult> {
+	async fetchOriginRawPreview(origin: ByteOrigin, access: OriginAccess, previewToken: string): Promise<RawPreviewResult> {
+		requireOriginAccess(origin, access)
+
 		const ref = originFile(origin)
 
 		if (ref === null) {
-			return Promise.reject(new Error("only a file origin has an embedded preview read"))
+			throw new Error("only a file origin has an embedded preview read")
 		}
 
 		if (ref.anon) {
-			return withLinkedUnauth(unauth =>
+			return await withLinkedUnauth(unauth =>
 				writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file: ref.file, ...params }))
 			)
 		}
 
 		const c = requireClient()
 
-		return writeRawPreview(previewToken, params => c.writeEmbeddedPreview({ file: ref.file, ...params }))
+		return await writeRawPreview(previewToken, params => c.writeEmbeddedPreview({ file: ref.file, ...params }))
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
 	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual

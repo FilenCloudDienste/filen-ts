@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useState } from "react"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { PdfSource } from "@filen/office/dom/pdf"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { usePreviewOrigin } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { openOriginRangeSource, type OriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
 import { originKey, originSize } from "@/lib/sdk/byteOrigin"
 import { MAX_RUN_BLOCKS } from "@/lib/media/blockCache"
@@ -34,6 +34,7 @@ export const PREVIEW_RANGE_MAX_READ = MAX_RUN_BLOCKS * BLOCK_BYTES
 // content (its key and size), like usePreviewFetch, so a rename keeps the port.
 export function usePreviewRangeSource(item: DriveItem, options?: PreviewRangeSourceOptions): UsePreviewRangeSourceResult {
 	const origin = usePreviewOrigin(item)
+	const access = usePreviewAccessMode()
 	const size = originSize(origin)
 	const limit = options?.limit
 	const length = limit === undefined ? size : Math.max(0, Math.min(limit, size))
@@ -57,7 +58,7 @@ export function usePreviewRangeSource(item: DriveItem, options?: PreviewRangeSou
 			if (live) setEntry({ key, result: { status: "error", dto: asErrorDTO(error), refetch } })
 		}
 
-		void openOriginRangeSource(latestOrigin(), token, { limit: length }).then(
+		void openOriginRangeSource(latestOrigin(), token, { access, limit: length }).then(
 			source => {
 				if (!live) {
 					source.close()
@@ -96,7 +97,7 @@ export function usePreviewRangeSource(item: DriveItem, options?: PreviewRangeSou
 				opened.close()
 			}
 		}
-	}, [key, length])
+	}, [key, length, access])
 
 	return entry !== null && entry.key === key ? entry.result : { status: "pending" }
 }

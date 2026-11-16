@@ -61,7 +61,7 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 			const url =
 				origin === null
 					? await previewStreamUrl(fileOf(), name, contentType, id, { access })
-					: await previewOriginStreamUrl(origin, name, contentType, id)
+					: await previewOriginStreamUrl(origin, access, name, contentType, id)
 
 			setPreviewStreamId(cacheScope, uuid, contentType, id, epoch)
 

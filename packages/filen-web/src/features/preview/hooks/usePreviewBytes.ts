@@ -1,7 +1,7 @@
 import { type DriveItem } from "@/features/drive/lib/item"
 import { originSize } from "@/lib/sdk/byteOrigin"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
-import { usePreviewOrigin } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
 import { type PreviewLoad, usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
 
@@ -20,10 +20,11 @@ export type UsePreviewBytesResult =
 // archive's entry) replaces the file under the same token and cache.
 export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 	const origin = usePreviewOrigin(item)
+	const access = usePreviewAccessMode()
 	const load = usePreviewFetch(item, {
 		seed: getPreviewBytes,
 		run: async ({ token, signal, cacheScope }) =>
-			await loadOriginBytes(origin, token, { cap: originSize(origin), scope: cacheScope, signal })
+			await loadOriginBytes(origin, token, { access, cap: originSize(origin), scope: cacheScope, signal })
 	})
 
 	return load.status === "success" ? { status: "success", bytes: load.value, refetch: load.refetch } : load

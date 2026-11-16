@@ -5,7 +5,7 @@ import { mockViewportHeight } from "@/tests/support/viewport"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query"
 import type { AnyFile, EntryAccess, EntryDownloadPhase } from "@filen/sdk-rs"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 import type { EntryReaderEvents } from "@/workers/originSource"
 import type { ArchiveNameInfo } from "@/workers/sdk.worker"
 import "@/lib/i18n"
@@ -48,7 +48,7 @@ vi.mock("@/lib/sdk/client", async () => {
 
 				return Promise.resolve()
 			},
-			downloadOriginBytes: async (origin: ByteOrigin, _cap: number, token: string): Promise<Uint8Array> => {
+			downloadOriginBytes: async (origin: ByteOrigin, _access: OriginAccess, _cap: number, token: string): Promise<Uint8Array> => {
 				const reader = origin.kind === "entry" ? readers.get(origin.reader) : undefined
 
 				if (origin.kind !== "entry" || reader === undefined) {

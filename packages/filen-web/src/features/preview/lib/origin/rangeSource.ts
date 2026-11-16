@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import { originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
 import type { RangeReadBudget } from "@/lib/media/rangeReads"
 import { sdkApi } from "@/lib/sdk/client"
@@ -7,6 +7,8 @@ import { runOp } from "@/lib/actions/outcome"
 import { serveBlobPort } from "@/features/preview/lib/origin/blobPort"
 
 export interface OriginRangeSourceOptions {
+	// The surface asking (usePreviewAccessMode): a public link's reads only what needs no session.
+	readonly access: OriginAccess
 	// Only this many bytes from the start are the source (a byte prefix shown as a file of its own). Unset: all of it.
 	readonly limit?: number
 	// The page reader's reads each take a permit of this budget (ranked first).
@@ -32,10 +34,9 @@ const FIRST = (): number => 0
 export async function openOriginRangeSource(
 	origin: ByteOrigin,
 	token: string,
-	options?: OriginRangeSourceOptions
+	options: OriginRangeSourceOptions
 ): Promise<OriginRangeSource> {
-	const limit = options?.limit
-	const budget = options?.budget
+	const { access, limit, budget } = options
 	const full = originSize(origin)
 	const size = limit === undefined ? full : Math.max(0, Math.min(limit, full))
 	// A `bytes` origin's ports, each ended by its own lifetime; the SDK worker's all end with the token.
@@ -57,7 +58,7 @@ export async function openOriginRangeSource(
 		const { port1, port2 } = new MessageChannel()
 
 		try {
-			await runOp(sdkApi.openOriginRangePort(Comlink.transfer(port1, [port1]), origin, token))
+			await runOp(sdkApi.openOriginRangePort(Comlink.transfer(port1, [port1]), origin, access, token))
 		} catch (e) {
 			port2.close()
 

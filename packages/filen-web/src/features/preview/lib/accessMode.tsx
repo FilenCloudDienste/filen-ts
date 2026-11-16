@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { bytesOrigin, requireOriginAccess, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 
 // Which worker surface the preview viewers are allowed to reach for bytes. The authenticated app
 // leaves this at its default ("authed"), so every existing caller keeps hitting the authed
@@ -14,7 +14,7 @@ import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 // viewer rendered under mode="anon" must resolve its bytes ONLY through the anon method; nothing here
 // carries key material — the mode is a plain string tag, the key still travels through the fabricated
 // DriveItem's own decrypted meta as it always has.
-export type PreviewAccessMode = "authed" | "anon"
+export type PreviewAccessMode = OriginAccess
 
 const PreviewAccessModeContext = createContext<PreviewAccessMode>("authed")
 const PreviewCacheScopeContext = createContext<string | null>(previewCacheScope("authed", undefined))
@@ -100,9 +100,16 @@ export function PreviewByteOriginProvider({ origin, children }: { origin: ByteOr
 }
 
 // The provided origin (an archive's entry: no file of the drive or a link, so nothing a drive action could take), else
-// null.
+// null. Under a public link, one that needs a session throws: every viewer reads its origin through here.
 export function useProvidedPreviewOrigin(): ByteOrigin | null {
-	return useContext(PreviewByteOriginContext)
+	const provided = useContext(PreviewByteOriginContext)
+	const mode = usePreviewAccessMode()
+
+	if (provided !== null) {
+		requireOriginAccess(provided, mode)
+	}
+
+	return provided
 }
 
 // ★ The one derivation of a viewer's origin: the provided one, else the item read through the client its access mode

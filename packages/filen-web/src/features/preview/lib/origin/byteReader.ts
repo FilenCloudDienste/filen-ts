@@ -1,6 +1,6 @@
 import { BlockCache } from "@/lib/media/blockCache"
 import { raceAbort } from "@/lib/abort"
-import { originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { openOriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
 
 // Random reads of an origin for a parser on the page (a sniff, a header walk). Reads past the end are cut short.
@@ -12,6 +12,8 @@ export interface ByteReader {
 }
 
 export interface ByteReaderOptions {
+	// The surface asking (usePreviewAccessMode): a public link's reads only what needs no session.
+	readonly access: OriginAccess
 	// SDK blocks kept for revisits.
 	readonly blocks?: number
 }
@@ -25,7 +27,7 @@ function clamp(size: number, offset: number, length: number): { start: number; e
 }
 
 // A `bytes` origin reads its Blob directly; the others read whole SDK blocks through a range port, memoised.
-export async function openByteReader(origin: ByteOrigin, token: string, options?: ByteReaderOptions): Promise<ByteReader> {
+export async function openByteReader(origin: ByteOrigin, token: string, options: ByteReaderOptions): Promise<ByteReader> {
 	if (origin.kind === "bytes") {
 		const { blob } = origin
 
@@ -45,9 +47,9 @@ export async function openByteReader(origin: ByteOrigin, token: string, options?
 		}
 	}
 
-	const source = await openOriginRangeSource(origin, token)
+	const source = await openOriginRangeSource(origin, token, { access: options.access })
 	const size = originSize(origin)
-	const blocks = new BlockCache(size, source.reader.readRange, { capacity: options?.blocks ?? DEFAULT_BLOCKS, readAhead: 0 })
+	const blocks = new BlockCache(size, source.reader.readRange, { capacity: options.blocks ?? DEFAULT_BLOCKS, readAhead: 0 })
 
 	return {
 		size,

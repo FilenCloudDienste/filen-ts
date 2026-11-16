@@ -80,6 +80,17 @@ export function originAnonSafe(o: ByteOrigin): boolean {
 	}
 }
 
+// The surface asking for an origin's bytes: the signed-in app, or a public link's page.
+export type OriginAccess = "authed" | "anon"
+
+// ★ The anon seam, checked on the page and again in the SDK worker: a public link's surface reaches only an origin an
+// unauthenticated client may read. Throws for any other.
+export function requireOriginAccess(o: ByteOrigin, access: OriginAccess): void {
+	if (access === "anon" && !originAnonSafe(o)) {
+		throw new Error(`a public link's preview cannot read a ${o.kind} origin that needs a session`)
+	}
+}
+
 // The only constructor of the `bytes` kind. The holder wraps a Uint8Array once (`new Blob([bytes])`) and drops every
 // reference to the array in the same tick. `cacheKey` is `${parentOriginKey}/${partId}`.
 export function bytesOrigin(blob: Blob, cacheKey: string): ByteOrigin {

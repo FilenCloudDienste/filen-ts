@@ -69,7 +69,7 @@ async function serveContent(params: WriterParams): Promise<void> {
 async function openPort(origin: ByteOrigin, token: string): Promise<RangePortApi> {
 	const { port1 } = new MessageChannel()
 
-	await api.openOriginRangePort(port1, origin, token)
+	await api.openOriginRangePort(port1, origin, "authed", token)
 
 	return exposed.get("api") as RangePortApi
 }
@@ -156,17 +156,39 @@ describe("sdk worker origin range ports", () => {
 	})
 })
 
+describe("sdk worker origin access", () => {
+	it("refuses an origin that needs a session to a public link's surface on every origin call", async () => {
+		const origin: ByteOrigin = { kind: "file", file: fileOf(10) }
+		const { port1 } = new MessageChannel()
+
+		await expect(api.downloadOriginBytes(origin, "anon", 10, "a1")).rejects.toThrow("needs a session")
+		await expect(api.openOriginRangePort(port1, origin, "anon", "a2")).rejects.toThrow("needs a session")
+		await expect(api.openOriginSyncRange(new SharedArrayBuffer(8), port1, origin, "anon", "a3", "lock")).rejects.toThrow(
+			"needs a session"
+		)
+		await expect(api.readOriginProbe(origin, "anon", "card", "a4")).rejects.toThrow("needs a session")
+		await expect(api.fetchOriginRawPreview(origin, "anon", "a5")).rejects.toThrow("needs a session")
+		expect(fakeClient.downloadFileToWriter).not.toHaveBeenCalled()
+	})
+
+	it("reads a linked file for a public link's surface through the unauthenticated client", async () => {
+		expect(Array.from(await api.downloadOriginBytes({ kind: "linkedFile", file: fileOf(10) }, "anon", 10, "a6"))).toEqual(CONTENT)
+		expect(fakeUnauth.downloadFileToWriter).toHaveBeenCalledTimes(1)
+		expect(fakeClient.downloadFileToWriter).not.toHaveBeenCalled()
+	})
+})
+
 describe("sdk worker whole origin reads", () => {
 	it("downloads a file's whole bytes under its cap and refuses above it", async () => {
-		expect(Array.from(await api.downloadOriginBytes({ kind: "file", file: fileOf(10) }, 10, "w1"))).toEqual(CONTENT)
-		await expect(api.downloadOriginBytes({ kind: "file", file: fileOf(10) }, 9, "w2")).rejects.toThrow("cap")
+		expect(Array.from(await api.downloadOriginBytes({ kind: "file", file: fileOf(10) }, "authed", 10, "w1"))).toEqual(CONTENT)
+		await expect(api.downloadOriginBytes({ kind: "file", file: fileOf(10) }, "authed", 9, "w2")).rejects.toThrow("cap")
 	})
 
 	it("reads an entry whole through the checked entry download", async () => {
 		const reader = { id: "reader-2" }
 		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: "pw", maxSolidSkip: () => 0 })
 
-		expect(Array.from(await api.downloadOriginBytes(entryOrigin(reader.id), 10, "w3"))).toEqual(CONTENT)
+		expect(Array.from(await api.downloadOriginBytes(entryOrigin(reader.id), "authed", 10, "w3"))).toEqual(CONTENT)
 		expect(fakeClient.downloadArchiveEntry.mock.calls[0]?.[1]).toBe("pw")
 		releaseEntryReader(reader.id)
 	})
@@ -176,10 +198,10 @@ describe("sdk worker whole origin reads", () => {
 		const reader = { id: "reader-3" }
 		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
 
-		await expect(api.openOriginSyncRange(new SharedArrayBuffer(8), port1, entryOrigin(reader.id), "s1", "lock")).rejects.toThrow(
-			"read whole"
-		)
-		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "r1")).rejects.toThrow("file origin")
+		await expect(
+			api.openOriginSyncRange(new SharedArrayBuffer(8), port1, entryOrigin(reader.id), "authed", "s1", "lock")
+		).rejects.toThrow("read whole")
+		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "authed", "r1")).rejects.toThrow("file origin")
 		releaseEntryReader(reader.id)
 	})
 })

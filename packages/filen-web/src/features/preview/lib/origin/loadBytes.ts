@@ -1,9 +1,11 @@
-import { originKey, originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { originKey, originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 export interface LoadOriginBytesOptions {
+	// The surface asking (usePreviewAccessMode): a public link's reads only what needs no session.
+	readonly access: OriginAccess
 	// The most the origin may be; a larger one is refused before anything is read.
 	readonly cap: number
 	// Kept in the preview cache once loaded (default). False shares a load under way without keeping its result.
@@ -37,7 +39,7 @@ export async function loadOriginBytes(origin: ByteOrigin, token: string, options
 		options.scope ?? null,
 		originKey(origin),
 		size,
-		() => runOp(sdkApi.downloadOriginBytes(origin, cap, token)),
+		() => runOp(sdkApi.downloadOriginBytes(origin, options.access, cap, token)),
 		{
 			...(signal === undefined ? {} : { signal }),
 			store: options.store ?? true

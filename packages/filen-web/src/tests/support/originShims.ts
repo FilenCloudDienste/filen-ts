@@ -1,5 +1,5 @@
 import type { AnyFile } from "@filen/sdk-rs"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 
 // The byte layer's worker calls routed to a test's spies on the per-client calls they replace (a drive file to the
 // session's, a linked file to the anonymous one), so a test asserting on those still sees every read.
@@ -24,13 +24,13 @@ function missing(name: string): never {
 
 export function originShims(calls: PerClientCalls) {
 	return {
-		downloadOriginBytes: (origin: ByteOrigin, _cap: number, token: string): Promise<Uint8Array> => {
+		downloadOriginBytes: (origin: ByteOrigin, _access: OriginAccess, _cap: number, token: string): Promise<Uint8Array> => {
 			const { anon, file } = fileOf(origin)
 			const call = anon ? calls.downloadLinkedFileBytesAnon : calls.downloadFileBytes
 
 			return call === undefined ? missing(anon ? "downloadLinkedFileBytesAnon" : "downloadFileBytes") : call(file, token)
 		},
-		openOriginRangePort: async (port: MessagePort, origin: ByteOrigin, token: string): Promise<void> => {
+		openOriginRangePort: async (port: MessagePort, origin: ByteOrigin, _access: OriginAccess, token: string): Promise<void> => {
 			const { anon, file } = fileOf(origin)
 			const call = anon ? calls.openLinkedRangePortAnon : calls.openRangePort
 

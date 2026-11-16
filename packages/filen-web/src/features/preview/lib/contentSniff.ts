@@ -10,6 +10,7 @@ import { probeTransportStream } from "@/features/preview/lib/transportStreamProb
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 export interface ContentSniffOptions {
+	readonly access: PreviewAccessMode
 	// The preview cache's scope (previewCacheScope).
 	readonly scope: string | null
 	readonly signal: AbortSignal
@@ -44,12 +45,18 @@ async function probed(id: SniffId, origin: ByteOrigin, signal: AbortSignal): Pro
 // preview cache, where the buffered viewer opening next finds it; a larger one has one block read.
 async function readHead(origin: ByteOrigin, length: number, token: string, options: ContentSniffOptions): Promise<Uint8Array> {
 	if (originSize(origin) <= BLOCK_BYTES) {
-		const bytes = await loadOriginBytes(origin, token, { cap: BLOCK_BYTES, store: true, scope: options.scope, signal: options.signal })
+		const bytes = await loadOriginBytes(origin, token, {
+			access: options.access,
+			cap: BLOCK_BYTES,
+			store: true,
+			scope: options.scope,
+			signal: options.signal
+		})
 
 		return bytes.subarray(0, length)
 	}
 
-	const reader = await openByteReader(origin, token, { blocks: 1 })
+	const reader = await openByteReader(origin, token, { access: options.access, blocks: 1 })
 
 	try {
 		return await reader.read(0, length, options.signal)

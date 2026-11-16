@@ -49,7 +49,7 @@ export function ContentSniffGate({ item, asText, render }: { item: DriveItem; as
 	const mime = driveItemMime(item)
 	const size = item.data.size
 	// The origin and cache scope as they stand: usePreviewOrigin builds a new origin each render.
-	const readFrom = useEffectEvent(() => ({ origin, scope }))
+	const readFrom = useEffectEvent(() => ({ origin, scope, access }))
 
 	useEffect(() => {
 		if (sniff === null || !waiting) {
@@ -59,7 +59,11 @@ export function ContentSniffGate({ item, asText, render }: { item: DriveItem; as
 		const abort = new AbortController()
 		const from = readFrom()
 
-		void runContentSniff(sniff, from.origin, crypto.randomUUID(), { scope: from.scope, signal: abort.signal }).then(
+		void runContentSniff(sniff, from.origin, crypto.randomUUID(), {
+			access: from.access,
+			scope: from.scope,
+			signal: abort.signal
+		}).then(
 			found => {
 				if (!abort.signal.aborted) {
 					// A public link's verdict stays in memory: an anonymous visit leaves nothing in kv.
