@@ -82,9 +82,9 @@ describe("fileIconKey", () => {
 
 	it.each([
 		["archive", "aab aar war ear xpi crx whl nupkg vsix appx msix kmz cbz cbt cb7 cbr"],
-		["doc", "epub mobi fb2 pages"],
+		["doc", "epub mobi fb2 pages msg"],
 		["xls", "numbers"],
-		["txt", "eml msg mbox ics ifb ical vcf vcard srt vtt ass ssa smi sami"],
+		["txt", "eml mbox ics ifb ical vcf vcard srt vtt ass ssa smi sami"],
 		["code", "ipynb gpx kml geojson mmd excalidraw"],
 		["cad", "stl gltf glb 3mf fbx ply usdz dxf"],
 		["audio", "mid midi kar rmi xm s3m mptm wma"],

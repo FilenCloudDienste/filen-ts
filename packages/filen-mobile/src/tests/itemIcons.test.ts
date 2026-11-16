@@ -376,6 +376,8 @@ describe("resolveFileIconKey", () => {
 		expect(resolveFileIconKey("go.sum")).toBe("txt")
 		expect(resolveFileIconKey("film.srt")).toBe("txt")
 		expect(resolveFileIconKey("mail.eml")).toBe("txt")
+		// An Outlook message is binary: the document glyph, never text's.
+		expect(resolveFileIconKey("mail.msg")).toBe("doc")
 		expect(resolveFileIconKey("tracks.gpx")).toBe("code")
 		expect(resolveFileIconKey("notebook.ipynb")).toBe("code")
 		expect(resolveFileIconKey("lib.aar")).toBe("archive")
