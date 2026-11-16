@@ -35,6 +35,7 @@ import { previewPptxShow } from "@/locales/en/previewPptx/show"
 import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewImageEditor } from "@/locales/en/previewImage/editor"
 import { previewImageSave } from "@/locales/en/previewImage/save"
+import { previewRichShell } from "@/locales/en/previewRich/shell"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -851,5 +852,6 @@ export const preview = {
 	...previewPdfRedaction,
 	...previewPdfShell,
 	...previewPdfNotices,
-	...previewPdfPages
+	...previewPdfPages,
+	...previewRichShell
 } as const
