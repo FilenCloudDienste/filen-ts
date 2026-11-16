@@ -125,6 +125,22 @@ describe("PendingUploads — order by state", () => {
 		expect(animate.mock.calls[0]?.[0]).toEqual([{ transform: `translate(0px, ${String(-2 * ROW_HEIGHT)}px)` }, { transform: "none" }])
 	})
 
+	it("slides an upload that fails to the failed rows, though its row changes key", () => {
+		mockRowOffsets()
+		mockReducedMotion(false)
+
+		const animate = mockAnimate()
+		const container = renderBlock()
+
+		act(() => {
+			useTransfersStore.getState().settle("a", "error")
+		})
+
+		expect(rowNames(container)).toEqual(["b.txt", "c.txt", "a.txt"])
+		expect(animate).toHaveBeenCalledTimes(1)
+		expect(animate.mock.contexts[0]).toBe(container.querySelector('li[aria-label="a.txt"]'))
+	})
+
 	it("moves it without sliding under reduced motion", () => {
 		mockRowOffsets()
 		mockReducedMotion(true)

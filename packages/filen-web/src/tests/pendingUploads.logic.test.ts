@@ -16,6 +16,7 @@ import {
 	pendingSummaryFigures,
 	pendingSummarySamples,
 	pendingRowGroup,
+	pendingRowOrderId,
 	pendingUploadRowKeys
 } from "@/features/drive/lib/pendingUploads.logic"
 import { TRANSFER_GROUP } from "@/features/transfers/lib/order"
@@ -125,6 +126,24 @@ describe("pendingUploadRowKeys — order by state", () => {
 		store().setProgress("b", 900)
 
 		expect(keys()).toEqual(before)
+	})
+
+	it("keeps a unit's order id when it fails, so the move is followed", () => {
+		expect(pendingRowOrderId("failedUpload:a")).toBe(pendingRowOrderId("upload:a"))
+		expect(pendingRowOrderId("failedDirectory:t")).toBe(pendingRowOrderId("directory:t"))
+		expect(pendingRowOrderId("job:j")).toBe("job:j")
+		expect(pendingRowOrderId("upload:a")).not.toBe(pendingRowOrderId("directory:a"))
+	})
+
+	it("puts an upload that fails after the running ones, in the failed group", () => {
+		const run = plainRun("run")
+
+		addUpload("a", run)
+		addUpload("b", run)
+		store().settle("a", "error", sdkDto("Timeout"))
+
+		expect(keys()).toEqual(["upload:b", "failedUpload:a"])
+		expect(keys().map(key => pendingRowGroup(store(), key, NO_WAITING))).toEqual([TRANSFER_GROUP.active, TRANSFER_GROUP.failed])
 	})
 
 	it("gives the summary rows their own group", () => {

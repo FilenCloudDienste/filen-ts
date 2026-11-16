@@ -19,6 +19,7 @@ import {
 	pendingJobIds,
 	pendingJobSpeed,
 	pendingRowGroup,
+	pendingRowOrderId,
 	pendingRunFigures,
 	pendingSummaryFigures,
 	pendingSummarySamples,
@@ -251,7 +252,7 @@ function PendingTransferRow({ rowKey, group, viewMode, onCancel, onDismiss }: Ro
 			transfer={transfer}
 			failed={failed}
 			viewMode={viewMode}
-			order={orderAttributes(rowKey, group)}
+			order={orderAttributes(pendingRowOrderId(rowKey), group)}
 			action={
 				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
@@ -378,7 +379,7 @@ function PendingDirectoryRow({ rowKey, group, viewMode, onCancel, onDismiss }: R
 			details={details}
 			progress={failed || scanning ? null : percent}
 			failed={failed}
-			order={orderAttributes(rowKey, group)}
+			order={orderAttributes(pendingRowOrderId(rowKey), group)}
 			action={
 				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
@@ -413,7 +414,7 @@ function PendingSummaryRow({ rowKey, group, parentUuid, viewMode, onCancel }: Ro
 			details={details}
 			progress={percent}
 			failed={false}
-			order={orderAttributes(rowKey, group)}
+			order={orderAttributes(pendingRowOrderId(rowKey), group)}
 			action={
 				<RowButton
 					label={t("transfersRowCancel")}
@@ -443,7 +444,7 @@ function PendingFailedSummaryRow({ rowKey, group, parentUuid, viewMode, onDismis
 			details={failedLine("")}
 			progress={null}
 			failed
-			order={orderAttributes(rowKey, group)}
+			order={orderAttributes(pendingRowOrderId(rowKey), group)}
 			action={
 				<RowButton
 					label={t("drivePendingUploadsDismiss")}

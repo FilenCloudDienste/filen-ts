@@ -36,7 +36,8 @@ export function useGroupMoves(container: RefObject<HTMLElement | null>): void {
 			return
 		}
 
-		const still = before.size === 0 || prefersReducedMotion()
+		// Asked only once a row changed group, as most commits are progress ticks that move nothing.
+		let reduced: boolean | undefined
 
 		for (const row of element.querySelectorAll<HTMLElement>(`[${ORDER_ID_ATTRIBUTE}]`)) {
 			const id = row.getAttribute(ORDER_ID_ATTRIBUTE)
@@ -47,11 +48,17 @@ export function useGroupMoves(container: RefObject<HTMLElement | null>): void {
 			}
 
 			const now: Placed = { group, x: row.offsetLeft, y: row.offsetTop }
-			const was = still ? undefined : before.get(id)
+			const was = before.get(id)
 
 			placed.set(id, now)
 
 			if (was === undefined || was.group === group) {
+				continue
+			}
+
+			reduced ??= prefersReducedMotion()
+
+			if (reduced) {
 				continue
 			}
 

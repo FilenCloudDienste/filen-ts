@@ -188,6 +188,21 @@ function pushUnitRows(state: PendingUploadsState, parentUuid: string | null, key
 	}
 }
 
+// The id the order follows a row by (useGroupMoves): its unit's, which a failed upload or directory run keeps though its
+// key, and so its row, changes.
+export function pendingRowOrderId(key: PendingRowKey): string {
+	const { kind, id } = parsePendingRowKey(key)
+
+	switch (kind) {
+		case "failedUpload":
+			return `upload:${id}`
+		case "failedDirectory":
+			return `directory:${id}`
+		default:
+			return key
+	}
+}
+
 // A row's state in the order (lib/order.ts): a directory run waits while it is walked, a job while its job waits for
 // the archive slot.
 export function pendingRowGroup(state: PendingUploadsState, key: PendingRowKey, waitingJobs: ReadonlySet<string>): TransferGroup {
