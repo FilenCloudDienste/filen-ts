@@ -31,6 +31,9 @@ export type PdfWorker =
 	// pdf.js's main-thread worker, for a page that cannot start one (an opaque origin): the host imports
 	// pdf.worker.mjs statically, which installs globalThis.pdfjsWorker.
 	| { readonly kind: "inThread" }
+	// A pdf.js PDFWorker the host created and keeps for many documents (pdf.js destroys only a worker it created
+	// itself), so a short document does not pay for starting one.
+	| { readonly kind: "shared"; readonly worker: unknown }
 
 export type PdfAssetKind = "cMapUrl" | "standardFontDataUrl" | "wasmUrl"
 
@@ -187,7 +190,7 @@ export function openPdf<S>(pdfjs: PdfJs<S>, source: PdfSource, options: PdfOpenO
 
 			return { promise: failed, password: () => false, destroy: () => Promise.resolve() }
 		}
-	} else if (pdfjs.GlobalWorkerOptions.workerSrc !== options.worker.src) {
+	} else if (options.worker.kind === "script" && pdfjs.GlobalWorkerOptions.workerSrc !== options.worker.src) {
 		pdfjs.GlobalWorkerOptions.workerSrc = options.worker.src
 	}
 
@@ -235,7 +238,8 @@ export function openPdf<S>(pdfjs: PdfJs<S>, source: PdfSource, options: PdfOpenO
 	}
 
 	const params = pdfDocumentParams(source, options.assets ?? { kind: "none" }, options)
-	const call: PdfDocumentParams = range === undefined ? params : { ...params, range }
+	const withWorker: PdfDocumentParams = options.worker.kind === "shared" ? { ...params, worker: options.worker.worker } : params
+	const call: PdfDocumentParams = range === undefined ? withWorker : { ...withWorker, range }
 	const task = pdfjs.getDocument(call)
 	let pending: ((password: string) => void) | null = null
 

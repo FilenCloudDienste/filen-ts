@@ -7,7 +7,7 @@ import {
 	THUMB_MAX_DIM,
 	THUMB_SDK_MAX_HEIGHT,
 	THUMB_SDK_LOSSY_QUALITY,
-	THUMB_SIZE_GATE,
+	THUMB_PDF_READ_MAX,
 	THUMB_WARM_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
@@ -16,6 +16,14 @@ import type { ProbeRecord } from "@/features/videos/lib/probeService.logic"
 import type { FrameGeneratorDeps, FrameRequest, GeneratedFrame } from "@/features/videos/lib/frames"
 import type { ProbeServiceDeps } from "@/features/videos/lib/probeService"
 import { FRAME_DWELL_MS, FRAME_RECIPE_VERSION, type FrameHint } from "@/features/videos/lib/frames.logic"
+
+const MIB = 1024 * 1024
+
+// The range transport openPdf handed the `index`th getDocument call.
+function transportOf(index: number): { requestDataRange(begin: number, end: number): void; answered: number[] } {
+	return (getDocumentMock.mock.calls[index]?.[0] as { range: { requestDataRange(begin: number, end: number): void; answered: number[] } })
+		.range
+}
 
 // The signal of a generation some cell still wants.
 function live(): AbortSignal {
@@ -139,8 +147,8 @@ vi.mock("@/features/videos/lib/records", () => ({
 }))
 vi.mock("@/features/videos/workers/frame.worker.ts?worker", () => ({ default: vi.fn() }))
 
-// A stand-in pdf.js whose documents fail to open, which is all the worker-sharing branch needs: the
-// worker handed to getDocument and each task's teardown are observable without a DOM.
+// A stand-in pdf.js: what each generation hands getDocument (bytes or a range transport, the worker), each task's
+// teardown, and the transport's requests are observable without a DOM. Nothing here ever renders a page.
 const { pdfWorkerCtorMock, pdfWorkerDestroyMock, getDocumentMock, taskDestroyMock } = vi.hoisted(() => ({
 	pdfWorkerCtorMock: vi.fn(),
 	pdfWorkerDestroyMock: vi.fn(),
@@ -159,8 +167,31 @@ vi.mock("pdfjs-dist", () => ({
 			pdfWorkerDestroyMock()
 		}
 	},
+	PDFDataRangeTransport: class {
+		readonly answered: number[] = []
+
+		requestDataRange(): void {
+			throw new Error("not replaced")
+		}
+
+		onDataRange(begin: number): void {
+			this.answered.push(begin)
+		}
+
+		abort(): void {
+			// Nothing to abort.
+		}
+	},
 	getDocument: getDocumentMock
 }))
+
+const { openOriginRangeSourceMock, rangeReadMock, rangeCloseMock } = vi.hoisted(() => ({
+	openOriginRangeSourceMock: vi.fn(),
+	rangeReadMock: vi.fn<(start: number, end: number, signal: AbortSignal) => Promise<Uint8Array>>(),
+	rangeCloseMock: vi.fn()
+}))
+
+vi.mock("@/features/preview/lib/origin/rangeSource", () => ({ openOriginRangeSource: openOriginRangeSourceMock }))
 
 import {
 	generateSdkThumb,
@@ -373,7 +404,7 @@ describe("warmUploadThumbnail", () => {
 		const gateBytes = 41.5 * 1024 * 1024
 
 		expect(THUMB_WARM_SIZE_GATE).toBe(BigInt(gateBytes))
-		expect(THUMB_WARM_SIZE_GATE).toBeLessThan(THUMB_SIZE_GATE)
+		expect(THUMB_WARM_SIZE_GATE).toBeLessThan(THUMB_PDF_READ_MAX)
 
 		warmUploadThumbnail(namedFile("shot.nef", "image/x-nikon-nef", { canMakeThumbnail: true }), sizedFile("shot.nef", gateBytes))
 
@@ -470,10 +501,65 @@ describe("warmUploadThumbnail", () => {
 		expect(getDocumentMock).not.toHaveBeenCalled()
 	})
 
-	it("skips a pdf over the whole-buffer gate", () => {
-		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf", { size: THUMB_SIZE_GATE + 1n }), browserFile("doc.pdf"))
+	it("reads a 100 MiB local pdf through File.slice ranges, within the read budget, never whole", async () => {
+		const size = 100 * MIB
+		const file = sizedFile("doc.pdf", size)
+		const sliced: number[] = []
+		const document = Promise.withResolvers<unknown>()
 
-		expect(seedThumbnailMock).not.toHaveBeenCalled()
+		vi.spyOn(file, "slice").mockImplementation((start = 0, end = size) => {
+			sliced.push(end - start)
+
+			return new Blob([new Uint8Array(end - start)])
+		})
+		const whole = vi.spyOn(file, "arrayBuffer")
+
+		getDocumentMock.mockImplementation(() => ({ promise: document.promise, destroy: taskDestroyMock }))
+
+		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf", { size: BigInt(size) }), file)
+
+		const produced = seededProduction()()
+
+		await vi.waitFor(() => {
+			expect(getDocumentMock).toHaveBeenCalledTimes(1)
+		})
+		const transport = transportOf(0)
+
+		transport.requestDataRange(0, MIB)
+		transport.requestDataRange(size - MIB, size)
+		await vi.waitFor(() => {
+			expect(transport.answered).toEqual([0, size - MIB])
+		})
+		// Past the budget: settled as a verdict about the file, the document destroyed.
+		transport.requestDataRange(MIB, THUMB_PDF_READ_MAX)
+
+		await expect(produced).resolves.toEqual({ type: "none" })
+		expect(whole).not.toHaveBeenCalled()
+		expect(sliced.reduce((sum, length) => sum + length, 0)).toBeLessThanOrEqual(THUMB_PDF_READ_MAX)
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("pdf")
+	})
+
+	it("leaves a large local pdf unanswered when a range of it cannot be read", async () => {
+		const size = 100 * MIB
+		const file = sizedFile("doc.pdf", size)
+		const unreadable = new Blob([])
+
+		vi.spyOn(unreadable, "arrayBuffer").mockRejectedValue(new DOMException("gone", "NotReadableError"))
+		vi.spyOn(file, "slice").mockReturnValue(unreadable)
+		getDocumentMock.mockImplementation(() => ({ promise: new Promise(() => undefined), destroy: taskDestroyMock }))
+
+		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf", { size: BigInt(size) }), file)
+
+		const produced = seededProduction()()
+
+		await vi.waitFor(() => {
+			expect(getDocumentMock).toHaveBeenCalledTimes(1)
+		})
+		transportOf(0).requestDataRange(0, MIB)
+
+		await expect(produced).resolves.toEqual({ type: "unanswered" })
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
 	})
 
 	it("the seeded production hands the browser File straight to the SDK, in an image slot, and returns its bytes", async () => {
@@ -1203,6 +1289,114 @@ describe("generatePdfThumb", () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))
 
 		await expect(generatePdfThumb(pdfItem(), live())).resolves.toEqual({ type: "failed" })
+	})
+})
+
+// A large pdf is read by range: every path settles, destroys the document and ends the range source.
+describe("generatePdfThumb by range", () => {
+	const SIZE = 100 * MIB
+	let task: { promise: Promise<unknown>; resolve: (value: unknown) => void; onPassword: unknown }
+
+	function largePdf(): BaseFileItem {
+		return itemAsBaseFile(narrowItem(namedFile("doc.pdf", "application/pdf", { size: BigInt(SIZE) })))
+	}
+
+	// An opened document whose page 1 never comes (pdf.js waiting on a range it will never be answered).
+	const getPageMock = vi.fn(() => new Promise(() => undefined))
+	const OPENED = { numPages: 1, getPage: getPageMock }
+
+	beforeEach(() => {
+		const opened = Promise.withResolvers<unknown>()
+
+		task = { promise: opened.promise, resolve: opened.resolve, onPassword: null }
+		getDocumentMock.mockImplementation(() => Object.assign(task, { destroy: taskDestroyMock }))
+		rangeReadMock.mockImplementation((start, end) => Promise.resolve(new Uint8Array(end - start)))
+		openOriginRangeSourceMock.mockResolvedValue({
+			size: SIZE,
+			reader: { readRange: rangeReadMock },
+			close: rangeCloseMock
+		})
+	})
+
+	// Wrapped: an async function returning the generation itself would wait for it to settle.
+	async function started(signal: AbortSignal = live()): Promise<{ generation: Promise<unknown> }> {
+		const generation = generatePdfThumb(largePdf(), signal)
+
+		await vi.waitFor(() => {
+			expect(getDocumentMock).toHaveBeenCalledTimes(1)
+		})
+
+		return { generation }
+	}
+
+	it("opens the drive file by range on the background read budget, never downloading it", async () => {
+		const { generation } = await started()
+
+		expect(openOriginRangeSourceMock.mock.calls[0]?.[0]).toMatchObject({ kind: "file" })
+		expect(openOriginRangeSourceMock.mock.calls[0]?.[2]).toEqual({ access: "authed", budget: rangeReads })
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+
+		task.resolve(OPENED)
+		transportOf(0).requestDataRange(SIZE - MIB, SIZE)
+		transportOf(0).requestDataRange(0, THUMB_PDF_READ_MAX)
+
+		await expect(generation).resolves.toEqual({ type: "unavailable", reason: "overBudget" })
+		expect(rangeReadMock.mock.calls.every(([start, end]) => end - start <= 4 * MIB)).toBe(true)
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("settles a read over the budget before the document opened as overBudget", async () => {
+		const { generation } = await started()
+
+		transportOf(0).requestDataRange(0, THUMB_PDF_READ_MAX + MIB)
+
+		await expect(generation).resolves.toEqual({ type: "unavailable", reason: "overBudget" })
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("settles a password-protected file as unsupported", async () => {
+		const { generation } = await started()
+
+		;(task.onPassword as (update: (password: string) => void, reason: number) => void)(vi.fn(), 1)
+
+		await expect(generation).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("fails on a read that fails after the document opened", async () => {
+		const { generation } = await started()
+
+		task.resolve(OPENED)
+		await vi.waitFor(() => {
+			expect(getPageMock).toHaveBeenCalled()
+		})
+		rangeReadMock.mockRejectedValue(new Error("network"))
+		transportOf(0).requestDataRange(0, MIB)
+
+		await expect(generation).resolves.toEqual({ type: "failed" })
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("fails once nobody wants the thumbnail any more", async () => {
+		const controller = new AbortController()
+		const { generation } = await started(controller.signal)
+
+		controller.abort()
+
+		await expect(generation).resolves.toEqual({ type: "failed" })
+		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
+		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("fails without opening pdf.js when the range source cannot be opened", async () => {
+		openOriginRangeSourceMock.mockRejectedValue(new Error("no session"))
+
+		await expect(generatePdfThumb(largePdf(), live())).resolves.toEqual({ type: "failed" })
+		expect(getDocumentMock).not.toHaveBeenCalled()
 	})
 })
 

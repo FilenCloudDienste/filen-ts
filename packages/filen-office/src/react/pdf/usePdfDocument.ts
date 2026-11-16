@@ -8,7 +8,8 @@ import {
 	type PdfOpening,
 	type PdfAssets,
 	type PdfPasswordReason,
-	type PdfSource
+	type PdfSource,
+	type PdfWorker
 } from "../../dom/pdf/index"
 import type { PdfDomDocument } from "./types"
 
@@ -73,11 +74,21 @@ function sameAssets(a: PdfAssets | undefined, b: PdfAssets | undefined): boolean
 	return true
 }
 
+function sameWorker(a: PdfWorker, b: PdfWorker): boolean {
+	switch (a.kind) {
+		case "inThread":
+			return b.kind === "inThread"
+		case "script":
+			return b.kind === "script" && a.src === b.src
+		case "shared":
+			return b.kind === "shared" && a.worker === b.worker
+	}
+}
+
 function sameOptions(a: PdfDocumentOptions, b: PdfDocumentOptions): boolean {
 	return (
 		a === b ||
-		(a.worker.kind === b.worker.kind &&
-			(a.worker.kind === "inThread" || (b.worker.kind === "script" && a.worker.src === b.worker.src)) &&
+		(sameWorker(a.worker, b.worker) &&
 			sameAssets(a.assets, b.assets) &&
 			a.maxImageSize === b.maxImageSize &&
 			a.canvasMaxAreaInBytes === b.canvasMaxAreaInBytes &&

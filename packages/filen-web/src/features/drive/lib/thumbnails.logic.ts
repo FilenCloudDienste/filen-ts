@@ -5,7 +5,7 @@ import { itemTypeExtension, previewType } from "@/features/drive/lib/preview.log
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
 // them ever sees now. "video", "pdf" and "svg" stay client-side because Rust decodes none of them.
-// "none" covers every directory arm, an undecryptable file, a pdf or svg over its size gate, and
+// "none" covers every directory arm, an undecryptable file, an svg over its size gate, and
 // anything the SDK itself says it cannot thumbnail.
 export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "none"
 
@@ -30,15 +30,21 @@ export const THUMB_MAX_DIM = 384
 // full-size embedded JPEG clears it and still answers in a couple of range reads.
 export const THUMB_SDK_MAX_HEIGHT = THUMB_MAX_DIM * 2
 
-// Whole-buffer decode/generate ceiling (64 MiB) for the ONE remaining category that pulls the entire
-// file into JS memory to produce a thumbnail: pdf. An oversize file skips thumbnailing rather than
-// risking a tab-crashing allocation for a preview-sized image. video is exempt (its generator only
-// ever reads a single frame off a stream), and so is "sdk" — the SDK enforces its own byte ceiling
-// (`max_source_bytes`, 64 MiB by default, byte-identical to this) internally, and still runs the cheap
-// embedded-preview probe ABOVE it. Applying this gate to the sdk arm would therefore change nothing
-// except to throw away the one case that matters most: a 90 MB RAW whose camera already embedded a
-// full-size JPEG the SDK can lift out with a couple of range reads.
-export const THUMB_SIZE_GATE = 67_108_864n
+// Most a pdf's thumbnail reads of the file (64 MiB). pdf.js reads page 1 in ranges, usually a few blocks; a file that
+// needs more for it (a damaged cross-reference table pdf.js rebuilds by reading everything) has no thumbnail. A file
+// at or below it may be read whole, so this is also the old whole-download ceiling. No gate at open: what costs is
+// what is read, and the SDK's own byte ceiling (`max_source_bytes`, 64 MiB by default) is the same figure.
+export const THUMB_PDF_READ_MAX = 67_108_864
+
+// The least a pdf's thumbnail may read (16 MiB): a small file's whole length is too tight a budget when pdf.js reads
+// whole blocks.
+export const THUMB_PDF_READ_MIN = 16_777_216
+
+// What a pdf's thumbnail may read of a file of `size` bytes: never less than the whole file up to the ceiling, which is
+// what the whole download read before.
+export function pdfThumbReadBudget(size: number): number {
+	return Math.max(THUMB_PDF_READ_MIN, Math.min(size, THUMB_PDF_READ_MAX))
+}
 
 // Whole-document ceiling (4 MiB) for an svg, which is read whole and parsed and rasterised on the main
 // thread (only a DOM <img> renders one). Real icons and illustrations sit far below it; past it lies
@@ -46,7 +52,7 @@ export const THUMB_SIZE_GATE = 67_108_864n
 export const THUMB_SVG_SIZE_GATE = 4_194_304n
 
 // The working memory the SDK allots one thumbnail decode (microthumb's APP_PROCESS_MEM_BUDGET). A
-// different axis from THUMB_SIZE_GATE above — bytes of MEMORY, not bytes of source — that happens to
+// different axis from THUMB_PDF_READ_MAX above — bytes of MEMORY, not bytes of source — that happens to
 // default to the same 64 MiB. This app configures neither.
 export const THUMB_SDK_MEM_BUDGET = 67_108_864n
 
@@ -66,8 +72,8 @@ const THUMB_FULL_TARGET_BUDGET = BigInt(THUMB_SDK_MAX_HEIGHT) * BigInt(THUMB_SDK
 // gate from 54 MiB, so more just-uploaded files now fall through to the drive-side producer. The drive-side path pays a constant 3 MiB for its
 // resident chunk slots instead — two on-demand slots plus the hand-off slot of the read-ahead stream a
 // full decode switches to — so its budget never shrinks with the file; past this gate it is simply the
-// better producer. Below THUMB_SIZE_GATE, so it also covers the from-stream path's outright refusal of
-// a source over `max_source_bytes`.
+// better producer. Below THUMB_PDF_READ_MAX (the SDK's `max_source_bytes`), so it also covers the from-stream path's
+// outright refusal of a source over it.
 export const THUMB_WARM_SIZE_GATE = THUMB_SDK_MEM_BUDGET - THUMB_FULL_TARGET_BUDGET
 
 // WebP quality 0-100 handed to the SDK arm. Absent would mean LOSSLESS (the SDK's default), which is
@@ -113,7 +119,7 @@ export const THUMB_EXT = ".thumb"
 //   2. svg, at/under the gate    -> svg    (client-side: rasterised through an <img>, whose secure
 //                                           mode runs no script; never handed to the SDK's decoders)
 //   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
-//   4. pdf, at/under the gate    -> pdf    (client-side: pdf.js, the one whole-buffer decode left)
+//   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
 //   5. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
 //   6. everything else           -> none
 //
@@ -141,7 +147,7 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 	}
 
 	if (ext === "pdf") {
-		return base.data.size <= THUMB_SIZE_GATE ? "pdf" : "none"
+		return "pdf"
 	}
 
 	return base.data.canMakeThumbnail ? "sdk" : "none"

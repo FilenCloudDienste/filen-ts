@@ -112,6 +112,8 @@ export interface PdfDocumentParams {
 	readonly canvasMaxAreaInBytes?: number
 	readonly enableXfa?: boolean
 	readonly verbosity?: number
+	// A pdf.js PDFWorker the host keeps: destroying the document leaves it running.
+	readonly worker?: unknown
 }
 
 export interface PdfJs<S = unknown> {

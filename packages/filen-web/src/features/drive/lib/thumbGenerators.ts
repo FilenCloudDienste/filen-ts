@@ -19,6 +19,7 @@ import {
 	THUMB_SDK_MAX_HEIGHT,
 	THUMB_SDK_LOSSY_QUALITY,
 	THUMB_WARM_SIZE_GATE,
+	pdfThumbReadBudget,
 	thumbnailCategory
 } from "@/features/drive/lib/thumbnails.logic"
 import {
@@ -42,7 +43,12 @@ import { SAMPLE_HEIGHT, SAMPLE_WIDTH, isDark, meanLuma } from "@/lib/media/frame
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { driveItemMime, narrowItem, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
-import { getDocument, GlobalWorkerOptions, PDFWorker } from "pdfjs-dist"
+import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, PDFWorker } from "pdfjs-dist"
+import { openPdf, PdfReadError, type PdfDocument, type PdfJs, type PdfSource } from "@filen/office/dom/pdf"
+import { BLOCK_BYTES, ReadBudgetError } from "@filen/shared/videos"
+import { PDF_WORKER_SRC, pdfViewerSetup } from "@/features/preview/lib/pdfViewerSetup"
+import { openOriginRangeSource, type OriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
+import { MAX_RUN_BLOCKS } from "@/lib/media/blockCache"
 import { idleResource, type IdleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -62,7 +68,7 @@ import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
 // rest costs less than starting over the next time the cell scrolls into view.
 const DOWNLOAD_COMMIT_FRACTION = 0.5
 
-// pdf and svg are the generators that pull a whole file into JS memory, through the same buffered
+// svg and a small pdf are the generations that pull a whole file into JS memory, through the same buffered
 // download the preview overlay uses (usePreviewBytes) — or straight from the bytes a preview already
 // holds. The returned buffer is the caller's own, so a consumer may transfer it.
 async function downloadWholeFile(item: BaseFileItem, signal: AbortSignal): Promise<Uint8Array> {
@@ -192,17 +198,14 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 
 	if (category === "pdf") {
 		seedLocalThumb(item, "pdf", async () => {
-			let bytes: Uint8Array
+			const read = { failed: false }
+			const source = await localPdfSource(file, () => {
+				read.failed = true
+			})
+			const result = source === null ? null : await renderPdfThumb(source, uploaded.uuid, UNSTOPPED)
 
-			try {
-				bytes = new Uint8Array(await file.arrayBuffer())
-			} catch (e) {
-				log.warn("thumb-generators", "warmUploadThumbnail: local read failed", uploaded.uuid, e)
-
-				return null
-			}
-
-			return await renderPdfThumb(bytes, uploaded.uuid)
+			// A local file that could not be read says nothing about the file.
+			return read.failed ? null : result
 		})
 
 		return
@@ -834,7 +837,7 @@ export async function rasterizeSvgThumb(text: string): Promise<ThumbGenerationRe
 	return result.data
 }
 
-// Small by construction (THUMB_SVG_SIZE_GATE), so the whole document is read like a pdf's: the
+// Small by construction (THUMB_SVG_SIZE_GATE), so the whole document is read like a small pdf's: the
 // rasteriser needs the markup, not a stream. Once the markup is in hand the render always runs.
 export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 	let bytes: Uint8Array
@@ -853,19 +856,45 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 }
 
 // One pdf.js worker shared by every PDF thumbnail, instead of one spun up and torn down per file.
-// Passed to getDocument explicitly, so a task's destroy() ends only its own document and never the
-// worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
+// Handed to pdf.js as the host's own (openPdf's "shared" worker), so a task's destroy() ends only its own document
+// and never the worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
 // their own. Torn down once no generation has used it for a while.
 const PDF_THUMB_WORKER_IDLE_MS = 30_000
 
+// A pdf at or below this size is read whole in one request: fewer round trips than reading it block by block.
+const PDF_THUMB_WHOLE_READ_MAX = 4 * 1024 * 1024
+
+const PDFJS_THUMB: PdfJs = { getDocument, GlobalWorkerOptions, PDFDataRangeTransport }
+
 let pdfThumbWorker: IdleResource<PDFWorker> | null = null
 
-// Page 1 of a whole pdf, drawn into a thumbnail. Both arms share it: the drive-side one downloads the
-// bytes, the upload warm reads them from the local file.
-async function renderPdfThumb(bytes: Uint8Array, uuid: string): Promise<ThumbGenerationResult> {
-	// Mirrors pdfViewer.tsx's own worker-src setup (duplicated rather than imported: that file is a
-	// React component this module must not depend on). Read when the shared worker is constructed.
-	GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
+const PDF_THUMB_OVER_BUDGET: ThumbGenerationResult = { type: "unavailable", reason: "overBudget" }
+
+// Page 1 of a pdf, drawn into a thumbnail.
+async function drawFirstPage(pdf: PdfDocument): Promise<ThumbGenerationResult> {
+	const page = await pdf.getPage(1)
+	const baseViewport = page.getViewport({ scale: 1 })
+	const fitted = fitWithin(baseViewport.width, baseViewport.height, THUMB_MAX_DIM)
+	const viewport = page.getViewport({ scale: fitted.width / baseViewport.width })
+	const canvas = document.createElement("canvas")
+
+	canvas.width = fitted.width
+	canvas.height = fitted.height
+
+	await page.render({ canvas, viewport }).promise
+
+	const blob = await encodeCanvasThumb(canvas)
+
+	return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
+}
+
+// Page 1 of a pdf through the viewer's own open (its assets and decode limits, pdfViewerSetup.ts) on the shared worker.
+// A ranged source may read at most pdfThumbReadBudget of the file. Settles on every path, and destroys the document:
+// a read over the budget is a verdict (overBudget), a password-protected file too (unsupported); any other failed
+// read, a failed render, or `signal` aborting is a failure. pdf.js never asks a failed range again, so a read failing
+// after the document opened would leave its page pending for good without the onReadError answer.
+async function renderPdfThumb(source: PdfSource, uuid: string, signal: AbortSignal): Promise<ThumbGenerationResult> {
+	GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC
 
 	pdfThumbWorker ??= idleResource(
 		() => new PDFWorker(),
@@ -876,57 +905,162 @@ async function renderPdfThumb(bytes: Uint8Array, uuid: string): Promise<ThumbGen
 	)
 
 	return await pdfThumbWorker.use<ThumbGenerationResult>(async worker => {
-		const task = getDocument({ data: bytes, worker })
+		let overBudget = false
+		let budgeted = source
 
-		try {
-			// No onPassword handler is registered — pdf.js rejects task.promise with the password exception
-			// instead of waiting on a handler that will never answer (verified against the installed 6.1.200
-			// source), so a password-protected file fails this generation promptly rather than hanging.
-			const doc = await task.promise
-			const page = await doc.getPage(1)
-			const baseViewport = page.getViewport({ scale: 1 })
-			const fitted = fitWithin(baseViewport.width, baseViewport.height, THUMB_MAX_DIM)
-			const viewport = page.getViewport({ scale: fitted.width / baseViewport.width })
+		if (source.kind === "ranges") {
+			const budget = pdfThumbReadBudget(source.length)
+			let read = 0
 
-			const canvas = document.createElement("canvas")
+			budgeted = {
+				...source,
+				read: (offset, length) => {
+					if (read + length > budget) {
+						overBudget = true
 
-			canvas.width = fitted.width
-			canvas.height = fitted.height
+						return Promise.reject(new ReadBudgetError())
+					}
 
-			const renderTask = page.render({ canvas, viewport })
+					read += length
 
-			await renderTask.promise
+					return source.read(offset, length)
+				}
+			}
+		}
 
-			const blob = await encodeCanvasThumb(canvas)
+		const settled = Promise.withResolvers<ThumbGenerationResult>()
+		const readFailed = (): ThumbGenerationResult => (overBudget ? PDF_THUMB_OVER_BUDGET : { type: "failed" })
+		const opening = openPdf(PDFJS_THUMB, budgeted, {
+			...pdfViewerSetup().shared,
+			worker: { kind: "shared", worker },
+			onPassword: () => {
+				settled.resolve({ type: "unavailable", reason: "unsupported" })
+			},
+			onReadError: () => {
+				settled.resolve(readFailed())
+			}
+		})
+		const stop = onAbort(signal, () => {
+			settled.resolve({ type: "failed" })
+		})
 
-			return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
-		} catch (e) {
+		void opening.promise.then(drawFirstPage).then(settled.resolve, (e: unknown) => {
+			if (e instanceof PdfReadError) {
+				settled.resolve(readFailed())
+
+				return
+			}
+
 			log.warn("thumb-generators", "renderPdfThumb: render failed", uuid, e)
 			// pdf.worker is its own file: a deploy that changed it fails documents in older tabs.
 			recoverIfNewerBuild()
+			settled.resolve({ type: "failed" })
+		})
 
-			return { type: "failed" }
+		try {
+			return await settled.promise
 		} finally {
-			await task.destroy()
+			stop()
+			await opening.destroy()
 		}
 	})
 }
 
-// Once the bytes are in hand the render always runs: page 1 costs far less than the download did.
-export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
-	let bytes: Uint8Array
+// A generation nothing stops: the upload warm's, whose result is cached for the row it was seeded for.
+const UNSTOPPED = new AbortController().signal
+
+// A local file's bytes for a pdf thumbnail: whole when small, else by range through File.slice (no network, and never
+// the whole file in memory). `onUnreadable` hears of a read of the file that failed; null when the whole read did.
+async function localPdfSource(file: File, onUnreadable: () => void): Promise<PdfSource | null> {
+	if (file.size > PDF_THUMB_WHOLE_READ_MAX) {
+		return {
+			kind: "ranges",
+			length: file.size,
+			read: (offset, length) =>
+				file
+					.slice(offset, offset + length)
+					.arrayBuffer()
+					.then(
+						buffer => new Uint8Array(buffer),
+						(e: unknown) => {
+							onUnreadable()
+
+							throw e
+						}
+					),
+			chunkSize: BLOCK_BYTES,
+			maxRead: MAX_RUN_BLOCKS * BLOCK_BYTES
+		}
+	}
 
 	try {
-		bytes = await downloadWholeFile(item, signal)
+		return { kind: "bytes", bytes: new Uint8Array(await file.arrayBuffer()) }
 	} catch (e) {
-		if (!signal.aborted) {
-			log.warn("thumb-generators", "generatePdfThumb: download failed", item.data.uuid, e)
+		log.warn("thumb-generators", "warmUploadThumbnail: local read failed", file.name, e)
+		onUnreadable()
+
+		return null
+	}
+}
+
+// Page 1 of a drive pdf. A small file (or one a preview already holds) is read whole; a larger one by range through
+// the SDK worker, aligned to its blocks and taking a background read permit per read, so page 1 of a large file costs
+// a few blocks. The range source ends (and its downloads with it) once the generation settles.
+export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
+	if (
+		item.data.size <= PDF_THUMB_WHOLE_READ_MAX ||
+		getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid) !== undefined
+	) {
+		let bytes: Uint8Array
+
+		try {
+			bytes = await downloadWholeFile(item, signal)
+		} catch (e) {
+			if (!signal.aborted) {
+				log.warn("thumb-generators", "generatePdfThumb: download failed", item.data.uuid, e)
+			}
+
+			return { type: "failed" }
 		}
+
+		return await renderPdfThumb({ kind: "bytes", bytes }, item.data.uuid, signal)
+	}
+
+	if (signal.aborted) {
+		return { type: "failed" }
+	}
+
+	let range: OriginRangeSource
+
+	try {
+		range = await openOriginRangeSource({ kind: "file", file: narrowToAnyFile(item) }, crypto.randomUUID(), {
+			access: "authed",
+			budget: rangeReads
+		})
+	} catch (e) {
+		log.warn("thumb-generators", "generatePdfThumb: range source failed", item.data.uuid, e)
 
 		return { type: "failed" }
 	}
 
-	return await renderPdfThumb(bytes, item.data.uuid)
+	const reads = new AbortController()
+
+	try {
+		return await renderPdfThumb(
+			{
+				kind: "ranges",
+				length: range.size,
+				read: (offset, length) => range.reader.readRange(offset, offset + length, reads.signal),
+				chunkSize: BLOCK_BYTES,
+				maxRead: MAX_RUN_BLOCKS * BLOCK_BYTES
+			},
+			item.data.uuid,
+			signal
+		)
+	} finally {
+		reads.abort()
+		range.close()
+	}
 }
 
 // Module scope, not inside a function: runs exactly once per module evaluation (mirrors

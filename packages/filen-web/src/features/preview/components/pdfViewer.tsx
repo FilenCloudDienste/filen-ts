@@ -12,19 +12,13 @@ import {
 	type PdfViewerCommand,
 	type PdfViewport
 } from "@filen/office/dom/pdf"
-import {
-	PdfPages,
-	usePdfDocument,
-	usePdfViewer,
-	type PdfDocumentOptions,
-	type PdfDomDocument,
-	type PdfJsDom
-} from "@filen/office/react/pdf"
+import { PdfPages, usePdfDocument, usePdfViewer, type PdfDomDocument, type PdfJsDom } from "@filen/office/react/pdf"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewRangeSource } from "@/features/preview/hooks/usePreviewRangeSource"
 import { usePdfFullReadGuard } from "@/features/preview/hooks/usePdfFullReadGuard"
-import { PDF_FULL_READ_WARN_BYTES, pdfViewerLimits, type PdfViewerLimits } from "@/features/preview/lib/pdfLimits"
+import { PDF_FULL_READ_WARN_BYTES } from "@/features/preview/lib/pdfLimits"
+import { pdfViewerSetup } from "@/features/preview/lib/pdfViewerSetup"
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
 import { toggleViewerFullScreen, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
@@ -54,7 +48,6 @@ import "@/features/preview/components/pdfTheme.css"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { usePasswordDraft } from "@/features/preview/lib/passwordDraft"
 import { usePdfPrint } from "@/features/pdf/print/usePdfPrint"
-import { PDFJS_ASSETS } from "virtual:pdfjs-assets"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import { PdfSignatureStatus, PdfSignedVersionStatus } from "@/features/pdf/signatures/pdfSignatureStatus"
 import { useSignatureVerifier, type PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureVerifier"
@@ -89,35 +82,6 @@ export interface PdfViewerProps {
 
 // Only what the viewer uses, so the rest of pdf.js's exports stay out of the bundle.
 const PDFJS: PdfJsDom = { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer }
-
-// Vite rewrites `new URL(specifier, import.meta.url)` to a same-origin, content-hashed asset URL, which
-// worker-src 'self' covers. A worker script (not one shared Worker) gives every document its own worker,
-// destroyed with it: pdf.js tears down the worker of the task it destroys. pdf.js has no eval path, so the CSP
-// needs nothing more. Its data files (character maps, standard fonts, image decoders, ICC profile) come from this
-// origin too (vite/pdfjs-assets-plugin.ts), and decoded images and pdf.js's own canvases are capped for the device.
-const WORKER_SRC = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
-
-let built: { readonly options: PdfDocumentOptions; readonly limits: PdfViewerLimits } | null = null
-
-// Built once: the device's limits do not change while the page lives.
-function viewerSetup(): { readonly options: PdfDocumentOptions; readonly limits: PdfViewerLimits } {
-	if (built === null) {
-		const limits = pdfViewerLimits()
-
-		built = {
-			limits,
-			options: {
-				worker: { kind: "script", src: WORKER_SRC },
-				assets: { kind: "urls", ...PDFJS_ASSETS },
-				maxImageSize: limits.maxImageSize,
-				canvasMaxAreaInBytes: limits.canvasMaxAreaInBytes,
-				residentLimit: limits.residentReopenBytes
-			}
-		}
-	}
-
-	return built
-}
 
 // The column grows to its widest page (w-max) and at least fills the view (min-w-full), so narrower pages stay
 // centred while a page zoomed wider than the view overflows to the right only, keeping its left side scrollable.
@@ -664,7 +628,7 @@ function PdfReader({
 							/>
 						}
 						allowLink={isSafeAbsoluteHref}
-						maxCanvasBytes={viewerSetup().limits.canvasMaxAreaInBytes}
+						maxCanvasBytes={pdfViewerSetup().limits.canvasMaxAreaInBytes}
 						{...(edit === null
 							? {}
 							: {
@@ -739,7 +703,7 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 	const { state, password, retry, fullyRead, resident, reopen, acceptedPassword, release } = usePdfDocument(
 		PDFJS,
 		source,
-		viewerSetup().options
+		pdfViewerSetup().options
 	)
 	const failed = state.status === "error"
 	const ready = state.status === "ready" ? state.document : null

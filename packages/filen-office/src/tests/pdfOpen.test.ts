@@ -158,6 +158,16 @@ describe("openPdf", () => {
 		expect(pdfjs.GlobalWorkerOptions.workerSrc).toBe("/pdf.worker.mjs")
 	})
 
+	it("hands pdf.js the host's shared worker and leaves the worker script alone", () => {
+		const { pdfjs, tasks } = fakePdfJs()
+		const worker = { shared: true }
+
+		openPdf(pdfjs, { kind: "bytes", bytes: new Uint8Array(1) }, { worker: { kind: "shared", worker }, onPassword: () => undefined })
+
+		expect(Reflect.get(tasks[0]?.params as object, "worker")).toBe(worker)
+		expect(pdfjs.GlobalWorkerOptions.workerSrc).toBe("")
+	})
+
 	it("refuses the in-thread worker when the host did not load pdf.js's worker module", async () => {
 		const { pdfjs, tasks } = fakePdfJs()
 		const opening = openPdf(

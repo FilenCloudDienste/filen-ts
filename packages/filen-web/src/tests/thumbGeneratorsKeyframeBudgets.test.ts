@@ -71,6 +71,7 @@ vi.mock("@/features/preview/lib/previewCache", () => ({ getPreviewBytes: () => u
 vi.mock("pdfjs-dist", () => ({
 	GlobalWorkerOptions: { workerSrc: "" },
 	PDFWorker: vi.fn(),
+	PDFDataRangeTransport: vi.fn(),
 	getDocument: vi.fn()
 }))
 

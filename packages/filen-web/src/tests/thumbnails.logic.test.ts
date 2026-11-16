@@ -3,15 +3,20 @@ import type { Dir, File, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import {
+	pdfThumbReadBudget,
 	rowRank,
 	thumbnailCategory,
 	THUMB_MAX_DIM,
+	THUMB_PDF_READ_MAX,
+	THUMB_PDF_READ_MIN,
 	THUMB_SDK_MAX_HEIGHT,
-	THUMB_SIZE_GATE,
 	THUMB_SVG_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
 import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
+
+// Past every byte ceiling a thumbnail has (64 MiB).
+const BIG = 67_108_865n
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
@@ -148,7 +153,7 @@ describe("thumbnailCategory", () => {
 	// have to be claimed by extension BEFORE the flag check or they would fall to "none" and lose the
 	// client-side generators that do handle them.
 	it.each(["mp4", "mov", "webm", "m4v", "mkv"])("%s -> video despite canMakeThumbnail false, and size-gate exempt", ext => {
-		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false, size: THUMB_SIZE_GATE + 1n }))).toBe("video")
+		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false, size: BIG }))).toBe("video")
 	})
 
 	it("pdf -> pdf despite canMakeThumbnail false", () => {
@@ -164,15 +169,21 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed(".gitignore"))).toBe("sdk")
 	})
 
-	// pdf is the ONE category left that buffers a whole file in JS memory, so it is the only one this
-	// gate still applies to.
-	describe("whole-buffer size gate (pdf only)", () => {
-		it("is pdf exactly at the size gate", () => {
-			expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false, size: THUMB_SIZE_GATE }))).toBe("pdf")
+	// pdf.js reads page 1 in ranges, so a pdf of any size routes to pdf; what it may read is budgeted instead.
+	describe("pdf read budget", () => {
+		it("is pdf at any size", () => {
+			expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false, size: 10n * BIG }))).toBe("pdf")
 		})
 
-		it("is none one byte over the size gate", () => {
-			expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false, size: THUMB_SIZE_GATE + 1n }))).toBe("none")
+		it("reads at least 16 MiB, at most 64 MiB, and never less than the whole file below that", () => {
+			const MIB = 1024 * 1024
+
+			expect(THUMB_PDF_READ_MIN).toBe(16 * MIB)
+			expect(THUMB_PDF_READ_MAX).toBe(64 * MIB)
+			expect(pdfThumbReadBudget(1024)).toBe(16 * MIB)
+			expect(pdfThumbReadBudget(40 * MIB)).toBe(40 * MIB)
+			expect(pdfThumbReadBudget(64 * MIB)).toBe(64 * MIB)
+			expect(pdfThumbReadBudget(1024 * MIB)).toBe(64 * MIB)
 		})
 	})
 
@@ -181,7 +192,7 @@ describe("thumbnailCategory", () => {
 	// enforces its own byte ceiling internally either way.
 	describe("the sdk arm is NOT size-gated", () => {
 		it("a large still image still routes to sdk", () => {
-			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE + 1n }))).toBe("sdk")
+			expect(thumbnailCategory(fileNamed("photo.jpg", { size: BIG }))).toBe("sdk")
 		})
 
 		it("a 90 MB RAW still routes to sdk", () => {
