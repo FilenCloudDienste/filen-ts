@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { onlineManager } from "@tanstack/react-query"
+import { log } from "@/lib/log"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type ThumbGeneratorCategory, type ThumbGenerator, type ThumbSeedResult } from "@/features/drive/lib/thumbnails"
@@ -192,6 +193,10 @@ const { openOriginRangeSourceMock, rangeReadMock, rangeCloseMock } = vi.hoisted(
 }))
 
 vi.mock("@/features/preview/lib/origin/rangeSource", () => ({ openOriginRangeSource: openOriginRangeSourceMock }))
+
+const { recoverIfNewerBuildMock } = vi.hoisted(() => ({ recoverIfNewerBuildMock: vi.fn() }))
+
+vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild: recoverIfNewerBuildMock }))
 
 import {
 	generateSdkThumb,
@@ -1390,6 +1395,56 @@ describe("generatePdfThumb by range", () => {
 		await expect(generation).resolves.toEqual({ type: "failed" })
 		expect(taskDestroyMock).toHaveBeenCalledTimes(1)
 		expect(rangeCloseMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("fails quietly when the document's teardown fails its pending page once nobody wants it", async () => {
+		const page = Promise.withResolvers<never>()
+		const controller = new AbortController()
+		const warn = vi.spyOn(log, "warn")
+
+		page.promise.catch(() => undefined)
+		taskDestroyMock.mockImplementationOnce(() => {
+			page.reject(new Error("Worker was destroyed"))
+
+			return Promise.resolve()
+		})
+
+		const { generation } = await started(controller.signal)
+
+		task.resolve({ numPages: 1, getPage: () => page.promise })
+		await vi.waitFor(() => {
+			expect(transportOf(0)).toBeDefined()
+		})
+		controller.abort()
+
+		await expect(generation).resolves.toEqual({ type: "failed" })
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(warn).not.toHaveBeenCalledWith("thumb-generators", "renderPdfThumb: render failed", expect.anything(), expect.anything())
+		expect(recoverIfNewerBuildMock).not.toHaveBeenCalled()
+		warn.mockRestore()
+	})
+
+	it("reads a large pdf a preview holds by range from those bytes, never copying them whole", async () => {
+		const held = new Uint8Array(5 * MIB).fill(9)
+
+		getPreviewBytesMock.mockReturnValue(held)
+
+		const { generation } = await started()
+		const params = getDocumentMock.mock.calls[0]?.[0] as { data?: unknown; range?: unknown }
+
+		expect(params.data).toBeUndefined()
+		expect(params.range).toBeDefined()
+		expect(openOriginRangeSourceMock).not.toHaveBeenCalled()
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+
+		transportOf(0).requestDataRange(0, MIB)
+		await vi.waitFor(() => {
+			expect(transportOf(0).answered).toEqual([0])
+		})
+		task.resolve(OPENED)
+		transportOf(0).requestDataRange(0, THUMB_PDF_READ_MAX)
+		await expect(generation).resolves.toEqual({ type: "unavailable", reason: "overBudget" })
+		expect(held.every(byte => byte === 9)).toBe(true)
 	})
 
 	it("fails without opening pdf.js when the range source cannot be opened", async () => {

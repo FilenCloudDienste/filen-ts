@@ -943,8 +943,17 @@ async function renderPdfThumb(source: PdfSource, uuid: string, signal: AbortSign
 		const stop = onAbort(signal, () => {
 			settled.resolve({ type: "failed" })
 		})
+		// Set once the generation settled: the document's teardown then fails the open or the render, which is no
+		// failure of the file.
+		let closing = false
 
 		void opening.promise.then(drawFirstPage).then(settled.resolve, (e: unknown) => {
+			if (closing || signal.aborted) {
+				settled.resolve({ type: "failed" })
+
+				return
+			}
+
 			if (e instanceof PdfReadError) {
 				settled.resolve(readFailed())
 
@@ -960,6 +969,7 @@ async function renderPdfThumb(source: PdfSource, uuid: string, signal: AbortSign
 		try {
 			return await settled.promise
 		} finally {
+			closing = true
 			stop()
 			await opening.destroy()
 		}
@@ -1003,14 +1013,29 @@ async function localPdfSource(file: File, onUnreadable: () => void): Promise<Pdf
 	}
 }
 
-// Page 1 of a drive pdf. A small file (or one a preview already holds) is read whole; a larger one by range through
-// the SDK worker, aligned to its blocks and taking a background read permit per read, so page 1 of a large file costs
-// a few blocks. The range source ends (and its downloads with it) once the generation settles.
+// The bytes a preview holds, read by range: only what pdf.js asks for is copied (it transfers what it is handed, and
+// the preview's buffer must stay whole).
+function heldPdfSource(held: Uint8Array): PdfSource {
+	return {
+		kind: "ranges",
+		length: held.byteLength,
+		read: (offset, length) => Promise.resolve(held.slice(offset, offset + length)),
+		chunkSize: BLOCK_BYTES,
+		maxRead: MAX_RUN_BLOCKS * BLOCK_BYTES
+	}
+}
+
+// Page 1 of a drive pdf. A small file is read whole; a larger one by range, from the bytes a preview already holds or
+// else through the SDK worker, aligned to its blocks and taking a background read permit per read, so page 1 of a
+// large file costs a few blocks. The range source ends (and its downloads with it) once the generation settles.
 export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
-	if (
-		item.data.size <= PDF_THUMB_WHOLE_READ_MAX ||
-		getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid) !== undefined
-	) {
+	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
+
+	if (held !== undefined && held.byteLength > PDF_THUMB_WHOLE_READ_MAX) {
+		return signal.aborted ? { type: "failed" } : await renderPdfThumb(heldPdfSource(held), item.data.uuid, signal)
+	}
+
+	if (item.data.size <= PDF_THUMB_WHOLE_READ_MAX || held !== undefined) {
 		let bytes: Uint8Array
 
 		try {
