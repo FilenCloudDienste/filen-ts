@@ -24,6 +24,7 @@ import {
 	selectionBytes,
 	browseSaveItems,
 	browseSaveGlyph,
+	browseZipItems,
 	DEFAULT_PUBLIC_SORT,
 	EMPTY_SELECTION,
 	type BrowseCrumb,
@@ -34,6 +35,7 @@ import {
 import {
 	startAnonDirZipDownload,
 	startAnonFileDownload,
+	startAnonItemsZipDownload,
 	type AnonDownloadOutcome,
 	type AnonDownloadProgress
 } from "@/features/publicLinks/lib/download"
@@ -54,14 +56,16 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useReportViewing } from "@/features/publicLinks/lib/reportSubject"
 
-// One download at a time, the whole directory's zip ("zip") or a row's file or subdirectory ("item").
+// One download at a time, the whole directory's zip ("zip") or a row's file or subdirectory, or the selection ("item").
 type DownloadUiState =
 	| { status: "idle" }
 	| { status: "running"; kind: "zip" | "item"; loaded: number; total: number | null }
 	// `forUuid`: the level the download was started on, so an outcome landing after navigation stays off another
-	// directory's header. `file`: a single file's outcome, which says "file" where a zip's says "directory".
-	| { status: "too-large"; forUuid: string; file: boolean }
+	// directory's header. `subject`: what the too-large note names.
+	| { status: "too-large"; forUuid: string; subject: DownloadSubject }
 	| { status: "error"; dto: ErrorDTO; forUuid: string }
+
+type DownloadSubject = "file" | "directory" | "selection"
 
 interface SaveTarget {
 	items: AnyItemWithContext[]
@@ -141,7 +145,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 
 	function runDownload(
 		kind: "zip" | "item",
-		file: boolean,
+		subject: DownloadSubject,
 		start: (onProgress: AnonDownloadProgress) => Promise<AnonDownloadOutcome>
 	): void {
 		const forUuid = current.uuid
@@ -155,14 +159,14 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				outcome.status === "error"
 					? { status: "error", dto: outcome.dto, forUuid }
 					: outcome.status === "too-large"
-						? { status: "too-large", forUuid, file }
+						? { status: "too-large", forUuid, subject }
 						: { status: "idle" }
 			)
 		})
 	}
 
 	function handleZip(): void {
-		runDownload("zip", false, onProgress =>
+		runDownload("zip", "directory", onProgress =>
 			startAnonDirZipDownload({ dir: { dir: current.dir, link }, name: current.name, onProgress })
 		)
 	}
@@ -175,10 +179,23 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		} else if (download.status !== "running") {
 			const name = entryName(entry)
 
-			runDownload("item", entry.kind === "file", onProgress =>
+			runDownload("item", entry.kind === "file" ? "file" : "directory", onProgress =>
 				entry.kind === "file"
 					? startAnonFileDownload({ file: entry.file, name, size: entry.file.size, linkScope, onProgress })
 					: startAnonDirZipDownload({ dir: { dir: entry.dir, link }, name, onProgress })
+			)
+		}
+	}
+
+	// A single entry downloads as its row menu does; more, as one zip named after the level on screen.
+	function handleDownloadSelected(): void {
+		const [only] = picked
+
+		if (only !== undefined && picked.length === 1) {
+			handleEntryAction(only, "download")
+		} else {
+			runDownload("item", "selection", onProgress =>
+				startAnonItemsZipDownload({ items: browseZipItems(picked), link, name: current.name, onProgress })
 			)
 		}
 	}
@@ -321,7 +338,15 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				/>
 			)}
 			{downloadNotice?.status === "too-large" && (
-				<DownloadTooLargeNote message={downloadNotice.file ? t("downloadTooLarge") : t("downloadDirectoryTooLarge")} />
+				<DownloadTooLargeNote
+					message={
+						downloadNotice.subject === "file"
+							? t("downloadTooLarge")
+							: downloadNotice.subject === "directory"
+								? t("downloadDirectoryTooLarge")
+								: t("downloadSelectionTooLarge")
+					}
+				/>
 			)}
 			{downloadNotice?.status === "error" && (
 				<p className="text-sm text-destructive">{`${t("downloadFailed")} ${errorLabel(downloadNotice.dto)}`}</p>
@@ -404,7 +429,14 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						clearKbdAction="drive.clearSelection"
 						onClear={clearSelection}
 					>
-						{/* Download-selected, one zip of the selection, goes here ahead of Save. */}
+						{link.enableDownload ? (
+							<BulkActionButton
+								icon={ACTION_DEFS.download.icon}
+								label={t("download")}
+								disabled={download.status === "running"}
+								onClick={handleDownloadSelected}
+							/>
+						) : null}
 						{saveable ? (
 							<BulkActionButton
 								icon={ACTION_DEFS.copy.icon}

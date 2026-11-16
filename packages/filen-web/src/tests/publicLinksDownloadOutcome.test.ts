@@ -1,21 +1,31 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
+import type { AnyFile, AnyLinkedDirWithContext, DirPublicLink, NonRootLinkedItem } from "@filen/sdk-rs"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // What a public link's buffered (non-FSA) download reports: a directory's zip that outgrows the
 // in-memory cap is "too large", not a bare failure; a failed zip leaves no rejection unhandled; a
 // buffered file shows no share of progress it cannot know.
 
-const { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon, createObjectURL } = vi.hoisted(() => ({
+const { downloadLinkedDirToZipAnon, downloadLinkedItemsToZipAnon, downloadLinkedFileBytesAnon, createObjectURL } = vi.hoisted(() => ({
 	downloadLinkedDirToZipAnon:
 		vi.fn<(dir: AnyLinkedDirWithContext, id: string, writable: WritableStream<Uint8Array>, progress: unknown) => Promise<void>>(),
+	downloadLinkedItemsToZipAnon:
+		vi.fn<
+			(
+				items: NonRootLinkedItem[],
+				link: DirPublicLink,
+				id: string,
+				writable: WritableStream<Uint8Array>,
+				progress: unknown
+			) => Promise<void>
+		>(),
 	downloadLinkedFileBytesAnon: vi.fn<(file: AnyFile, id: string) => Promise<Uint8Array>>(),
 	createObjectURL: vi.fn<(object: Blob | MediaSource) => string>(() => "blob:test")
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedItemsToZipAnon, downloadLinkedFileBytesAnon } }))
 // The real anchor save runs; only the capability and the picker are faked.
 vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
@@ -30,7 +40,7 @@ vi.mock("@/features/publicLinks/lib/download.logic", async importOriginal => {
 	return { ...actual, createCollectingSink: () => actual.createCollectingSink(4n) }
 })
 
-const { startAnonDirZipDownload, startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
+const { startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownload } = await import("@/features/publicLinks/lib/download")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
@@ -84,6 +94,48 @@ describe("startAnonDirZipDownload without FSA", () => {
 		const outcome = await startAnonDirZipDownload({ dir, name: "Photos", onProgress: vi.fn() })
 
 		expect(outcome.status).toBe("error")
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+	})
+})
+
+describe("startAnonItemsZipDownload without FSA", () => {
+	const items = [] as NonRootLinkedItem[]
+	const link = {} as DirPublicLink
+
+	it("reports a selection's zip that outgrows the in-memory cap as too large", async () => {
+		downloadLinkedItemsToZipAnon.mockImplementation((_items, _link, _id, writable) => writeZip(writable, [3, 3]))
+
+		const outcome = await startAnonItemsZipDownload({ items, link, name: "Photos", onProgress: vi.fn() })
+
+		expect(outcome).toEqual({ status: "too-large" })
+	})
+
+	it("saves the zip as the level's name, reporting its progress", async () => {
+		const onProgress = vi.fn()
+		const anchors: string[] = []
+
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+			anchors.push(this.download)
+		})
+		downloadLinkedItemsToZipAnon.mockImplementation(async (_items, _link, _id, writable, progress) => {
+			;(progress as (bytesWritten: bigint, totalBytes: bigint) => void)(2n, 4n)
+			await writeZip(writable, [2, 2])
+		})
+
+		const outcome = await startAnonItemsZipDownload({ items, link, name: "Photos", onProgress })
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(anchors).toEqual(["Photos.zip"])
+		expect(onProgress).toHaveBeenCalledWith(2, 4)
+	})
+
+	it("reports a cancelled zip as cancelled", async () => {
+		downloadLinkedItemsToZipAnon.mockRejectedValue({ species: "sdk", kind: "Cancelled", message: "cancelled", label: "cancelled" })
+
+		const outcome = await startAnonItemsZipDownload({ items, link, name: "Photos", onProgress: vi.fn() })
+
+		expect(outcome).toEqual({ status: "cancelled" })
 
 		await new Promise(resolve => setTimeout(resolve, 0))
 	})

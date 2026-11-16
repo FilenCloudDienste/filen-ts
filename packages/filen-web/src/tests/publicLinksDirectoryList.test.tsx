@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile, LinkedDir } from "@filen/sdk-rs"
 import type { AnonDownloadOutcome } from "@/features/publicLinks/lib/download"
 import type { SaveToDriveDialogProps } from "@/features/publicLinks/components/saveToDrive"
@@ -13,14 +13,15 @@ import "@/lib/i18n"
 // The directory link's list: drive's selection model over the level on screen, its selection bar, and the
 // per-row menus.
 
-const { startAnonDirZipDownload, startAnonFileDownload, saveable, dialog } = vi.hoisted(() => ({
+const { startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownload, saveable, dialog } = vi.hoisted(() => ({
 	startAnonDirZipDownload: vi.fn<() => Promise<AnonDownloadOutcome>>(),
 	startAnonFileDownload: vi.fn<() => Promise<AnonDownloadOutcome>>(),
+	startAnonItemsZipDownload: vi.fn<() => Promise<AnonDownloadOutcome>>(),
 	saveable: { current: false },
 	dialog: { current: null as SaveToDriveDialogProps | null }
 }))
 
-vi.mock("@/features/publicLinks/lib/download", () => ({ startAnonDirZipDownload, startAnonFileDownload }))
+vi.mock("@/features/publicLinks/lib/download", () => ({ startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownload }))
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	useLinkSaveable: () => saveable.current,
 	usePublicDirListing: () => ({ status: "success", data: LISTING, refetch: vi.fn() }),
@@ -80,8 +81,12 @@ const LISTING = { dirs: [SUB], files: [A_TXT, B_TXT, C_TXT] }
 const INFO = { root: { inner: { uuid: ROOT_UUID, meta: { type: "decoded", data: { name: "Photos" } } } } } as unknown as DirPublicInfo
 const LINK = { enableDownload: true, linkKey: "key", password: undefined } as unknown as DirPublicLink
 
-function renderBrowser(): void {
-	render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+function renderBrowser(link: DirPublicLink = LINK): void {
+	render(createElement(DirectoryBrowser, { info: INFO, link }))
+}
+
+function barButton(name: string): HTMLElement | null {
+	return within(screen.getByRole("toolbar", { name: "Selection actions" })).queryByRole("button", { name })
 }
 
 function option(name: string): HTMLElement {
@@ -107,6 +112,7 @@ function selectedNames(): string[] {
 }
 
 beforeEach(() => {
+	vi.clearAllMocks()
 	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	saveable.current = false
 	dialog.current = null
@@ -358,5 +364,56 @@ describe("DirectoryBrowser — the list", () => {
 		expect(startAnonDirZipDownload).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ dir: { dir: SUB, link: LINK }, name: "Sub" })
 		)
+	})
+
+	it("downloads the selection as one zip named after the level, with the link beside the listed entries", async () => {
+		let finish!: (outcome: AnonDownloadOutcome) => void
+
+		startAnonItemsZipDownload.mockReturnValueOnce(
+			new Promise(resolve => {
+				finish = resolve
+			})
+		)
+		renderBrowser()
+
+		fireEvent.click(option("Sub"), { detail: 1 })
+		fireEvent.click(option("b.txt"), { detail: 1, ctrlKey: true })
+		fireEvent.click(barButton("Download") ?? document.body)
+
+		expect(startAnonItemsZipDownload).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ items: [SUB, B_TXT], link: LINK, name: "Photos" })
+		)
+		expect(barButton("Download")?.hasAttribute("disabled")).toBe(true)
+
+		await act(async () => {
+			finish({ status: "too-large" })
+			await Promise.resolve()
+		})
+
+		expect(barButton("Download")?.hasAttribute("disabled")).toBe(false)
+		expect(screen.getByText(/^This selection is too large to download here/)).toBeDefined()
+	})
+
+	it("downloads a lone selected file as the file itself", async () => {
+		startAnonFileDownload.mockResolvedValueOnce({ status: "success" })
+		renderBrowser()
+
+		fireEvent.click(option("a.txt"), { detail: 1 })
+
+		await act(async () => {
+			fireEvent.click(barButton("Download") ?? document.body)
+			await Promise.resolve()
+		})
+
+		expect(startAnonFileDownload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ file: A_TXT, name: "a.txt" }))
+		expect(startAnonItemsZipDownload).not.toHaveBeenCalled()
+	})
+
+	it("offers no Download in the bar for a link with downloads disabled", () => {
+		renderBrowser({ ...LINK, enableDownload: false })
+
+		fireEvent.click(option("a.txt"), { detail: 1 })
+
+		expect(barButton("Download")).toBeNull()
 	})
 })

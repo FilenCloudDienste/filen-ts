@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
+import type { AnyFile, AnyLinkedDirWithContext, DirPublicLink, NonRootLinkedItem } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
@@ -142,17 +142,47 @@ export async function startAnonFileDownload(args: {
 	return { status: "success" }
 }
 
-// Whole linked directory → a single zip. FSA streams the archive to the picked file, else the service worker
-// streams it into the browser's download; the fallback without either collects it in memory (createCollectingSink, cap-enforced incrementally since a zip's total
-// isn't known up front, reported as "too-large" once it trips) then saves one Blob. `<name>.zip` mirrors
-// old-web's naming.
-export async function startAnonDirZipDownload(args: {
+// Whole linked directory → a single zip. `<name>.zip` mirrors old-web's naming.
+export function startAnonDirZipDownload(args: {
 	dir: AnyLinkedDirWithContext
 	name: string
 	onProgress: AnonDownloadProgress
 }): Promise<AnonDownloadOutcome> {
 	const { dir, name, onProgress } = args
-	const fileName = `${name}.zip`
+
+	return startAnonZipDownload(`${name}.zip`, onProgress, (transferId, writable, progress) =>
+		sdkApi.downloadLinkedDirToZipAnon(dir, transferId, writable, progress)
+	)
+}
+
+// A selection of one level's files and subdirectories → a single zip, named after that level (`name`).
+export function startAnonItemsZipDownload(args: {
+	items: NonRootLinkedItem[]
+	link: DirPublicLink
+	name: string
+	onProgress: AnonDownloadProgress
+}): Promise<AnonDownloadOutcome> {
+	const { items, link, name, onProgress } = args
+
+	return startAnonZipDownload(`${name}.zip`, onProgress, (transferId, writable, progress) =>
+		sdkApi.downloadLinkedItemsToZipAnon(items, link, transferId, writable, progress)
+	)
+}
+
+type ZipProducer = (
+	transferId: string,
+	writable: WritableStream<Uint8Array>,
+	progress: (bytesWritten: bigint, totalBytes: bigint) => void
+) => Promise<void>
+
+// FSA streams the archive to the picked file, else the service worker streams it into the browser's download; the
+// fallback without either collects it in memory (createCollectingSink, cap-enforced incrementally since a zip's total
+// isn't known up front, reported as "too-large" once it trips) then saves one Blob.
+async function startAnonZipDownload(
+	fileName: string,
+	onProgress: AnonDownloadProgress,
+	produce: ZipProducer
+): Promise<AnonDownloadOutcome> {
 	const transferId = crypto.randomUUID()
 
 	let target: FsaSaveTarget | null = null
@@ -176,21 +206,17 @@ export async function startAnonDirZipDownload(args: {
 
 	try {
 		if (target !== null) {
-			await pipeWorkerToSink(target.writable, transferred =>
-				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, transferred, reportProgress)
-			)
+			await pipeWorkerToSink(target.writable, transferred => produce(transferId, transferred, reportProgress))
 		} else if (canStreamToSw()) {
 			await streamProducerToSw(swTarget(fileName), transferId, null, writable =>
-				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, Comlink.transfer(writable, [writable]), reportProgress)
+				produce(transferId, Comlink.transfer(writable, [writable]), reportProgress)
 			)
 		} else {
 			const buffered = createCollectingSink()
 
 			sink = buffered
 
-			await pipeWorkerToSink(buffered.writable, transferred =>
-				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, transferred, reportProgress)
-			)
+			await pipeWorkerToSink(buffered.writable, transferred => produce(transferId, transferred, reportProgress))
 
 			saveBlob(await buffered.done, fileName)
 		}

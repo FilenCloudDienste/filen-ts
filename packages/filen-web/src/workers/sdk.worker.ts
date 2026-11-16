@@ -80,6 +80,7 @@ import init, {
 	type AnyLinkedDir,
 	type AnyLinkedDirWithContext,
 	type DirPublicLink,
+	type NonRootLinkedItem,
 	type LinkedDirsAndFiles,
 	type UserPersonalUpdateInfo,
 	type GdprInfo,
@@ -2568,6 +2569,27 @@ const api = {
 
 				try {
 					await unauth.downloadLinkedDirToZip(dir, writer, progress, managedFuture)
+				} finally {
+					finish()
+				}
+			})
+		})
+	},
+	// A selection of one linked level's files and subdirectories as one zip, the same plumbing as
+	// downloadLinkedDirToZipAnon. `link` carries the password the listing was unlocked with.
+	async downloadLinkedItemsToZipAnon(
+		items: NonRootLinkedItem[],
+		link: DirPublicLink,
+		transferId: string,
+		writer: WritableStream<Uint8Array>,
+		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
+	): Promise<void> {
+		await withLinkedUnauth(async unauth => {
+			await withTransferControls(transferId, async managedFuture => {
+				const { progress, finish } = throttledProgress(onProgress)
+
+				try {
+					await unauth.downloadLinkedItemsToZip(items, link, writer, progress, managedFuture)
 				} finally {
 					finish()
 				}

@@ -3,23 +3,27 @@
 // A public link's download into a picked file (File System Access): picking already created the file, so
 // a download that fails or is cancelled deletes it instead of leaving it empty on disk.
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyLinkedDirWithContext } from "@filen/sdk-rs"
+import type { AnyLinkedDirWithContext, DirPublicLink, NonRootLinkedItem } from "@filen/sdk-rs"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 
-const { downloadLinkedDirToZipAnon, downloadLinkedFileToWriterAnon, pickFsaTarget } = vi.hoisted(() => ({
+const { downloadLinkedDirToZipAnon, downloadLinkedItemsToZipAnon, downloadLinkedFileToWriterAnon, pickFsaTarget } = vi.hoisted(() => ({
 	downloadLinkedDirToZipAnon: vi.fn<(dir: AnyLinkedDirWithContext, id: string, writable: WritableStream<Uint8Array>) => Promise<void>>(),
+	downloadLinkedItemsToZipAnon:
+		vi.fn<(items: NonRootLinkedItem[], link: DirPublicLink, id: string, writable: WritableStream<Uint8Array>) => Promise<void>>(),
 	downloadLinkedFileToWriterAnon: vi.fn<(file: unknown, id: string, writable: WritableStream<Uint8Array>) => Promise<void>>(),
 	pickFsaTarget: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedFileToWriterAnon } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedItemsToZipAnon, downloadLinkedFileToWriterAnon }
+}))
 vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
 	isFsaAvailable: () => true,
 	pickFsaTarget
 }))
 
-const { startAnonDirZipDownload, startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
+const { startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownload } = await import("@/features/publicLinks/lib/download")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
@@ -81,5 +85,26 @@ describe("public link downloads into a picked file", () => {
 
 		expect(outcome).toEqual({ status: "success" })
 		expect(remove).not.toHaveBeenCalled()
+	})
+
+	it("zips a selection with its link into a file named after the level, deleting it when the zip fails", async () => {
+		const { remove } = pick()
+		const items = [{}, {}] as NonRootLinkedItem[]
+		const link = { linkKey: "key" } as unknown as DirPublicLink
+
+		downloadLinkedItemsToZipAnon.mockRejectedValue(failure)
+
+		const outcome = await startAnonItemsZipDownload({ items, link, name: "Photos", onProgress: vi.fn() })
+
+		expect(pickFsaTarget).toHaveBeenCalledExactlyOnceWith("Photos.zip")
+		expect(downloadLinkedItemsToZipAnon).toHaveBeenCalledExactlyOnceWith(
+			items,
+			link,
+			expect.any(String),
+			expect.any(WritableStream),
+			expect.any(Function)
+		)
+		expect(outcome.status).toBe("error")
+		expect(remove).toHaveBeenCalledTimes(1)
 	})
 })

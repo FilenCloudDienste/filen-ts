@@ -5,7 +5,8 @@ import type {
 	DirPublicLink,
 	File as SdkFile,
 	LinkedDir,
-	LinkedDirsAndFiles
+	LinkedDirsAndFiles,
+	NonRootLinkedItem
 } from "@filen/sdk-rs"
 import { copyJobGlyph, driveItemName, type CopyJobGlyph } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -157,6 +158,11 @@ export function toggleSelection(selection: BrowseSelection, key: string): Browse
 // Entries as the SDK copies them into the visitor's drive: a file as listed, a directory with the link.
 export function browseSaveItems(entries: readonly BrowseEntry[], link: DirPublicLink): AnyItemWithContext[] {
 	return entries.map(entry => (entry.kind === "file" ? entry.file : { dir: entry.dir, link }))
+}
+
+// The zip call takes the listed entries as they are; the selection's link travels beside them.
+export function browseZipItems(entries: readonly BrowseEntry[]): NonRootLinkedItem[] {
+	return entries.map(entry => (entry.kind === "file" ? entry.file : entry.dir))
 }
 
 export function browseSaveGlyph(entries: readonly BrowseEntry[]): CopyJobGlyph {
