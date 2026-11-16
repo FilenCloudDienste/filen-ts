@@ -106,7 +106,7 @@ function QueueRow({
 					<img
 						src={coverUrl}
 						alt=""
-						className="size-5 shrink-0 rounded object-cover"
+						className="size-5 shrink-0 rounded object-cover thumbnail-range"
 					/>
 				) : (
 					<span

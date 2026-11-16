@@ -174,7 +174,7 @@ function ZoomableImage({
 	return (
 		<div
 			ref={containerRef}
-			className="flex size-full items-center justify-center overflow-hidden [dynamic-range-limit:no-limit]"
+			className="flex size-full items-center justify-center overflow-hidden"
 		>
 			<img
 				ref={element => {

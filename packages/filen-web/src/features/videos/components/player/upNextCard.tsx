@@ -106,7 +106,7 @@ export function UpNextCard({
 						<img
 							src={still}
 							alt=""
-							className="size-full object-cover"
+							className="size-full object-cover thumbnail-range"
 						/>
 					)}
 				</div>

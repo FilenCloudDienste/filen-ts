@@ -581,7 +581,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 							<img
 								src={coverUrl}
 								alt=""
-								className="size-full object-cover"
+								className="size-full object-cover thumbnail-range"
 							/>
 						) : (
 							<MusicIcon

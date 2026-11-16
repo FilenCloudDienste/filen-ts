@@ -75,7 +75,7 @@ export function ArtImage({ url, fit }: { url: string; fit: "cover" | "contain" }
 			decoding="async"
 			draggable={false}
 			className={cn(
-				"absolute inset-0 size-full transition-opacity duration-150 motion-reduce:transition-none",
+				"absolute inset-0 size-full transition-opacity duration-150 thumbnail-range motion-reduce:transition-none",
 				fit === "cover" ? "object-cover" : "object-contain",
 				ready ? "opacity-100" : "opacity-0"
 			)}

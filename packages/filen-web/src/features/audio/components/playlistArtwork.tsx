@@ -26,7 +26,7 @@ export function PlaylistArtwork({
 				<img
 					src={coverUrl}
 					alt=""
-					className="absolute inset-0 size-full object-cover"
+					className="absolute inset-0 size-full object-cover thumbnail-range"
 				/>
 			) : null}
 		</div>

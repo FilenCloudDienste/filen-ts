@@ -213,7 +213,7 @@ export function AudioPlayerBar() {
 							<img
 								src={coverUrl}
 								alt=""
-								className="size-full object-cover"
+								className="size-full object-cover thumbnail-range"
 							/>
 						) : (
 							<Music className="size-5" />

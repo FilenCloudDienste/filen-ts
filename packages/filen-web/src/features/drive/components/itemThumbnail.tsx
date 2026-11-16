@@ -48,7 +48,7 @@ export function ItemThumbnail({
 			alt=""
 			draggable={false}
 			decoding="async"
-			className={cn(imgClassName, waited && "animate-in fade-in")}
+			className={cn("thumbnail-range", imgClassName, waited && "animate-in fade-in")}
 			onError={() => {
 				invalidateThumbnail(item.data.uuid)
 				setThumbFailed(true)

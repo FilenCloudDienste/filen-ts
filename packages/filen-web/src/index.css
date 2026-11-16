@@ -66,17 +66,18 @@
     -webkit-app-region: no-drag;
 }
 
+/* Thumbnails and artwork in grids and rows stay at standard dynamic range, so a grid of HDR photos cannot outshine
+   the interface. Only these surfaces: video and every full-size picture keep the initial no-limit. Ignored where
+   unsupported. */
+@utility thumbnail-range {
+    dynamic-range-limit: standard;
+}
+
 /* Desktop window chrome (lib/desktop.ts sets data-desktop; every inset is 0 in a browser). Windows and
    Linux: the window-controls overlay, a band across the top whose controls sit at the right. macOS: the
    traffic lights at x 10-70, y 8-22, gone in fullscreen. A full-window layer's top bar leaves
    --window-inset-top above itself and --window-inset-left before its first control; a panel in the
    top-left corner starts --window-inset-corner down. */
-/* HDR pictures stay at standard range everywhere (a grid of HDR photos would outshine the interface); the preview's
-   image surface lifts the limit. Inherited; ignored where unsupported. */
-:root {
-    dynamic-range-limit: standard;
-}
-
 :root {
     --window-inset-top: env(titlebar-area-height, 0px);
     --window-inset-left: 0px;
