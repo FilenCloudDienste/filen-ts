@@ -2,7 +2,7 @@ import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, UsersIcon, type LucideIcon } from "lucide-react"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { noteRowIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
@@ -24,6 +24,7 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { stopRowPropagation } from "@/lib/domEvents"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
@@ -42,6 +43,8 @@ export interface NoteRowProps {
 	// The shared minute tick (useNowMinute), owned by the sidebar so rows do not each subscribe.
 	now: number
 	isOnline: boolean
+	// The user's default note type (Appearance → Notes): its notes carry no type mark.
+	defaultNoteType: NoteType
 	// Threaded straight through to the row's own menu (noteMenu.tsx's onAction/onDuplicated) — the
 	// sidebar's ONE dialog host (useNoteDialogHost) is the actual dialog-opening implementation, not
 	// this row.
@@ -117,6 +120,7 @@ export function NoteRow({
 	currentUserId,
 	now,
 	isOnline,
+	defaultNoteType,
 	onAction,
 	onDuplicated,
 	onPointerSelect,
@@ -124,7 +128,7 @@ export function NoteRow({
 }: NoteRowProps) {
 	// ["notes", "common"] for the shared cannot-decrypt title; notes stays the default namespace.
 	const { t } = useTranslation(["notes", "common"])
-	const mark = noteRowIcon(note, nested !== true)
+	const mark = noteRowIcon(note, nested !== true, defaultNoteType)
 	const title = noteDisplayTitle(note, t)
 	const preview = noteRowPreview(note)
 	const sharedByEmail = noteRowSharedByEmail(note, currentUserId)
@@ -140,6 +144,7 @@ export function NoteRow({
 					.join("\n")
 	const tags = note.tags.length > 0 ? noteRowTags(note) : note.tags
 	const hiddenTags = tags.length > NOTE_ROW_MAX_TAGS ? tags.slice(NOTE_ROW_MAX_TAGS) : null
+	const hiddenTagNames = hiddenTags !== null ? hiddenTags.map(tagDisplayName).join(", ") : ""
 	const offersFlags = noteOffersPinAndFavorite(note)
 	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
 	const press = useTouchLongPress<HTMLDivElement>({ onLongPress })
@@ -197,16 +202,18 @@ export function NoteRow({
 								{mark !== null ? <mark.icon className={cn("size-3.5 shrink-0", mark.colorClass)} /> : null}
 								<span className="min-w-0 truncate text-sm font-medium">{title}</span>
 								{sharedLabel !== null ? (
-									<span
-										title={sharedLabel}
-										className="shrink-0 text-muted-foreground"
+									<LazyTooltip
+										label={sharedLabel}
+										className="flex shrink-0"
 									>
-										<UsersIcon
-											aria-hidden
-											className="size-3"
-										/>
-										<span className="sr-only">{sharedLabel}</span>
-									</span>
+										<span className="text-muted-foreground">
+											<UsersIcon
+												aria-hidden
+												className="size-3"
+											/>
+											<span className="sr-only">{sharedLabel}</span>
+										</span>
+									</LazyTooltip>
 								) : null}
 							</span>
 							<span className="truncate text-xs text-muted-foreground">
@@ -224,12 +231,15 @@ export function NoteRow({
 										</span>
 									))}
 									{hiddenTags !== null ? (
-										<span
-											title={hiddenTags.map(tagDisplayName).join(", ")}
-											className="shrink-0 rounded-full bg-muted px-1.5 text-xs leading-4 text-muted-foreground tabular-nums"
+										<LazyTooltip
+											label={hiddenTagNames}
+											className="flex shrink-0"
 										>
-											{t("noteMoreTags", { hidden: hiddenTags.length })}
-										</span>
+											<span className="rounded-full bg-muted px-1.5 text-xs leading-4 text-muted-foreground tabular-nums">
+												<span aria-hidden>{t("noteMoreTags", { hidden: hiddenTags.length })}</span>
+												<span className="sr-only">{hiddenTagNames}</span>
+											</span>
+										</LazyTooltip>
 									) : null}
 								</span>
 							) : null}

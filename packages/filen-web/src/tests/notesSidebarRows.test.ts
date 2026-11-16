@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, cleanup, screen } from "@testing-library/react"
+import { render, cleanup, fireEvent, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import type { Note } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -30,7 +30,7 @@ function renderNoteRow(
 	selected: boolean,
 	multiSelected: boolean,
 	note: Note = mockNote(),
-	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "nested">> = {}
+	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "nested" | "defaultNoteType">> = {}
 ) {
 	return render(
 		createElement(NoteRow, {
@@ -41,6 +41,7 @@ function renderNoteRow(
 			currentUserId: 1n,
 			now: NOW,
 			isOnline: true,
+			defaultNoteType: "text",
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
 			onPointerSelect: () => false,
@@ -147,6 +148,7 @@ describe("note row — calm layout", () => {
 				currentUserId: 1n,
 				now: NOW + 2 * DAY_MS,
 				isOnline: true,
+				defaultNoteType: "text",
 				onAction: () => undefined,
 				onDuplicated: () => undefined,
 				onPointerSelect: () => false,
@@ -164,10 +166,28 @@ describe("note row — calm layout", () => {
 		expect(screen.getByText("a")).toBeTruthy()
 		expect(screen.getByText("b")).toBeTruthy()
 		expect(screen.queryByText("c")).toBeNull()
-		expect(screen.getByText("+2").getAttribute("title")).toBe("c, d")
+		expect(screen.getByText("+2")).toBeTruthy()
+		// The hidden names stay in the link's accessible text.
+		expect(screen.getByText("c, d").className).toContain("sr-only")
 	})
 
-	it("marks only non-plain note types", () => {
+	it("creates the hidden-tags tooltip only while the pointer is on the chip", () => {
+		const tags = ["a", "b", "c", "d"].map(name => mockNoteTag({ uuid: testUuid(name), name }))
+		renderNoteRow(false, false, mockNote({ tags }))
+		const chip = screen.getByText("+2")
+
+		expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull()
+
+		fireEvent.pointerEnter(chip)
+
+		expect(document.querySelector("[data-slot='tooltip-content']")?.textContent).toBe("c, d")
+
+		fireEvent.pointerLeave(screen.getByText("+2"))
+
+		expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull()
+	})
+
+	it("marks every type but the user's default one", () => {
 		const plain = renderNoteRow(false, false, mockNote({ noteType: "text" }))
 
 		expect(plain.container.querySelector("a svg")).toBeNull()
@@ -177,6 +197,12 @@ describe("note row — calm layout", () => {
 		const checklist = renderNoteRow(false, false, mockNote({ noteType: "checklist" }))
 
 		expect(checklist.container.querySelector("a svg")).not.toBeNull()
+
+		cleanup()
+
+		const defaultChecklist = renderNoteRow(false, false, mockNote({ noteType: "checklist" }), { defaultNoteType: "checklist" })
+
+		expect(defaultChecklist.container.querySelector("a svg")).toBeNull()
 	})
 
 	it("folds who shared the note and who else is on it into one mark", () => {
@@ -190,7 +216,14 @@ describe("note row — calm layout", () => {
 		})
 		const { container } = renderNoteRow(false, false, note)
 
-		expect(container.querySelector("[title^='Shared by']")?.getAttribute("title")).toBe("Shared by owner@example.com\nShared with Bob")
+		const label = "Shared by owner@example.com\nShared with Bob"
+		const accessible = container.querySelector("a .sr-only")
+
+		expect(accessible?.textContent).toBe(label)
+
+		fireEvent.pointerEnter(accessible?.parentElement ?? container)
+
+		expect(document.querySelector("[data-slot='tooltip-content']")?.textContent).toBe(label)
 	})
 
 	it("exposes pin and favorite as toggles carrying their state, disabled offline", () => {

@@ -132,21 +132,23 @@ describe("noteRow.logic — noteRowTime", () => {
 })
 
 describe("icon.logic — noteRowIcon", () => {
-	it("marks no plain text note", () => {
-		expect(noteRowIcon(mockNote({ noteType: "text" }), true)).toBeNull()
-		expect(noteRowIcon(mockNote({ noteType: "text" }), false)).toBeNull()
+	it("marks no note of the user's default type", () => {
+		expect(noteRowIcon(mockNote({ noteType: "text" }), true, "text")).toBeNull()
+		expect(noteRowIcon(mockNote({ noteType: "md" }), false, "md")).toBeNull()
 	})
 
-	it("marks every other type", () => {
-		expect(noteRowIcon(mockNote({ noteType: "checklist" }), true)).toStrictEqual(noteTypeIcon("checklist"))
-		expect(noteRowIcon(mockNote({ noteType: "md" }), true)).toStrictEqual(noteTypeIcon("md"))
+	it("marks every other type, plain text included once it is not the default", () => {
+		expect(noteRowIcon(mockNote({ noteType: "checklist" }), true, "text")).toStrictEqual(noteTypeIcon("checklist"))
+		expect(noteRowIcon(mockNote({ noteType: "text" }), true, "md")).toStrictEqual(noteTypeIcon("text"))
 	})
 
 	it("shows archive and trash only where no section says so", () => {
 		const trashed = mockNote({ noteType: "code", trash: true })
 
-		expect(noteRowIcon(trashed, true)).toStrictEqual(noteTypeIcon("code"))
-		expect(noteRowIcon(trashed, false)).toStrictEqual(noteIcon(trashed))
-		expect(noteRowIcon(mockNote({ noteType: "text", archive: true }), false)).toStrictEqual(noteIcon(mockNote({ archive: true })))
+		expect(noteRowIcon(trashed, true, "text")).toStrictEqual(noteTypeIcon("code"))
+		expect(noteRowIcon(trashed, false, "text")).toStrictEqual(noteIcon(trashed))
+		expect(noteRowIcon(mockNote({ noteType: "text", archive: true }), false, "text")).toStrictEqual(
+			noteIcon(mockNote({ archive: true }))
+		)
 	})
 })

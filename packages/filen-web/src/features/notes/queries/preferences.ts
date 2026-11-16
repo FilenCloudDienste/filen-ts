@@ -4,9 +4,12 @@ import {
 	getMdSplitRatio,
 	getNoteTagsSortBy,
 	getHideCompletedChecklist,
+	getDefaultNoteType,
+	DEFAULT_NOTE_TYPE_QUERY_KEY,
 	type NotesViewMode
 } from "@/features/notes/lib/preferences"
 import type { NoteTagsSortBy } from "@filen/shared"
+import type { NoteType } from "@filen/sdk-rs"
 
 // The view-mode preference is read as a query for the same reason drive reads its own
 // (useViewModePreferencesQuery): keeps every async read on one primitive (caching, refetch) instead of
@@ -35,6 +38,12 @@ export function useNoteTagsSortByQuery(): UseQueryResult<NoteTagsSortBy> {
 		queryKey: ["notes", "tagsSortBy"] as const,
 		queryFn: getNoteTagsSortBy
 	})
+}
+
+// The type a new note gets (Appearance → Notes): a local kv read. The Appearance select awaits setDefaultNoteType
+// then refetches; createNote reads the same cache entry.
+export function useDefaultNoteTypeQuery(): UseQueryResult<NoteType> {
+	return useQuery({ queryKey: DEFAULT_NOTE_TYPE_QUERY_KEY, queryFn: getDefaultNoteType })
 }
 
 // Per-note "hide completed checklist items" preference, keyed into the query cache by uuid so

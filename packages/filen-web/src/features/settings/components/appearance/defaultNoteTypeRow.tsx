@@ -1,7 +1,7 @@
 import type { NoteType } from "@filen/sdk-rs"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { DEFAULT_NOTE_TYPE_QUERY_KEY, getDefaultNoteType, NOTE_TYPES, setDefaultNoteType } from "@/features/notes/lib/preferences"
+import { NOTE_TYPES, setDefaultNoteType } from "@/features/notes/lib/preferences"
+import { useDefaultNoteTypeQuery } from "@/features/notes/queries/preferences"
 import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
 import type { NotesKey } from "@/lib/i18n"
@@ -17,7 +17,7 @@ const NOTE_TYPE_LABEL_KEYS: Record<NoteType, NotesKey> = {
 // The type createNote gives a new note; same query it reads, so a create right after a change uses the new value.
 function DefaultNoteTypeRow() {
 	const { t } = useTranslation(["settings", "notes"])
-	const query = useQuery({ queryKey: DEFAULT_NOTE_TYPE_QUERY_KEY, queryFn: getDefaultNoteType })
+	const query = useDefaultNoteTypeQuery()
 
 	async function apply(next: NoteType): Promise<void> {
 		if (await saveSetting(() => setDefaultNoteType(next))) {

@@ -16,14 +16,20 @@ import {
 	UploadIcon,
 	ArrowDownNarrowWideIcon
 } from "lucide-react"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, toggleInSet, type NoteTagsSortBy } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
-import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
+import { useNotesViewModeQuery, useNoteTagsSortByQuery, useDefaultNoteTypeQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, setNoteTagsSortBy, type NotesViewMode } from "@/features/notes/lib/preferences"
+import {
+	setNotesViewMode,
+	DEFAULT_NOTES_VIEW_MODE,
+	DEFAULT_NOTE_TYPE,
+	setNoteTagsSortBy,
+	type NotesViewMode
+} from "@/features/notes/lib/preferences"
 import { tagDisplayName, isNoteUndecryptable } from "@/features/notes/lib/sort"
 import {
 	buildNotesGroupedRows,
@@ -269,6 +275,8 @@ export function NotesSidebar() {
 	const viewModeQuery = useNotesViewModeQuery()
 	const viewMode = viewModeQuery.data ?? DEFAULT_NOTES_VIEW_MODE
 	const tagsSortByQuery = useNoteTagsSortByQuery()
+	// Read once here and handed to every row: notes of this type carry no type mark.
+	const defaultNoteType = useDefaultNoteTypeQuery().data ?? DEFAULT_NOTE_TYPE
 	const tagsSortBy = tagsSortByQuery.data ?? DEFAULT_NOTE_TAGS_SORT_BY
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
@@ -343,7 +351,12 @@ export function NotesSidebar() {
 			liveSelectedNotes.push(live)
 		}
 	}
-	const liveSelectedUuids = new Set(liveSelectedNotes.map(note => note.uuid))
+	// The notes that wear the multi-selection ring. A plain click selects the note it opens (the range anchor and the
+	// shortcuts' target), so a selection of just the open note is the open note, shown by its own highlight.
+	const liveSelectedUuids =
+		liveSelectedNotes.length === 1 && liveSelectedNotes[0]?.uuid === selectedUuid
+			? new Set<string>()
+			: new Set(liveSelectedNotes.map(note => note.uuid))
 	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode, selectionCount: liveSelectedNotes.length })
 
 	async function handleViewModeChange(next: NotesViewMode): Promise<void> {
@@ -870,6 +883,7 @@ export function NotesSidebar() {
 						currentUserId={currentUserId}
 						now={now}
 						isOnline={isOnline}
+						defaultNoteType={defaultNoteType}
 						selectableIndexByRowKey={selectableIndexByRowKey}
 						onToggleTag={toggleTag}
 						onOpenNote={openNote}
@@ -912,6 +926,7 @@ interface NotesSidebarListProps {
 	currentUserId: bigint | undefined
 	now: number
 	isOnline: boolean
+	defaultNoteType: NoteType
 	selectableIndexByRowKey: ReadonlyMap<string, number>
 	onToggleTag: (uuid: string) => void
 	onOpenNote: (note: Note) => Promise<void>
@@ -937,6 +952,7 @@ function NotesSidebarList({
 	currentUserId,
 	now,
 	isOnline,
+	defaultNoteType,
 	selectableIndexByRowKey,
 	onToggleTag,
 	onOpenNote,
@@ -1099,6 +1115,7 @@ function NotesSidebarList({
 								currentUserId={currentUserId}
 								now={now}
 								isOnline={isOnline}
+								defaultNoteType={defaultNoteType}
 								onAction={onNoteAction}
 								onDuplicated={duplicated => {
 									void onOpenNote(duplicated)
