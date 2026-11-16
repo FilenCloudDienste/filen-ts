@@ -122,7 +122,8 @@ export async function startAnonFileDownload(args: {
 				Number(size),
 				() => sdkApi.downloadLinkedFileBytesAnon(file, transferId),
 				{
-					store: false
+					store: false,
+					reserve: true
 				}
 			)
 

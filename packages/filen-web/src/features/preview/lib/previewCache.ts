@@ -181,13 +181,15 @@ function cancelledError(): Error {
 // `signal` aborts, the caller starts no load: its cancel token only reaches a download it started, so
 // one begun after it went away could never be cancelled. `store: false` shares a load without keeping
 // it (a public Download's own fetch): nothing reads a Download's bytes back, and the cache would hold
-// them for the rest of the visit. Such a load makes no room either, since it never joins what is held.
+// them for the rest of the visit. Such a load makes no room either (a viewer that transfers its bytes to a worker
+// leaves the cache alone), unless `reserve` asks for it: a public Download's buffer is still memory, so cached
+// previews make way for it and the cache plus the buffer stay within the budget.
 export function loadPreviewBytes(
 	scope: string | null,
 	uuid: string,
 	size: number,
 	load: () => Promise<Uint8Array>,
-	options?: { signal?: AbortSignal; store?: boolean }
+	options?: { signal?: AbortSignal; store?: boolean; reserve?: boolean }
 ): Promise<Uint8Array> {
 	const signal = options?.signal
 
@@ -224,7 +226,7 @@ export function loadPreviewBytes(
 	const loadEpoch = epoch
 	const store = options?.store ?? true
 
-	if (store) {
+	if (options?.reserve ?? store) {
 		loaded.reserve(size)
 	}
 

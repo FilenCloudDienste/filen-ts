@@ -646,8 +646,9 @@ describe("a Download while the preview is still loading", () => {
 		expect(getPreviewBytes("anon:scope-1", photo.data.uuid)).toBeDefined()
 	})
 
-	// Uncached, it never joins what the cache holds, so it evicts nothing: the previews stay for the pager's revisits.
-	it("buffered: a Download's own fetch leaves the cached previews in place", async () => {
+	// Uncached, its buffer is still memory: cached previews make way for it as for a preview's own load,
+	// only as far as the budget needs, so a large file never lands on top of a full cache.
+	it("buffered: a Download's own fetch makes room for its buffer", async () => {
 		const cached = makeItem("ffffffff-0000-0000-0000-000000000003", "cached.jpg", 40)
 		const preview = renderHook(() => usePreviewBytes(cached), { wrapper: anon })
 
@@ -655,11 +656,14 @@ describe("a Download while the preview is still loading", () => {
 			expect(preview.result.current.status).toBe("success")
 		})
 
-		// 40 held and 70 incoming exceed the 100-byte budget, yet nothing is stored.
-		await expect(download(makeItem("eeeeeeee-0000-0000-0000-000000000002", "large.bin", 70))).resolves.toEqual({ status: "success" })
+		// 40 held and 50 incoming fit the 100-byte budget.
+		await expect(download(makeItem("eeeeeeee-0000-0000-0000-000000000001", "fits.bin", 50))).resolves.toEqual({ status: "success" })
 		expect(getPreviewBytes("anon:scope-1", cached.data.uuid)).toBeDefined()
-		expect(getPreviewBytes("anon:scope-1", "eeeeeeee-0000-0000-0000-000000000002")).toBeUndefined()
-		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(2)
+
+		// 40 held and 70 incoming don't.
+		await expect(download(makeItem("eeeeeeee-0000-0000-0000-000000000002", "large.bin", 70))).resolves.toEqual({ status: "success" })
+		expect(getPreviewBytes("anon:scope-1", cached.data.uuid)).toBeUndefined()
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(3)
 	})
 
 	// Its token only cancels a download it started, so a retry begun after it went away could never be
