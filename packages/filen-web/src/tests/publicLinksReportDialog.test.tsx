@@ -217,8 +217,11 @@ describe("ReportAbuseDialog", () => {
 		expect(emailInput().value).toBe("visitor@example.com")
 		expect(screen.getByRole("radio", { name: "Malware" }).getAttribute("aria-checked")).toBe("true")
 		expect(toastSuccess).not.toHaveBeenCalled()
-		// The used token's widget goes and a new one issues the next token.
-		expect(turnstile.remove).toHaveBeenCalledWith("widget-1")
+		// The used token's widget goes and a new one issues the next token. The old widget goes in the remounted
+		// challenge's effect cleanup, which React runs after the commit that shows the alert.
+		await waitFor(() => {
+			expect(turnstile.remove).toHaveBeenCalledWith("widget-1")
+		})
 		await waitFor(() => {
 			expect(send().disabled).toBe(false)
 		})
