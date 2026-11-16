@@ -49,7 +49,7 @@ export interface ChatRowProps {
 
 // One compact conversation row: avatar, display name (bold while unread), relative time, a one-line
 // last-message preview (prefixed with its sender in a group, "You" for own), an unread count pill and a
-// muted affordance. The row container is the section listbox's option (it carries the selection ring); the
+// muted affordance. The row container is the section listbox's option (it carries the multi-selection ring); the
 // Link inside it is the activation target — a Link to /chats/$uuid, where the uuid is a selection key, not a
 // path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as its sibling, not its descendant (a
 // <button> nested inside an <a> is invalid content model — same rationale as noteRow.tsx). Carries its own
@@ -125,8 +125,12 @@ export function ChatRow({
 						{...press.handlers}
 						className={cn(
 							"group relative flex h-full w-full items-center gap-1 rounded-lg px-2 transition-colors app-region-no-drag",
-							selected ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
-							multiSelected && "ring-2 ring-chat-own/60 ring-inset"
+							// An open context menu (the row's own data-popup-open) or ⋯ menu (a descendant's) holds the
+							// hover highlight: CSS reads Base UI's trigger state, so no row keeps menu state of its own.
+							selected
+								? "bg-sidebar-accent"
+								: "hover:bg-sidebar-accent/60 has-[[data-popup-open]]:bg-sidebar-accent/60 data-popup-open:bg-sidebar-accent/60",
+							multiSelected && "ring-2 ring-primary/60 ring-inset"
 						)}
 					>
 						<Link

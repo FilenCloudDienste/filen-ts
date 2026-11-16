@@ -8,6 +8,16 @@ import {
 	touchTapIntent
 } from "@/features/drive/lib/listbox"
 
+// The items that wear a list's multi-selection ring. A plain click selects the item it opens (the range anchor and the
+// shortcuts' target), so a selection of just the open item is the open item, shown by its own highlight.
+export function multiSelectionRingUuids(selectedUuids: readonly string[], openUuid: string | null | undefined): ReadonlySet<string> {
+	if (selectedUuids.length === 1 && selectedUuids[0] === openUuid) {
+		return new Set()
+	}
+
+	return new Set(selectedUuids)
+}
+
 export interface ListPointerSelectionActions<T> {
 	set: (items: T[]) => void
 	toggle: (item: T) => void

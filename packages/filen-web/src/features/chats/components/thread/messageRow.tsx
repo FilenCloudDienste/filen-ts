@@ -85,18 +85,37 @@ export interface MessageRowProps {
 	active: boolean
 	// Set on the active row only: where it publishes its actions for the thread's keyboard commands.
 	actionsRef: RefObject<MessageActionsHandle | null> | null
+	// The composer is replying to this message (derived once by the thread from the composer store).
+	replying: boolean
 }
+
+// The hover highlight, also held while the row's context menu (its own data-popup-open) or its action bar's ⋯ menu (a
+// descendant's) is open: CSS reads Base UI's trigger state, so no row keeps menu state of its own. A failed send keeps
+// its error tint, deepened the same way.
+const ROW_HIGHLIGHT = "hover:bg-muted data-popup-open:bg-muted has-[[data-popup-open]]:bg-muted"
+const FAILED_ROW_HIGHLIGHT =
+	"bg-destructive/6 hover:bg-destructive/10 data-popup-open:bg-destructive/10 has-[[data-popup-open]]:bg-destructive/10"
 
 // One message as a full-width row, everyone's left-aligned: a run opens with the avatar in the gutter and
 // the name and time on the first line, and each later line sits under the name with its time in the gutter
-// on hover. Own rows carry a faint tint. The text column is capped so wide panes never set long lines; the
-// row itself spans the pane for the hover highlight and the tint. The hover action bar (MessageActionBar)
+// on hover. The text column is capped so wide panes never set long lines; the row itself spans the pane for the
+// hover highlight, which a row also wears while the composer replies to it or one of its menus is open. The hover action bar (MessageActionBar)
 // floats over the row's top-right corner. There is no deleted tombstone: the wasm ChatMessage has no
 // deleted flag — deletions remove the message outright (socketHandlers.ts's messageDelete handler drops it
 // from the cache), so the special body states here are undecryptable (message === undefined → placeholder)
 // and a blocked sender's tap-to-reveal tombstone. The row carries its own right-click menu; the delete
 // confirm dialog is owned HERE (not the menu content) so it survives past the menu's own close.
-export function MessageRow({ chat, message, runStart, currentUserId, ownAvatarUrl, blocked, active, actionsRef }: MessageRowProps) {
+export function MessageRow({
+	chat,
+	message,
+	runStart,
+	currentUserId,
+	ownAvatarUrl,
+	blocked,
+	active,
+	actionsRef,
+	replying
+}: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
 	const own = isOwnMessage(message, currentUserId)
@@ -161,7 +180,7 @@ export function MessageRow({ chat, message, runStart, currentUserId, ownAvatarUr
 		}
 	})
 
-	// The run gap sits outside the highlighted row, so hover and tint cover the message only.
+	// The run gap sits outside the highlighted row, so the highlight covers the message only.
 	const gapClassName = runStart ? "pt-3" : undefined
 	const sentLabel = runStart ? dayTimeLabel(t, message.sentTimestamp) : undefined
 
@@ -208,11 +227,8 @@ export function MessageRow({ chat, message, runStart, currentUserId, ownAvatarUr
 								tabIndex={active ? 0 : -1}
 								className={cn(
 									"group relative px-4 py-px focus-ring-row outline-none focus-visible:ring-inset",
-									failed
-										? "bg-destructive/6 hover:bg-destructive/10"
-										: own
-											? "bg-chat-own/6 hover:bg-chat-own/10"
-											: "hover:bg-muted"
+									failed ? FAILED_ROW_HIGHLIGHT : ROW_HIGHLIGHT,
+									replying && (failed ? "bg-destructive/10" : "bg-muted")
 								)}
 							>
 								{message.replyTo !== undefined ? (

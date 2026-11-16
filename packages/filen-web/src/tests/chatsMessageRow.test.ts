@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, fireEvent, within } from "@testing-library/react"
+import { cleanup, render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
@@ -24,6 +24,10 @@ import { messageMenuActions } from "@/features/chats/components/thread/messageMe
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { formatClockTime } from "@/features/chats/lib/time"
 import { testUuid } from "@/tests/support/uuid"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The action bar's tooltips show each action's keys.
+registerAllActions()
 
 const chat: Chat = {
 	uuid: testUuid("chat"),
@@ -50,7 +54,7 @@ const message: ChatMessage = {
 
 const descriptors = messageMenuActions(message, 1n, "confirmed")
 
-function renderRow(overrides: { runStart?: boolean; currentUserId?: bigint } = {}) {
+function renderRow(overrides: { runStart?: boolean; currentUserId?: bigint; replying?: boolean } = {}) {
 	useMessageActions.mockReturnValue({ descriptors, runAction })
 
 	return render(
@@ -62,7 +66,8 @@ function renderRow(overrides: { runStart?: boolean; currentUserId?: bigint } = {
 			ownAvatarUrl: undefined,
 			blocked: deriveBlockedUsers([]),
 			active: false,
-			actionsRef: null
+			actionsRef: null,
+			replying: overrides.replying ?? false
 		})
 	)
 }
@@ -112,6 +117,45 @@ describe("MessageRow action model", () => {
 	})
 })
 
+describe("MessageActionBar tooltips", () => {
+	it("creates no tooltip until the pointer reaches the bar, then names each button with its key", async () => {
+		renderRow()
+
+		const toolbar = screen.getByRole("toolbar", { name: "Message actions" })
+
+		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
+
+		fireEvent.pointerEnter(toolbar)
+
+		const triggers = toolbar.querySelectorAll("[data-slot='tooltip-trigger']")
+
+		// Reply, Copy, Edit and the ⋯ overflow.
+		expect(triggers).toHaveLength(4)
+
+		const replyTrigger = within(toolbar).getByRole("button", { name: "Reply" })
+
+		fireEvent.mouseEnter(replyTrigger)
+		fireEvent.mouseMove(replyTrigger)
+
+		const popup = await waitFor(() => {
+			const found = document.querySelector("[data-slot='tooltip-content']")
+
+			if (found === null) {
+				throw new Error("no tooltip")
+			}
+
+			return found
+		})
+
+		expect(popup.textContent).toContain("Reply")
+		expect(popup.querySelector("[data-slot='kbd']")?.textContent).toBe("R")
+
+		fireEvent.pointerLeave(toolbar)
+
+		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
+	})
+})
+
 // jsdom has no layout, so this pins the classes that keep the row's height at its estimate (thread.logic.ts).
 describe("MessageRow layout", () => {
 	it("keeps the action bar out of the row's height, over its top-right corner", () => {
@@ -135,21 +179,60 @@ describe("MessageRow layout", () => {
 		expect(screen.queryByText("You")).toBeNull()
 	})
 
-	it("left-aligns every row, tinting own rows only", () => {
+	it("left-aligns every row, own rows untinted, with one hover highlight", () => {
 		renderRow()
 
 		const own = screen.getByText("hello").closest(".group")
 
-		expect(own?.classList).toContain("bg-chat-own/6")
+		expect(own?.className).not.toContain("chat-own")
 		expect(own?.classList).not.toContain("items-end")
+		expect(own?.classList).toContain("hover:bg-muted")
+		expect(own?.classList).not.toContain("bg-muted")
 		cleanup()
 
 		renderRow({ currentUserId: 2n })
 
 		const other = screen.getByText("hello").closest(".group")
 
-		expect(other?.className).not.toContain("bg-chat-own")
-		expect(other?.classList).toContain("hover:bg-muted")
+		expect(other?.className).toBe(own?.className)
+	})
+
+	it("wears the hover highlight while the composer replies to it", () => {
+		renderRow({ replying: true })
+
+		expect(screen.getByText("hello").closest(".group")?.classList).toContain("bg-muted")
+	})
+
+	// jsdom applies no CSS: this pins that the highlight follows Base UI's open-trigger attribute, which the row carries
+	// while its context menu is open, and the action bar's ⋯ trigger while its menu is.
+	it("holds the hover highlight while its context menu or ⋯ menu is open", async () => {
+		renderRow()
+
+		const row = screen.getByText("hello").closest(".group")
+
+		if (row === null) {
+			throw new Error("row not rendered")
+		}
+
+		expect(row.classList).toContain("data-popup-open:bg-muted")
+		expect(row.classList).toContain("has-[[data-popup-open]]:bg-muted")
+		expect(row.hasAttribute("data-popup-open")).toBe(false)
+
+		fireEvent.contextMenu(row)
+		await screen.findByRole("menuitem", { name: "Copy" })
+
+		expect(row.hasAttribute("data-popup-open")).toBe(true)
+		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+		await waitFor(() => {
+			expect(screen.queryByRole("menu")).toBeNull()
+		})
+
+		const more = within(screen.getByRole("toolbar", { name: "Message actions" })).getByRole("button", { name: "More actions" })
+
+		fireEvent.click(more)
+		await screen.findByRole("menuitem", { name: "Copy" })
+
+		expect(row.querySelector("[data-popup-open]")).toBe(more)
 	})
 
 	it("caps the text column's measure while the row spans the pane", () => {

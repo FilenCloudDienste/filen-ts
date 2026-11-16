@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
@@ -53,12 +53,16 @@ function lastMessage(senderId: number, senderEmail: string): ChatMessage {
 	}
 }
 
-function renderRow(overrides: { selected?: boolean; chat?: Chat } & Partial<Pick<ChatRowProps, "onPointerSelect" | "onLongPress">> = {}) {
+function renderRow(
+	overrides: { selected?: boolean; multiSelected?: boolean; chat?: Chat } & Partial<
+		Pick<ChatRowProps, "onPointerSelect" | "onLongPress">
+	> = {}
+) {
 	return render(
 		createElement(ChatRow, {
 			chat: overrides.chat ?? chat,
 			selected: overrides.selected ?? false,
-			multiSelected: false,
+			multiSelected: overrides.multiSelected ?? false,
 			posInSet: 1,
 			setSize: 1,
 			currentUserId: 1n,
@@ -109,6 +113,35 @@ describe("ChatRow", () => {
 		selected.unmount()
 
 		expect(renderRow().getByRole("option").classList).not.toContain("bg-sidebar-accent")
+	})
+
+	it("rings a multi-selection in a neutral token, never the brand blue", () => {
+		const option = renderRow({ multiSelected: true }).getByRole("option")
+
+		expect(option.classList).toContain("ring-primary/60")
+		expect(option.className).not.toContain("chat-own")
+		cleanup()
+
+		expect(renderRow().getByRole("option").className).not.toContain("ring-2")
+	})
+
+	it("focuses its link with the neutral keyboard-only row ring", () => {
+		expect(renderRow().getByRole("link").classList).toContain("focus-ring-row")
+	})
+
+	// jsdom applies no CSS: this pins that the highlight follows Base UI's open-trigger attribute, which the row carries
+	// while its context menu is open, and its ⋯ trigger while that menu is.
+	it("holds the hover highlight while its context menu is open", async () => {
+		const option = renderRow().getByRole("option")
+
+		expect(option.classList).toContain("data-popup-open:bg-sidebar-accent/60")
+		expect(option.classList).toContain("has-[[data-popup-open]]:bg-sidebar-accent/60")
+		expect(option.hasAttribute("data-popup-open")).toBe(false)
+
+		fireEvent.contextMenu(option)
+		await screen.findByRole("menu")
+
+		expect(option.hasAttribute("data-popup-open")).toBe(true)
 	})
 
 	it("prefixes the preview with You on own messages, never with the other person in a 1:1", () => {

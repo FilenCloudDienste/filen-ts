@@ -65,7 +65,8 @@ function renderRow(overrides: Partial<ChatMessage> = {}, blockedUsers: BlockedUs
 			ownAvatarUrl: undefined,
 			blocked: blockedUsers,
 			active: false,
-			actionsRef: null
+			actionsRef: null,
+			replying: false
 		}),
 		{ wrapper }
 	)

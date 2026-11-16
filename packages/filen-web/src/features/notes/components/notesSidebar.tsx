@@ -91,6 +91,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { multiSelectionRingUuids } from "@/lib/useListPointerSelection"
 
 // First-pass size estimates only — a note row is two lines, three with tags, and the notes view
 // interleaves section headers, so real heights come from the virtualizer's measureElement pass after
@@ -359,12 +360,6 @@ export function NotesSidebar() {
 			liveSelectedNotes.push(live)
 		}
 	}
-	// The notes that wear the multi-selection ring. A plain click selects the note it opens (the range anchor and the
-	// shortcuts' target), so a selection of just the open note is the open note, shown by its own highlight.
-	const liveSelectedUuids =
-		liveSelectedNotes.length === 1 && liveSelectedNotes[0]?.uuid === selectedUuid
-			? new Set<string>()
-			: new Set(liveSelectedNotes.map(note => note.uuid))
 	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode, selectionCount: liveSelectedNotes.length })
 
 	async function handleViewModeChange(next: NotesViewMode): Promise<void> {
@@ -731,6 +726,13 @@ export function NotesSidebar() {
 
 		return null
 	}
+
+	// The notes that wear the multi-selection ring, derived after every hook: the React Compiler reads a call as able
+	// to mutate its arguments, which would stretch the selection's mutable range across the hooks and drop their memos.
+	const liveSelectedUuids = multiSelectionRingUuids(
+		liveSelectedNotes.map(note => note.uuid),
+		selectedUuid
+	)
 
 	return (
 		<ResizableSidebarPanel

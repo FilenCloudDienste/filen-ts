@@ -7,6 +7,7 @@ import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelection
 import { clickEvent, describeClickSelectionContract } from "@/tests/contracts/selection"
 import { testUuid } from "@/tests/support/uuid"
 import { mockChat } from "@/tests/fixtures/sdk"
+import { multiSelectionRingUuids } from "@/lib/useListPointerSelection"
 
 const chatA = mockChat({ uuid: testUuid("a") })
 const chatB = mockChat({ uuid: testUuid("b") })
@@ -42,5 +43,21 @@ describe("useChatsListSelection — unmount auto-clear", () => {
 		unmount()
 
 		expect(useChatsSelectionStore.getState().selectedChats).toEqual([])
+	})
+})
+
+// A plain click selects the chat it opens, so the open chat alone wears no ring over its own highlight.
+describe("multiSelectionRingUuids", () => {
+	it("rings nothing for a selection of just the open chat", () => {
+		expect([...multiSelectionRingUuids([chatA.uuid], chatA.uuid)]).toEqual([])
+	})
+
+	it("rings a lone selection that is not the open chat", () => {
+		expect([...multiSelectionRingUuids([chatB.uuid], chatA.uuid)]).toEqual([chatB.uuid])
+		expect([...multiSelectionRingUuids([chatB.uuid], "")]).toEqual([chatB.uuid])
+	})
+
+	it("rings every chat of a multi-selection, the open one included", () => {
+		expect([...multiSelectionRingUuids([chatA.uuid, chatB.uuid], chatA.uuid)]).toEqual([chatA.uuid, chatB.uuid])
 	})
 })

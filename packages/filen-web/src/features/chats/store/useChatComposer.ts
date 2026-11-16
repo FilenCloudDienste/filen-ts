@@ -78,3 +78,13 @@ export const useChatComposerStore = create<ChatComposerStore>(set => {
 export function useChatComposerEntry(chatUuid: string): ChatComposerEntry {
 	return useChatComposerStore(state => state.entries[chatUuid] ?? EMPTY_ENTRY)
 }
+
+// The message the composer of a chat is replying to, as its uuid: a primitive, so the one subscriber (the thread list)
+// re-renders only when the reply target changes, and hands each row a boolean.
+export function useChatReplyingToUuid(chatUuid: string): string | null {
+	return useChatComposerStore(state => {
+		const mode = state.entries[chatUuid]?.mode
+
+		return mode?.kind === "reply" ? mode.message.uuid : null
+	})
+}

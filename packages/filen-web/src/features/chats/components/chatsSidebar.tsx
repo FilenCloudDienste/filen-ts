@@ -45,6 +45,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { multiSelectionRingUuids } from "@/lib/useListPointerSelection"
 
 // Next/previous conversation also work in the message field (Slack's Alt+↑/↓): a chord the textarea has no use for.
 const IN_COMPOSER: Options = { ...OUTSIDE_OVERLAYS, enableOnFormTags: ["option", "textarea"] }
@@ -129,7 +130,6 @@ export function ChatsSidebar() {
 			liveSelectedChats.push(live)
 		}
 	}
-	const liveSelectedUuids = new Set(liveSelectedChats.map(chat => chat.uuid))
 	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered, collapsed
 	// sections left out) —
 	// mirrors notesSidebar's own selection wiring. Clears on mount/unmount (see the hook's own doc
@@ -387,6 +387,13 @@ export function ChatsSidebar() {
 
 		return null
 	}
+
+	// The conversations that wear the multi-selection ring, derived after every hook: the React Compiler reads a call as able
+	// to mutate its arguments, which would stretch the selection's mutable range across the hooks and drop their memos.
+	const liveSelectedUuids = multiSelectionRingUuids(
+		liveSelectedChats.map(chat => chat.uuid),
+		selectedUuid
+	)
 
 	return (
 		<ResizableSidebarPanel

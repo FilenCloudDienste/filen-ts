@@ -38,6 +38,7 @@ import {
 } from "@/features/chats/components/thread/thread.logic"
 import { composeMessageList } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
+import { useChatReplyingToUuid } from "@/features/chats/store/useChatComposer"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
@@ -150,7 +151,8 @@ function ThreadRowContent({
 	ownAvatarUrl,
 	blocked,
 	active,
-	actionsRef
+	actionsRef,
+	replying
 }: {
 	row: ThreadRow
 	chat: Chat
@@ -159,6 +161,7 @@ function ThreadRowContent({
 	blocked: BlockedUsers
 	active: boolean
 	actionsRef: RefObject<MessageActionsHandle | null> | null
+	replying: boolean
 }) {
 	if (row.kind === "time") {
 		return <TimeHeader timestamp={row.timestamp} />
@@ -178,6 +181,7 @@ function ThreadRowContent({
 			blocked={blocked}
 			active={active}
 			actionsRef={actionsRef}
+			replying={replying}
 		/>
 	)
 }
@@ -274,6 +278,8 @@ function ThreadList({
 	// The roving message: the last one focused while it is still in the thread, else the newest.
 	const [focusKey, setFocusKey] = useState<string | null>(null)
 	const activeKey = focusKey !== null && messageKeys.has(focusKey) ? focusKey : newestMessageKey
+	// The message the composer is replying to, read once here: its row wears the hover highlight.
+	const replyingUuid = useChatReplyingToUuid(chat.uuid)
 	// The active row's action model, published by the row itself (messageRow.tsx).
 	const activeActionsRef = useRef<MessageActionsHandle | null>(null)
 	const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -815,6 +821,7 @@ function ThreadList({
 										blocked={blocked}
 										active={row.key === activeKey}
 										actionsRef={row.key === activeKey ? activeActionsRef : null}
+										replying={row.kind === "message" && row.message.uuid === replyingUuid}
 									/>
 								</div>
 							)
