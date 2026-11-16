@@ -9,11 +9,13 @@ import { pdfMemoryConstrained } from "@/features/preview/lib/pdfLimits"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
 import { transferList } from "@/lib/transferList"
+import { createOwnedWorker } from "@/lib/workers/ownedWorker"
 
 // One PDF engine: a worker with MuPDF and one document, reading the file through its own sync range bridge from the
 // SDK worker. Closing it closes the document, stops the bridge and terminates the worker; a poisoned engine (a wasm
-// trap, out of memory, a stuck render) is terminated at once and reports it. Every engine holds the compiled MuPDF
-// module (engineModule.ts) while it lives.
+// trap, out of memory, a stuck render) is terminated at once and reports it. Every engine is an owned preview worker,
+// so sign-out terminates it at once (its calls reject "closed"). Every engine holds the compiled MuPDF module
+// (engineModule.ts) while it lives.
 
 export function pdfEngineMemory(): PdfMemoryProfile {
 	return pdfMemoryConstrained() ? PDF_MOBILE_MEMORY : PDF_DESKTOP_MEMORY
@@ -36,12 +38,14 @@ export interface OpenPdfEngineOptions {
 	readonly onPoisoned?: (message: string) => void
 }
 
-function spawn(module: WebAssembly.Module): PdfEngineClient {
-	const worker = new PdfEngineWorker({ name: "pdf-engine" })
+// The engine's client, and `gone`: rejects once the worker is gone (a break, sign-out, or the client's own terminate).
+function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; readonly gone: Promise<never> } {
+	const owned = createOwnedWorker<object>(() => new PdfEngineWorker({ name: "pdf-engine" }), "pdf-engine")
+	const { worker } = owned
 
 	worker.postMessage({ [PDF_ENGINE_WASM]: module })
 
-	return new PdfEngineClient({
+	const client = new PdfEngineClient({
 		postMessage: (message, transfer) => {
 			worker.postMessage(message, { transfer: transferList(transfer) })
 		},
@@ -51,9 +55,11 @@ function spawn(module: WebAssembly.Module): PdfEngineClient {
 			})
 		},
 		terminate: () => {
-			worker.terminate()
+			owned.terminate()
 		}
 	})
+
+	return { client, gone: owned.gone }
 }
 
 // Where an engine reads its file: a drive file through the SDK worker, or a channel another engine serves (a written
@@ -77,8 +83,14 @@ async function startEngine(options: EngineStart): Promise<PdfEngine> {
 
 	// The module is held until the engine closes; an open that fails releases it.
 	void withPdfEngineModule(async module => {
-		const client = spawn(module)
+		const { client, gone } = spawn(module)
+		let ended = false
 		const end = (): void => {
+			if (ended) {
+				return
+			}
+
+			ended = true
 			client.terminate()
 			range?.close()
 
@@ -86,6 +98,9 @@ async function startEngine(options: EngineStart): Promise<PdfEngine> {
 
 			engineDone.resolve(undefined)
 		}
+
+		// Sign-out (or a broken worker) ends the engine like a close.
+		gone.catch(end)
 
 		client.onPoisoned(message => {
 			log.warn("pdf", "engine poisoned", { message })
