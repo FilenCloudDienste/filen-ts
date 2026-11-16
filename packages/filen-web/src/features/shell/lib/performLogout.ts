@@ -25,7 +25,7 @@ import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
 import { cancelActiveTransfers } from "@/features/transfers/lib/control"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
-import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
+import { releaseAllPreviewWorkers } from "@/lib/workers/ownedWorker"
 import { clearArchiveListings } from "@/features/archive/lib/listingCache"
 import { releaseHeicWorker } from "@/features/preview/lib/heicTransform"
 import { releaseImageEditWorker } from "@/features/preview/imageEdit/renderClient"
@@ -156,10 +156,11 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	disposeAudioEngine()
 	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits,
 	// any idle HEIC worker whose heap still holds this account's decoded photos, the image editor's
-	// render worker with the picture it was editing, and the video editor's preview worker. The preview disposers close
+	// render worker with the picture it was editing, and the video editor's preview worker. The preview registry
+	// terminates every other preview worker at once, busy ones included (the remux worker among them), and closes
 	// whatever else a preview still holds (the ports it serves).
 	clearPreviewCache()
-	runPreviewDisposers()
+	releaseAllPreviewWorkers()
 	clearArchiveListings()
 	releaseHeicWorker()
 	releaseImageEditWorker()
