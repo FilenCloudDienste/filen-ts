@@ -1,4 +1,5 @@
-import { MAX_SUBTITLE_CHARS, decodeSubtitleBytes, parseSubtitle, type CueStore } from "@filen/shared/videos"
+import { MAX_SUBTITLE_CHARS, parseSubtitle, type CueStore } from "@filen/shared/videos"
+import { decodeSubtitleBytes } from "@filen/shared/textEncoding"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { DRIVE_LISTING_KEY_PREFIX } from "@/features/drive/queries/drive"

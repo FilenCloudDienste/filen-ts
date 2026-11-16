@@ -669,14 +669,6 @@ export function decodeUtf8(bytes: Uint8Array): string {
 	return new TextDecoder("utf-8").decode(bytes)
 }
 
-// A NUL byte near the start marks a binary file (text never contains one): a file opened as text that
-// isn't shows a notice instead of a screen of replacement glyphs.
-const BINARY_PROBE_BYTES = 8192
-
-export function looksBinary(bytes: Uint8Array): boolean {
-	return bytes.subarray(0, BINARY_PROBE_BYTES).includes(0)
-}
-
 // ext -> the code language (@filen/office/core/code: every grammar both apps ship) codeMirrorShared.ts
 // builds the editor's highlighting from. "" means no grammar covers the extension; the file still renders
 // as a fully usable, unhighlighted CodeMirror view, never a blocked preview.

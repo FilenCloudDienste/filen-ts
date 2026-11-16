@@ -50,7 +50,8 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: previewBytes.current, refetch: vi.fn() })
 }))
 vi.mock("@/features/preview/components/codeSurface", () => ({
-	CodeSurface: ({ file }: { file: { text: string } }) => createElement("pre", { "data-testid": "source" }, file.text)
+	CodeSurface: ({ file, editable }: { file: { text: string }; editable: boolean }) =>
+		createElement("pre", { "data-testid": "source", "data-editable": String(editable) }, file.text)
 }))
 
 import "@/lib/i18n"
@@ -177,5 +178,59 @@ describe("TextViewer — binary guard", () => {
 		)
 
 		expect(screen.getByTestId("source").textContent).toBe("key = value")
+	})
+
+	it("shows UTF-16 text, whose zero bytes are not a binary sign", () => {
+		previewBytes.current = Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00)
+
+		render(
+			<TextViewer
+				item={named("notes.cfg")}
+				alt="notes.cfg"
+				rejectBinary
+			/>
+		)
+
+		expect(screen.getByTestId("source").textContent).toBe("hi")
+	})
+})
+
+describe("TextViewer — editing only what a save writes back", () => {
+	it("keeps strict UTF-8 editable", () => {
+		previewBytes.current = new TextEncoder().encode("café")
+		const onReadOnly = vi.fn()
+
+		render(
+			<TextViewer
+				item={named("notes.txt")}
+				alt="notes.txt"
+				editable
+				onReadOnly={onReadOnly}
+			/>
+		)
+
+		expect(screen.getByTestId("source").dataset["editable"]).toBe("true")
+		expect(onReadOnly).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		["latin-1", Uint8Array.of(0x63, 0x61, 0x66, 0xe9)],
+		["UTF-16", Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00)],
+		["UTF-8 with a stray byte", Uint8Array.of(...new TextEncoder().encode("Grüße, Köln, schön"), 0xff)]
+	])("opens %s text read-only and tells the overlay", (_, bytes) => {
+		previewBytes.current = bytes
+		const onReadOnly = vi.fn()
+
+		render(
+			<TextViewer
+				item={named("notes.txt")}
+				alt="notes.txt"
+				editable
+				onReadOnly={onReadOnly}
+			/>
+		)
+
+		expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
+		expect(onReadOnly).toHaveBeenCalled()
 	})
 })

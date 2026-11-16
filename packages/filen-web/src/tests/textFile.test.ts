@@ -60,10 +60,22 @@ describe("text file fidelity", () => {
 		expect(detectLineEnding("a\r\nb\r\nc\nd")).toBe("crlf")
 		expect(detectLineEnding("a\nb\nc\r\nd")).toBe("lf")
 		expect(detectLineEnding("single line")).toBe("lf")
-		expect(writeTextFile(Text.of(["a", "b"]), { bom: false, lineEnding: "crlf" })).toBe("a\r\nb")
+		expect(writeTextFile(Text.of(["a", "b"]), { encoding: "utf-8", bom: false, lineEnding: "crlf" })).toBe("a\r\nb")
 	})
 
-	it("decodes invalid UTF-8 without throwing", () => {
-		expect(readTextFile(new Uint8Array([0x61, 0xff, 0x62])).text).toBe("a�b")
+	it("opens strict UTF-8 editable, with or without its mark", () => {
+		expect(readTextFile(bytes("plain")).editableAsIs).toBe(true)
+		expect(readTextFile(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61)).editableAsIs).toBe(true)
+	})
+
+	it("opens text a UTF-8 save would change read-only", () => {
+		// Not UTF-8: read with the browser language's codepage (windows-1252 for English).
+		expect(readTextFile(Uint8Array.of(0x61, 0xff, 0x62))).toMatchObject({ text: "aÿb", encoding: "windows-1252", editableAsIs: false })
+		expect(readTextFile(Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00))).toMatchObject({
+			text: "hi",
+			encoding: "utf-16le",
+			bom: true,
+			editableAsIs: false
+		})
 	})
 })

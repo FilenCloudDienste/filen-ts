@@ -1,7 +1,8 @@
 import type { Text } from "@codemirror/state"
+import { decodeTextBytes, editableAsIs } from "@filen/shared/textEncoding"
 
-// A text file as the editor opens and saves it: its UTF-8 text, whether it began with a byte order mark and the
-// line ending it uses. The editor splits lines on any ending (so text pasted or typed with another still breaks
+// A text file as the editor opens and saves it: its text, its encoding, whether it began with a byte order mark and
+// the line ending it uses. The editor splits lines on any ending (so text pasted or typed with another still breaks
 // lines) and keeps none of them; a save joins the lines with the file's own ending and puts its mark back, so
 // saving a CRLF or BOM file changes only what was edited. (CodeMirror's lineSeparator facet is not used: set to
 // "\r\n" it would stop a pasted "\n" from breaking the line.)
@@ -9,6 +10,8 @@ import type { Text } from "@codemirror/state"
 export type LineEnding = "lf" | "crlf" | "cr"
 
 export interface TextFileFormat {
+	// WHATWG name of the encoding the file was read with.
+	readonly encoding: string
 	readonly bom: boolean
 	readonly lineEnding: LineEnding
 }
@@ -16,6 +19,8 @@ export interface TextFileFormat {
 export interface TextFile extends TextFileFormat {
 	// Without the mark.
 	readonly text: string
+	// A save (UTF-8, its mark kept) writes back the bytes it came from; otherwise the file opens read-only.
+	readonly editableAsIs: boolean
 }
 
 const BOM = "﻿"
@@ -51,13 +56,17 @@ export function detectLineEnding(text: string): LineEnding {
 	return cr > lf && cr > crlf ? "cr" : "lf"
 }
 
-// Never throws: an invalid sequence becomes U+FFFD (decodeUtf8's rule).
+// Never throws. Bytes that are not Unicode are read with the codepage of the browser's first language.
 export function readTextFile(bytes: Uint8Array): TextFile {
-	const decoded = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes)
-	const bom = decoded.startsWith(BOM)
-	const text = bom ? decoded.slice(1) : decoded
+	const decoded = decodeTextBytes(bytes, { languageHint: navigator.languages[0] ?? null })
 
-	return { text, bom, lineEnding: detectLineEnding(text) }
+	return {
+		text: decoded.text,
+		encoding: decoded.encoding,
+		bom: decoded.bom,
+		lineEnding: detectLineEnding(decoded.text),
+		editableAsIs: editableAsIs(decoded)
+	}
 }
 
 export function lineBreak(ending: LineEnding): string {

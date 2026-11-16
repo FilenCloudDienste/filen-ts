@@ -1,7 +1,8 @@
-import type { RefObject } from "react"
+import { useEffect, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
+import { looksLikeText } from "@filen/shared/textEncoding"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { itemTypeExtension, codeMirrorLanguageFor, looksBinary } from "@/features/drive/lib/preview.logic"
+import { itemTypeExtension, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { readTextFile } from "@/features/preview/lib/textFile"
@@ -29,19 +30,31 @@ export interface TextViewerProps {
 	locked?: boolean
 	// Opened through "Open as text": a file whose type is unknown, which may turn out to be binary.
 	rejectBinary?: boolean
+	// Asked to be editable, the file turned out to be text a save would change (not strict UTF-8): it shows
+	// read-only, and the overlay is told so.
+	onReadOnly?: () => void
 }
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
-// category), then a non-fatal UTF-8 decode that keeps the file's byte order mark and line ending for its
-// saves (readTextFile — never throws) and a per-extension language lookup. The editor under its command bar
+// category), then a decode that keeps the file's encoding, byte order mark and line ending for its saves
+// (readTextFile — never throws) and a per-extension language lookup. The editor under its command bar
 // lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte loading,
 // item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, rejectBinary }: TextViewerProps) {
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, rejectBinary, onReadOnly }: TextViewerProps) {
 	const { t } = useTranslation("preview")
 	const result = usePreviewBytes(item)
+	const notText = result.status === "success" && rejectBinary === true && !looksLikeText(result.bytes)
+	const file = result.status === "success" && !notText ? readTextFile(result.bytes) : null
+	const readOnly = editable === true && file !== null && !file.editableAsIs
 
 	useLeaveViewerFullScreen()
+
+	useEffect(() => {
+		if (readOnly) {
+			onReadOnly?.()
+		}
+	}, [readOnly, onReadOnly])
 
 	if (result.status === "pending") {
 		return <PreviewLoading />
@@ -56,7 +69,7 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 		)
 	}
 
-	if (rejectBinary === true && looksBinary(result.bytes)) {
+	if (file === null) {
 		return (
 			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
 				{t("previewNotText")}
@@ -66,10 +79,10 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 
 	return (
 		<CodeSurface
-			file={readTextFile(result.bytes)}
+			file={file}
 			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 			alt={alt}
-			editable={editable ?? false}
+			editable={editable === true && file.editableAsIs}
 			locked={locked ?? false}
 			onDirtyChange={onDirtyChange}
 			contentRef={contentRef}

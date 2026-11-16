@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { SUBTITLE_ENCODINGS, decidePlayback, type ProbeAudio, type VideoProbe } from "@filen/shared/videos"
+import { decidePlayback, type ProbeAudio, type VideoProbe } from "@filen/shared/videos"
+import { SUBTITLE_ENCODINGS } from "@filen/shared/textEncoding"
 import { Button } from "@/components/ui/button"
 import { TracksPopover, type TrackOption } from "@/components/media/video/tracksPopover"
 import { playbackCapabilities } from "@/lib/media/playback/capabilities"

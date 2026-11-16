@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { decodeSubtitleBytes, legacyEncodingForLanguage, SUBTITLE_ENCODINGS } from "@filen/shared/videos"
+import { decodeSubtitleBytes, legacyEncodingForLanguage, SUBTITLE_ENCODINGS } from "@filen/shared/textEncoding"
 
 const enc = new TextEncoder()
 
@@ -12,7 +12,7 @@ describe("decodeSubtitleBytes", () => {
 		const plain = decodeSubtitleBytes(enc.encode("héllo ✓"))
 		const bom = decodeSubtitleBytes(Uint8Array.from([0xef, 0xbb, 0xbf, ...enc.encode("héllo")]))
 
-		expect(plain).toEqual({ text: "héllo ✓", encoding: "utf-8", confident: true })
+		expect(plain).toEqual({ text: "héllo ✓", encoding: "utf-8", bom: false, confident: true, writable: "yes", lossy: false })
 		expect(bom?.text).toBe("héllo")
 		expect(bom?.encoding).toBe("utf-8")
 	})
@@ -42,7 +42,10 @@ describe("decodeSubtitleBytes", () => {
 		expect(decodeSubtitleBytes(cyrillic, { languageHint: "rus" })).toEqual({
 			text: "Привет",
 			encoding: "windows-1251",
-			confident: false
+			bom: false,
+			confident: false,
+			writable: "yes",
+			lossy: false
 		})
 		expect(decodeSubtitleBytes(bytesOf([0xe9]), { languageHint: null })).toMatchObject({ text: "é", encoding: "windows-1252" })
 		expect(decodeSubtitleBytes(bytesOf([0x82, 0xb1, 0x82, 0xf1]), { languageHint: "ja" })).toMatchObject({
@@ -155,17 +158,19 @@ describe("legacy hints and malformed UTF-16", () => {
 		const body = [..."{1}{25}"].map(c => c.charCodeAt(0))
 		const decoded = decodeSubtitleBytes(Uint8Array.from([0xef, 0xbb, 0xbf, ...body, 0x9e]), { languageHint: "cs" })
 
-		expect(decoded).toEqual({ text: "{1}{25}ž", encoding: "windows-1250", confident: false })
+		expect(decoded).toMatchObject({ text: "{1}{25}ž", encoding: "windows-1250", bom: true, confident: false })
 	})
 
 	it("drops a UTF-8 BOM in front of a payload forced to a legacy codepage", () => {
 		const body = [..."{1}{25}Ahoj"].map(c => c.charCodeAt(0))
 		const bytes = Uint8Array.from([0xef, 0xbb, 0xbf, ...body, 0x9e])
 
-		expect(decodeSubtitleBytes(bytes, { encoding: "windows-1250" })).toEqual({
+		expect(decodeSubtitleBytes(bytes, { encoding: "windows-1250" })).toMatchObject({
 			text: "{1}{25}Ahojž",
 			encoding: "windows-1250",
-			confident: false
+			confident: false,
+			// The UTF-8 mark is not written back by a windows-1250 encoder.
+			writable: "convert"
 		})
 		expect(decodeSubtitleBytes(Uint8Array.from([0xef, 0xbb, 0xbf, ...body]), { encoding: "UTF-8" })?.text).toBe("{1}{25}Ahoj")
 	})

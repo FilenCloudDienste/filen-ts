@@ -597,7 +597,11 @@ export function CodeCommandBar({
 						<span className="sr-only">{t("previewCommandBarEol", { ending: t(ending) })}</span>
 						<span aria-hidden="true">{t(ending)}</span>
 					</span>
-					<span>{t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")}</span>
+					<span>
+						{format.encoding === "utf-8"
+							? t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")
+							: format.encoding.toUpperCase()}
+					</span>
 					{editable ? null : (
 						<Badge
 							variant="outline"

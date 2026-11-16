@@ -335,7 +335,8 @@ export function PreviewOverlay({
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
-	// fresh item or a fresh overlay mount, never by an effect.
+	// fresh item or a fresh overlay mount, never by an effect. A text file a save would change (not strict UTF-8)
+	// locks it the same way, reported by its viewer on each mount.
 	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
 	// Not component state: the sign-out path is a plain lib function and has to be able to read this
 	// same bit (see usePreviewUnsavedGuard). Boolean-collapsed selector, so the overlay still re-renders
@@ -2269,6 +2270,15 @@ export function PreviewOverlay({
 															asText={asText}
 															locked={saving}
 															onDirtyChange={setPreviewDirty}
+															onReadOnly={() => {
+																if (rawDriveItem !== undefined) {
+																	const forUuid = rawDriveItem.data.uuid
+
+																	setLockedReadOnly(current =>
+																		current?.forUuid === forUuid ? current : { forUuid }
+																	)
+																}
+															}}
 															contentRef={contentRef}
 															spreadsheetRef={spreadsheetRef}
 															docxRef={docxRef}
@@ -2634,6 +2644,8 @@ interface PreviewBodyProps {
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
+	// The text viewer found text a save would change: the slot is read-only.
+	onReadOnly: () => void
 	contentRef: RefObject<(() => string) | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 	docxRef: RefObject<DocxSaveSource | null>
@@ -2674,6 +2686,7 @@ function PreviewBody({
 	asText,
 	locked,
 	onDirtyChange,
+	onReadOnly,
 	contentRef,
 	spreadsheetRef,
 	docxRef,
@@ -2813,6 +2826,7 @@ function PreviewBody({
 					editable={editable}
 					locked={locked}
 					onDirtyChange={onDirtyChange}
+					onReadOnly={onReadOnly}
 					contentRef={contentRef}
 					rejectBinary={asText}
 				/>
@@ -2825,6 +2839,7 @@ function PreviewBody({
 					editable={editable}
 					locked={locked}
 					onDirtyChange={onDirtyChange}
+					onReadOnly={onReadOnly}
 					contentRef={contentRef}
 				/>
 			)

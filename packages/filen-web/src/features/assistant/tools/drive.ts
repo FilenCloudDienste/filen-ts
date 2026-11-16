@@ -1,4 +1,5 @@
 import { driveItemName, fastLocaleCompare, formatBytes } from "@filen/shared"
+import { looksLikeText } from "@filen/shared/textEncoding"
 import {
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
 	DIRECTORIES_BY_SIZE_NOTE,
@@ -20,13 +21,14 @@ import {
 	type DirectorySizeItem
 } from "@/features/drive/queries/drive"
 import { asDirectoryOrFile, driveItemMime, isDirectoryItem, lastModifiedOf, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { CATEGORY_POLICY, decodeUtf8, extensionOf, itemTypeExtension, looksBinary, previewType } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, extensionOf, itemTypeExtension, previewType } from "@/features/drive/lib/preview.logic"
 import { defaultRevealDeps, resolveContainingDirectoryTarget } from "@/features/drive/lib/reveal"
 import { searchDriveOnce, type DriveSearchOnceResult } from "@/features/drive/lib/searchQuery"
 import { WATCHDOG_MS } from "@/features/drive/lib/searchStatus.logic"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { spreadsheetFileKind } from "@/features/spreadsheet/lib/fileKind"
 import { loadDriveFileBytes } from "@/features/preview/lib/fileBytes"
+import { readTextFile } from "@/features/preview/lib/textFile"
 import { assistantRouter, navigateChecked } from "@/features/assistant/tools/navigation"
 import { navigateToRoute } from "@/features/assistant/tools/routes"
 import {
@@ -646,11 +648,11 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 
 	const bytes = await loadDriveFileBytes(item, abortSignalOf(scope.signal))
 
-	if (looksBinary(bytes)) {
+	if (!looksLikeText(bytes)) {
 		throw new AssistantToolError(`"${name}" is not a text file`)
 	}
 
-	const { text, truncated } = clipText(decodeUtf8(bytes), TEXT_FILE_MAX_CHARS)
+	const { text, truncated } = clipText(readTextFile(bytes).text, TEXT_FILE_MAX_CHARS)
 
 	return {
 		value: {

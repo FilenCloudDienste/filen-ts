@@ -8,7 +8,6 @@ import {
 	needsImageTransform,
 	canOpenAsText,
 	fileTypeExtension,
-	looksBinary,
 	isStreamedCategory,
 	previewableSiblings,
 	stepPreviewIndex,
@@ -459,18 +458,6 @@ describe("canOpenAsText", () => {
 		expect(canOpenAsText(fileNamed("LICENSE"))).toBe(false)
 		expect(canOpenAsText(dirItem())).toBe(false)
 		expect(canOpenAsText(fileNamed("data.bin", { undecryptable: true }))).toBe(false)
-	})
-})
-
-describe("looksBinary", () => {
-	it("flags a NUL byte near the start, and only there", () => {
-		expect(looksBinary(new TextEncoder().encode("plain text\n"))).toBe(false)
-		expect(looksBinary(Uint8Array.of(0x50, 0x4b, 0x03, 0x04, 0x00))).toBe(true)
-
-		const late = new Uint8Array(10_000).fill(0x61)
-		late[9_000] = 0
-
-		expect(looksBinary(late)).toBe(false)
 	})
 })
 

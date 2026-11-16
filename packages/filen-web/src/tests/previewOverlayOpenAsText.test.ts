@@ -18,14 +18,28 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
-vi.mock("@/features/preview/components/textViewer", () => ({
-	TextViewer: ({ editable, rejectBinary }: { editable?: boolean; rejectBinary?: boolean }) =>
-		createElement("div", {
-			"data-testid": "text",
-			"data-editable": String(editable === true),
-			"data-reject-binary": String(rejectBinary === true)
-		})
-}))
+const { reportReadOnly } = vi.hoisted(() => ({ reportReadOnly: { current: false } }))
+
+vi.mock("@/features/preview/components/textViewer", async () => {
+	const { useEffect } = await import("react")
+
+	return {
+		// Reports read-only as the real viewer does for text a save would change.
+		TextViewer: ({ editable, rejectBinary, onReadOnly }: { editable?: boolean; rejectBinary?: boolean; onReadOnly?: () => void }) => {
+			useEffect(() => {
+				if (reportReadOnly.current && editable === true) {
+					onReadOnly?.()
+				}
+			})
+
+			return createElement("div", {
+				"data-testid": "text",
+				"data-editable": String(editable === true),
+				"data-reject-binary": String(rejectBinary === true)
+			})
+		}
+	}
+})
 
 import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -62,6 +76,7 @@ function overlay(name: string, asText: boolean) {
 
 afterEach(() => {
 	cleanup()
+	reportReadOnly.current = false
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
 
@@ -104,5 +119,16 @@ describe("PreviewOverlay — opened as text", () => {
 
 		expect(viewer.dataset["editable"]).toBe("true")
 		expect(viewer.dataset["rejectBinary"]).toBe("false")
+	})
+
+	it("locks a text file its viewer reports a save would change", async () => {
+		reportReadOnly.current = true
+		render(overlay("notes.txt", false))
+
+		const viewer = await screen.findByTestId("text")
+
+		await vi.waitFor(() => {
+			expect(viewer.dataset["editable"]).toBe("false")
+		})
 	})
 })

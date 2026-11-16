@@ -26,6 +26,8 @@ export interface MarkdownViewerProps {
 	contentRef?: RefObject<(() => string) | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
+	// See TextViewer's own prop.
+	onReadOnly?: () => void
 }
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
@@ -33,9 +35,17 @@ export interface MarkdownViewerProps {
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
 // save rotates the uuid, remounting this whole viewer onto the new bytes.
 // No parameter defaults: the React Compiler skips a component that has them.
-export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: MarkdownViewerProps) {
+export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onReadOnly }: MarkdownViewerProps) {
 	const result = usePreviewBytes(item)
 	const download = usePreviewDownload()
+	const file = result.status === "success" ? readTextFile(result.bytes) : null
+	const readOnly = editable === true && file !== null && !file.editableAsIs
+
+	useEffect(() => {
+		if (readOnly) {
+			onReadOnly?.()
+		}
+	}, [readOnly, onReadOnly])
 
 	useLeaveViewerFullScreen()
 	const [mode, setMode] = useState<MarkdownMode>("rendered")
@@ -107,7 +117,9 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		)
 	}
 
-	const file = readTextFile(result.bytes)
+	if (file === null) {
+		return <PreviewLoading />
+	}
 	const bar: MarkdownBar = {
 		mode,
 		locked: dirty,
@@ -136,7 +148,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 					file={file}
 					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 					alt={alt}
-					editable={editable ?? false}
+					editable={editable === true && file.editableAsIs}
 					locked={locked ?? false}
 					autoFocus={focusAfterToggle === "editor"}
 					markdown={bar}

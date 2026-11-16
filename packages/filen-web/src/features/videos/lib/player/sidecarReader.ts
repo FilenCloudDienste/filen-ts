@@ -1,5 +1,6 @@
 import { type } from "arktype"
-import { MAX_SUBTITLE_CHARS, decodeSubtitleBytes, parseEdl, parseSubtitle, type CueStore, type SkipSegment } from "@filen/shared/videos"
+import { MAX_SUBTITLE_CHARS, parseEdl, parseSubtitle, type CueStore, type SkipSegment } from "@filen/shared/videos"
+import { decodeSubtitleBytes } from "@filen/shared/textEncoding"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
