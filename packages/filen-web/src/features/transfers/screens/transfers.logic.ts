@@ -1,35 +1,44 @@
 import { clampedRatio, isJobRunning } from "@filen/shared"
 import { isActiveTransfer, transfersIndexOf, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
-import { NO_SYNC_ACTIVITY, type SyncActivity } from "@/features/transfers/lib/externalTransfers.logic"
+import { NO_SYNC_ACTIVITY, type ExternalTransferRow, type SyncActivity } from "@/features/transfers/lib/externalTransfers.logic"
+import {
+	externalTransferGroupOf,
+	groupEnd,
+	groupRows,
+	TRANSFER_GROUP,
+	transferGroupOf,
+	type TransferGroup
+} from "@/features/transfers/lib/order"
 
-// The screen's two rendered sections. Active on top, oldest-running first (ASC startedAt) — the
-// longest-waiting transfer stays anchored at the top instead of being bumped down every time a newer
-// one starts. Finished below, newest first (DESC startedAt — there is no finishedAt field, startedAt
-// is the nearest proxy). "Finished" is simply isActiveTransfer's complement (done/error in practice:
-// cancelled never reaches the store's list — removed on settle — and completedWithErrors is unused;
-// see stores/transfers.ts's own header comment), so no per-status branching is needed here either.
+// The screen's rows, the desktop app's sync and mounts ones among them, in the order every transfer list keeps
+// (lib/order.ts): by state, each state in start order, which is the store's own order (rows only append), the page's
+// rows before the desktop app's. Rows before `activeEnd` are still in flight (the Active section), the rest finished.
+// `queued`: rows whose wait the store does not hold (a drive job waiting for the archive slot, a directory upload still
+// being walked). O(n) and comparison-free, so a progress tick keeps every row in place.
+export type TransfersListRow = Transfer | ExternalTransferRow
+
 export interface TransfersDisplayList {
-	active: Transfer[]
-	finished: Transfer[]
+	rows: TransfersListRow[]
+	activeEnd: number
 }
 
-export function buildTransfersDisplayList(transfers: Transfer[]): TransfersDisplayList {
-	const active: Transfer[] = []
-	const finished: Transfer[] = []
+export function isExternalRow(row: TransfersListRow): row is ExternalTransferRow {
+	return "kind" in row
+}
 
-	for (const transfer of transfers) {
-		if (isActiveTransfer(transfer.status)) {
-			active.push(transfer)
-		} else {
-			finished.push(transfer)
-		}
-	}
+export function transfersListRowGroup(row: TransfersListRow, queued: ReadonlySet<string>): TransferGroup {
+	return isExternalRow(row) ? externalTransferGroupOf(row) : transferGroupOf(row, queued.has(row.id))
+}
 
-	active.sort((a, b) => a.startedAt - b.startedAt)
-	finished.sort((a, b) => b.startedAt - a.startedAt)
+export function buildTransfersDisplayList(
+	transfers: readonly Transfer[],
+	external: readonly ExternalTransferRow[],
+	queued: ReadonlySet<string>
+): TransfersDisplayList {
+	const grouped = groupRows<TransfersListRow>([transfers, external], row => transfersListRowGroup(row, queued))
 
-	return { active, finished }
+	return { rows: grouped.rows, activeEnd: groupEnd(grouped, TRANSFER_GROUP.paused) }
 }
 
 // Bulk-header target selection. Each helper returns exactly the id list its header button hands to

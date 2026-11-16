@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
+import type { ExternalTransferRow } from "@/features/transfers/lib/externalTransfers.logic"
 import {
 	cancelAllLeavesBrowserPartial,
 	leavesBrowserPartial,
 	buildTransfersDisplayList,
 	cancellableTransferIds,
+	isExternalRow,
+	type TransfersDisplayList,
 	endedJobIds,
 	pausableTransferIds,
 	resumableTransferIds,
@@ -30,47 +33,78 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 }
 
 describe("buildTransfersDisplayList", () => {
-	it("active section: oldest startedAt first", () => {
-		const newest = transfer({ id: "a", status: "uploading", startedAt: 3 })
-		const oldest = transfer({ id: "b", status: "downloading", startedAt: 1 })
-		const middle = transfer({ id: "c", status: "uploading", startedAt: 2 })
+	function ids(list: TransfersDisplayList): string[] {
+		return list.rows.map(row => row.id)
+	}
 
-		const list = buildTransfersDisplayList([newest, oldest, middle])
+	it("orders by state, each state in start order, and splits active from finished", () => {
+		const list = buildTransfersDisplayList(
+			[
+				transfer({ id: "done", status: "done" }),
+				transfer({ id: "a", status: "uploading" }),
+				transfer({ id: "paused", status: "downloading", paused: true }),
+				transfer({ id: "partly", status: "completedWithErrors" }),
+				transfer({ id: "slot", status: "downloading", waitingForSlot: true }),
+				transfer({ id: "job", status: "compressing" }),
+				transfer({ id: "b", status: "copying" }),
+				transfer({ id: "failed", status: "error" })
+			],
+			[],
+			new Set(["job"])
+		)
 
-		expect(list.active.map(t => t.id)).toEqual(["b", "c", "a"])
+		expect(ids(list)).toEqual(["a", "b", "slot", "job", "paused", "partly", "failed", "done"])
+		expect(list.activeEnd).toBe(5)
 	})
 
-	it("finished section: newest startedAt first", () => {
-		const oldest = transfer({ id: "a", status: "done", startedAt: 1 })
-		const newest = transfer({ id: "b", status: "error", startedAt: 3 })
-		const middle = transfer({ id: "c", status: "done", startedAt: 2 })
+	it("lists the desktop app's rows with the page's rows of the same state, after them", () => {
+		const moving: ExternalTransferRow = {
+			kind: "transfer",
+			id: "sync:p:upload:a.txt",
+			path: "a.txt",
+			direction: "upload",
+			bytes: 1,
+			total: 2,
+			speed: null,
+			source: { kind: "sync", pairId: "p", name: "Pair" }
+		}
+		const queued: ExternalTransferRow = { kind: "queued", id: "mounts:queued", count: 2, source: { kind: "mounts", role: "drive" } }
+		const list = buildTransfersDisplayList(
+			[
+				transfer({ id: "slot", status: "downloading", waitingForSlot: true }),
+				transfer({ id: "a", status: "uploading" }),
+				transfer({ id: "done", status: "done" })
+			],
+			[queued, moving],
+			NONE
+		)
 
-		const list = buildTransfersDisplayList([oldest, newest, middle])
-
-		expect(list.finished.map(t => t.id)).toEqual(["b", "c", "a"])
+		expect(ids(list)).toEqual(["a", moving.id, "slot", queued.id, "done"])
+		expect(list.activeEnd).toBe(4)
+		expect(list.rows.map(isExternalRow)).toEqual([false, true, false, true, false])
 	})
 
-	it("splits active from finished regardless of direction", () => {
-		const list = buildTransfersDisplayList([
-			transfer({ id: "a", direction: "upload", status: "uploading" }),
-			transfer({ id: "b", direction: "download", status: "downloading" }),
-			transfer({ id: "c", direction: "upload", status: "done" }),
-			transfer({ id: "d", direction: "download", status: "error" })
-		])
+	it("keeps the order across a progress tick, and moves only a row whose state changed", () => {
+		const rows = [transfer({ id: "a" }), transfer({ id: "b" }), transfer({ id: "c" })]
+		const before = ids(buildTransfersDisplayList(rows, [], NONE))
+		const ticked = rows.map(row => (row.id === "a" ? { ...row, bytesTransferred: 50 } : row))
 
-		expect(list.active.map(t => t.id).sort()).toEqual(["a", "b"])
-		expect(list.finished.map(t => t.id).sort()).toEqual(["c", "d"])
+		expect(ids(buildTransfersDisplayList(ticked, [], NONE))).toEqual(before)
+
+		const paused = rows.map(row => (row.id === "a" ? { ...row, paused: true } : row))
+
+		expect(ids(buildTransfersDisplayList(paused, [], NONE))).toEqual(["b", "c", "a"])
 	})
 
-	it("returns empty sections for an empty list", () => {
-		expect(buildTransfersDisplayList([])).toEqual({ active: [], finished: [] })
+	it("returns no rows for an empty list", () => {
+		expect(buildTransfersDisplayList([], [], NONE)).toMatchObject({ rows: [], activeEnd: 0 })
 	})
 
 	it("does not mutate the input array", () => {
-		const input = [transfer({ id: "a", startedAt: 2 }), transfer({ id: "b", startedAt: 1 })]
+		const input = [transfer({ id: "a", status: "done" }), transfer({ id: "b" })]
 		const original = [...input]
 
-		buildTransfersDisplayList(input)
+		buildTransfersDisplayList(input, [], NONE)
 
 		expect(input).toEqual(original)
 	})

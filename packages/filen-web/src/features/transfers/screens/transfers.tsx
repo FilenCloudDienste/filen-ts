@@ -29,10 +29,14 @@ import {
 	cancellableTransferIds,
 	leavesBrowserPartial,
 	endedJobIds,
+	isExternalRow,
 	pausableTransferIds,
 	resumableTransferIds,
-	shouldShowTransfersAggregate
+	shouldShowTransfersAggregate,
+	transfersListRowGroup,
+	type TransfersDisplayList
 } from "@/features/transfers/screens/transfers.logic"
+import { scanningRunIds, waitingJobIds } from "@/features/transfers/lib/order"
 import { cancelTransfer, cancelTransfers, cancelUploadRuns, setTransferPaused, setTransfersPaused } from "@/features/transfers/lib/control"
 import {
 	focusedTransferId,
@@ -47,6 +51,7 @@ import { hasCommandModifier } from "@/lib/rowKeys"
 import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { ExternalTransferRowView } from "@/features/transfers/components/externalTransferRow"
+import { useGroupMoves } from "@/features/transfers/hooks/useGroupMoves"
 import {
 	attributeMounts,
 	mountsRunning,
@@ -81,22 +86,27 @@ function useExternalTransfers(): ExternalTransferRow[] {
 
 // Full-page transfers surface, reached from the rail entry (iconRail.tsx's TransfersEntry). One header
 // row carries the live summary and the bulk actions, which act on this page's own transfers only; below
-// it, the active transfers (the desktop app's sync and mounts ones after the page's own, read-only), then
-// the finished ones.
+// it, the active transfers (the desktop app's sync and mounts ones among them, read-only), then the
+// finished ones, in the order of lib/order.ts.
 export function TransfersScreen() {
 	const { t } = useTranslation(["transfers", "common"])
 	const navigate = useNavigate()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	// Changes when a drive job ends, which takes its row out of the bulk actions.
 	const endedJobs = useDriveJobsStore(useShallow(state => endedJobIds(state.jobs)))
-	const { active, finished } = buildTransfersDisplayList(transfers)
 	const external = useExternalTransfers()
+	// The rows' waits the store does not mark itself; both change only when a wait starts or ends.
+	const waitingJobs = useDriveJobsStore(useShallow(state => waitingJobIds(state.jobs)))
+	const scanningRuns = useTransfersStore(useShallow(state => scanningRunIds(state.uploadBatches)))
+	const queued = scanningRuns.size === 0 ? waitingJobs : new Set([...waitingJobs, ...scanningRuns])
+	const list = buildTransfersDisplayList(transfers, external, queued)
 	// Samples age out through the rail's own tick (iconRail.tsx's TransfersEntry), mounted beside this.
 	const { activeCount, percent, speed } = useTransfersAggregate()
 	const cancellable = cancellableTransferIds(transfers, endedJobs)
 	const pausable = pausableTransferIds(transfers, endedJobs)
 	const resumable = resumableTransferIds(transfers, endedJobs)
-	const clearable = finished.length > 0
+	// Every finished row is the page's own: the desktop app's are listed only while they run.
+	const clearable = list.rows.length > list.activeEnd
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
 	// Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
 	// wrapper (ConfirmDialog), same primitive AccountMenu's sign-out already uses. cancelTransfer is
@@ -104,9 +114,9 @@ export function TransfersScreen() {
 	// constant false, unlike a real async confirm flow.
 	const [cancelAllConfirmOpen, setCancelAllConfirmOpen] = useState(false)
 	// Single-row cancel — a stable id, not a per-row boolean: this screen owns the confirm (rather than
-	// each TransferRow owning its own), because buildTransfersDisplayList renders active/finished
-	// transfers in two separate sections — a row settling mid-confirm unmounts in one section and
-	// remounts in the other, which would silently drop any dialog-open state the ROW itself held. Kept
+	// each TransferRow owning its own), because buildTransfersDisplayList moves a row whose state changes,
+	// across sections too — a row settling mid-confirm unmounts in one section and remounts in the
+	// other, which would silently drop any dialog-open state the ROW itself held. Kept
 	// as an id (not the Transfer object) so it re-resolves the CURRENT transfer every render — see
 	// cancelTarget below.
 	const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
@@ -251,7 +261,7 @@ export function TransfersScreen() {
 				</div>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{active.length === 0 && finished.length === 0 && external.length === 0 ? (
+				{list.rows.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
@@ -265,9 +275,8 @@ export function TransfersScreen() {
 					</div>
 				) : (
 					<TransfersList
-						active={active}
-						external={external}
-						finished={finished}
+						list={list}
+						queued={queued}
 						onRequestCancel={requestRowCancel}
 						onShowInDirectory={handleShowInDirectory}
 					/>
@@ -344,35 +353,37 @@ const LIST_OVERSCAN = 8
 // Only the rows in view mount: a many-file upload adds a row per file up front, and every progress tick
 // re-renders the screen. The rows stay in flow inside each section's list, the ones out of view standing
 // as padding, so each row is still an <li> of its own <ul>. The virtualizer counts both sections as one
-// run of heading, rows, heading, rows.
+// run of heading, rows, heading, rows. A row that changes state slides to its new place (useGroupMoves).
 function TransfersList({
-	active,
-	external,
-	finished,
+	list,
+	queued,
 	onRequestCancel,
 	onShowInDirectory
 }: {
-	active: Transfer[]
-	// Listed after the active rows, in their section.
-	external: ExternalTransferRow[]
-	finished: Transfer[]
+	list: TransfersDisplayList
+	queued: ReadonlySet<string>
 	onRequestCancel: (transfer: Transfer) => void
 	onShowInDirectory: (item: DriveItem) => void
 }) {
 	const { t } = useTranslation("transfers")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const scrollRef = useRef<HTMLDivElement | null>(null)
+	const { rows, activeEnd } = list
+	// Each section's rows, as a range of `rows`.
 	const sections = [
-		{ key: "active", title: t("transfersScreenSectionActive"), own: active, external },
-		{ key: "finished", title: t("transfersScreenSectionFinished"), own: finished, external: [] }
-	].filter(section => section.own.length + section.external.length > 0)
+		{ key: "active", title: t("transfersScreenSectionActive"), start: 0, end: activeEnd },
+		{ key: "finished", title: t("transfersScreenSectionFinished"), start: activeEnd, end: rows.length }
+	].filter(section => section.end > section.start)
 	// Each section's heading index in the virtualizer's run.
 	const headings: number[] = []
 	let count = 0
 
 	for (const section of sections) {
 		headings.push(count)
-		count += 1 + section.own.length + section.external.length
+		count += 1 + section.end - section.start
 	}
+
+	useGroupMoves(scrollRef)
 
 	const virtualizer = useVirtualizer({
 		count,
@@ -393,9 +404,13 @@ function TransfersList({
 	for (const [sectionIndex, section] of sections.entries()) {
 		const rowsStart = (headings[sectionIndex] ?? 0) + 1
 
-		for (const [index, transfer] of section.own.entries()) {
-			rowIds.push(transfer.id)
-			rowRunIndex.push(rowsStart + index)
+		for (let index = section.start; index < section.end; index++) {
+			const row = rows[index]
+
+			if (row !== undefined && !isExternalRow(row)) {
+				rowIds.push(row.id)
+				rowRunIndex.push(rowsStart + index - section.start)
+			}
 		}
 	}
 
@@ -542,11 +557,13 @@ function TransfersList({
 	const setScroller = useCallback(
 		(element: HTMLDivElement | null) => {
 			setScrollElement(element)
+			scrollRef.current = element
 
 			const releases = [pauseRef(element), cancelRef(element), revealRef(element), detailsRef(element)]
 
 			return () => {
 				setScrollElement(null)
+				scrollRef.current = null
 
 				for (const release of releases) {
 					if (typeof release === "function") {
@@ -563,12 +580,12 @@ function TransfersList({
 			ref={setScroller}
 			onKeyDown={handleKeyDown}
 			onFocus={handleFocus}
-			className="flex-1 overflow-y-auto px-2 pb-4"
+			// The rows' offsetParent, so their offsets (useGroupMoves) do not move as it scrolls.
+			className="relative flex-1 overflow-y-auto px-2 pb-4"
 		>
 			{sections.map((section, sectionIndex) => {
 				const rowsStart = (headings[sectionIndex] ?? 0) + 1
-				const ownCount = section.own.length
-				const total = ownCount + section.external.length
+				const total = section.end - section.start
 				const from = Math.min(total, Math.max(0, first - rowsStart))
 				const to = Math.max(from, Math.min(total, last - rowsStart + 1))
 
@@ -584,22 +601,25 @@ function TransfersList({
 							className="flex flex-col"
 							style={{ gap: ROW_GAP, paddingTop: from * ROW_STRIDE, paddingBottom: (total - to) * ROW_STRIDE }}
 						>
-							{section.own.slice(Math.min(from, ownCount), Math.min(to, ownCount)).map(transfer => (
-								<TransferRow
-									key={transfer.id}
-									transfer={transfer}
-									// Only an active row renders its Cancel button (TransferRow's active branch).
-									onRequestCancel={onRequestCancel}
-									onShowInDirectory={onShowInDirectory}
-									tabStop={transfer.id === tabStopId}
-								/>
-							))}
-							{section.external.slice(Math.max(0, from - ownCount), Math.max(0, to - ownCount)).map(row => (
-								<ExternalTransferRowView
-									key={row.id}
-									row={row}
-								/>
-							))}
+							{rows.slice(section.start + from, section.start + to).map(row =>
+								isExternalRow(row) ? (
+									<ExternalTransferRowView
+										key={row.id}
+										row={row}
+										group={transfersListRowGroup(row, queued)}
+									/>
+								) : (
+									<TransferRow
+										key={row.id}
+										transfer={row}
+										group={transfersListRowGroup(row, queued)}
+										// Only an active row renders its Cancel button (TransferRow's active branch).
+										onRequestCancel={onRequestCancel}
+										onShowInDirectory={onShowInDirectory}
+										tabStop={row.id === tabStopId}
+									/>
+								)
+							)}
 						</ul>
 					</section>
 				)

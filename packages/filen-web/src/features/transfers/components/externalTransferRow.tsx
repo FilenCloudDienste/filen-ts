@@ -6,6 +6,8 @@ import type { ExternalTransferRow, ExternalTransferSource } from "@/features/tra
 import { ProgressGlyph, TRANSFER_ROW_CLASS } from "@/features/transfers/components/transferRow"
 import { activeStatusLabelKey, steadyEtaSeconds } from "@/features/transfers/components/transferRow.logic"
 import { useRunningDetails } from "@/features/transfers/hooks/useTransferFigures"
+import { orderAttributes } from "@/features/transfers/hooks/useGroupMoves"
+import type { TransferGroup } from "@/features/transfers/lib/order"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { pathBasename } from "@/features/sync/lib/syncStatus.logic"
@@ -65,8 +67,9 @@ function SourceTag({ source }: { source: ExternalTransferSource }) {
 }
 
 // A transfer the desktop app's sync or mounts run: read-only, as neither offers a per-file control, and listed only
-// while it moves. It reads like the screen's own rows, with its source in place of their controls.
-export function ExternalTransferRowView({ row }: { row: ExternalTransferRow }) {
+// while it moves. It reads like the screen's own rows, with its source in place of their controls. `group`: its place in
+// the list's order (lib/order.ts).
+export function ExternalTransferRowView({ row, group }: { row: ExternalTransferRow; group: TransferGroup }) {
 	const { t } = useTranslation("transfers")
 	const runningDetails = useRunningDetails()
 
@@ -76,6 +79,7 @@ export function ExternalTransferRowView({ row }: { row: ExternalTransferRow }) {
 		return (
 			<li
 				aria-label={title}
+				{...orderAttributes(row.id, group)}
 				className={TRANSFER_ROW_CLASS}
 			>
 				<ProgressGlyph
@@ -109,6 +113,7 @@ export function ExternalTransferRowView({ row }: { row: ExternalTransferRow }) {
 	return (
 		<li
 			aria-label={name}
+			{...orderAttributes(row.id, group)}
 			className={TRANSFER_ROW_CLASS}
 		>
 			<ProgressGlyph

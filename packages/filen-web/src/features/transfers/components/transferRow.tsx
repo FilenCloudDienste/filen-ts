@@ -44,15 +44,19 @@ import { jobRevealItem } from "@/features/drive/lib/driveJobs.logic"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { TransferIcon } from "@/features/transfers/components/transferIcon"
 import { useRunningDetails, useTransferRate } from "@/features/transfers/hooks/useTransferFigures"
+import { orderAttributes } from "@/features/transfers/hooks/useGroupMoves"
+import type { TransferGroup } from "@/features/transfers/lib/order"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 export interface TransferRowProps {
 	transfer: Transfer
+	// Its place in the list's order (lib/order.ts), which the list slides it by when it changes (useGroupMoves).
+	group: TransferGroup
 	// Cancel's own confirm dialog is owned by the SCREEN (screens/transfers.tsx), not this row:
-	// buildTransfersDisplayList renders active/finished transfers in two SEPARATE sections, so a row
-	// moving from active to finished (settling mid-confirm) unmounts this component and remounts a new
+	// buildTransfersDisplayList moves a row whose state changes, across its two SEPARATE sections too, so a
+	// row moving from active to finished (settling mid-confirm) unmounts this component and remounts a new
 	// one in the other section — a dialog-open flag kept in local row state would silently vanish right
 	// under the user's cursor the instant that happens. The screen instead tracks a stable id (immune
 	// to this component ever remounting) and re-resolves the target transfer by id on every render, so
@@ -240,7 +244,7 @@ function revealNative(action: "reveal" | "open", id: string): void {
 // what happened, "Uploaded · 6 MiB", or in red why it failed. Active rows pause/resume and cancel (the
 // screen confirms the cancel, see onRequestCancel); finished rows can open where the item landed and
 // be removed from the list, which touches nothing but the list.
-export function TransferRow({ transfer, onRequestCancel, onShowInDirectory, tabStop }: TransferRowProps) {
+export function TransferRow({ transfer, group, onRequestCancel, onShowInDirectory, tabStop }: TransferRowProps) {
 	const { t } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const active = isActiveTransfer(transfer.status)
@@ -330,6 +334,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory, tabS
 		<li
 			aria-label={transfer.name}
 			data-transfer-id={transfer.id}
+			{...orderAttributes(transfer.id, group)}
 			tabIndex={tabStop ? 0 : -1}
 			className={cn(TRANSFER_ROW_CLASS, "focus-ring-row outline-none")}
 		>

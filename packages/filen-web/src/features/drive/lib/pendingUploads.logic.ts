@@ -11,6 +11,7 @@ import {
 	type UploadBatch
 } from "@/features/transfers/store/useTransfersStore"
 import { steadyEtaSeconds } from "@/features/transfers/components/transferRow.logic"
+import { groupRows, TRANSFER_GROUP, transferGroupOf, type TransferGroup } from "@/features/transfers/lib/order"
 import { ROW_HEIGHT, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 import type { DriveViewMode } from "@/features/drive/lib/preferences"
 
@@ -18,8 +19,10 @@ import type { DriveViewMode } from "@/features/drive/lib/preferences"
 // is one plain upload (a transfer), one directory upload's top-level directory (a run, however many files
 // it holds) or one drive job (its single transfers row). Up to MAX_UNIT_ROWS running units get a row each
 // and more fold into one summary row; failed uploads the same, below them (a failed job is its card's to
-// report). Rows are keyed by string so the listing's membership read compares shallowly and
-// changes only when a row comes, goes, fails or a group crosses the threshold, never on a progress tick.
+// report). Running rows go in the order every transfer list keeps (lib/order.ts): moving, then waiting
+// their turn, then paused. Rows are keyed by string so the listing's membership read compares shallowly and
+// changes only when a row comes, goes, changes state or a group crosses the threshold, never on a progress
+// tick.
 // Plain uploads and jobs are read off the rows' index (transfersIndexOf), so no read walks the rows.
 export type PendingRowKey =
 	| `upload:${string}`
@@ -116,16 +119,24 @@ export function pendingRowCount(state: PendingUploadsState, parentUuid: string |
 	return rowsFor(running) + rowsFor(failed)
 }
 
-// The rows, running units first (directory runs, then plain uploads and drive jobs, each in start order),
-// failed after. Only the few rows it gives are ever put in order.
-export function pendingUploadRowKeys(state: PendingUploadsState, parentUuid: string | null): PendingRowKey[] {
+// The rows, running units first by state (directory runs, then plain uploads and drive jobs, each in start
+// order, within a state), failed after. Only the few rows it gives are ever put in order. `waitingJobs`: the
+// drive jobs waiting for the archive slot, which their jobs hold rather than their rows.
+export function pendingUploadRowKeys(
+	state: PendingUploadsState,
+	parentUuid: string | null,
+	waitingJobs: ReadonlySet<string>
+): PendingRowKey[] {
 	const { running, failed } = countUnits(state, parentUuid)
 	const keys: PendingRowKey[] = []
 
 	if (running > MAX_UNIT_ROWS) {
 		keys.push("uploading")
 	} else if (running > 0) {
-		pushUnitRows(state, parentUuid, keys, "running")
+		const units: PendingRowKey[] = []
+
+		pushUnitRows(state, parentUuid, units, "running")
+		keys.push(...groupRows([units], key => pendingRowGroup(state, key, waitingJobs)).rows)
 	}
 
 	if (failed > MAX_UNIT_ROWS) {
@@ -174,6 +185,32 @@ function pushUnitRows(state: PendingUploadsState, parentUuid: string | null, key
 
 	for (const row of rows) {
 		keys.push(row.key)
+	}
+}
+
+// A row's state in the order (lib/order.ts): a directory run waits while it is walked, a job while its job waits for
+// the archive slot.
+export function pendingRowGroup(state: PendingUploadsState, key: PendingRowKey, waitingJobs: ReadonlySet<string>): TransferGroup {
+	const { kind, id } = parsePendingRowKey(key)
+
+	switch (kind) {
+		case "uploading":
+			return TRANSFER_GROUP.active
+		case "failed":
+		case "failedUpload":
+		case "failedDirectory":
+			return TRANSFER_GROUP.failed
+		case "directory": {
+			const row = transferById(state.transfers, id)
+			const scanning = state.uploadBatches[id]?.scanning === true
+
+			return row === undefined ? (scanning ? TRANSFER_GROUP.queued : TRANSFER_GROUP.active) : transferGroupOf(row, scanning)
+		}
+		default: {
+			const row = transferById(state.transfers, id)
+
+			return row === undefined ? TRANSFER_GROUP.active : transferGroupOf(row, waitingJobs.has(id))
+		}
 	}
 }
 

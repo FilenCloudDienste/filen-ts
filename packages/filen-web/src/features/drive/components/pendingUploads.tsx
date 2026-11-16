@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type PointerEvent, type ReactNode, type Ref } from "react"
+import { useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowUpIcon, FilesIcon, XIcon } from "lucide-react"
@@ -8,6 +8,8 @@ import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { activeStatusLabelKey, transferProgress } from "@/features/transfers/components/transferRow.logic"
 import { TransferIcon } from "@/features/transfers/components/transferIcon"
 import { useRunningDetails, useTransferRate, type RunningDetails } from "@/features/transfers/hooks/useTransferFigures"
+import { orderAttributes, useGroupMoves } from "@/features/transfers/hooks/useGroupMoves"
+import { TRANSFER_GROUP, waitingJobIds, type TransferGroup } from "@/features/transfers/lib/order"
 import {
 	parsePendingRowKey,
 	pendingCancelSubject,
@@ -16,6 +18,7 @@ import {
 	pendingGroupSpeed,
 	pendingJobIds,
 	pendingJobSpeed,
+	pendingRowGroup,
 	pendingRunFigures,
 	pendingSummaryFigures,
 	pendingSummarySamples,
@@ -68,7 +71,12 @@ function stopListboxPress(event: PointerEvent): void {
 // a row comes or goes.
 export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: PendingUploadsProps) {
 	const { t } = useTranslation("drive")
-	const keys = useTransfersStore(useShallow(state => pendingUploadRowKeys(state, parentUuid)))
+	// The jobs waiting for the archive slot, which changes only when a wait starts or ends.
+	const waitingJobs = useDriveJobsStore(useShallow(state => waitingJobIds(state.jobs)))
+	const keys = useTransfersStore(useShallow(state => pendingUploadRowKeys(state, parentUuid, waitingJobs)))
+	// The rows' states, read here so a row that changes state without moving is still known to have changed.
+	const groups = useTransfersStore(useShallow(state => keys.map(key => pendingRowGroup(state, key, waitingJobs))))
+	const listRef = useRef<HTMLUListElement>(null)
 	// The row whose Cancel is being confirmed, kept here: a row that settles unmounts, and its confirm with it.
 	const [cancelKey, setCancelKey] = useState<PendingRowKey | null>(null)
 	const running = keys.some(key => !key.startsWith("failed"))
@@ -100,6 +108,8 @@ export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: Pend
 		dismissPendingRow(key, parentUuid)
 	}
 
+	useGroupMoves(listRef)
+
 	return (
 		<div
 			ref={blockRef}
@@ -115,18 +125,21 @@ export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: Pend
 					.join(". ")}
 			</p>
 			<ul
+				ref={listRef}
 				aria-label={t("drivePendingUploadsLabel")}
-				className={viewMode === "list" ? "flex flex-col" : "grid"}
+				// The rows' offsetParent, for useGroupMoves.
+				className={cn("relative", viewMode === "list" ? "flex flex-col" : "grid")}
 				style={
 					viewMode === "grid"
 						? { gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`, gridAutoRows: TILE_ROW_HEIGHT }
 						: undefined
 				}
 			>
-				{keys.map(key => (
+				{keys.map((key, index) => (
 					<PendingRow
 						key={key}
 						rowKey={key}
+						group={groups[index] ?? TRANSFER_GROUP.active}
 						parentUuid={parentUuid}
 						viewMode={viewMode}
 						onCancel={handleCancel}
@@ -147,6 +160,8 @@ export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: Pend
 
 interface RowProps {
 	rowKey: PendingRowKey
+	// Its state in the order (lib/order.ts).
+	group: TransferGroup
 	parentUuid: string | null
 	viewMode: DriveViewMode
 	onCancel: RowAction
@@ -220,7 +235,7 @@ function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 // One upload or drive job. A job's figures and glyph come off its job, as on the transfers screen.
-function PendingTransferRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
+function PendingTransferRow({ rowKey, group, viewMode, onCancel, onDismiss }: RowProps) {
 	const { t } = useTranslation(["transfers", "drive"])
 	const { kind, id } = parsePendingRowKey(rowKey)
 	const transfer = useTransfersStore(state => transferById(state.transfers, id))
@@ -236,6 +251,7 @@ function PendingTransferRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps)
 			transfer={transfer}
 			failed={failed}
 			viewMode={viewMode}
+			order={orderAttributes(rowKey, group)}
 			action={
 				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
@@ -256,11 +272,13 @@ function PendingTransferCell({
 	transfer,
 	failed,
 	viewMode,
+	order,
 	action
 }: {
 	transfer: Transfer
 	failed: boolean
 	viewMode: DriveViewMode
+	order: Record<string, string>
 	action: ReactNode
 }) {
 	const { t } = useTranslation("transfers")
@@ -315,12 +333,13 @@ function PendingTransferCell({
 			details={details}
 			progress={failed ? null : progress}
 			failed={failed}
+			order={order}
 			action={action}
 		/>
 	)
 }
 
-function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
+function PendingDirectoryRow({ rowKey, group, viewMode, onCancel, onDismiss }: RowProps) {
 	const { t } = useTranslation(["transfers", "drive"])
 	const { kind, id } = parsePendingRowKey(rowKey)
 	const figures = useTransfersStore(useShallow(state => pendingRunFigures(state, id)))
@@ -359,6 +378,7 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 			details={details}
 			progress={failed || scanning ? null : percent}
 			failed={failed}
+			order={orderAttributes(rowKey, group)}
 			action={
 				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
@@ -375,7 +395,7 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 	)
 }
 
-function PendingSummaryRow({ rowKey, parentUuid, viewMode, onCancel }: RowProps) {
+function PendingSummaryRow({ rowKey, group, parentUuid, viewMode, onCancel }: RowProps) {
 	const { t } = useTranslation("transfers")
 	const { figures, details, percent } = usePendingSummary(parentUuid)
 	const summaryLabel = useSummaryLabel()
@@ -393,6 +413,7 @@ function PendingSummaryRow({ rowKey, parentUuid, viewMode, onCancel }: RowProps)
 			details={details}
 			progress={percent}
 			failed={false}
+			order={orderAttributes(rowKey, group)}
 			action={
 				<RowButton
 					label={t("transfersRowCancel")}
@@ -405,7 +426,7 @@ function PendingSummaryRow({ rowKey, parentUuid, viewMode, onCancel }: RowProps)
 	)
 }
 
-function PendingFailedSummaryRow({ rowKey, parentUuid, viewMode, onDismiss }: RowProps) {
+function PendingFailedSummaryRow({ rowKey, group, parentUuid, viewMode, onDismiss }: RowProps) {
 	const { t } = useTranslation("drive")
 	const count = useTransfersStore(state => pendingFailedCount(state, parentUuid))
 
@@ -422,6 +443,7 @@ function PendingFailedSummaryRow({ rowKey, parentUuid, viewMode, onDismiss }: Ro
 			details={failedLine("")}
 			progress={null}
 			failed
+			order={orderAttributes(rowKey, group)}
 			action={
 				<RowButton
 					label={t("drivePendingUploadsDismiss")}
@@ -465,6 +487,7 @@ function PendingCell({
 	details,
 	progress,
 	failed,
+	order,
 	action
 }: {
 	viewMode: DriveViewMode
@@ -473,6 +496,8 @@ function PendingCell({
 	details: RunningDetails
 	progress: number | null
 	failed: boolean
+	// Its marks for useGroupMoves.
+	order: Record<string, string>
 	action: ReactNode
 }) {
 	const tone = failed ? "text-destructive" : "text-muted-foreground"
@@ -481,6 +506,7 @@ function PendingCell({
 		return (
 			<li
 				aria-label={name}
+				{...order}
 				className={cn(LIST_ROW_CLASS, "relative isolate")}
 			>
 				{progress === null ? null : (
@@ -511,6 +537,7 @@ function PendingCell({
 	return (
 		<li
 			aria-label={name}
+			{...order}
 			className={TILE_CLASS}
 		>
 			<div className={cn(TILE_FACE_CLASS, "isolate")}>

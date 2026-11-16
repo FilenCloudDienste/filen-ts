@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { mockViewportHeight } from "@/tests/support/viewport"
 import { act, render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
@@ -234,5 +234,132 @@ describe("TransfersScreen — a large batch", () => {
 		expect(rows.length).toBeLessThan(50)
 		expect(screen.getByText("file0.txt")).toBeTruthy()
 		expect(screen.getByText("Active")).toBeTruthy()
+	})
+})
+
+// Rows go by state (active, queued, paused, failed, done), each state in start order; a row that changes state moves at
+// once, sliding from where it stood unless the user asked for reduced motion.
+describe("TransfersScreen — order by state", () => {
+	const ROW_HEIGHT = 58
+
+	function rowNames(container: HTMLElement): string[] {
+		return [...container.querySelectorAll("li[aria-label]")].map(row => row.getAttribute("aria-label") ?? "")
+	}
+
+	// jsdom lays nothing out: each row stands one row height below the one before it.
+	function mockRowOffsets(): void {
+		const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetTop")
+
+		Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+			configurable: true,
+			get(this: HTMLElement) {
+				return [...document.querySelectorAll("[data-order-id]")].indexOf(this) * ROW_HEIGHT
+			}
+		})
+		onTestFinished(() => {
+			if (original === undefined) {
+				Reflect.deleteProperty(HTMLElement.prototype, "offsetTop")
+			} else {
+				Object.defineProperty(HTMLElement.prototype, "offsetTop", original)
+			}
+		})
+	}
+
+	function mockAnimate(): ReturnType<typeof vi.fn> {
+		const animate = vi.fn()
+
+		Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, writable: true, value: animate })
+		onTestFinished(() => {
+			Reflect.deleteProperty(HTMLElement.prototype, "animate")
+		})
+
+		return animate
+	}
+
+	function mockReducedMotion(reduced: boolean): void {
+		vi.stubGlobal("matchMedia", (query: string) => ({ matches: reduced && query.includes("reduce") }))
+		onTestFinished(() => {
+			vi.unstubAllGlobals()
+		})
+	}
+
+	const ROWS = [
+		transfer({ id: "done", name: "done.txt", status: "done", startedAt: 1 }),
+		transfer({ id: "moving", name: "moving.txt", status: "uploading", startedAt: 2 }),
+		transfer({ id: "paused", name: "paused.txt", status: "uploading", paused: true, startedAt: 3 }),
+		transfer({ id: "failed", name: "failed.txt", status: "error", startedAt: 4 }),
+		transfer({ id: "waiting", name: "waiting.txt", status: "downloading", waitingForSlot: true, startedAt: 5 }),
+		transfer({ id: "second", name: "second.txt", status: "downloading", startedAt: 6 })
+	]
+
+	it("lists active, queued, paused, failed then done, each in start order", () => {
+		mockListViewport()
+		useTransfersStore.setState({ transfers: ROWS })
+
+		const { container } = render(createElement(TransfersScreen))
+
+		expect(rowNames(container)).toEqual(["moving.txt", "second.txt", "waiting.txt", "paused.txt", "failed.txt", "done.txt"])
+	})
+
+	it("does not reorder or animate on a progress tick", () => {
+		mockListViewport()
+		mockRowOffsets()
+		mockReducedMotion(false)
+
+		const animate = mockAnimate()
+
+		useTransfersStore.setState({ transfers: ROWS })
+
+		const { container } = render(createElement(TransfersScreen))
+		const before = rowNames(container)
+
+		act(() => {
+			useTransfersStore.getState().setProgress("moving", 60)
+			useTransfersStore.getState().setProgress("second", 30)
+		})
+
+		expect(rowNames(container)).toEqual(before)
+		expect(animate).not.toHaveBeenCalled()
+	})
+
+	it("moves a row that changes state at once, sliding only that row from where it stood", () => {
+		mockListViewport()
+		mockRowOffsets()
+		mockReducedMotion(false)
+
+		const animate = mockAnimate()
+
+		useTransfersStore.setState({ transfers: ROWS })
+
+		const { container } = render(createElement(TransfersScreen))
+
+		act(() => {
+			useTransfersStore.getState().setPaused("moving", true)
+		})
+
+		expect(rowNames(container)).toEqual(["second.txt", "waiting.txt", "moving.txt", "paused.txt", "failed.txt", "done.txt"])
+		expect(animate).toHaveBeenCalledTimes(1)
+		expect(animate.mock.contexts[0]).toBe(container.querySelector('li[aria-label="moving.txt"]'))
+		// From the top row down to the third: it starts two rows up.
+		expect(animate.mock.calls[0]?.[0]).toEqual([{ transform: `translate(0px, ${String(-2 * ROW_HEIGHT)}px)` }, { transform: "none" }])
+	})
+
+	it("moves the row without sliding it under reduced motion", () => {
+		mockListViewport()
+		mockRowOffsets()
+		mockReducedMotion(true)
+
+		const animate = mockAnimate()
+
+		useTransfersStore.setState({ transfers: ROWS })
+
+		const { container } = render(createElement(TransfersScreen))
+
+		act(() => {
+			useTransfersStore.getState().settle("moving", "done")
+		})
+
+		expect(rowNames(container)).toEqual(["second.txt", "waiting.txt", "paused.txt", "failed.txt", "done.txt", "moving.txt"])
+		expect(animate).not.toHaveBeenCalled()
 	})
 })

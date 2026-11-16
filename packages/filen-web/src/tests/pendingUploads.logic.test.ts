@@ -15,8 +15,10 @@ import {
 	pendingRunFigures,
 	pendingSummaryFigures,
 	pendingSummarySamples,
+	pendingRowGroup,
 	pendingUploadRowKeys
 } from "@/features/drive/lib/pendingUploads.logic"
+import { TRANSFER_GROUP } from "@/features/transfers/lib/order"
 import { makeTransfer } from "@/tests/fixtures/transfers"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 
@@ -53,8 +55,10 @@ function addUpload(id: string, batch: UploadBatchRef | undefined, overrides: Par
 	store().add(batch === undefined ? transfer : { ...transfer, batch })
 }
 
-function keys(parentUuid: string | null = DIR) {
-	return pendingUploadRowKeys(store(), parentUuid)
+const NO_WAITING: ReadonlySet<string> = new Set()
+
+function keys(parentUuid: string | null = DIR, waiting: ReadonlySet<string> = NO_WAITING) {
+	return pendingUploadRowKeys(store(), parentUuid, waiting)
 }
 
 beforeEach(() => {
@@ -63,6 +67,70 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers()
+})
+
+describe("pendingUploadRowKeys — order by state", () => {
+	it("puts running units active first, then queued, then paused, each in start order", () => {
+		store().startUploadBatch({ id: "tree", parentUuid: DIR, directoryName: "Photos" }, undefined, { scanning: true })
+
+		const run = plainRun("run")
+
+		addUpload("paused", run)
+		addUpload("moving", run)
+		store().setPaused("paused", true)
+
+		expect(keys()).toEqual(["upload:moving", "directory:tree", "upload:paused"])
+		expect(keys().map(key => pendingRowGroup(store(), key, NO_WAITING))).toEqual([
+			TRANSFER_GROUP.active,
+			TRANSFER_GROUP.queued,
+			TRANSFER_GROUP.paused
+		])
+	})
+
+	it("puts a drive job waiting for the archive slot after the units that move", () => {
+		store().add(makeTransfer({ id: "job", direction: "compress", status: "compressing", parentUuid: DIR }))
+		addUpload("a", plainRun("run"))
+
+		const waiting = new Set(["job"])
+
+		expect(keys(DIR, waiting)).toEqual(["upload:a", "job:job"])
+		expect(pendingRowGroup(store(), "job:job", waiting)).toBe(TRANSFER_GROUP.queued)
+		expect(keys()).toEqual(["job:job", "upload:a"])
+	})
+
+	it("moves only the unit whose state changed, and back once it resumes", () => {
+		const run = plainRun("run")
+
+		addUpload("a", run)
+		addUpload("b", run)
+		addUpload("c", run)
+		store().setPaused("a", true)
+
+		expect(keys()).toEqual(["upload:b", "upload:c", "upload:a"])
+
+		store().setPaused("a", false)
+
+		expect(keys()).toEqual(["upload:a", "upload:b", "upload:c"])
+	})
+
+	it("does not reorder on a progress tick", () => {
+		const run = plainRun("run")
+
+		addUpload("a", run, { size: 1_000 })
+		addUpload("b", run, { size: 1_000 })
+		store().setPaused("a", true)
+
+		const before = keys()
+
+		store().setProgress("b", 900)
+
+		expect(keys()).toEqual(before)
+	})
+
+	it("gives the summary rows their own group", () => {
+		expect(pendingRowGroup(store(), "uploading", NO_WAITING)).toBe(TRANSFER_GROUP.active)
+		expect(pendingRowGroup(store(), "failed", NO_WAITING)).toBe(TRANSFER_GROUP.failed)
+	})
 })
 
 describe("pendingUploadRowKeys — grouping", () => {

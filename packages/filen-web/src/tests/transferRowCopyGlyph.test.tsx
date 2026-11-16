@@ -13,6 +13,7 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { ARCHIVE_ITEM, compressJob, extractJob } from "@/tests/support/archiveJobFixtures"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import type { Transfer } from "@/features/transfers/store/useTransfersStore"
+import { TRANSFER_GROUP } from "@/features/transfers/lib/order"
 
 function copyRow(name: string): Transfer {
 	return {
@@ -37,6 +38,7 @@ function renderRow(name: string, glyph: CopyJobGlyph | null): HTMLElement {
 	const { container } = render(
 		<TransferRow
 			transfer={copyRow(name)}
+			group={TRANSFER_GROUP.active}
 			onRequestCancel={vi.fn()}
 			onShowInDirectory={vi.fn()}
 			tabStop={false}
@@ -103,6 +105,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 		render(
 			<TransferRow
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -133,6 +136,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 		render(
 			<TransferRow
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -162,6 +166,7 @@ describe("TransferRow — archive jobs", () => {
 		const compress = render(
 			<TransferRow
 				transfer={archiveRow("compress")}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -176,6 +181,7 @@ describe("TransferRow — archive jobs", () => {
 		const extract = render(
 			<TransferRow
 				transfer={archiveRow("extract")}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -192,6 +198,7 @@ describe("TransferRow — archive jobs", () => {
 		render(
 			<TransferRow
 				transfer={archiveRow("extract", { size: 100 })}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -210,6 +217,7 @@ describe("TransferRow — archive jobs", () => {
 		render(
 			<TransferRow
 				transfer={archiveRow("compress")}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -224,6 +232,7 @@ describe("TransferRow — archive jobs", () => {
 		render(
 			<TransferRow
 				transfer={archiveRow("extract")}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -238,6 +247,7 @@ describe("TransferRow — archive jobs", () => {
 		render(
 			<TransferRow
 				transfer={copyRow("photos")}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
 				tabStop={false}
@@ -255,6 +265,7 @@ describe("TransferRow — archive jobs", () => {
 		render(
 			<TransferRow
 				transfer={archiveRow("compress", { status: "done" })}
+				group={TRANSFER_GROUP.active}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={onShowInDirectory}
 				tabStop={false}

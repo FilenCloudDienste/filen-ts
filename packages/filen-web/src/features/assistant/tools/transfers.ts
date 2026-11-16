@@ -7,7 +7,7 @@ import {
 	type Transfer
 } from "@/features/transfers/store/useTransfersStore"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
-import { buildTransfersDisplayList } from "@/features/transfers/screens/transfers.logic"
+import { groupEnd, groupRows, scanningRunIds, TRANSFER_GROUP, transferGroupOf, waitingJobIds } from "@/features/transfers/lib/order"
 import { runningPercentFraction, transferProgress, transferRate } from "@/features/transfers/components/transferRow.logic"
 import { driveJobRate } from "@/features/drive/lib/driveJobs.logic"
 import { driveName, showDrive, type ToolAdapter, type ToolScope } from "@/features/assistant/tools/entities"
@@ -48,11 +48,15 @@ function itemHandle(transfer: Transfer, scope: ToolScope): { handle?: string } {
 	return transfer.item === undefined ? {} : { handle: showDrive(scope, transfer.item) }
 }
 
-// What the transfers screen lists, read from its store: running rows oldest first, then the newest finished.
-// Nothing here pauses, resumes or stops a transfer.
+// What the transfers screen lists, read from its store, in its order (lib/order.ts): running rows by state, then the
+// failed and finished ones. Nothing here pauses, resumes or stops a transfer.
 export const getTransfersTool: ToolAdapter = (_input, scope) => {
-	const { transfers, speedSamples } = useTransfersStore.getState()
-	const { active, finished } = buildTransfersDisplayList(transfers)
+	const { transfers, speedSamples, uploadBatches } = useTransfersStore.getState()
+	const queued = new Set([...waitingJobIds(useDriveJobsStore.getState().jobs), ...scanningRunIds(uploadBatches)])
+	const grouped = groupRows([transfers], transfer => transferGroupOf(transfer, queued.has(transfer.id)))
+	const activeEnd = groupEnd(grouped, TRANSFER_GROUP.paused)
+	const active = grouped.rows.slice(0, activeEnd)
+	const finished = grouped.rows.slice(activeEnd)
 	const aggregate = computeTransfersAggregate(transfers, speedSamples)
 	const failed = finished.filter(transfer => transfer.status === "error").length
 
