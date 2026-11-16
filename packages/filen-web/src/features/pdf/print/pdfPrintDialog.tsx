@@ -35,8 +35,8 @@ export interface PdfPrintDialogProps {
 	permissions: PdfPrintPermissions
 	// A phone or tablet: Standard quality only, smaller canvases.
 	constrained: boolean
-	// Every page of a large file read: asked first (false cancels the print), and held while the print is prepared so the
-	// viewer keeps the read document until it is done.
+	// Every page of a large file read: asked first (false cancels the print). Any print job holds the document while its
+	// pages are prepared, so the viewer keeps it (and what it read) until the job is done.
 	fullRead: PdfPrintFullRead | undefined
 	onClose: () => void
 }
@@ -110,7 +110,8 @@ export function PdfPrintDialog({ document, current, size, permissions, constrain
 		}
 
 		const job = new AbortController()
-		const release = form.pages === "all" ? fullRead?.hold() : undefined
+		// Every job, whatever its pages: the viewer must not reopen the document the pages render from.
+		const release = fullRead?.hold()
 
 		controller.current = job
 		setProgress({ done: 0, pages: count })
