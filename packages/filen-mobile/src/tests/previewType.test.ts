@@ -397,6 +397,20 @@ describe("getPreviewType — stored mime", () => {
 		expect(fileTypeExtension("logo", "image/x-png")).toBe("png")
 	})
 
+	// Before = after: a subtitle, calendar or contact type was text by the text/* rule; it now names its own extension,
+	// which this platform's tables lack, so the text/* fallback keeps it text. Message and mailbox types, and SubRip's,
+	// were and stay unknown.
+	it("keeps extensionless subtitle, calendar and contact types text, and mail types unknown", () => {
+		for (const mime of ["text/vtt", "text/calendar", "text/vcard", "text/x-vcard"]) {
+			expect(getPreviewType("download", mime), mime).toBe("text")
+			expect(fileTypeExtension("download", mime), mime).toBe("txt")
+		}
+
+		for (const mime of ["application/x-subrip", "message/rfc822", "application/mbox"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+		}
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

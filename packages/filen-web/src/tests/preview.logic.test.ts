@@ -8,6 +8,7 @@ import {
 	needsImageTransform,
 	canOpenAsText,
 	fileTypeExtension,
+	itemTypeExtension,
 	isStreamedCategory,
 	previewableSiblings,
 	stepPreviewIndex,
@@ -338,6 +339,34 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("blob6.bin", { mime: "text/csv" }))).toBe("spreadsheet")
 		// Before the generic text/* arm, and the mime Excel registers for .csv on Windows too.
 		expect(previewType(fileNamed("blob7.bin", { mime: "application/vnd.ms-excel" }))).toBe("spreadsheet")
+	})
+
+	it.each(["srt", "vtt", "ass", "ssa", "smi", "sami", "ics", "ifb", "ical", "vcf", "vcard", "eml"])("%s -> text", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("text")
+	})
+
+	it("reads a mailbox as code (its grammar), and geo and notebook JSON as nothing yet", () => {
+		expect(previewType(fileNamed("inbox.mbox"))).toBe("code")
+		expect(previewType(fileNamed("tracks.gpx"))).toBe("code")
+		expect(previewType(fileNamed("map.geojson"))).toBe("other")
+		expect(previewType(fileNamed("analysis.ipynb"))).toBe("other")
+	})
+
+	it("reads a subtitle, calendar, contact or message type as text without an extension", () => {
+		for (const [mime, extension] of [
+			["text/vtt", "vtt"],
+			["application/x-subrip", "srt"],
+			["text/calendar", "ics"],
+			["text/vcard", "vcf"],
+			["text/x-vcard", "vcf"],
+			["message/rfc822", "eml"],
+			["application/mbox", "mbox"]
+		] as const) {
+			const item = fileNamed("download", { mime })
+
+			expect(itemTypeExtension(item), mime).toBe(extension)
+			expect(previewType(item), mime).toBe(extension === "mbox" ? "code" : "text")
+		}
 	})
 
 	it("recognises spreadsheets by extension", () => {

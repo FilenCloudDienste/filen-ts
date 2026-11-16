@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { AUDIO_FORMATS } from "@filen/shared"
+import { AUDIO_FORMATS, SUBTITLE_FILE_EXTENSIONS } from "@filen/shared"
+import { subtitleFormat } from "@filen/shared/videos"
 
 describe("AUDIO_FORMATS", () => {
 	it("lists every audio extension the apps play", () => {
@@ -35,6 +36,16 @@ describe("AUDIO_FORMATS", () => {
 		for (const format of AUDIO_FORMATS.values()) {
 			expect(format.synth).toBeUndefined()
 			expect(format.cap).toBeUndefined()
+		}
+	})
+})
+
+describe("SUBTITLE_FILE_EXTENSIONS", () => {
+	it("lists the text subtitle formats the video sidecars read", () => {
+		expect([...SUBTITLE_FILE_EXTENSIONS]).toEqual(["srt", "vtt", "ass", "ssa", "smi", "sami"])
+
+		for (const extension of SUBTITLE_FILE_EXTENSIONS) {
+			expect(subtitleFormat(extension, false), extension).not.toBeNull()
 		}
 	})
 })

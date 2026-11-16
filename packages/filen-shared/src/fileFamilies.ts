@@ -33,3 +33,7 @@ export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, A
 	["ec3", { decoded: true }],
 	["dts", { decoded: true }]
 ])
+
+// Subtitle files a text editor reads as they are (videos/sidecars.ts names their formats). Image-based tracks (VobSub,
+// PGS) and the ambiguous `.sub` are not text.
+export const SUBTITLE_FILE_EXTENSIONS: ReadonlySet<string> = new Set(["srt", "vtt", "ass", "ssa", "smi", "sami"])

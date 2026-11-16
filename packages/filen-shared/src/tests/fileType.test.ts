@@ -68,10 +68,17 @@ describe("extensionForMime", () => {
 	})
 })
 
-// Aliases added after the hand-written map, each a type browsers and older tools still store.
+// Rows added after the hand-written map.
 const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["image/pjpeg", "jpg"],
-	["image/x-png", "png"]
+	["image/x-png", "png"],
+	["text/vtt", "vtt"],
+	["application/x-subrip", "srt"],
+	["text/calendar", "ics"],
+	["text/vcard", "vcf"],
+	["text/x-vcard", "vcf"],
+	["message/rfc822", "eml"],
+	["application/mbox", "mbox"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
@@ -222,6 +229,16 @@ describe("mimeForExtension", () => {
 		}
 		expect(mimeForExtension("opus")).toBe("audio/ogg")
 		expect(mimeForExtension("wav")).toBe("audio/wav")
+	})
+
+	it("serves subtitles, calendars, contacts and mail as their own types", () => {
+		expect(mimeForExtension("vtt")).toBe("text/vtt")
+		expect(mimeForExtension("srt")).toBe("application/x-subrip")
+		expect(mimeForExtension("ics")).toBe("text/calendar")
+		expect(mimeForExtension("vcf")).toBe("text/vcard")
+		expect(mimeForExtension("eml")).toBe("message/rfc822")
+		expect(mimeForExtension("mbox")).toBe("application/mbox")
+		expect(extensionForMime("text/x-vcard")).toBe("vcf")
 	})
 
 	it("has nothing for an extension no row serves", () => {

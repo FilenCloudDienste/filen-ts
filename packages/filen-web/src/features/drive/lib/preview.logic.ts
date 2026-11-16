@@ -6,6 +6,7 @@ import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
 import {
 	AUDIO_FORMATS,
 	CODE_FILE_EXTENSIONS,
+	SUBTITLE_FILE_EXTENSIONS,
 	extensionStart,
 	resolveFileKind,
 	sniffCandidates,
@@ -330,6 +331,9 @@ export const CODE_DERIVATION_EXCLUSIONS: ReadonlySet<string> = new Set([
 	"p"
 ])
 
+// Text a save must never write back: a message or a mailbox is evidence, kept byte for byte.
+export const VIEW_ONLY_TEXT_EXTENSIONS: ReadonlySet<string> = new Set(["eml", "mbox"])
+
 // Every extension a grammar highlights (@filen/office/core/code), and the shared code set, some of which have no
 // grammar (Makefile, .bat, .ps). An extension an earlier tier lists keeps that tier's category.
 export const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -357,7 +361,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// 97–2003 files (viewed). A `.pot` is a 97–2003 template until a read of its signature says it is text (gettext).
 	[PRESENTATION_EXTENSIONS, "presentation"],
 	[["md", "markdown", "mkd"], "markdown"],
-	[["txt", "log"], "text"],
+	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
+	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
 	[ARCHIVE_NAME_EXTENSIONS, "archive"],
 	// A `.vhd` is VHDL until a read of its head finds a Virtual Hard Disk.
 	[CODE_EXTENSIONS, "code"]

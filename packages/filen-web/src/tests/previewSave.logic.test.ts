@@ -98,6 +98,18 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("index.ts") }), "drive")).toBe(true)
 	})
 
+	it("keeps a message and a mailbox view-only, and edits subtitles, calendars and contacts", () => {
+		for (const name of ["mail.eml", "inbox.mbox", "MAIL.EML"]) {
+			expect(isEditable(fileItem({ meta: decodedMeta(name) }), "drive"), name).toBe(false)
+		}
+
+		expect(isEditable(fileItem({ meta: byMime("download", "message/rfc822") }), "drive")).toBe(false)
+
+		for (const name of ["film.srt", "film.vtt", "agenda.ics", "card.vcf"]) {
+			expect(isEditable(fileItem({ meta: decodedMeta(name) }), "drive"), name).toBe(true)
+		}
+	})
+
 	it("is false outside the drive variant (e.g. trash)", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("notes.txt") }), "trash")).toBe(false)
 	})

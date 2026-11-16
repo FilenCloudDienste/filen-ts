@@ -4,7 +4,14 @@ import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/prese
 import { savePortAnnounced } from "@filen/shared/savePort"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { CATEGORY_POLICY, extensionOf, itemTypeExtension, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import {
+	CATEGORY_POLICY,
+	extensionOf,
+	itemTypeExtension,
+	previewType,
+	VIEW_ONLY_TEXT_EXTENSIONS,
+	type PreviewCategory
+} from "@/features/drive/lib/preview.logic"
 import { IMAGE_FORMATS } from "@/features/preview/lib/imageFormat"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
@@ -98,7 +105,7 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 		return inPlaceVideoContainerByName(driveItemName(base)) !== null
 	}
 
-	return isTextCategory(category)
+	return isTextCategory(category) && !VIEW_ONLY_TEXT_EXTENSIONS.has(itemTypeExtension(item))
 }
 
 // Whether the preview offers the image editor: any decodable still in the user's own drive, saved in place or, for
