@@ -8,6 +8,7 @@ import {
 	originFile,
 	originSource,
 	registerEntryReader,
+	releaseEntryReader,
 	type EntryReaderRecord,
 	type FileReadClient,
 	type OriginSourceDeps
@@ -141,13 +142,13 @@ describe("originSource", () => {
 	})
 
 	it("registers, releases and clears entry readers", () => {
-		const first = registerEntryReader(record())
-		const second = registerEntryReader(record(true))
+		registerEntryReader("first", record())
+		registerEntryReader("second", record(true))
 
-		expect(entryReader(first.id)?.anon).toBe(false)
-		first.release()
-		expect(entryReader(first.id)).toBeUndefined()
+		expect(entryReader("first")?.anon).toBe(false)
+		releaseEntryReader("first")
+		expect(entryReader("first")).toBeUndefined()
 		clearEntryReaders()
-		expect(entryReader(second.id)).toBeUndefined()
+		expect(entryReader("second")).toBeUndefined()
 	})
 })

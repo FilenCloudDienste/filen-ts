@@ -24,6 +24,7 @@ import type {
 import type { CompressJobEvent, EntryJobParams, EntryProgress, ExtractJobEvent, ListJobEvent, SdkWorkerApi } from "@/workers/sdk.worker"
 import { getCachedDir } from "@/features/drive/lib/cache"
 import { liveSdkError, sdkErrorDTO } from "@/tests/support/sdkError"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import { testUuid } from "@/tests/support/uuid"
 
 // The worker's archive bridge against a stand-in client: only the wasm module and Comlink's expose are
@@ -587,6 +588,24 @@ describe("sdk worker archives", () => {
 
 describe("sdk worker archive entries", () => {
 	const PARAMS: EntryJobParams = { archive: ARCHIVE, entry: { archive: testUuid("archive"), index: 3 }, maxSolidSkip: 4096 }
+
+	function entryEvents() {
+		return { phase: vi.fn<(phase: EntryDownloadPhase) => void>(), verified: vi.fn(), failed: vi.fn<(error: ErrorDTO) => void>() }
+	}
+
+	// A preview's whole read of PARAMS's entry: an entry reader opened for it, read through its origin under `token`.
+	function loadEntry(size: number, password: string | undefined, token: string, events = entryEvents()): Promise<Uint8Array> {
+		const reader = `reader-${token}`
+
+		void api.openEntryReader(reader, PARAMS.archive, password, new Map([[PARAMS.entry.index, PARAMS.maxSolidSkip]]), events)
+
+		return api.downloadOriginBytes(
+			{ kind: "entry", reader, entry: PARAMS.entry, size, access: "whole", anon: false, cacheKey: reader },
+			size,
+			token
+		)
+	}
+
 	const DONE: EntryDownloadReport = { bytesWritten: 0n, bytesRead: 0n, checked: true, error: undefined }
 
 	function entryUpdate(phase: EntryDownloadPhase, bytesWritten = 0n): EntryDownloadUpdate {
@@ -692,10 +711,10 @@ describe("sdk worker archive entries", () => {
 			return { ...DONE, checked: false }
 		})
 
-		await expect(api.downloadArchiveEntryBytes(PARAMS, 1, "pw", "token-0", () => undefined)).resolves.toEqual({
-			bytes: new Uint8Array([1]),
-			checked: false
-		})
+		const events = entryEvents()
+
+		await expect(loadEntry(1, "pw", "token-0", events)).resolves.toEqual(new Uint8Array([1]))
+		expect(events.verified).not.toHaveBeenCalled()
 	})
 
 	it("cancels and pauses an entry download by its transfer id, freeing its pause after", async () => {
@@ -730,30 +749,24 @@ describe("sdk worker archive entries", () => {
 			[3, 4]
 		])
 
-		const onPhase = vi.fn<(phase: EntryDownloadPhase) => void>()
-		const { bytes, checked } = await api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-1", onPhase)
+		const events = entryEvents()
+		const bytes = await loadEntry(4, undefined, "token-1", events)
 
 		expect([...bytes]).toEqual([1, 2, 3, 4])
 		expect(bytes.buffer.byteLength).toBe(4)
-		expect(checked).toBe(true)
-		expect(onPhase.mock.calls.map(([phase]) => phase)).toEqual(["waitingForWorker", "reading", "done"])
+		expect(events.verified).toHaveBeenCalledTimes(1)
+		expect(events.phase.mock.calls.map(([phase]) => phase)).toEqual(["waitingForWorker", "reading", "done"])
 		expect(lastCall(fakeClient.downloadArchiveEntry)[0].maxSolidSkip).toBe(4096)
 	})
 
 	it("returns what arrived of an entry shorter than listed", async () => {
 		writing([[9]])
 
-		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-2", () => undefined)).resolves.toEqual({
-			bytes: new Uint8Array([9]),
-			checked: true
-		})
+		await expect(loadEntry(4, undefined, "token-2")).resolves.toEqual(new Uint8Array([9]))
 
 		writing([])
 
-		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-2b", () => undefined)).resolves.toEqual({
-			bytes: new Uint8Array(0),
-			checked: true
-		})
+		await expect(loadEntry(4, undefined, "token-2b")).resolves.toEqual(new Uint8Array(0))
 	})
 
 	it("fails an entry larger than listed rather than grow the buffer", async () => {
@@ -762,7 +775,10 @@ describe("sdk worker archive entries", () => {
 			[3, 4, 5]
 		])
 
-		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-3", () => undefined)).rejects.toMatchObject({ kind: "IO" })
+		const events = entryEvents()
+
+		await expect(loadEntry(4, undefined, "token-3", events)).rejects.toMatchObject({ kind: "IO" })
+		expect(events.failed).toHaveBeenCalledWith(expect.objectContaining({ kind: "IO" }))
 	})
 
 	it("aborts a preview's load by its token", async () => {
@@ -771,7 +787,7 @@ describe("sdk worker archive entries", () => {
 		fakeClient.downloadArchiveEntry.mockClear()
 		fakeClient.downloadArchiveEntry.mockReturnValue(running.promise)
 
-		const load = api.downloadArchiveEntryBytes(PARAMS, 4, "pw", "token-4", () => undefined)
+		const load = loadEntry(4, "pw", "token-4")
 
 		await vi.waitFor(() => {
 			expect(fakeClient.downloadArchiveEntry).toHaveBeenCalled()

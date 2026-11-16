@@ -9,7 +9,12 @@ import { reportMediaFailure, type MediaFailureKind } from "@/lib/media/mediaFail
 import { audioDemotions, audioRoute } from "@/lib/media/audioRoute.logic"
 import { audioMediaSource, openDecodedAudioStream } from "@/lib/media/playback/audioStream"
 import { isAudioUnsupported } from "@/lib/media/remuxTypes"
-import { mediaControlsList, usePreviewAccessMode, usePreviewByteSource, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
+import {
+	mediaControlsList,
+	usePreviewAccessMode,
+	useProvidedPreviewOrigin,
+	usePreviewDownloadable
+} from "@/features/preview/lib/accessMode"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { holdPreviewStreamAlive, isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
@@ -367,10 +372,10 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 // where it can serve the file, else through MediaSource fed by the remux worker.
 export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const downloadable = usePreviewDownloadable()
-	// Only an archive's entry carries a byte source, and archives never open media in the preview.
-	const byteSource = usePreviewByteSource()
+	// Only an archive's entry carries a provided origin, and archives never open media in the preview.
+	const provided = useProvidedPreviewOrigin()
 
-	if (byteSource !== null) {
+	if (provided !== null) {
 		return <MediaFormatFailure codecs={[]} />
 	}
 

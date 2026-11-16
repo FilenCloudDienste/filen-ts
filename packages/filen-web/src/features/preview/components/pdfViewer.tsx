@@ -29,7 +29,7 @@ import { toggleViewerFullScreen, useLeaveViewerFullScreen } from "@/features/pre
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import {
 	PreviewDownloadableProvider,
-	usePreviewByteSource,
+	useProvidedPreviewOrigin,
 	usePreviewDownload,
 	type PreviewAccessMode
 } from "@/features/preview/lib/accessMode"
@@ -832,7 +832,7 @@ export function PdfViewer({ item, alt, variant, editing, onOpenFile }: PdfViewer
 
 	const { t } = useTranslation("preview")
 
-	const entry = usePreviewByteSource()
+	const entry = useProvidedPreviewOrigin()
 	const access = usePreviewAccessMode()
 	// An archive's entry is not a drive file the editor could read or save.
 	const edit = usePdfEdit(item, access, entry === null ? editing : undefined, onOpenFile === undefined ? undefined : { onOpenFile })

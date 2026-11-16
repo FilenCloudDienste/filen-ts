@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { mockViewportHeight } from "@/tests/support/viewport"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query"
-import type { AnyFile, EntryAccess } from "@filen/sdk-rs"
+import type { AnyFile, EntryAccess, EntryDownloadPhase } from "@filen/sdk-rs"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { EntryReaderEvents } from "@/workers/originSource"
 import type { ArchiveNameInfo } from "@/workers/sdk.worker"
 import "@/lib/i18n"
 
@@ -18,7 +20,65 @@ const { openListingSession, runEntryDownload, loadEntryBytes } = vi.hoisted(() =
 	loadEntryBytes: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: vi.fn(() => Promise.resolve()) } }))
+// The SDK worker's entry readers, as far as a preview reads them: each whole read goes to loadEntryBytes, which
+// answers with the bytes and whether their checksum matched, and the reader's events hear its phases and outcome.
+vi.mock("@/lib/sdk/client", async () => {
+	const { asErrorDTO } = await import("@/lib/sdk/errors")
+	const readers = new Map<
+		string,
+		{ archive: AnyFile; password: string | undefined; solidSkips: ReadonlyMap<number, number>; events: EntryReaderEvents }
+	>()
+
+	return {
+		sdkApi: {
+			cancelPreviewDownload: vi.fn(() => Promise.resolve()),
+			openEntryReader: (
+				id: string,
+				archive: AnyFile,
+				password: string | undefined,
+				solidSkips: ReadonlyMap<number, number>,
+				events: EntryReaderEvents
+			) => {
+				readers.set(id, { archive, password, solidSkips, events })
+
+				return Promise.resolve()
+			},
+			releaseEntryReader: (id: string) => {
+				readers.delete(id)
+
+				return Promise.resolve()
+			},
+			downloadOriginBytes: async (origin: ByteOrigin, _cap: number, token: string): Promise<Uint8Array> => {
+				const reader = origin.kind === "entry" ? readers.get(origin.reader) : undefined
+
+				if (origin.kind !== "entry" || reader === undefined) {
+					throw new Error("archive reader is closed")
+				}
+
+				const request = {
+					params: { archive: reader.archive, entry: origin.entry, maxSolidSkip: reader.solidSkips.get(origin.entry.index) ?? 0 },
+					size: origin.size
+				}
+
+				try {
+					const { bytes, checked } = (await loadEntryBytes(request, reader.password, token, (phase: EntryDownloadPhase) => {
+						reader.events.phase(phase)
+					})) as { bytes: Uint8Array; checked: boolean }
+
+					if (checked) {
+						reader.events.verified()
+					}
+
+					return bytes
+				} catch (e) {
+					reader.events.failed(asErrorDTO(e))
+
+					throw e
+				}
+			}
+		}
+	}
+})
 vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client({ defaultOptions: { queries: { retry: false } } }) }
@@ -31,8 +91,7 @@ vi.mock("@/features/archive/lib/listingSession", async importOriginal => ({
 }))
 vi.mock("@/features/archive/lib/entryDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/archive/lib/entryDownload")>()),
-	runEntryDownload,
-	loadEntryBytes
+	runEntryDownload
 }))
 vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
@@ -195,7 +254,7 @@ describe("an archive entry on its own", () => {
 
 		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
 		expect(loadEntryBytes).toHaveBeenCalledWith(
-			{ params: { archive: SOURCE.file, entry: { archive: TEST_ARCHIVE, index: 0 }, maxSolidSkip: 0 }, name: "readme.md", size: 3 },
+			{ params: { archive: SOURCE.file, entry: { archive: TEST_ARCHIVE, index: 0 }, maxSolidSkip: 0 }, size: 3 },
 			undefined,
 			expect.any(String),
 			expect.any(Function)

@@ -12,10 +12,14 @@ const { downloadFileBytes, cancelPreviewDownload } = vi.hoisted(() => ({
 	cancelPreviewDownload: vi.fn(() => Promise.resolve())
 }))
 
-vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon: vi.fn(), cancelPreviewDownload },
-	threadCount: () => 1
-}))
+vi.mock("@/lib/sdk/client", async () => {
+	const { originShims } = await import("@/tests/support/originShims")
+
+	return {
+		sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon: vi.fn(), cancelPreviewDownload, ...originShims({ downloadFileBytes }) },
+		threadCount: () => 1
+	}
+})
 
 // The rendered view's link gate reads the trusted link domains.
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))

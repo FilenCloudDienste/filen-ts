@@ -28,10 +28,20 @@ const {
 	transformHeicBytes: vi.fn<(bytes: Uint8Array) => Promise<Blob>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon, downloadLinkedFileToWriterAnon, cancelPreviewDownload },
-	threadCount: () => 1
-}))
+vi.mock("@/lib/sdk/client", async () => {
+	const { originShims } = await import("@/tests/support/originShims")
+
+	return {
+		sdkApi: {
+			downloadFileBytes,
+			downloadLinkedFileBytesAnon,
+			downloadLinkedFileToWriterAnon,
+			cancelPreviewDownload,
+			...originShims({ downloadFileBytes, downloadLinkedFileBytesAnon })
+		},
+		threadCount: () => 1
+	}
+})
 vi.mock("@/features/drive/lib/preview.logic", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/preview.logic")>()),
 	PREVIEW_MAX_BYTES: 100n

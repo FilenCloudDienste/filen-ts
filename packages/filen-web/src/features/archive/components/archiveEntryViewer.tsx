@@ -3,16 +3,16 @@ import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { bindingOf } from "@/lib/keymap/bindingOf"
 import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
-import { useState, type KeyboardEvent } from "react"
+import { useEffectEvent, useLayoutEffect, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
-import { PreviewByteSourceProvider, PreviewDownloadableProvider, type PreviewByteSource } from "@/features/preview/lib/accessMode"
+import { PreviewByteOriginProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
-import { isArchivePasswordError, loadEntryBytes, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import { entryOrigin, isArchivePasswordError, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { Button } from "@/components/ui/button"
@@ -41,8 +41,9 @@ export interface ArchiveEntryViewerProps {
 }
 
 // One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
-// gets. Its bytes come through the entry's byte source, cached like a file's under the entry's key. An
-// encrypted entry without a password asks first; a password the SDK refuses asks again.
+// gets. Its bytes come through the entry's origin, an entry reader opened for each password tried, cached like a
+// file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
+// again.
 export function ArchiveEntryViewer({
 	archiveUuid,
 	entry,
@@ -59,31 +60,44 @@ export function ArchiveEntryViewer({
 	// Remounts the viewer, so a new password loads again.
 	const [attempt, setAttempt] = useState(0)
 	const [waiting, setWaiting] = useState(false)
+	const [readerBase] = useState(() => crypto.randomUUID())
 	const { request } = entry
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
+	// One reader per password tried; the viewer below remounts with it.
+	const readerId = `${readerBase}:${String(attempt)}`
+	const origin = entryOrigin(request, readerId, item.data.uuid)
+	const onPhase = useEffectEvent((waitingForWorker: boolean) => {
+		setWaiting(waitingForWorker)
+	})
+	// A 7z entry without a CRC decodes under a wrong password too: only a matched checksum proves it.
+	const onVerified = useEffectEvent(() => {
+		if (password !== undefined) {
+			onPasswordAccepted(password)
+		}
+	})
+	const onFailed = useEffectEvent((dto: ErrorDTO) => {
+		if (isArchivePasswordError(dto)) {
+			setAsk({ wrong: dto.kind === "ArchiveWrongPassword" || password !== undefined })
+		}
+	})
+	const readerRequest = useEffectEvent(() => ({ request, password }))
 
-	const source: PreviewByteSource = token =>
-		loadEntryBytes(request, password, token, phase => {
-			setWaiting(phase === "waitingForWorker")
-		}).then(
-			({ bytes, checked }) => {
-				// A 7z entry without a CRC decodes under a wrong password too: nothing proven.
-				if (password !== undefined && checked) {
-					onPasswordAccepted(password)
-				}
+	// A layout effect: it runs before the viewer's own effects start reading through the reader.
+	useLayoutEffect(() => {
+		const opened = readerRequest()
 
-				return bytes
+		return openEntryReader(opened.request, readerId, opened.password, {
+			phase: phase => {
+				onPhase(phase === "waitingForWorker")
 			},
-			(e: unknown) => {
-				const dto = asErrorDTO(e)
-
-				if (isArchivePasswordError(dto)) {
-					setAsk({ wrong: dto.kind === "ArchiveWrongPassword" || password !== undefined })
-				}
-
-				throw e
+			verified: () => {
+				onVerified()
+			},
+			failed: dto => {
+				onFailed(dto)
 			}
-		)
+		})
+	}, [readerId])
 
 	// The back key (Escape, Alt+Left) goes back to the list and Mod+S saves the entry, unless something inside took the
 	// key already (a find panel's Escape); keys from a dialog portaled out of this subtree are not this one's. Back is
@@ -173,9 +187,9 @@ export function ArchiveEntryViewer({
 						}}
 					/>
 				) : (
-					<PreviewByteSourceProvider
+					<PreviewByteOriginProvider
 						key={attempt}
-						source={source}
+						origin={origin}
 					>
 						<PreviewDownloadableProvider
 							downloadable={onDownload !== null}
@@ -187,7 +201,7 @@ export function ArchiveEntryViewer({
 								alt={request.name}
 							/>
 						</PreviewDownloadableProvider>
-					</PreviewByteSourceProvider>
+					</PreviewByteOriginProvider>
 				)}
 				{waiting && ask === null ? (
 					<div className="absolute inset-0 bg-background">

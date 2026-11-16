@@ -50,7 +50,7 @@ vi.mock("comlink", () => ({
 
 await import("@/workers/sdk.worker")
 
-const { registerEntryReader } = await import("@/workers/originSource")
+const { registerEntryReader, releaseEntryReader } = await import("@/workers/originSource")
 const api = exposed.get("api") as Remote<SdkWorkerApi>
 const CONTENT = Array.from({ length: 10 }, (_, i) => i)
 
@@ -137,7 +137,8 @@ describe("sdk worker origin range ports", () => {
 	})
 
 	it("serves an entry's ranges from one checked whole read shared by the token's ports", async () => {
-		const reader = registerEntryReader({ anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
+		const reader = { id: "reader-1" }
+		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
 		const first = await openPort(entryOrigin(reader.id), "o3")
 		const second = await openPort(entryOrigin(reader.id), "o3")
 
@@ -147,7 +148,7 @@ describe("sdk worker origin range ports", () => {
 		expect(fakeClient.downloadArchiveEntry.mock.calls[0]?.[0]).toMatchObject({ maxSolidSkip: 0, entry: { index: 2 } })
 
 		await api.cancelPreviewDownload("o3")
-		reader.release()
+		releaseEntryReader(reader.id)
 	})
 
 	it("refuses an entry whose reader is closed", async () => {
@@ -162,21 +163,23 @@ describe("sdk worker whole origin reads", () => {
 	})
 
 	it("reads an entry whole through the checked entry download", async () => {
-		const reader = registerEntryReader({ anon: false, archive: fileOf(100), password: "pw", maxSolidSkip: () => 0 })
+		const reader = { id: "reader-2" }
+		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: "pw", maxSolidSkip: () => 0 })
 
 		expect(Array.from(await api.downloadOriginBytes(entryOrigin(reader.id), 10, "w3"))).toEqual(CONTENT)
 		expect(fakeClient.downloadArchiveEntry.mock.calls[0]?.[1]).toBe("pw")
-		reader.release()
+		releaseEntryReader(reader.id)
 	})
 
 	it("has no sync range for an origin read whole and no ranged embedded preview for an entry", async () => {
 		const { port1 } = new MessageChannel()
-		const reader = registerEntryReader({ anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
+		const reader = { id: "reader-3" }
+		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
 
 		await expect(api.openOriginSyncRange(new SharedArrayBuffer(8), port1, entryOrigin(reader.id), "s1", "lock")).rejects.toThrow(
 			"read whole"
 		)
 		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "r1")).rejects.toThrow("file origin")
-		reader.release()
+		releaseEntryReader(reader.id)
 	})
 })

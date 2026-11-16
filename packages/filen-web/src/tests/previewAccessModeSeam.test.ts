@@ -11,10 +11,19 @@ const downloadFileBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])))
 const downloadLinkedFileBytesAnon = vi.fn(() => Promise.resolve(new Uint8Array([2])))
 const cancelPreviewDownload = vi.fn()
 
-vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon, cancelPreviewDownload },
-	threadCount: () => 1
-}))
+vi.mock("@/lib/sdk/client", async () => {
+	const { originShims } = await import("@/tests/support/originShims")
+
+	return {
+		sdkApi: {
+			downloadFileBytes,
+			downloadLinkedFileBytesAnon,
+			cancelPreviewDownload,
+			...originShims({ downloadFileBytes, downloadLinkedFileBytesAnon })
+		},
+		threadCount: () => 1
+	}
+})
 
 const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")

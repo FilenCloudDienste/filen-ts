@@ -164,6 +164,9 @@ import {
 	entryReader,
 	originFile,
 	originSource,
+	registerEntryReader,
+	releaseEntryReader,
+	type EntryReaderEvents,
 	type FileReadClient,
 	type OriginSource,
 	type OriginSourceDeps
@@ -521,12 +524,6 @@ function settleEntryReport(report: EntryDownloadReport): boolean {
 	return report.checked
 }
 
-export interface EntryBytes {
-	bytes: Uint8Array
-	// Its checksum matched (see settleEntryReport).
-	checked: boolean
-}
-
 export interface ArchiveFormatInfo {
 	extension: string
 	levels: ArchiveLevels | null
@@ -826,19 +823,38 @@ const originDeps: OriginSourceDeps = {
 
 		const c = requireClient()
 		const { writer, take } = entryBuffer(size)
+		const { events } = record
+		let phase: EntryDownloadPhase | null = null
+		let checked: boolean
 
-		settleEntryReport(
-			await c.downloadArchiveEntry(
-				{
-					archive: record.archive,
-					entry,
-					writer,
-					maxSolidSkip: record.maxSolidSkip(entry),
-					managedFuture: { abortSignal: signal }
-				},
-				archivePassword(record.password)
+		try {
+			checked = settleEntryReport(
+				await c.downloadArchiveEntry(
+					{
+						archive: record.archive,
+						entry,
+						writer,
+						maxSolidSkip: record.maxSolidSkip(entry),
+						onUpdate: update => {
+							if (update.phase !== phase) {
+								phase = update.phase
+								events?.phase(update.phase)
+							}
+						},
+						managedFuture: { abortSignal: signal }
+					},
+					archivePassword(record.password)
+				)
 			)
-		)
+		} catch (e) {
+			events?.failed(asErrorDTO(e))
+
+			throw e
+		}
+
+		if (checked) {
+			events?.verified()
+		}
 
 		return take()
 	}
@@ -2424,44 +2440,6 @@ const api = {
 
 		abortPreview(previewToken)
 	},
-	// An archive entry's whole buffer for the preview (entryBuffer), transferred back like downloadFileBytes.
-	// Cancelled by its token; only a change of phase crosses, for the waiting state.
-	async downloadArchiveEntryBytes(
-		params: EntryJobParams,
-		size: number,
-		password: string | undefined,
-		previewToken: string,
-		onPhase: (phase: EntryDownloadPhase) => void
-	): Promise<EntryBytes> {
-		const c = requireClient()
-		const controller = new AbortController()
-		const { writer, take } = entryBuffer(size)
-		let phase: EntryDownloadPhase | null = null
-
-		registerPreviewAbort(previewToken, controller)
-		try {
-			const checked = settleEntryReport(
-				await c.downloadArchiveEntry(
-					{
-						...entryDownloadParams(params, writer, update => {
-							if (update.phase !== phase) {
-								phase = update.phase
-								onPhase(update.phase)
-							}
-						}),
-						managedFuture: { abortSignal: controller.signal }
-					},
-					archivePassword(password)
-				)
-			)
-
-			const bytes = take()
-
-			return Comlink.transfer({ bytes, checked }, [bytes.buffer])
-		} finally {
-			previewAborts.delete(previewToken)
-		}
-	},
 	// A camera RAW's preview: the JPEG embedded in the container, extracted by the SDK from the ranges
 	// it needs (never a whole-file download into JS, never a RAW decode). Cancelled by the same token.
 	fetchRawPreview(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
@@ -3208,6 +3186,27 @@ const api = {
 		serveSyncRangeFor(buffer, port, requireClient, file, previewToken, readerLock)
 	},
 	// ── Byte origins (lib/sdk/byteOrigin.ts) ─────────────────────────────────
+	// Opens the archive `archive` for entry reads under the caller's `id`, read whole through the session client
+	// until the SDK has archive readers. `solidSkips` is the accepted solid skip by entry index; `events` hears the
+	// reads (a Comlink proxy).
+	openEntryReader(
+		id: string,
+		archive: AnyFile,
+		password: string | undefined,
+		solidSkips: ReadonlyMap<number, number>,
+		events: EntryReaderEvents
+	): void {
+		registerEntryReader(id, {
+			anon: false,
+			archive,
+			password,
+			maxSolidSkip: entry => solidSkips.get(entry.index) ?? 0,
+			events
+		})
+	},
+	releaseEntryReader(id: string): void {
+		releaseEntryReader(id)
+	},
 	// openRangePort for any origin the SDK reads. Ports opened under one token share its cancel and one source per
 	// origin; each lives until its reader closes it.
 	openOriginRangePort(port: MessagePort, origin: ByteOrigin, previewToken: string): void {

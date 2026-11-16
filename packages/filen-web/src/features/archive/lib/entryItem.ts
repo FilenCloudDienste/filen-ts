@@ -17,8 +17,8 @@ const IMAGE_MIMES: ReadonlyMap<string, string> = new Map([
 	["avif", "image/avif"]
 ])
 
-// An archive entry as the stand-in item the viewers take, its bytes coming from the entry's byte source
-// (PreviewByteSourceProvider). Its uuid is the entry's key, so the preview cache keeps it apart from the
+// An archive entry as the stand-in item the viewers take, its bytes coming from the entry's origin
+// (PreviewByteOriginProvider). Its uuid is the entry's key, so the preview cache keeps it apart from the
 // archive itself; it parents itself, so no drive action takes it for an item of the drive
 // (isLinkedEmbedItem), and it carries no key, region or chunk anything could read.
 export function archiveEntryItem(archiveUuid: string, index: number, name: string, size: number, modified: number): DriveItem {

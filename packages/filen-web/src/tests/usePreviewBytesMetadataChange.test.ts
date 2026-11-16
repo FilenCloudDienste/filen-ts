@@ -13,10 +13,14 @@ const { downloadFileBytes, cancelPreviewDownload } = vi.hoisted(() => ({
 	cancelPreviewDownload: vi.fn<(token: string) => Promise<void>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon: vi.fn(), cancelPreviewDownload },
-	threadCount: () => 1
-}))
+vi.mock("@/lib/sdk/client", async () => {
+	const { originShims } = await import("@/tests/support/originShims")
+
+	return {
+		sdkApi: { downloadFileBytes, downloadLinkedFileBytesAnon: vi.fn(), cancelPreviewDownload, ...originShims({ downloadFileBytes }) },
+		threadCount: () => 1
+	}
+})
 
 const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")

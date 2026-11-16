@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 
 // Which worker surface the preview viewers are allowed to reach for bytes. The authenticated app
 // leaves this at its default ("authed"), so every existing caller keeps hitting the authed
@@ -24,12 +24,6 @@ const PreviewDownloadableContext = createContext(true)
 // The host's own way to save the open file, for a viewer that cannot show it to offer instead. Null where
 // the host offers none of its own (a public link's page carries its own button beside the preview).
 const PreviewDownloadContext = createContext<(() => void) | null>(null)
-
-// Where a viewer's whole buffer comes from when it is no file of the drive or a link (an archive's entry):
-// usePreviewBytes loads through it, cancelled by the same token, and nothing streams. Null everywhere else.
-export type PreviewByteSource = (token: string) => Promise<Uint8Array>
-
-const PreviewByteSourceContext = createContext<PreviewByteSource | null>(null)
 
 // The preview cache's key scope (previewCache.ts). Authed items share one. A public link's is a
 // fingerprint of its key and password, so bytes read under one password are never served under
@@ -97,14 +91,6 @@ export function mediaControlsList(downloadable: boolean): "nodownload" | undefin
 	return downloadable ? undefined : "nodownload"
 }
 
-export function PreviewByteSourceProvider({ source, children }: { source: PreviewByteSource; children: ReactNode }) {
-	return <PreviewByteSourceContext value={source}>{children}</PreviewByteSourceContext>
-}
-
-export function usePreviewByteSource(): PreviewByteSource | null {
-	return useContext(PreviewByteSourceContext)
-}
-
 // Where a viewer's bytes come from when they are no file of the drive or a link (an archive's entry, an attachment).
 // Null everywhere else.
 const PreviewByteOriginContext = createContext<ByteOrigin | null>(null)
@@ -113,26 +99,27 @@ export function PreviewByteOriginProvider({ origin, children }: { origin: ByteOr
 	return <PreviewByteOriginContext value={origin}>{children}</PreviewByteOriginContext>
 }
 
+// The provided origin (an archive's entry: no file of the drive or a link, so nothing a drive action could take), else
+// null.
+export function useProvidedPreviewOrigin(): ByteOrigin | null {
+	return useContext(PreviewByteOriginContext)
+}
+
 // ★ The one derivation of a viewer's origin: the provided one, else the item read through the client its access mode
-// allows (a public link's surface only ever yields an unauthenticated read).
+// allows (a public link's surface only ever yields an unauthenticated read). Only file items are previewed.
 export function usePreviewOrigin(item: DriveItem): ByteOrigin {
-	const provided = useContext(PreviewByteOriginContext)
+	const provided = useProvidedPreviewOrigin()
 	const mode = usePreviewAccessMode()
-	const legacySource = usePreviewByteSource()
 
 	if (provided !== null) {
 		return provided
 	}
 
-	// A viewer under a byte source has no file of its own to fall back to.
-	if (legacySource !== null) {
-		throw new Error("usePreviewOrigin: this viewer's bytes come from a byte source, not an origin")
-	}
-
 	const base = asDirectoryOrFile(item)
 
+	// A directory never reaches a viewer; it has no bytes.
 	if (base.type === "directory") {
-		throw new Error("usePreviewOrigin: a directory has no bytes")
+		return bytesOrigin(new Blob([]), base.data.uuid)
 	}
 
 	return mode === "anon" ? { kind: "linkedFile", file: base.data } : { kind: "file", file: base.data }

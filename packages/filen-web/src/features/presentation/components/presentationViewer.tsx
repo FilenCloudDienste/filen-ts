@@ -37,7 +37,12 @@ import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/compo
 import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
+import {
+	usePreviewAccessMode,
+	useProvidedPreviewOrigin,
+	usePreviewDownload,
+	usePreviewDownloadable
+} from "@/features/preview/lib/accessMode"
 import { DeckNotes } from "@/features/presentation/components/deckChrome"
 import { actionLabel, DEFAULT_SLIDE_SIZE, isTextField, onPageKey } from "@/features/presentation/components/deckChrome.logic"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
@@ -119,7 +124,7 @@ const ZOOM_CHANGE_OF: Readonly<Partial<Record<string, PresentationZoomChange>>> 
 export function PresentationViewer({ item, alt, variant, editing, canSaveCopy, onOpenFile }: PresentationViewerProps) {
 	useLeaveViewerFullScreen()
 
-	const archive = usePreviewByteSource() !== null
+	const archive = useProvidedPreviewOrigin() !== null
 
 	return archive ? (
 		<ArchiveDeck

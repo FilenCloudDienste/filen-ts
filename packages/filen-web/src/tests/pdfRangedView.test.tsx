@@ -22,7 +22,11 @@ const { sdk, reader } = vi.hoisted(() => ({
 	}
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: sdk }))
+vi.mock("@/lib/sdk/client", async () => {
+	const { originShims } = await import("@/tests/support/originShims")
+
+	return { sdkApi: { ...sdk, ...originShims(sdk) } }
+})
 vi.mock("@/lib/media/rangePort", () => ({
 	rangePortReader: () => ({
 		readRange: reader.readRange,

@@ -1,4 +1,5 @@
-import type { AnyFile, ArchiveEntryId } from "@filen/sdk-rs"
+import type { AnyFile, ArchiveEntryId, EntryDownloadPhase } from "@filen/sdk-rs"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { AbortableReadRange } from "@/lib/media/blockCache"
 import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
@@ -22,6 +23,14 @@ export interface FileReadClient {
 	release(): void
 }
 
+// What the page hears of an entry reader's whole reads: the slot wait (a phase change), a read whose checksum matched
+// (only that proves the password), and a failure (a password the entry needs or refused).
+export interface EntryReaderEvents {
+	phase(phase: EntryDownloadPhase): void
+	verified(): void
+	failed(error: ErrorDTO): void
+}
+
 // An archive opened for entry reads: the archive file, the client that may read it and the password it took.
 export interface EntryReaderRecord {
 	readonly anon: boolean
@@ -29,6 +38,7 @@ export interface EntryReaderRecord {
 	readonly password: string | undefined
 	// The solid skip the user accepted for this entry (0 for one that skips nothing).
 	maxSolidSkip(entry: ArchiveEntryId): number
+	readonly events?: EntryReaderEvents
 }
 
 export interface OriginSourceDeps {
@@ -162,18 +172,13 @@ export function originFile(o: ByteOrigin): { readonly anon: boolean; readonly fi
 // Archives opened for entry reads, by reader id.
 const entryReaders = new Map<string, EntryReaderRecord>()
 
-// Returns the reader's id and its release.
-export function registerEntryReader(record: EntryReaderRecord): { readonly id: string; release(): void } {
-	const id = crypto.randomUUID()
-
+// `id` is the caller's own, so an origin naming it can be built before this registration lands.
+export function registerEntryReader(id: string, record: EntryReaderRecord): void {
 	entryReaders.set(id, record)
+}
 
-	return {
-		id,
-		release: () => {
-			entryReaders.delete(id)
-		}
-	}
+export function releaseEntryReader(id: string): void {
+	entryReaders.delete(id)
 }
 
 export function entryReader(id: string): EntryReaderRecord | undefined {

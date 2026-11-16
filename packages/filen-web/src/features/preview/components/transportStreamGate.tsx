@@ -8,7 +8,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { mediaFailureDTO } from "@/lib/media/mediaFailure"
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
-import { usePreviewAccessMode, usePreviewByteSource } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { probeTransportStream } from "@/features/preview/lib/transportStreamProbe"
 import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -18,10 +18,10 @@ import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/feat
 export function TransportStreamGate({ item, render }: { item: DriveItem; render: () => ReactNode }) {
 	const { t } = useTranslation("preview")
 	const access = usePreviewAccessMode()
-	const byteSource = usePreviewByteSource()
+	const provided = useProvidedPreviewOrigin()
 	const uuid = item.data.uuid
 	const verdict = useFileKindVerdict(uuid)
-	const waiting = byteSource === null && verdict === undefined && unprobedTransportStream(item)
+	const waiting = provided === null && verdict === undefined && unprobedTransportStream(item)
 	const [failedAttempt, setFailedAttempt] = useState<number | null>(null)
 	const [attempt, setAttempt] = useState(0)
 	const [file] = useState(() => (asDirectoryOrFile(item).type === "file" ? narrowToAnyFile(item) : null))

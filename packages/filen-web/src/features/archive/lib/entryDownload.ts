@@ -1,9 +1,10 @@
 import * as Comlink from "comlink"
-import type { EntryDownloadPhase } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import type { EntryBytes, EntryJobParams, EntryProgress } from "@/workers/sdk.worker"
+import type { EntryJobParams, EntryProgress } from "@/workers/sdk.worker"
+import type { EntryReaderEvents } from "@/workers/originSource"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import {
 	isPickerCancelled,
 	pipeToPickedFile,
@@ -196,13 +197,31 @@ export const defaultEntryDownloadDeps: RunEntryDownloadDeps = {
 	}
 }
 
-// An entry's whole buffer for the preview, cancelled by the preview's token. `onPhase` hears the slot
-// wait begin and end.
-export function loadEntryBytes(
+// The origin a viewer reads `request`'s entry through: the entry reader `readerId` (openEntryReader), read whole,
+// cached under `cacheKey` (its stand-in item's uuid).
+export function entryOrigin(request: EntryRequest, readerId: string, cacheKey: string): ByteOrigin {
+	return { kind: "entry", reader: readerId, entry: request.params.entry, size: request.size, access: "whole", anon: false, cacheKey }
+}
+
+// Opens the entry reader `readerId` for `request`'s archive, allowing its entry the solid skip the user accepted.
+// Comlink delivers calls in order, so an origin naming it can be read at once. Returns the release.
+export function openEntryReader(
 	request: EntryRequest,
+	readerId: string,
 	password: string | undefined,
-	token: string,
-	onPhase: (phase: EntryDownloadPhase) => void
-): Promise<EntryBytes> {
-	return sdkApi.downloadArchiveEntryBytes(request.params, request.size, password, token, Comlink.proxy(onPhase))
+	events: EntryReaderEvents
+): () => void {
+	const { params } = request
+
+	void sdkApi.openEntryReader(
+		readerId,
+		params.archive,
+		password,
+		new Map([[params.entry.index, params.maxSolidSkip]]),
+		Comlink.proxy(events)
+	)
+
+	return () => {
+		void sdkApi.releaseEntryReader(readerId)
+	}
 }

@@ -29,7 +29,7 @@ import { driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/dri
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { usePreviewAccessMode, usePreviewByteSource } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { DOCX_FONT_URLS, docxHost, docxLegacy, docxProtection, prewarmDocxWorker } from "@/features/preview/lib/docxEngine"
 import {
 	BALLOON_COLUMN_WIDTH,
@@ -143,7 +143,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 	const result = usePreviewBytes(edit ? openedItem : item)
 	const downloading = result.status === "pending"
 	const anon = usePreviewAccessMode() === "anon"
-	const archive = usePreviewByteSource() !== null
+	const archive = useProvidedPreviewOrigin() !== null
 
 	// The worker starts while the file downloads; a buffer already cached, or a failed download, starts none.
 	// The editor lays out on this thread and needs no worker.

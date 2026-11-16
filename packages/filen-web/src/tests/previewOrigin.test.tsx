@@ -14,8 +14,7 @@ vi.mock("@/lib/sdk/client", () => ({
 	threadCount: () => 1
 }))
 
-const { PreviewAccessModeProvider, PreviewByteOriginProvider, PreviewByteSourceProvider, usePreviewOrigin } =
-	await import("@/features/preview/lib/accessMode")
+const { PreviewAccessModeProvider, PreviewByteOriginProvider, usePreviewOrigin } = await import("@/features/preview/lib/accessMode")
 const { loadOriginBytes } = await import("@/features/preview/lib/origin/loadBytes")
 const { openByteReader } = await import("@/features/preview/lib/origin/byteReader")
 const { openOriginRangeSource } = await import("@/features/preview/lib/origin/rangeSource")
@@ -61,15 +60,11 @@ describe("usePreviewOrigin", () => {
 		expect(originAnonSafe(result.current)).toBe(true)
 	})
 
-	it("refuses to invent a file origin under a byte source", () => {
-		vi.spyOn(console, "error").mockImplementation(() => undefined)
+	it("never yields a file origin for a directory", () => {
+		const dir = { ...item, type: "directory" } as unknown as typeof item
+		const { result } = renderHook(() => usePreviewOrigin(dir))
 
-		expect(() =>
-			renderHook(() => usePreviewOrigin(item), {
-				wrapper: ({ children }: { children: ReactNode }) =>
-					createElement(PreviewByteSourceProvider, { source: () => Promise.resolve(new Uint8Array(0)), children })
-			})
-		).toThrow("byte source")
+		expect(result.current.kind).toBe("bytes")
 	})
 })
 

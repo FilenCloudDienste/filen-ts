@@ -2,7 +2,7 @@ import type { PdfSignatureReport } from "@filen/office/core/pdfsign"
 import type { PdfSignatureFieldHint } from "@filen/office/dom/pdf"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { usePreviewAccessMode, usePreviewByteSource } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { verifyInEngine } from "@/features/pdf/signatures/verifyInEngine"
 import type { PdfEditPhase } from "@/features/pdf/session/swap"
 
@@ -22,7 +22,7 @@ export interface PdfSignatureEditor {
 // file, unlocked with the password the viewer accepted. A new version of the file (a save) is checked again.
 export function useSignatureVerifier(item: DriveItem, editor: PdfSignatureEditor): PdfSignatureVerify | null {
 	const access = usePreviewAccessMode()
-	const entry = usePreviewByteSource()
+	const entry = useProvidedPreviewOrigin()
 
 	if (entry !== null) {
 		return null
