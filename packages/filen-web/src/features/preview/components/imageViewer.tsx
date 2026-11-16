@@ -393,13 +393,22 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 	)
 }
 
-// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs, and is read
-// again when a probe refines the device profile — HEIC/HEIF never reach the streamed branch at all (mediaType.ts independently
-// excludes them too, defense-in-depth), every other image extension is unaffected.
+// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs — HEIC/HEIF never
+// reach the streamed branch at all (mediaType.ts independently excludes them too, defense-in-depth), every other image
+// extension is unaffected. The route is picked once per file: a probe that refines the device profile while it is open
+// changes the next open, never this one (which would drop the decoded picture, its zoom, and download it again).
 export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 	const profile = useDeviceProfile()
+	const uuid = item.data.uuid
+	const [route, setRoute] = useState(() => ({ uuid, transform: needsImageTransform(item, profile) }))
+	let transform = route.transform
 
-	if (needsImageTransform(item, profile)) {
+	if (route.uuid !== uuid) {
+		transform = needsImageTransform(item, profile)
+		setRoute({ uuid, transform })
+	}
+
+	if (transform) {
 		return (
 			<TransformedImage
 				item={item}

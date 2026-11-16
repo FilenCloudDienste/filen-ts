@@ -65,6 +65,7 @@ const { FileHero } = await import("@/features/publicLinks/components/fileHero")
 const { startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
 const { registerAllActions } = await import("@/lib/keymap/actions")
+const { refineDeviceProfile } = await import("@/lib/deviceProfile")
 
 // The shared link's file hero binds its download shortcut through the registry.
 registerAllActions()
@@ -270,6 +271,36 @@ describe("preview pager revisits", () => {
 
 		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
 		expect(transformHeicBytes).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps an open HEIC on its converted JPEG when a probe finds the browser shows HEIC itself", async () => {
+		transformHeicBytes.mockResolvedValue(new Blob(["jpeg"]))
+
+		const heic = makeItem("eeeeeeee-0000-0000-0000-000000000002", "photo.heic", 10)
+		const view = render(createElement(ImageViewer, { item: heic, alt: "photo" }))
+
+		await waitFor(() => {
+			expect(view.container.querySelector("img")).not.toBeNull()
+		})
+
+		const shown = view.container.querySelector("img")
+		const urls = createObjectURL.mock.calls.length
+
+		try {
+			await act(async () => {
+				refineDeviceProfile({ heicNative: "yes" })
+				await new Promise(resolve => setTimeout(resolve, 0))
+			})
+
+			// The same picture element, no new object URL: the streamed branch never mounted.
+			expect(view.container.querySelector("img")).toBe(shown)
+			expect(createObjectURL.mock.calls.length).toBe(urls)
+			expect(downloadFileBytes).toHaveBeenCalledTimes(1)
+			expect(registerWithSw).not.toHaveBeenCalled()
+		} finally {
+			refineDeviceProfile({ heicNative: "unknown" })
+			view.unmount()
+		}
 	})
 })
 
