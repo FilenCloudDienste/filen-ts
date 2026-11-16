@@ -21,6 +21,13 @@ describe("gateFor", () => {
 		expect(gateFor(null, BIG, false)).toBe("gate")
 	})
 
+	it("gates a package name whose bytes the SDK detected as another format by that format", () => {
+		expect(gateFor({ type: "tar", codec: "gzip" }, BIG, true)).toBe("gate")
+		expect(gateFor({ type: "single", codec: "gzip" }, BIG, true)).toBe("gate")
+		expect(gateFor({ type: "tar", codec: undefined }, UNGATED_MAX_BYTES, true)).toBe("list")
+		expect(gateFor({ type: "zip" }, BIG, true)).toBe("list")
+	})
+
 	it("lists one of up to 8 MiB at once", () => {
 		expect(UNGATED_MAX_BYTES).toBe(8 * 1024 * 1024)
 		expect(gateFor({ type: "tar", codec: "xz" }, UNGATED_MAX_BYTES, false)).toBe("list")
