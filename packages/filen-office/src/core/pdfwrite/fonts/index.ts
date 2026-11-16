@@ -1,4 +1,4 @@
-export { PdfFontAssetError, type PdfByteReader, type PdfByteStream, type PdfFontAssets } from "./assets"
+export { decodeFace, PdfFontAssetError, type PdfByteReader, type PdfByteStream, type PdfFontAssets } from "./assets"
 export { FALLBACK_FAMILIES, PDF_FACES, type FallbackFamily, type PdfFaceFile } from "./faces.generated"
 export {
 	PdfFontLoadError,

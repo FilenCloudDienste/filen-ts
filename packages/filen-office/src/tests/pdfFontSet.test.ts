@@ -1,12 +1,12 @@
 import { createReadStream, readFileSync } from "node:fs"
 import { Readable } from "node:stream"
-import { gunzipSync } from "node:zlib"
+import { gunzipSync, gzipSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import type { PdfFaceSource } from "../core/fonts/manager"
 import { symbolTable, symbolText } from "../core/fonts/symbols"
 import { PdfName, PdfRaw, PdfRef, type PdfDict, type PdfValue } from "../core/pdfwrite/objects"
 import type { PdfObjectSink, PdfStreamData } from "../core/pdfwrite/writer"
-import { readFace, type PdfByteStream, type PdfFontAssets } from "../core/pdfwrite/fonts/assets"
+import { decodeFace, readFace, type PdfByteStream, type PdfFontAssets } from "../core/pdfwrite/fonts/assets"
 import { PDF_FACES } from "../core/pdfwrite/fonts/faces.generated"
 import { PdfFontSet, SHAPE_CAPS, SHAPE_HYPHEN, type PdfFontFaceRequest, type PdfGlyphRun } from "../core/pdfwrite/fonts/fontSet"
 
@@ -461,5 +461,39 @@ describe("PDF font assets", () => {
 		longer.set(raw)
 
 		await expect(readFace({ open: () => Promise.resolve(stream(longer)) }, face ?? PDF_FACES.arimo[0]!)).rejects.toThrow(/larger/)
+	})
+
+	it("decodes a gzip'd body in hand, and takes an already decoded one as it is", () => {
+		const target = face ?? PDF_FACES.arimo[0]!
+		const raw = assetBytes(file)
+
+		expect(decodeFace(new Uint8Array(readFileSync(new URL(file, ASSETS))), target)).toEqual(raw)
+		expect(decodeFace(raw, target)).toBe(raw)
+	})
+
+	it("refuses a body in hand that is not the manifest's size, gzip'd or not", () => {
+		const target = face ?? PDF_FACES.arimo[0]!
+		const raw = assetBytes(file)
+		const longer = new Uint8Array(raw.length + 1)
+
+		longer.set(raw)
+
+		expect(() => decodeFace(new Uint8Array(gzipSync(longer)), target)).toThrow(/larger/)
+		expect(() => decodeFace(longer, target)).toThrow(/manifest/)
+		expect(() => decodeFace(raw.subarray(0, raw.length - 1), target)).toThrow(/manifest/)
+	})
+
+	it("cuts a body whose trailer understates its size off at the manifest's size", () => {
+		const target = face ?? PDF_FACES.arimo[0]!
+		const raw = assetBytes(file)
+		const longer = new Uint8Array(raw.length + 4096)
+
+		longer.set(raw)
+
+		const forged = new Uint8Array(gzipSync(longer))
+
+		new DataView(forged.buffer, forged.byteOffset).setUint32(forged.length - 4, raw.length, true)
+
+		expect(decodeFace(forged, target)).toHaveLength(raw.length)
 	})
 })
