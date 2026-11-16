@@ -70,6 +70,7 @@ import {
 	windowAround,
 	windowedState
 } from "../edit/window"
+import { scheduleIdle } from "@filen/shared/dom/scheduleIdle"
 import type { DocxDocument } from "../store"
 import { DOCX_MARK_LABELS, sameLabels, type DocxMarkLabels } from "../paint/marks"
 import { StoryCounters, markerCopy } from "../../../core/docx/reflow/counters"
@@ -2079,8 +2080,7 @@ export class ReflowView implements ReflowNodeHost {
 			if (!this.destroyed) this.editor.body.session.warmUp()
 		}
 
-		if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2000 })
-		else setTimeout(run, 0)
+		scheduleIdle(run, { timeout: 2000 })
 	}
 
 	// Before the view is taken out of the document (see EditSink.releaseFocus).

@@ -61,6 +61,7 @@ import {
 	windowAround,
 	windowedState
 } from "./window"
+import { scheduleIdle } from "@filen/shared/dom/scheduleIdle"
 
 export { plainSlice, plainText, safeClipboardHtml }
 
@@ -392,8 +393,7 @@ export class EditSink {
 			if (!this.destroyed && !this.readOnly) this.editor.body.session.warmUp()
 		}
 
-		if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2000 })
-		else setTimeout(run, 0)
+		scheduleIdle(run, { timeout: 2000 })
 	}
 
 	// The view's editability and attributes follow read-only.

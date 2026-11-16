@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer } from "pdfjs-dist"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon } from "lucide-react"
+import { scheduleIdle } from "@filen/shared/dom/scheduleIdle"
 import {
 	loadPdfOutline,
 	type PdfErrorKind,
@@ -1105,7 +1106,7 @@ function PdfSaveBinding({ saveRef, saveSource }: { saveRef: PdfEditHost["saveRef
 // with no page read). Returns the cancel.
 function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetchIdle(): void }): () => void {
 	let live = true
-	let idle = 0
+	let cancelIdle: (() => void) | null = null
 
 	void document.getMetadata().then(
 		({ info }) => {
@@ -1116,22 +1117,18 @@ function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetchIdle(): void
 				return
 			}
 
-			const prefetch = (): void => {
-				swap.prefetchIdle()
-			}
-
-			idle = typeof requestIdleCallback === "function" ? requestIdleCallback(prefetch) : window.setTimeout(prefetch, 2000)
+			cancelIdle = scheduleIdle(
+				() => {
+					swap.prefetchIdle()
+				},
+				{ fallbackMs: 2000 }
+			)
 		},
 		() => undefined
 	)
 
 	return () => {
 		live = false
-
-		if (typeof cancelIdleCallback === "function") {
-			cancelIdleCallback(idle)
-		} else {
-			window.clearTimeout(idle)
-		}
+		cancelIdle?.()
 	}
 }
