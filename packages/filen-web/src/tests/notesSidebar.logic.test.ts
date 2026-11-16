@@ -10,6 +10,8 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
+	headerRowIndices,
+	activeHeaderIndex,
 	isUntaggedTagUuid,
 	UNTAGGED_TAG_UUID,
 	type NotesSidebarRow
@@ -350,9 +352,7 @@ describe("notesSidebar.logic — buildNotesGroupedRows (search then group)", () 
 
 describe("notesSidebar.logic — sidebarRowKey (header rows)", () => {
 	it("keys a header row by its id", () => {
-		expect(sidebarRowKey({ kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" })).toBe(
-			"header:today"
-		)
+		expect(sidebarRowKey({ kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" } })).toBe("header:today")
 	})
 })
 
@@ -502,5 +502,33 @@ describe("notesSidebar.logic — untagged virtual row", () => {
 		expect(tagRowUuids(rows)).toStrictEqual([impostor.uuid, UNTAGGED_TAG_UUID])
 		expect(isUntaggedTagUuid(impostor.uuid)).toBe(false)
 		expect(isUntaggedTagUuid(UNTAGGED_TAG_UUID)).toBe(true)
+	})
+})
+
+describe("pinned section header", () => {
+	const now = Date.UTC(2026, 10, 16, 12)
+	const rows = groupNotesForView(
+		[
+			mockNote({ uuid: testUuid("a"), editedTimestamp: BigInt(now - 60_000) }),
+			mockNote({ uuid: testUuid("b"), editedTimestamp: BigInt(now - 120_000) }),
+			mockNote({ uuid: testUuid("c"), editedTimestamp: BigInt(now - 3 * 24 * 60 * 60 * 1000) })
+		],
+		now
+	)
+
+	it("indexes every section header in row order", () => {
+		expect(headerRowIndices(rows)).toStrictEqual([0, 3])
+		expect(headerRowIndices([])).toStrictEqual([])
+	})
+
+	it("picks the last header at or above the first visible row", () => {
+		const headers = headerRowIndices(rows)
+
+		expect(activeHeaderIndex(headers, 0)).toBe(0)
+		expect(activeHeaderIndex(headers, 2)).toBe(0)
+		expect(activeHeaderIndex(headers, 3)).toBe(3)
+		expect(activeHeaderIndex(headers, 4)).toBe(3)
+		expect(activeHeaderIndex(headers, -1)).toBe(-1)
+		expect(activeHeaderIndex([], 5)).toBe(-1)
 	})
 })

@@ -18,3 +18,17 @@ export function formatDateTime(value: number | bigint | string): string {
 	// DateTimeFormat.format throws on an Invalid Date where toLocaleString returned a label.
 	return Number.isNaN(date.getTime()) ? date.toLocaleString() : DATE_TIME.format(date)
 }
+
+const CLOCK_TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
+
+// Clock time alone, for a list row whose section already names the day. Epoch ms.
+export function formatClockTime(timestamp: number): string {
+	return CLOCK_TIME.format(timestamp)
+}
+
+const SHORT_WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "short" })
+
+// Abbreviated weekday, for a list row from the past week. Epoch ms.
+export function formatShortWeekday(timestamp: number): string {
+	return SHORT_WEEKDAY.format(timestamp)
+}

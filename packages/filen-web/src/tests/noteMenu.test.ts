@@ -28,6 +28,7 @@ import {
 	applyNoteOfflineGate,
 	applyTagOfflineGate,
 	NOTE_TYPE_SUBMENU,
+	noteOffersPinAndFavorite,
 	type NoteActionDescriptor
 } from "@/features/notes/components/noteMenu.logic"
 import { mockNote, mockNoteParticipant, mockNoteTag, tagWithoutName, undecryptableNote } from "@/tests/fixtures/notes"
@@ -413,5 +414,25 @@ describe("applyTagOfflineGate", () => {
 
 		expect(gated.map(d => d.id)).toEqual(["tagCreateNote", "tagRename", "tagFavorite", "tagDelete"])
 		expect(gated.every(d => d.enabled === false)).toBe(true)
+	})
+})
+
+describe("noteOffersPinAndFavorite", () => {
+	it("agrees with the menu on every note shape a row can show", () => {
+		const notes = [
+			mockNote({ ownerId: 1n }),
+			mockNote({ ownerId: 1n, archive: true }),
+			mockNote({ ownerId: 1n, trash: true }),
+			sharedNote(false),
+			undecryptableNote({ ownerId: 1n })
+		]
+
+		for (const note of notes) {
+			for (const userId of [1n, 2n]) {
+				const menu = ids(note, userId)
+
+				expect(noteOffersPinAndFavorite(note)).toBe(menu.includes("pin") && menu.includes("favorite"))
+			}
+		}
 	})
 })

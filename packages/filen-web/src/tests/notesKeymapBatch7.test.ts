@@ -115,10 +115,10 @@ describe("availableNoteAction — one gate for the menu and the shortcuts", () =
 describe("notesRowKeyTarget", () => {
 	const tag = mockNoteTag()
 	const rows: NotesSidebarRow[] = [
-		{ kind: "header", id: "h", label: { kind: "literal", text: "Today" }, icon: "today" },
+		{ kind: "header", id: "h", label: { kind: "literal", text: "Today" } },
 		{ kind: "tag", tag, noteCount: 1, expanded: true },
 		{ kind: "note", note: mockNote(), tagUuid: tag.uuid },
-		{ kind: "header", id: "h2", label: { kind: "literal", text: "Older" }, icon: "calendar" },
+		{ kind: "header", id: "h2", label: { kind: "literal", text: "Older" } },
 		{ kind: "tag", tag: mockNoteTag(), noteCount: 0, expanded: false }
 	]
 

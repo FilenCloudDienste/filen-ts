@@ -54,39 +54,29 @@ function monthLabel(timestamp: number): string {
 	return new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(timestamp))
 }
 
-// Header label key + icon for every string bucket id; the Record keeps it exhaustive over the shared ids.
-const FIXED_BUCKET_HEADERS: Record<
-	Extract<NoteBucketId, string>,
-	{ key: Extract<NotesGroupLabel, { kind: "key" }>["key"]; icon: NotesGroupIcon }
-> = {
-	pinned: { key: "notesGroupPinned", icon: "pinned" },
-	favorited: { key: "notesGroupFavorited", icon: "favorited" },
-	today: { key: "notesGroupToday", icon: "today" },
-	previous7Days: { key: "notesGroupPrevious7Days", icon: "calendar" },
-	previous30Days: { key: "notesGroupPrevious30Days", icon: "calendar" },
-	archived: { key: "notesGroupArchived", icon: "archived" },
-	trashed: { key: "notesGroupTrashed", icon: "trashed" }
+// Header label key for every string bucket id; the Record keeps it exhaustive over the shared ids.
+const FIXED_BUCKET_HEADERS: Record<Extract<NoteBucketId, string>, Extract<NotesGroupLabel, { kind: "key" }>["key"]> = {
+	pinned: "notesGroupPinned",
+	favorited: "notesGroupFavorited",
+	today: "notesGroupToday",
+	previous7Days: "notesGroupPrevious7Days",
+	previous30Days: "notesGroupPrevious30Days",
+	archived: "notesGroupArchived",
+	trashed: "notesGroupTrashed"
 }
 
 // Resolves the shared core's abstract bucket id into this app's header row — the presentation layer
 // the shared classification core deliberately excludes.
 function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kind: "header" }> {
 	if (typeof bucketId === "string") {
-		const header = FIXED_BUCKET_HEADERS[bucketId]
-
-		return { kind: "header", id: bucketId, label: { kind: "key", key: header.key }, icon: header.icon }
+		return { kind: "header", id: bucketId, label: { kind: "key", key: FIXED_BUCKET_HEADERS[bucketId] } }
 	}
 
 	if (bucketId.kind === "month") {
-		return { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(bucketId.monthTimestamp) }, icon: "calendar" }
+		return { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(bucketId.monthTimestamp) } }
 	}
 
-	return {
-		kind: "header",
-		id: `year-${String(bucketId.year)}`,
-		label: { kind: "literal", text: String(bucketId.year) },
-		icon: "calendar"
-	}
+	return { kind: "header", id: `year-${String(bucketId.year)}`, label: { kind: "literal", text: String(bucketId.year) } }
 }
 
 // Partition + emit. `now` is injected (not read from Date.now inside) so the bucket thresholds are
@@ -236,10 +226,6 @@ export type NotesGroupLabel =
 	  }
 	| { kind: "literal"; text: string }
 
-// The header row's leading icon, resolved to a concrete lucide icon in the component (the logic layer
-// stays React-free).
-export type NotesGroupIcon = "pinned" | "favorited" | "today" | "calendar" | "archived" | "trashed"
-
 // One flattened row model — tag headers and their expanded member notes interleaved, OR (notes view)
 // date-group section headers interleaved with note rows — so a SINGLE virtualizer covers either view
 // (never a nested virtualizer). A tag's `noteCount` is its TOTAL membership (not the search-narrowed
@@ -247,7 +233,7 @@ export type NotesGroupIcon = "pinned" | "favorited" | "today" | "calendar" | "ar
 export type NotesSidebarRow =
 	| { kind: "tag"; tag: NoteTag; noteCount: number; expanded: boolean }
 	| { kind: "note"; note: Note; tagUuid: string }
-	| { kind: "header"; id: string; label: NotesGroupLabel; icon: NotesGroupIcon }
+	| { kind: "header"; id: string; label: NotesGroupLabel }
 
 export interface TagsViewParams {
 	tags: readonly NoteTag[]
@@ -378,6 +364,41 @@ export function notesRowKeyTarget(rows: readonly NotesSidebarRow[], from: number
 		default:
 			return null
 	}
+}
+
+// Indices of the section-header rows, ascending: what the pinned header searches while scrolling.
+export function headerRowIndices(rows: readonly NotesSidebarRow[]): number[] {
+	const indices: number[] = []
+
+	for (let index = 0; index < rows.length; index++) {
+		if (rows[index]?.kind === "header") {
+			indices.push(index)
+		}
+	}
+
+	return indices
+}
+
+// The section header to pin over the list: the last header at or above the first visible row, or -1 when
+// there is none (the tags view). Binary search, run once per scrolled range.
+export function activeHeaderIndex(headerIndices: readonly number[], firstVisible: number): number {
+	let low = 0
+	let high = headerIndices.length - 1
+	let found = -1
+
+	while (low <= high) {
+		const mid = (low + high) >>> 1
+		const index = headerIndices[mid] ?? Number.POSITIVE_INFINITY
+
+		if (index <= firstVisible) {
+			found = index
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+
+	return found
 }
 
 function stopFrom(rows: readonly NotesSidebarRow[], start: number, step: 1 | -1): number {

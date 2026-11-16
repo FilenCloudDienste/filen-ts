@@ -34,6 +34,16 @@ export function noteIcon(note: Note): NoteIcon {
 	return NOTE_TYPE_ICON[note.noteType]
 }
 
+// A sidebar row's inline mark, or null for a plain text note. In the notes view the Archived/Trashed sections
+// already say a note's lifecycle, so only its type shows; the tags view has no sections, so it keeps the override.
+export function noteRowIcon(note: Note, sectioned: boolean): NoteIcon | null {
+	if (!sectioned && (note.trash || note.archive)) {
+		return noteIcon(note)
+	}
+
+	return note.noteType === "text" ? null : NOTE_TYPE_ICON[note.noteType]
+}
+
 // Bare per-type icon (no archive/trash override) — for a type picker or legend that names the type
 // itself rather than a specific note's current lifecycle state.
 export function noteTypeIcon(noteType: NoteType): NoteIcon {

@@ -143,6 +143,12 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 	return actions
 }
 
+// Whether noteMenuActions offers pin and favorite at all: everywhere but its two reduced menus (trashed,
+// undecryptable). Lets a row show its own toggles without building the whole menu.
+export function noteOffersPinAndFavorite(note: Note): boolean {
+	return !note.trash && !isNoteUndecryptable(note)
+}
+
 // Ids whose dispatch is an unconditional SDK write — offline they can only fail. Read entries stay
 // enabled: export/copyId/copyContent are cache-first reads, and participants/history only OPEN a
 // readable dialog — the mutating controls INSIDE those dialogs carry their own offline gate.

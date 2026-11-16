@@ -1,9 +1,9 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
+import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
 import {
 	PlusIcon,
@@ -13,15 +13,8 @@ import {
 	StickyNoteIcon,
 	TagIcon,
 	MoreHorizontalIcon,
-	PinIcon,
-	HeartIcon,
-	CalendarDaysIcon,
-	CalendarIcon,
-	ArchiveIcon,
-	Trash2Icon,
 	UploadIcon,
-	ArrowDownNarrowWideIcon,
-	type LucideIcon
+	ArrowDownNarrowWideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, toggleInSet, type NoteTagsSortBy } from "@filen/shared"
@@ -42,8 +35,9 @@ import {
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
 	notesRowKeyTarget,
-	type NotesSidebarRow,
-	type NotesGroupIcon
+	headerRowIndices,
+	activeHeaderIndex,
+	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes, toastNotesExportOutcome } from "@/features/notes/lib/export"
@@ -90,37 +84,23 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
-// First-pass size estimates only — note rows now vary in height (optional preview / shared-by /
-// avatar / tag lines), and the notes view interleaves section headers, so real heights come from the
-// virtualizer's measureElement pass after mount (same shape as messageThread.tsx's mixed message/day
-// rows). Tag headers are still one line; the estimates just seed the initial layout.
-const NOTE_ROW_ESTIMATE = 76
+// First-pass size estimates only — a note row is two lines, three with tags, and the notes view
+// interleaves section headers, so real heights come from the virtualizer's measureElement pass after
+// mount (same shape as messageThread.tsx's mixed message/day rows).
+const NOTE_ROW_ESTIMATE = 52
 const TAG_ROW_ESTIMATE = 40
-const HEADER_ROW_ESTIMATE = 40
+const HEADER_ROW_ESTIMATE = 32
 
-// Section-header icon kind → concrete lucide icon (the logic layer stays React-free and only names the
-// kind). Today gets a distinct calendar glyph; the remaining date buckets share the plain calendar.
-const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
-	pinned: PinIcon,
-	favorited: HeartIcon,
-	today: CalendarDaysIcon,
-	calendar: CalendarIcon,
-	archived: ArchiveIcon,
-	trashed: Trash2Icon
-}
-
-// A notes-view date-group section header — a leading icon + the bucket label. Sticky-free (the
-// virtualizer positions it absolutely like every other row), and a plain label: the flat row model
-// puts it beside the rows it introduces rather than around them, so it claims no ownership of them.
+// A notes-view section header: a small uppercase label. A plain label: the flat row model puts it beside the
+// rows it introduces rather than around them, so it claims no ownership of them. Opaque, since the one for
+// the section in view is pinned over the rows scrolling beneath it (NotesSidebarList).
 function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "header" }> }) {
 	const { t } = useTranslation("notes")
-	const Icon = GROUP_ICON[row.icon]
 	const label = row.label.kind === "key" ? t(row.label.key) : row.label.text
 
 	return (
-		<div className="flex items-center gap-2 px-2.5 pt-4 pb-1.5">
-			<Icon className="size-4 shrink-0 text-muted-foreground" />
-			<span className="truncate text-sm font-semibold text-muted-foreground">{label}</span>
+		<div className="truncate bg-sidebar px-3 pt-3 pb-1 text-[11px] leading-4 font-medium tracking-wide text-muted-foreground uppercase">
+			{label}
 		</div>
 	)
 }
@@ -348,6 +328,7 @@ export function NotesSidebar() {
 	// resets drive's own selection on navigation.
 	const selectableNotes = selectableNotesFromRows(rows)
 	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
+	const headerIndices = headerRowIndices(rows)
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -878,6 +859,7 @@ export function NotesSidebar() {
 				>
 					<NotesSidebarList
 						rows={rows}
+						headerIndices={headerIndices}
 						scrollElement={scrollElement}
 						fallback={renderFallback()}
 						label={t("notesListLabel")}
@@ -886,6 +868,8 @@ export function NotesSidebar() {
 						nested={viewMode === "tags"}
 						allTags={allTags}
 						currentUserId={currentUserId}
+						now={now}
+						isOnline={isOnline}
 						selectableIndexByRowKey={selectableIndexByRowKey}
 						onToggleTag={toggleTag}
 						onOpenNote={openNote}
@@ -916,6 +900,7 @@ export function NotesSidebar() {
 
 interface NotesSidebarListProps {
 	rows: NotesSidebarRow[]
+	headerIndices: readonly number[]
 	scrollElement: HTMLDivElement | null
 	// Rendered instead of the list (loading, error, empty) while non-null.
 	fallback: ReactNode
@@ -925,6 +910,8 @@ interface NotesSidebarListProps {
 	nested: boolean
 	allTags: readonly NoteTag[]
 	currentUserId: bigint | undefined
+	now: number
+	isOnline: boolean
 	selectableIndexByRowKey: ReadonlyMap<string, number>
 	onToggleTag: (uuid: string) => void
 	onOpenNote: (note: Note) => Promise<void>
@@ -939,6 +926,7 @@ interface NotesSidebarListProps {
 // every state, so the virtualizer and its measurement cache live exactly as long as the sidebar.
 function NotesSidebarList({
 	rows,
+	headerIndices,
 	scrollElement,
 	fallback,
 	label,
@@ -947,6 +935,8 @@ function NotesSidebarList({
 	nested,
 	allTags,
 	currentUserId,
+	now,
+	isOnline,
 	selectableIndexByRowKey,
 	onToggleTag,
 	onOpenNote,
@@ -955,6 +945,18 @@ function NotesSidebarList({
 	onPointerSelect,
 	onToggleSelect
 }: NotesSidebarListProps) {
+	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): a new extractor
+	// re-runs the range, so it changes with the header positions and nothing else.
+	const rangeExtractor = useCallback(
+		(range: Range) => {
+			const indexes = defaultRangeExtractor(range)
+			const active = activeHeaderIndex(headerIndices, range.startIndex)
+
+			return active === -1 || active >= (indexes[0] ?? 0) ? indexes : [active, ...indexes]
+		},
+		[headerIndices]
+	)
+
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollElement,
@@ -969,7 +971,8 @@ function NotesSidebarList({
 			const row = rows[index]
 
 			return row !== undefined ? sidebarRowKey(row) : index
-		}
+		},
+		rangeExtractor
 	})
 
 	// The focus stop (note link, tag button) of the row at `index`, once the virtualizer has it mounted.
@@ -1033,6 +1036,11 @@ function NotesSidebarList({
 		return fallback
 	}
 
+	const virtualItems = virtualizer.getVirtualItems()
+	// The section header in view stays mounted (rangeExtractor) and pinned: rendered sticky, in flow at the
+	// list's top, instead of at its own offset. Read off the range those items were cut from.
+	const stickyIndex = activeHeaderIndex(headerIndices, virtualizer.range?.startIndex ?? -1)
+
 	return (
 		// A plain list, deliberately neither tree nor listbox: both patterns owe a single-Tab-stop roving
 		// focus model (every row link here stays its own Tab stop; the arrow keys above are a shortcut
@@ -1047,12 +1055,14 @@ function NotesSidebarList({
 			className="relative w-full"
 			style={{ height: virtualizer.getTotalSize() }}
 		>
-			{virtualizer.getVirtualItems().map(virtualRow => {
+			{virtualItems.map(virtualRow => {
 				const row = rows[virtualRow.index]
 
 				if (row === undefined) {
 					return null
 				}
+
+				const sticky = virtualRow.index === stickyIndex
 
 				return (
 					<li
@@ -1063,8 +1073,8 @@ function NotesSidebarList({
 						ref={element => {
 							virtualizer.measureElement(element)
 						}}
-						className="absolute top-0 left-0 w-full"
-						style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
+						className={sticky ? "sticky top-0 z-10 w-full" : "absolute top-0 left-0 w-full"}
+						style={sticky ? undefined : { transform: `translateY(${String(virtualRow.start)}px)` }}
 					>
 						{row.kind === "header" ? (
 							<NotesGroupHeader row={row} />
@@ -1087,6 +1097,8 @@ function NotesSidebarList({
 								nested={nested}
 								allTags={allTags}
 								currentUserId={currentUserId}
+								now={now}
+								isOnline={isOnline}
 								onAction={onNoteAction}
 								onDuplicated={duplicated => {
 									void onOpenNote(duplicated)

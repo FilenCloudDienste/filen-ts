@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { noteRowPreview, noteRowSharedByEmail, noteRowTags, noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
+import {
+	noteRowPreview,
+	noteRowSharedByEmail,
+	noteRowTags,
+	noteRowParticipants,
+	noteRowSharedWithNames,
+	noteRowTime
+} from "@/features/notes/lib/noteRow.logic"
+import { noteRowIcon, noteIcon, noteTypeIcon } from "@/features/notes/lib/icon.logic"
+import { formatClockTime, formatShortDate, formatShortWeekday } from "@/lib/formatDate"
 import { testUuid } from "@/tests/support/uuid"
 import { mockNote, mockNoteParticipant, mockNoteTag, noteWithoutPreview, tagWithoutName } from "@/tests/fixtures/notes"
 
@@ -85,5 +94,59 @@ describe("noteRow.logic — noteRowParticipants", () => {
 		const note = mockNote({ participants: [mockNoteParticipant({ userId: 1n }), mockNoteParticipant({ userId: 2n })] })
 
 		expect(noteRowParticipants(note, undefined)).toHaveLength(2)
+	})
+})
+
+describe("noteRow.logic — noteRowSharedWithNames", () => {
+	it("is null when nobody else is on the note", () => {
+		expect(noteRowSharedWithNames(mockNote({ participants: [mockNoteParticipant({ userId: 1n })] }), 1n, null)).toBeNull()
+	})
+
+	it("lists the others by display name, leaving out the owner once the row names who shared it", () => {
+		const note = mockNote({
+			participants: [
+				mockNoteParticipant({ userId: 1n }),
+				mockNoteParticipant({ userId: 5n, isOwner: true, nickName: "Owner" }),
+				mockNoteParticipant({ userId: 7n, nickName: "", email: "bob@example.com" })
+			]
+		})
+
+		expect(noteRowSharedWithNames(note, 1n, null)).toContain("Owner")
+		expect(noteRowSharedWithNames(note, 1n, "owner@example.com")).toBe("bob@example.com")
+	})
+})
+
+describe("noteRow.logic — noteRowTime", () => {
+	const now = 1_700_000_040_000
+	const day = 24 * 60 * 60 * 1000
+
+	it("narrows to the clock within a day, the weekday within a week, the date before that", () => {
+		expect(noteRowTime(now - 60_000, now)).toBe(formatClockTime(now - 60_000))
+		expect(noteRowTime(now - 3 * day, now)).toBe(formatShortWeekday(now - 3 * day))
+		expect(noteRowTime(now - 10 * day, now)).toBe(formatShortDate(now - 10 * day))
+	})
+
+	it("shows the clock for a timestamp ahead of the local clock", () => {
+		expect(noteRowTime(now + 60_000, now)).toBe(formatClockTime(now + 60_000))
+	})
+})
+
+describe("icon.logic — noteRowIcon", () => {
+	it("marks no plain text note", () => {
+		expect(noteRowIcon(mockNote({ noteType: "text" }), true)).toBeNull()
+		expect(noteRowIcon(mockNote({ noteType: "text" }), false)).toBeNull()
+	})
+
+	it("marks every other type", () => {
+		expect(noteRowIcon(mockNote({ noteType: "checklist" }), true)).toStrictEqual(noteTypeIcon("checklist"))
+		expect(noteRowIcon(mockNote({ noteType: "md" }), true)).toStrictEqual(noteTypeIcon("md"))
+	})
+
+	it("shows archive and trash only where no section says so", () => {
+		const trashed = mockNote({ noteType: "code", trash: true })
+
+		expect(noteRowIcon(trashed, true)).toStrictEqual(noteTypeIcon("code"))
+		expect(noteRowIcon(trashed, false)).toStrictEqual(noteIcon(trashed))
+		expect(noteRowIcon(mockNote({ noteType: "text", archive: true }), false)).toStrictEqual(noteIcon(mockNote({ archive: true })))
 	})
 })

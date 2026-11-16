@@ -284,7 +284,7 @@ test.describe("notes", () => {
 				title: `e2e action note ${String(Date.now())} pending`
 			})
 
-			const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
+			const row = sidebar.locator(`[data-note-uuid="${uuid}"]`)
 
 			// Offline gate: the descriptor's `enabled` flag must reach a genuinely disabled menuitem, and
 			// the sidebar's own write triggers must disable too — neither is reachable under this
@@ -325,15 +325,18 @@ test.describe("notes", () => {
 				timeout: LIVE_WRITE_TIMEOUT_MS
 			})
 
-			// Pin — direct action, no dialog; verified on the note's own sidebar row. The row's pin/
-			// favorite marks are bare aria-labeled <svg> icons (no ARIA role), so a plain attribute
-			// selector is used rather than getByLabel (which targets form-control label association).
+			// Pin — direct action, no dialog; verified on the note's own sidebar row, whose pin/favorite
+			// toggles sit beside its link and carry their state as aria-pressed.
 			await runMenuAction(page, menuTrigger, "Pin", "menuClosed")
-			await expect(row.locator('[aria-label="Pinned"]')).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(row.getByRole("button", { name: "Pinned", exact: true })).toHaveAttribute("aria-pressed", "true", {
+				timeout: LIVE_WRITE_TIMEOUT_MS
+			})
 
 			// Favorite — direct action, no dialog.
 			await runMenuAction(page, menuTrigger, "Favorite", "menuClosed")
-			await expect(row.locator('[aria-label="Favorite"]')).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(row.getByRole("button", { name: "Favorite", exact: true })).toHaveAttribute("aria-pressed", "true", {
+				timeout: LIVE_WRITE_TIMEOUT_MS
+			})
 
 			// Tags submenu: the inline "New tag" entry creates a tag AND assigns it to this note in one
 			// round trip (old-web parity, useNoteDialogHost's own handleCreateTagSubmit). Same bounded

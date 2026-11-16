@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, cleanup, act, screen } from "@testing-library/react"
+import { render, cleanup, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import type { Note } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -19,13 +19,18 @@ vi.mock("@tanstack/react-router", () => ({
 import { NoteRow, type NoteRowProps } from "@/features/notes/components/noteRow"
 import { touchLongPress, touchTap } from "@/tests/support/touch"
 import { TagGroupRow } from "@/features/notes/components/notesSidebar"
-import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
+import { mockNote, mockNoteParticipant, mockNoteTag } from "@/tests/fixtures/notes"
+import { testUuid } from "@/tests/support/uuid"
+import { formatClockTime, formatShortWeekday } from "@/lib/formatDate"
+
+const NOW = 1_700_000_040_000
+const DAY_MS = 24 * 60 * 60 * 1000
 
 function renderNoteRow(
 	selected: boolean,
 	multiSelected: boolean,
 	note: Note = mockNote(),
-	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress">> = {}
+	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "nested">> = {}
 ) {
 	return render(
 		createElement(NoteRow, {
@@ -34,6 +39,8 @@ function renderNoteRow(
 			multiSelected,
 			allTags: [],
 			currentUserId: 1n,
+			now: NOW,
+			isOnline: true,
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
 			onPointerSelect: () => false,
@@ -113,23 +120,96 @@ describe("notes sidebar rows — list + disclosure semantics", () => {
 	})
 })
 
-describe("note row — relative edited time", () => {
-	it("follows the shared minute tick while the row stays mounted", () => {
-		// Minute-aligned, so the tick lands exactly on the labels asserted below.
-		const base = 1_700_000_040_000
+describe("note row — calm layout", () => {
+	function rowOf(container: HTMLElement): HTMLElement {
+		const row = container.querySelector<HTMLElement>("[data-note-uuid]")
 
-		vi.useFakeTimers()
-		vi.setSystemTime(base)
+		if (!row) {
+			throw new Error("no note row rendered")
+		}
 
-		renderNoteRow(false, false, { ...mockNote(), editedTimestamp: BigInt(base) })
+		return row
+	}
 
-		expect(screen.getByText("Just now")).toBeTruthy()
+	it("puts the edited time and the preview on one line, following the clock tick passed in", () => {
+		const note = mockNote({ preview: "ship the editor", editedTimestamp: BigInt(NOW - 60_000) })
+		const { container, rerender } = renderNoteRow(false, false, note)
+		const meta = (): string => container.querySelector("a")?.children[1]?.textContent ?? ""
 
-		act(() => {
-			vi.advanceTimersByTime(5 * 60_000)
+		expect(meta()).toBe(`${formatClockTime(NOW - 60_000)} · ship the editor`)
+
+		rerender(
+			createElement(NoteRow, {
+				note,
+				selected: false,
+				multiSelected: false,
+				allTags: [],
+				currentUserId: 1n,
+				now: NOW + 2 * DAY_MS,
+				isOnline: true,
+				onAction: () => undefined,
+				onDuplicated: () => undefined,
+				onPointerSelect: () => false,
+				onLongPress: () => undefined
+			})
+		)
+
+		expect(meta()).toBe(`${formatShortWeekday(NOW - 60_000)} · ship the editor`)
+	})
+
+	it("shows at most two tag chips plus a count of the rest", () => {
+		const tags = ["a", "b", "c", "d"].map(name => mockNoteTag({ uuid: testUuid(name), name }))
+		renderNoteRow(false, false, mockNote({ tags }))
+
+		expect(screen.getByText("a")).toBeTruthy()
+		expect(screen.getByText("b")).toBeTruthy()
+		expect(screen.queryByText("c")).toBeNull()
+		expect(screen.getByText("+2").getAttribute("title")).toBe("c, d")
+	})
+
+	it("marks only non-plain note types", () => {
+		const plain = renderNoteRow(false, false, mockNote({ noteType: "text" }))
+
+		expect(plain.container.querySelector("a svg")).toBeNull()
+
+		cleanup()
+
+		const checklist = renderNoteRow(false, false, mockNote({ noteType: "checklist" }))
+
+		expect(checklist.container.querySelector("a svg")).not.toBeNull()
+	})
+
+	it("folds who shared the note and who else is on it into one mark", () => {
+		const note = mockNote({
+			ownerId: 5n,
+			participants: [
+				mockNoteParticipant({ userId: 5n, isOwner: true, email: "owner@example.com", nickName: "" }),
+				mockNoteParticipant({ userId: 1n }),
+				mockNoteParticipant({ userId: 7n, nickName: "Bob" })
+			]
 		})
+		const { container } = renderNoteRow(false, false, note)
 
-		expect(screen.getByText("5 minutes ago")).toBeTruthy()
+		expect(container.querySelector("[title^='Shared by']")?.getAttribute("title")).toBe("Shared by owner@example.com\nShared with Bob")
+	})
+
+	it("exposes pin and favorite as toggles carrying their state, disabled offline", () => {
+		const { container } = renderNoteRow(false, false, mockNote({ pinned: true }), { isOnline: false })
+		const pin = rowOf(container).querySelector('[aria-label="Pinned"]')
+		const favorite = rowOf(container).querySelector('[aria-label="Favorite"]')
+
+		expect(pin?.getAttribute("aria-pressed")).toBe("true")
+		expect(favorite?.getAttribute("aria-pressed")).toBe("false")
+		expect(pin?.hasAttribute("disabled")).toBe(true)
+		// Siblings of the link, never inside it.
+		expect(container.querySelector("a [aria-pressed]")).toBeNull()
+	})
+
+	it("keeps a trashed note's pin as a plain mark, since its menu offers no pin", () => {
+		const { container } = renderNoteRow(false, false, mockNote({ pinned: true, trash: true }))
+
+		expect(container.querySelector("[aria-pressed]")).toBeNull()
+		expect(container.querySelector('[role="img"][aria-label="Pinned"]')).not.toBeNull()
 	})
 })
 

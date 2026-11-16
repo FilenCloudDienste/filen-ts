@@ -38,14 +38,18 @@ export const notes = {
 	notesViewToggleLabel: "Sidebar view",
 
 	// ── Note row affordances ───────────────────────────────────────────────────
-	/** Note row — accessible label on the pinned indicator */
+	/** Note row — accessible label on the pin toggle (pressed while pinned) */
 	notePinned: "Pinned",
-	/** Note row — accessible label on the favorite indicator */
+	/** Note row — accessible label on the favorite toggle (pressed while favorited) */
 	noteFavorite: "Favorite",
 	/** Note row — fallback title for a note that has no title yet */
 	noteUntitled: "Untitled note",
-	/** Note row — metadata line shown on a note shared TO you; {{email}} = the owning participant's email */
+	/** Note row — shared mark's tooltip on a note shared TO you; {{email}} = the owning participant's email */
 	noteSharedByEmail: "Shared by {{email}}",
+	/** Note row — shared mark's tooltip; {{names}} = the other participants' names as a list */
+	noteSharedWith: "Shared with {{names}}",
+	/** Note row — chip standing for the tags not shown; {{hidden}} = how many */
+	noteMoreTags: "+{{hidden}}",
 
 	// ── Notes-view date grouping (section headers) ─────────────────────────────
 	// First-match-wins partition, notes view only (the tags view stays ungrouped). Empty sections

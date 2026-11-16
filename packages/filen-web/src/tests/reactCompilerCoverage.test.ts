@@ -385,6 +385,7 @@ describe("React Compiler coverage", () => {
 				"buildTagsViewRows(",
 				"selectableNotesFromRows(",
 				"selectableRowIndexByKey(",
+				"headerRowIndices(",
 				"new Map(",
 				"new Set("
 			]

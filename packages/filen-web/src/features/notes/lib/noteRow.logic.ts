@@ -1,6 +1,7 @@
-import { fastLocaleCompare } from "@filen/shared"
+import { contactDisplayName, fastLocaleCompare } from "@filen/shared"
 import type { Note, NoteParticipant, NoteTag } from "@filen/sdk-rs"
 import { tagDisplayName } from "@/features/notes/lib/sort"
+import { formatClockTime, formatShortDate, formatShortWeekday } from "@/lib/formatDate"
 
 // Pure per-row content derivations, split out of noteRow.tsx so the row's non-trivial rules
 // (shared-by ownership, tag ordering, preview omission, self-exclusion) are unit-testable without a
@@ -36,4 +37,39 @@ export function noteRowTags(note: Note): NoteTag[] {
 // undefined), matching mobile's `participant.userId !== stringifiedClient?.userId`.
 export function noteRowParticipants(note: Note, currentUserId: bigint | undefined): NoteParticipant[] {
 	return note.participants.filter(participant => participant.userId !== currentUserId)
+}
+
+const NAME_LIST = new Intl.ListFormat(undefined, { style: "short", type: "conjunction" })
+
+// Display names of the other participants, for the row's shared mark; null when nobody else is on the
+// note. The owner is left out when the row already says who shared it.
+export function noteRowSharedWithNames(note: Note, currentUserId: bigint | undefined, sharedByEmail: string | null): string | null {
+	const names: string[] = []
+
+	for (const participant of note.participants) {
+		if (participant.userId !== currentUserId && !(sharedByEmail !== null && participant.isOwner)) {
+			names.push(contactDisplayName(participant))
+		}
+	}
+
+	return names.length > 0 ? NAME_LIST.format(names) : null
+}
+
+// Tag chips a row shows before the rest collapse into "+N".
+export const NOTE_ROW_MAX_TAGS = 2
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// The row's edited time, as precise as its notes-view section is coarse: the clock within the last 24
+// hours, the weekday within the last 7 days, the date before that (the sections' own windows).
+export function noteRowTime(timestamp: number, now: number): string {
+	if (timestamp >= now - DAY_MS) {
+		return formatClockTime(timestamp)
+	}
+
+	if (timestamp >= now - 7 * DAY_MS) {
+		return formatShortWeekday(timestamp)
+	}
+
+	return formatShortDate(timestamp)
 }
