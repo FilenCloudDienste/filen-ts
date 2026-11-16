@@ -347,7 +347,11 @@ describe("getPreviewType — well-known names", () => {
 		[".env", "code"],
 		[".env.local", "code"],
 		["Gemfile", "code"],
-		[".prettierrc", "code"]
+		[".prettierrc", "code"],
+		// Before: "unknown" (read by its extension, .mod).
+		["go.mod", "text"],
+		["go.sum", "text"],
+		["go.work", "text"]
 	])("classifies %s as %s", (name, expected) => {
 		expect(getPreviewType(name)).toBe(expected)
 	})
@@ -355,6 +359,11 @@ describe("getPreviewType — well-known names", () => {
 	it("ignores a mime for a well-known name", () => {
 		expect(getPreviewType("LICENSE", "application/octet-stream")).toBe("text")
 		expect(getPreviewType("Makefile", "video/mp4")).toBe("code")
+	})
+
+	it("keeps an extension the Go names share as before", () => {
+		expect(getPreviewType("tracker.mod")).toBe("unknown")
+		expect(fileTypeExtension("go.mod")).toBe("txt")
 	})
 
 	it("keeps a binary dotfile unknown", () => {

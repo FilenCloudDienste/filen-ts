@@ -3,8 +3,9 @@
 // the MIME type stored in its metadata. The result is an EXTENSION, so each app keeps classifying with
 // its own extension tables (what it can render differs by platform) and only feeds them this.
 
-// Files that carry no extension but whose name says what they are, lowercased, to the extension that reads
-// them the same way. Explicit rather than "every dotfile": some dotfiles are binary (.DS_Store).
+// Files whose whole name says what they are, lowercased, to the extension that reads them the same way: names without
+// an extension, and names whose extension means something else (`go.mod` is no tracker module). Explicit rather than
+// "every dotfile": some dotfiles are binary (.DS_Store).
 export const FILE_NAME_TYPES: ReadonlyMap<string, string> = new Map([
 	...["license", "licence", "copying", "readme", "changelog", "changes", "authors", "contributors", "notice", "todo", "history"].map(
 		name => [name, "txt"] as const
@@ -24,7 +25,9 @@ export const FILE_NAME_TYPES: ReadonlyMap<string, string> = new Map([
 	["gnumakefile", "makefile"],
 	["dockerfile", "dockerfile"],
 	["containerfile", "dockerfile"],
-	...["gemfile", "rakefile", "podfile", "brewfile", "vagrantfile", "fastfile", "guardfile"].map(name => [name, "rb"] as const)
+	...["gemfile", "rakefile", "podfile", "brewfile", "vagrantfile", "fastfile", "guardfile"].map(name => [name, "rb"] as const),
+	// Go's module, checksum and workspace files: plain text (no grammar reads them).
+	...["go.mod", "go.sum", "go.work"].map(name => [name, "txt"] as const)
 ])
 
 // Every MIME type ↔ extension pair, one list for both directions. "toExt": the extension a stored MIME type reads as
@@ -170,8 +173,7 @@ function baseName(name: string): string {
 	return trimmed.slice(trimmed.lastIndexOf("/") + 1).toLowerCase()
 }
 
-// The extension a file named exactly so reads as, or null. None of these names has an extension (extensionStart), so
-// resolveFileKind asks before the extension without changing what any of them reads as.
+// The extension a file named exactly so reads as, or null. resolveFileKind asks it before the extension.
 export function extensionForExactFileName(name: string): string | null {
 	return FILE_NAME_TYPES.get(baseName(name)) ?? null
 }

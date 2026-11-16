@@ -278,11 +278,21 @@ describe("canonicalInlineType", () => {
 })
 
 describe("extensionForExactFileName", () => {
-	it("names only files without an extension, so asking before the extension changes none of them", () => {
+	// Asked before the extension: a name without one changes nothing, so only the names below override an extension.
+	const OVERRIDES_AN_EXTENSION = new Set(["go.mod", "go.sum", "go.work"])
+
+	it("names files without an extension, and only these over the one their name has", () => {
 		for (const [name, extension] of FILE_NAME_TYPES) {
-			expect(extensionStart(name)).toBe(-1)
+			expect(extensionStart(name) === -1, name).toBe(!OVERRIDES_AN_EXTENSION.has(name))
 			expect(extensionForExactFileName(name.toUpperCase())).toBe(extension)
 		}
+	})
+
+	it("reads Go's module, checksum and workspace files as plain text, never their extension", () => {
+		expect(extensionForExactFileName("go.mod")).toBe("txt")
+		expect(extensionForExactFileName("project/go.sum")).toBe("txt")
+		expect(extensionForExactFileName("GO.WORK")).toBe("txt")
+		expect(extensionForExactFileName("other.mod")).toBeNull()
 	})
 
 	it("leaves the .env.* prefix rule to extensionForFileName", () => {

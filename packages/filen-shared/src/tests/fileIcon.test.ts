@@ -80,6 +80,29 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("markdown", stubSets)).toBe("code")
 	})
 
+	it.each([
+		["archive", "aab aar war ear xpi crx whl nupkg vsix appx msix kmz cbz cbt cb7 cbr"],
+		["doc", "epub mobi fb2 pages"],
+		["xls", "numbers"],
+		["txt", "eml msg mbox ics ifb ical vcf vcard srt vtt ass ssa smi sami"],
+		["code", "ipynb gpx kml geojson mmd excalidraw"],
+		["cad", "stl gltf glb 3mf fbx ply usdz dxf"],
+		["audio", "mid midi kar rmi xm s3m mptm wma"],
+		["image", "dcm dicom"],
+		["psd", "psb ai eps"],
+		["exe", "dll msi sys efi scr ocx cpl elf so ko axf dylib"],
+		["iso", "img vhdx vmdk"]
+	] as const)("routes each of the %s glyph's newer formats to it", (key, extensions) => {
+		for (const extension of extensions.split(" ")) {
+			expect(fileIconKey(extension, stubSets), extension).toBe(key)
+		}
+	})
+
+	// Each of these means more than one format; it gets a glyph once a read can tell which.
+	it.each("mod it obj db key vhd".split(" "))("leaves .%s on the generic glyph", ext => {
+		expect(fileIconKey(ext, stubSets)).toBe("other")
+	})
+
 	it("falls back to other for an unrecognised or empty extension", () => {
 		expect(fileIconKey("xyz", stubSets)).toBe("other")
 		expect(fileIconKey("", stubSets)).toBe("other")

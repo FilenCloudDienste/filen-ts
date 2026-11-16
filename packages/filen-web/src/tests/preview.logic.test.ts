@@ -316,6 +316,9 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("Dockerfile"))).toBe("code")
 		expect(previewType(fileNamed(".bashrc"))).toBe("code")
 		expect(previewType(fileNamed(".env.local"))).toBe("code")
+		expect(previewType(fileNamed("go.mod"))).toBe("text")
+		expect(previewType(fileNamed("go.work"))).toBe("text")
+		expect(previewType(fileNamed("tracker.mod"))).toBe("other")
 	})
 
 	it("a missing extension resolves by mime", () => {

@@ -32,6 +32,10 @@ export type FileIconSets = {
 	isAudio: (ext: string) => boolean
 }
 
+function rows(key: FileIconKey, extensions: readonly string[]): (readonly [string, FileIconKey])[] {
+	return extensions.map(extension => [extension, key] as const)
+}
+
 // Every non-media, non-code extension plus the extensions this ICON classifier treats as code even
 // where an app's own PREVIEW category splits them out (md/markdown/log/ahk — none of which are in the
 // shared preview set; see CODE_FILE_EXTENSIONS' own comment). Groups are disjoint, so a single lookup
@@ -94,6 +98,17 @@ const ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, 
 	["jar", "exe"],
 	["exe", "exe"],
 	["bin", "exe"],
+	...rows("archive", ["aab", "aar", "war", "ear", "xpi", "crx", "whl", "nupkg", "vsix", "appx", "msix", "kmz", "cbz", "cbt", "cb7", "cbr"]),
+	...rows("doc", ["epub", "mobi", "fb2", "pages"]),
+	["numbers", "xls"],
+	...rows("txt", ["eml", "msg", "mbox", "ics", "ifb", "ical", "vcf", "vcard", "srt", "vtt", "ass", "ssa", "smi", "sami"]),
+	...rows("code", ["ipynb", "gpx", "kml", "geojson", "mmd", "excalidraw"]),
+	...rows("cad", ["stl", "gltf", "glb", "3mf", "fbx", "ply", "usdz", "dxf"]),
+	...rows("audio", ["mid", "midi", "kar", "rmi", "xm", "s3m", "mptm", "wma"]),
+	...rows("image", ["dcm", "dicom"]),
+	...rows("psd", ["psb", "ai", "eps"]),
+	...rows("exe", ["dll", "msi", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib"]),
+	...rows("iso", ["img", "vhdx", "vmdk"]),
 	["md", "code"],
 	["markdown", "code"],
 	["log", "code"],

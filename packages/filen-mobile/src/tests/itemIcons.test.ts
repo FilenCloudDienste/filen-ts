@@ -370,6 +370,31 @@ describe("resolveFileIconKey", () => {
 		}
 	})
 
+	// Before: "other" for every one of them (no row), and go.mod by its extension .mod.
+	it("icons newer formats with the existing glyphs, and Go's module files as text", () => {
+		expect(resolveFileIconKey("go.mod")).toBe("txt")
+		expect(resolveFileIconKey("go.sum")).toBe("txt")
+		expect(resolveFileIconKey("film.srt")).toBe("txt")
+		expect(resolveFileIconKey("mail.eml")).toBe("txt")
+		expect(resolveFileIconKey("tracks.gpx")).toBe("code")
+		expect(resolveFileIconKey("notebook.ipynb")).toBe("code")
+		expect(resolveFileIconKey("lib.aar")).toBe("archive")
+		expect(resolveFileIconKey("comic.cbz")).toBe("archive")
+		expect(resolveFileIconKey("book.epub")).toBe("doc")
+		expect(resolveFileIconKey("sheet.numbers")).toBe("xls")
+		expect(resolveFileIconKey("part.stl")).toBe("cad")
+		expect(resolveFileIconKey("song.mid")).toBe("audio")
+		expect(resolveFileIconKey("scan.dcm")).toBe("image")
+		expect(resolveFileIconKey("art.ai")).toBe("psd")
+		expect(resolveFileIconKey("lib.dll")).toBe("exe")
+		expect(resolveFileIconKey("disk.vmdk")).toBe("iso")
+	})
+
+	// Each means more than one format: unchanged until a read can tell which.
+	it.each(["song.mod", "song.it", "model.obj", "data.db", "slides.key", "alu.vhd"])("keeps %s on the generic glyph", name => {
+		expect(resolveFileIconKey(name)).toBe("other")
+	})
+
 	it("keeps a known extension's icon whatever the mime says", () => {
 		expect(resolveFileIconKey("photo.jpg", "video/mp4")).toBe("image")
 		expect(resolveFileIconKey("main.rs", "text/plain")).toBe("code")

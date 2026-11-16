@@ -31,6 +31,20 @@ describe("fileIconKey", () => {
 		expect(fileIconKey(".bashrc")).toBe("code")
 	})
 
+	it("routes Go's module files by their whole name, and newer formats to existing glyphs", () => {
+		expect(fileIconKey("go.mod")).toBe("txt")
+		expect(fileIconKey("go.sum")).toBe("txt")
+		expect(fileIconKey("tracker.mod")).toBe("other")
+		expect(fileIconKey("film.srt")).toBe("txt")
+		expect(fileIconKey("inbox.mbox")).toBe("txt")
+		expect(fileIconKey("tracks.gpx")).toBe("code")
+		expect(fileIconKey("lib.aar")).toBe("archive")
+		expect(fileIconKey("book.epub")).toBe("doc")
+		expect(fileIconKey("part.stl")).toBe("cad")
+		expect(fileIconKey("lib.dll")).toBe("exe")
+		expect(fileIconKey("disk.vmdk")).toBe("iso")
+	})
+
 	it("routes by mime when the extension is missing or unknown, never over a known one", () => {
 		expect(fileIconKey("clip", "video/mp4")).toBe("video")
 		expect(fileIconKey("export.dat", "text/plain")).toBe("txt")

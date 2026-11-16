@@ -91,6 +91,9 @@ const ROWS: Row[] = [
 	["recording", "application/octet-stream", MIB, null, null, "", "default", false, false],
 	["recording", "", MIB, null, null, "", "default", false, false],
 	["Makefile", "text/plain", 100, null, null, "makefile", "name", false, false],
+	// A whole name over the extension it carries: go.mod is no tracker module.
+	["go.mod", "application/octet-stream", 100, null, "text", "txt", "name", false, false],
+	["src/go.sum", null, 100, null, "text", "txt", "name", false, false],
 	["LICENSE", "application/octet-stream", 100, null, "text", "txt", "name", false, false],
 	["notes", "text/plain", 100, null, "text", "txt", "mime", false, false],
 	["notes", "application/octet-stream", 100, null, null, "", "default", false, false],

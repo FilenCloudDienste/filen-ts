@@ -380,13 +380,14 @@ describe("precedence tiers", () => {
 		}
 	})
 
-	// A derived code extension never has a glyph that says otherwise (a disk image, an executable).
+	// A derived code extension never has a glyph that says otherwise (a disk image, an executable); a mailbox reads as
+	// text.
 	it("gives no code extension another type's glyph", () => {
 		const noMedia = { isImage: () => false, isVideo: () => false, isAudio: () => false }
 
 		for (const extension of CODE_EXTENSIONS) {
 			if (previewCategoryForExtension(extension) === "code") {
-				expect(["code", "other"], extension).toContain(sharedFileIconKey(extension, noMedia))
+				expect(["code", "txt", "other"], extension).toContain(sharedFileIconKey(extension, noMedia))
 			}
 		}
 	})
