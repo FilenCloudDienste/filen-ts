@@ -135,4 +135,27 @@ describe("archiveEntryItem", () => {
 		expect(previewType(archiveEntryItem(TEST_ARCHIVE, 0, "a.docx", 1, NaN))).toBe("docx")
 		expect(driveItemMime(archiveEntryItem(TEST_ARCHIVE, 0, "a.docx", 1, NaN))).toBe("application/octet-stream")
 	})
+
+	it("types each image entry as the hand-written map did, and every other viewed entry as generic binary", () => {
+		const typed = new Map([
+			["jpg", "image/jpeg"],
+			["jpeg", "image/jpeg"],
+			["png", "image/png"],
+			["gif", "image/gif"],
+			["webp", "image/webp"],
+			["svg", "image/svg+xml"],
+			["bmp", "image/bmp"],
+			["ico", "image/x-icon"],
+			["apng", "image/apng"],
+			["avif", "image/avif"]
+		])
+
+		const generic = ["heic", "heif", "hif", "tiff", "pdf", "docx", "xlsx", "pptx", "txt", "md", "json", "html"]
+
+		for (const extension of [...typed.keys(), ...generic]) {
+			const item = archiveEntryItem(TEST_ARCHIVE, 0, `entry.${extension}`, 1, NaN)
+
+			expect(driveItemMime(item)).toBe(typed.get(extension) ?? "application/octet-stream")
+		}
+	})
 })

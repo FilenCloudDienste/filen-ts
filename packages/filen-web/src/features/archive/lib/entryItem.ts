@@ -2,20 +2,7 @@ import type { UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { entryKey } from "@/features/archive/lib/entryAccess.logic"
-
-// What a blob of an image entry is served as: <img> sniffs raster formats, never SVG.
-const IMAGE_MIMES: ReadonlyMap<string, string> = new Map([
-	["jpg", "image/jpeg"],
-	["jpeg", "image/jpeg"],
-	["png", "image/png"],
-	["gif", "image/gif"],
-	["webp", "image/webp"],
-	["svg", "image/svg+xml"],
-	["bmp", "image/bmp"],
-	["ico", "image/x-icon"],
-	["apng", "image/apng"],
-	["avif", "image/avif"]
-])
+import { inlineTypeForExtension } from "@/features/preview/lib/mediaType"
 
 // An archive entry as the stand-in item the viewers take, its bytes coming from the entry's origin
 // (PreviewByteOriginProvider). Its uuid is the entry's key, so the preview cache keeps it apart from the
@@ -33,7 +20,8 @@ export function archiveEntryItem(archiveUuid: string, index: number, name: strin
 			type: "decoded",
 			data: {
 				name,
-				mime: IMAGE_MIMES.get(extensionOf(name)) ?? "application/octet-stream",
+				// What a blob of the entry is served as: <img> sniffs raster formats, never SVG.
+				mime: inlineTypeForExtension(extensionOf(name)) ?? "application/octet-stream",
 				size: BigInt(size),
 				version: 2,
 				key: "",

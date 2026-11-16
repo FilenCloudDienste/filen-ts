@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { effectiveExtension, extensionForFileName, extensionForMime } from "@filen/shared"
-
-const KNOWN = new Set(["txt", "md", "json", "jpg", "mp4", "pdf", "sh", "ini", "makefile", "dockerfile", "rb", "conf"])
-const isKnown = (extension: string) => KNOWN.has(extension)
+import {
+	canonicalInlineType,
+	extensionForExactFileName,
+	extensionForFileName,
+	extensionForMime,
+	extensionStart,
+	FILE_NAME_TYPES,
+	mimeForExtension,
+	TYPE_ROWS
+} from "@filen/shared"
 
 describe("extensionForFileName", () => {
 	it("reads extension-less well-known names, case-insensitively", () => {
@@ -62,25 +68,185 @@ describe("extensionForMime", () => {
 	})
 })
 
-describe("effectiveExtension", () => {
-	it("keeps a known extension, whatever the MIME type says", () => {
-		expect(effectiveExtension("photo.JPG", "application/octet-stream", isKnown)).toBe("jpg")
-		expect(effectiveExtension("notes.md", "text/plain", isKnown)).toBe("md")
+// The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
+const MIME_TYPES_SNAPSHOT: readonly (readonly [string, string])[] = [
+	["image/jpeg", "jpg"],
+	["image/png", "png"],
+	["image/gif", "gif"],
+	["image/webp", "webp"],
+	["image/svg+xml", "svg"],
+	["image/bmp", "bmp"],
+	["image/x-icon", "ico"],
+	["image/vnd.microsoft.icon", "ico"],
+	["image/apng", "apng"],
+	["image/avif", "avif"],
+	["image/heic", "heic"],
+	["image/heic-sequence", "heic"],
+	["image/heif", "heif"],
+	["image/heif-sequence", "heif"],
+	["image/tiff", "tiff"],
+	["video/mp4", "mp4"],
+	["video/webm", "webm"],
+	["video/quicktime", "mov"],
+	["video/x-matroska", "mkv"],
+	["video/x-m4v", "m4v"],
+	["video/mp2t", "m2ts"],
+	["video/vnd.dlna.mpeg-tts", "m2ts"],
+	["video/3gpp", "3gp"],
+	["video/3gpp2", "3g2"],
+	["audio/mpeg", "mp3"],
+	["audio/mp3", "mp3"],
+	["audio/mp4", "m4a"],
+	["audio/x-m4a", "m4a"],
+	["audio/x-m4b", "m4b"],
+	["audio/aac", "aac"],
+	["audio/wav", "wav"],
+	["audio/wave", "wav"],
+	["audio/x-wav", "wav"],
+	["audio/ogg", "ogg"],
+	["audio/flac", "flac"],
+	["audio/x-flac", "flac"],
+	["audio/opus", "opus"],
+	["audio/aiff", "aiff"],
+	["audio/x-aiff", "aiff"],
+	["audio/amr", "amr"],
+	["audio/x-caf", "caf"],
+	["application/pdf", "pdf"],
+	["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
+	["application/vnd.ms-word.document.macroenabled.12", "docm"],
+	["application/vnd.openxmlformats-officedocument.wordprocessingml.template", "dotx"],
+	["application/vnd.ms-word.template.macroenabled.12", "dotm"],
+	["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
+	["application/vnd.ms-excel.sheet.macroenabled.12", "xlsm"],
+	["application/vnd.ms-excel", "xls"],
+	["text/csv", "csv"],
+	["text/tab-separated-values", "tsv"],
+	["text/markdown", "md"],
+	["text/x-markdown", "md"],
+	["text/plain", "txt"],
+	["application/json", "json"],
+	["application/ld+json", "json"],
+	["application/xml", "xml"],
+	["text/xml", "xml"],
+	["application/javascript", "js"],
+	["application/x-javascript", "js"],
+	["text/javascript", "js"],
+	["application/typescript", "ts"],
+	["text/css", "css"],
+	["text/html", "html"],
+	["application/x-sh", "sh"],
+	["application/x-shellscript", "sh"],
+	["text/x-shellscript", "sh"],
+	["application/yaml", "yaml"],
+	["application/x-yaml", "yaml"],
+	["text/yaml", "yaml"],
+	["text/x-yaml", "yaml"],
+	["application/toml", "toml"],
+	["application/sql", "sql"],
+	["text/x-python", "py"],
+	["text/x-c", "c"],
+	["text/x-c++", "cpp"],
+	["text/x-java-source", "java"],
+	["text/x-php", "php"],
+	["application/x-httpd-php", "php"],
+	["text/x-go", "go"],
+	["text/x-rust", "rs"]
+]
+
+// The extension → audio type map web's inline route served before TYPE_ROWS.
+const AUDIO_TYPES_SNAPSHOT: readonly (readonly [string, string])[] = [
+	["mp3", "audio/mpeg"],
+	["m4a", "audio/mp4"],
+	["m4b", "audio/mp4"],
+	["aac", "audio/aac"],
+	["wav", "audio/wav"],
+	["ogg", "audio/ogg"],
+	["oga", "audio/ogg"],
+	["opus", "audio/ogg"],
+	["weba", "audio/webm"],
+	["flac", "audio/flac"],
+	["aiff", "audio/aiff"],
+	["aif", "audio/aiff"],
+	["caf", "audio/x-caf"]
+]
+
+describe("TYPE_ROWS", () => {
+	it("gives each MIME type at most one extension and each extension at most one MIME type", () => {
+		const toExt = TYPE_ROWS.filter(([, , direction]) => direction !== "fromExt").map(([mime]) => mime)
+		const fromExt = TYPE_ROWS.filter(([, , direction]) => direction !== "toExt").map(([, extension]) => extension)
+
+		expect(new Set(toExt).size).toBe(toExt.length)
+		expect(new Set(fromExt).size).toBe(fromExt.length)
 	})
 
-	it("reads a well-known name before the MIME type", () => {
-		expect(effectiveExtension("LICENSE", "application/octet-stream", isKnown)).toBe("txt")
-		expect(effectiveExtension(".gitignore", undefined, isKnown)).toBe("txt")
+	it("writes every row lowercase and parameter-free", () => {
+		for (const [mime, extension] of TYPE_ROWS) {
+			expect(mime).toBe(mime.toLowerCase())
+			expect(mime).not.toContain(";")
+			expect(extension).toBe(extension.toLowerCase())
+		}
 	})
 
-	it("falls back to the MIME type for an unknown or missing extension", () => {
-		expect(effectiveExtension("clip", "video/mp4", isKnown)).toBe("mp4")
-		expect(effectiveExtension("data.weird", "application/json", isKnown)).toBe("json")
-		expect(effectiveExtension("notes", "text/plain", isKnown)).toBe("txt")
+	it("reads every MIME type as the hand-written map did, and no other", () => {
+		const derived = new Map(
+			TYPE_ROWS.filter(([, , direction]) => direction !== "fromExt").map(([mime, extension]) => [mime, extension])
+		)
+
+		expect(derived).toEqual(new Map(MIME_TYPES_SNAPSHOT))
+
+		for (const [mime, extension] of MIME_TYPES_SNAPSHOT) {
+			expect(extensionForMime(mime)).toBe(extension)
+		}
 	})
 
-	it("ignores a MIME type the app cannot classify, keeping the file's own extension", () => {
-		expect(effectiveExtension("scan.weird", "image/tiff", isKnown)).toBe("weird")
-		expect(effectiveExtension("blob", "application/octet-stream", isKnown)).toBe("")
+	it("serves each audio extension as web's inline route did", () => {
+		for (const [extension, mime] of AUDIO_TYPES_SNAPSHOT) {
+			expect(mimeForExtension(extension)).toBe(mime)
+		}
+	})
+})
+
+describe("mimeForExtension", () => {
+	it("serves an extension as its canonical type, never an alias", () => {
+		expect(mimeForExtension("jpg")).toBe("image/jpeg")
+		expect(mimeForExtension("jpeg")).toBe("image/jpeg")
+		expect(mimeForExtension("ico")).toBe("image/x-icon")
+		expect(mimeForExtension("opus")).toBe("audio/ogg")
+		expect(mimeForExtension("wav")).toBe("audio/wav")
+	})
+
+	it("has nothing for an extension no row serves", () => {
+		expect(mimeForExtension("mka")).toBeNull()
+		expect(mimeForExtension("JPG")).toBeNull()
+		expect(mimeForExtension("")).toBeNull()
+	})
+})
+
+describe("canonicalInlineType", () => {
+	it("maps an alias to its canonical type", () => {
+		expect(canonicalInlineType("image/vnd.microsoft.icon")).toBe("image/x-icon")
+		expect(canonicalInlineType("audio/x-wav")).toBe("audio/wav")
+		expect(canonicalInlineType("Audio/X-FLAC; codecs=flac")).toBe("audio/flac")
+		expect(canonicalInlineType("audio/opus")).toBe("audio/ogg")
+	})
+
+	it("keeps a canonical type and has nothing for an unknown one", () => {
+		expect(canonicalInlineType("image/jpeg")).toBe("image/jpeg")
+		expect(canonicalInlineType("application/octet-stream")).toBeNull()
+		expect(canonicalInlineType("text/x-unknown-thing")).toBeNull()
+	})
+})
+
+describe("extensionForExactFileName", () => {
+	it("names only files without an extension, so asking before the extension changes none of them", () => {
+		for (const [name, extension] of FILE_NAME_TYPES) {
+			expect(extensionStart(name)).toBe(-1)
+			expect(extensionForExactFileName(name.toUpperCase())).toBe(extension)
+		}
+	})
+
+	it("leaves the .env.* prefix rule to extensionForFileName", () => {
+		expect(extensionForExactFileName(".env.production")).toBeNull()
+		expect(extensionForFileName(".env.production")).toBe("ini")
 	})
 })

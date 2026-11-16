@@ -1,5 +1,5 @@
 import { extensionStart } from "./fileExtensions"
-import { extensionForFileName, extensionForMime } from "./fileType"
+import { extensionForExactFileName, extensionForFileName, extensionForMime } from "./fileType"
 import { MIN_TRANSPORT_STREAM_BYTES } from "./videos/transportStream"
 
 export { MIN_TRANSPORT_STREAM_BYTES }
@@ -9,14 +9,15 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 // file name. The kind itself is each app's (what it can show differs by platform): the app passes
 // `kindOf`, its own extension table, and this decides which extension that table is asked about.
 //
+// 0. A file named exactly as a well-known one (LICENSE, Makefile, .gitignore) is what the name says.
 // 1. A known extension that means one thing wins.
 // 2. An extension that means two (`.ts` TypeScript or an MPEG transport stream; `.webm`, `.ogg`, `.mp4`,
 //    `.mkv` and their audio siblings; `.dot` a Word 97–2003 template or a Graphviz/text file; `.pot` a PowerPoint
 //    97–2003 template or a gettext template) is settled by a content verdict for the file when one exists, else by
 //    a MIME type that says audio or video (text, for a `.dot` or `.pot`), else by its usual meaning. A MIME type never makes a `.ts` a
 //    video: browsers upload TypeScript as video/mp2t too.
-// 3. No or an unknown extension: a well-known name (a Makefile is code whatever its type says), else its MIME
-//    type, else unknown.
+// 3. No or an unknown extension: a well-known name prefix (`.env.local`), else its MIME type, else, for a text/*
+//    type the table does not know, plain text, else unknown.
 // Whatever a verdict or a MIME type points at, an extension the caller's table does not know is passed over
 // for the next candidate: an app that has no audio Matroska keeps showing an `.mkv` as video. An extension
 // none of whose meanings the table knows is read as in 3 (an `.ogg` typed audio/opus on a table without
@@ -179,6 +180,7 @@ function isMediaType(mime: string | null | undefined): boolean {
 }
 
 const TEXT_TYPE = /^\s*text\//i
+const PLAIN_TEXT = "txt"
 
 function mimeExtension(ambiguity: Ambiguity, mime: string | null | undefined): string | undefined {
 	if (mime === null || mime === undefined) {
@@ -218,6 +220,13 @@ export function resolveFileKind<K>(
 	table: AmbiguityTable = AMBIGUOUS
 ): FileKind<K> {
 	const base = lowerName(input.name)
+	const named = extensionForExactFileName(base)
+
+	// A Makefile is code whatever its type says.
+	if (named !== null) {
+		return fileKind(kindOf(named), named, "name", false, false)
+	}
+
 	const dot = extensionStart(base)
 	const own = dot === -1 ? "" : base.slice(dot + 1)
 	const ambiguity = table.get(own)
@@ -282,6 +291,15 @@ export function resolveFileKind<K>(
 
 		if (kind !== null) {
 			return fileKind(kind, byMime, "mime", ambiguous, canSniff)
+		}
+
+		// A text/* type is text, whichever kind of text the table lacks (text/csv where no table lists csv).
+		if (byMime !== PLAIN_TEXT && input.mime !== null && input.mime !== undefined && TEXT_TYPE.test(input.mime)) {
+			const textKind = kindOf(PLAIN_TEXT)
+
+			if (textKind !== null) {
+				return fileKind(textKind, PLAIN_TEXT, "mime", ambiguous, canSniff)
+			}
 		}
 	}
 

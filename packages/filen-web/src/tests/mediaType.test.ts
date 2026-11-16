@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
-import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
+import { allowedMediaContentType, inlineTypeForExtension } from "@/features/preview/lib/mediaType"
+import { AUDIO_FORMATS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
@@ -110,6 +111,28 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("clip.mp4", "application/octet-stream"))).toBeNull()
 	})
 
+	it("serves every audio format stored with a generic type exactly as the hand-written map did", () => {
+		const served = new Map([
+			["mp3", "audio/mpeg"],
+			["m4a", "audio/mp4"],
+			["m4b", "audio/mp4"],
+			["aac", "audio/aac"],
+			["wav", "audio/wav"],
+			["ogg", "audio/ogg"],
+			["oga", "audio/ogg"],
+			["opus", "audio/ogg"],
+			["weba", "audio/webm"],
+			["flac", "audio/flac"],
+			["aiff", "audio/aiff"],
+			["aif", "audio/aiff"],
+			["caf", "audio/x-caf"]
+		])
+
+		for (const extension of AUDIO_FORMATS.keys()) {
+			expect(allowedMediaContentType(fileNamed(`track.${extension}`, "application/octet-stream"))).toBe(served.get(extension) ?? null)
+		}
+	})
+
 	it("rejects an undecryptable file", () => {
 		expect(allowedMediaContentType(fileNamed("clip.mp4", "video/mp4", { undecryptable: true }))).toBeNull()
 	})
@@ -141,5 +164,18 @@ describe("allowedMediaContentType", () => {
 
 	it("is case-insensitive and trims the mime", () => {
 		expect(allowedMediaContentType(fileNamed("clip.mp4", " VIDEO/MP4 "))).toBe("video/mp4")
+	})
+})
+
+describe("inlineTypeForExtension", () => {
+	it("serves an extension's canonical type only where the allowlist takes it", () => {
+		expect(inlineTypeForExtension("jpeg")).toBe("image/jpeg")
+		expect(inlineTypeForExtension("ico")).toBe("image/x-icon")
+		expect(inlineTypeForExtension("svg")).toBe("image/svg+xml")
+		expect(inlineTypeForExtension("heic")).toBeNull()
+		expect(inlineTypeForExtension("tiff")).toBeNull()
+		expect(inlineTypeForExtension("pdf")).toBeNull()
+		expect(inlineTypeForExtension("html")).toBeNull()
+		expect(inlineTypeForExtension("unknown")).toBeNull()
 	})
 })

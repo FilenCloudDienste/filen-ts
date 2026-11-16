@@ -1,13 +1,11 @@
-import { extensionStart } from "./fileExtensions"
-
-// Which type a file is, for its icon and preview, decided in one place for both apps: by its extension
-// when the app knows it, then by a well-known file name (a LICENSE or a .gitignore has no extension), then
-// by the MIME type stored in its metadata. The result is an EXTENSION, so each app keeps classifying with
+// Which type a file is, for its icon and preview, decided in one place for both apps: by a well-known file
+// name (a LICENSE or a .gitignore has no extension), then by its extension when the app knows it, then by
+// the MIME type stored in its metadata. The result is an EXTENSION, so each app keeps classifying with
 // its own extension tables (what it can render differs by platform) and only feeds them this.
 
 // Files that carry no extension but whose name says what they are, lowercased, to the extension that reads
 // them the same way. Explicit rather than "every dotfile": some dotfiles are binary (.DS_Store).
-const FILE_NAME_TYPES: ReadonlyMap<string, string> = new Map([
+export const FILE_NAME_TYPES: ReadonlyMap<string, string> = new Map([
 	...["license", "licence", "copying", "readme", "changelog", "changes", "authors", "contributors", "notice", "todo", "history"].map(
 		name => [name, "txt"] as const
 	),
@@ -29,96 +27,128 @@ const FILE_NAME_TYPES: ReadonlyMap<string, string> = new Map([
 	...["gemfile", "rakefile", "podfile", "brewfile", "vagrantfile", "fastfile", "guardfile"].map(name => [name, "rb"] as const)
 ])
 
-// MIME types to the extension that reads them. Parameters (`; charset=…`) are dropped before the lookup.
-const MIME_TYPES: ReadonlyMap<string, string> = new Map([
-	["image/jpeg", "jpg"],
-	["image/png", "png"],
-	["image/gif", "gif"],
-	["image/webp", "webp"],
-	["image/svg+xml", "svg"],
-	["image/bmp", "bmp"],
-	["image/x-icon", "ico"],
-	["image/vnd.microsoft.icon", "ico"],
-	["image/apng", "apng"],
-	["image/avif", "avif"],
-	["image/heic", "heic"],
-	["image/heic-sequence", "heic"],
-	["image/heif", "heif"],
-	["image/heif-sequence", "heif"],
-	["image/tiff", "tiff"],
-	["video/mp4", "mp4"],
-	["video/webm", "webm"],
-	["video/quicktime", "mov"],
-	["video/x-matroska", "mkv"],
-	["video/x-m4v", "m4v"],
+// Every MIME type ↔ extension pair, one list for both directions. "toExt": the extension a stored MIME type reads as
+// (extensionForMime); "fromExt": the canonical MIME type an extension is served as (mimeForExtension); "both": each.
+// An alias is "toExt" only, so a MIME type reads as one extension and an extension serves as one type.
+export type TypeDirection = "both" | "toExt" | "fromExt"
+
+export type TypeRow = readonly [mime: string, extension: string, direction: TypeDirection]
+
+export const TYPE_ROWS: readonly TypeRow[] = [
+	["image/jpeg", "jpg", "both"],
+	["image/jpeg", "jpeg", "fromExt"],
+	["image/png", "png", "both"],
+	["image/gif", "gif", "both"],
+	["image/webp", "webp", "both"],
+	["image/svg+xml", "svg", "both"],
+	["image/bmp", "bmp", "both"],
+	["image/x-icon", "ico", "both"],
+	["image/vnd.microsoft.icon", "ico", "toExt"],
+	["image/apng", "apng", "both"],
+	["image/avif", "avif", "both"],
+	["image/heic", "heic", "both"],
+	["image/heic-sequence", "heic", "toExt"],
+	["image/heif", "heif", "both"],
+	["image/heif-sequence", "heif", "toExt"],
+	["image/tiff", "tiff", "both"],
+	["video/mp4", "mp4", "both"],
+	["video/webm", "webm", "both"],
+	["video/quicktime", "mov", "both"],
+	["video/x-matroska", "mkv", "both"],
+	["video/x-m4v", "m4v", "both"],
 	// Not `.ts`, which TypeScript shares: a transport stream's MIME type is unambiguous.
-	["video/mp2t", "m2ts"],
-	["video/vnd.dlna.mpeg-tts", "m2ts"],
-	["video/3gpp", "3gp"],
-	["video/3gpp2", "3g2"],
-	["audio/mpeg", "mp3"],
-	["audio/mp3", "mp3"],
-	["audio/mp4", "m4a"],
-	["audio/x-m4a", "m4a"],
-	["audio/x-m4b", "m4b"],
-	["audio/aac", "aac"],
-	["audio/wav", "wav"],
-	["audio/wave", "wav"],
-	["audio/x-wav", "wav"],
-	["audio/ogg", "ogg"],
-	["audio/flac", "flac"],
-	["audio/x-flac", "flac"],
-	["audio/opus", "opus"],
-	["audio/aiff", "aiff"],
-	["audio/x-aiff", "aiff"],
-	["audio/amr", "amr"],
-	["audio/x-caf", "caf"],
-	["application/pdf", "pdf"],
-	["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
-	["application/vnd.ms-word.document.macroenabled.12", "docm"],
-	["application/vnd.openxmlformats-officedocument.wordprocessingml.template", "dotx"],
-	["application/vnd.ms-word.template.macroenabled.12", "dotm"],
-	["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
-	["application/vnd.ms-excel.sheet.macroenabled.12", "xlsm"],
-	["application/vnd.ms-excel", "xls"],
-	["text/csv", "csv"],
-	["text/tab-separated-values", "tsv"],
-	["text/markdown", "md"],
-	["text/x-markdown", "md"],
-	["text/plain", "txt"],
-	["application/json", "json"],
-	["application/ld+json", "json"],
-	["application/xml", "xml"],
-	["text/xml", "xml"],
-	["application/javascript", "js"],
-	["application/x-javascript", "js"],
-	["text/javascript", "js"],
-	["application/typescript", "ts"],
-	["text/css", "css"],
-	["text/html", "html"],
-	["application/x-sh", "sh"],
-	["application/x-shellscript", "sh"],
-	["text/x-shellscript", "sh"],
-	["application/yaml", "yaml"],
-	["application/x-yaml", "yaml"],
-	["text/yaml", "yaml"],
-	["text/x-yaml", "yaml"],
-	["application/toml", "toml"],
-	["application/sql", "sql"],
-	["text/x-python", "py"],
-	["text/x-c", "c"],
-	["text/x-c++", "cpp"],
-	["text/x-java-source", "java"],
-	["text/x-php", "php"],
-	["application/x-httpd-php", "php"],
-	["text/x-go", "go"],
-	["text/x-rust", "rs"]
-])
+	["video/mp2t", "m2ts", "both"],
+	["video/vnd.dlna.mpeg-tts", "m2ts", "toExt"],
+	["video/3gpp", "3gp", "both"],
+	["video/3gpp2", "3g2", "both"],
+	["audio/mpeg", "mp3", "both"],
+	["audio/mp3", "mp3", "toExt"],
+	["audio/mp4", "m4a", "both"],
+	["audio/mp4", "m4b", "fromExt"],
+	["audio/x-m4a", "m4a", "toExt"],
+	["audio/x-m4b", "m4b", "toExt"],
+	["audio/aac", "aac", "both"],
+	["audio/wav", "wav", "both"],
+	["audio/wave", "wav", "toExt"],
+	["audio/x-wav", "wav", "toExt"],
+	["audio/ogg", "ogg", "both"],
+	["audio/ogg", "oga", "fromExt"],
+	["audio/ogg", "opus", "fromExt"],
+	["audio/webm", "weba", "fromExt"],
+	["audio/flac", "flac", "both"],
+	["audio/x-flac", "flac", "toExt"],
+	["audio/opus", "opus", "toExt"],
+	["audio/aiff", "aiff", "both"],
+	["audio/aiff", "aif", "fromExt"],
+	["audio/x-aiff", "aiff", "toExt"],
+	["audio/amr", "amr", "both"],
+	["audio/x-caf", "caf", "both"],
+	["application/pdf", "pdf", "both"],
+	["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx", "both"],
+	["application/vnd.ms-word.document.macroenabled.12", "docm", "both"],
+	["application/vnd.openxmlformats-officedocument.wordprocessingml.template", "dotx", "both"],
+	["application/vnd.ms-word.template.macroenabled.12", "dotm", "both"],
+	["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx", "both"],
+	["application/vnd.ms-excel.sheet.macroenabled.12", "xlsm", "both"],
+	["application/vnd.ms-excel", "xls", "both"],
+	["text/csv", "csv", "both"],
+	["text/tab-separated-values", "tsv", "both"],
+	["text/markdown", "md", "both"],
+	["text/x-markdown", "md", "toExt"],
+	["text/plain", "txt", "both"],
+	["application/json", "json", "both"],
+	["application/ld+json", "json", "toExt"],
+	["application/xml", "xml", "both"],
+	["text/xml", "xml", "toExt"],
+	["application/javascript", "js", "toExt"],
+	["application/x-javascript", "js", "toExt"],
+	["text/javascript", "js", "both"],
+	["application/typescript", "ts", "both"],
+	["text/css", "css", "both"],
+	["text/html", "html", "both"],
+	["application/x-sh", "sh", "both"],
+	["application/x-shellscript", "sh", "toExt"],
+	["text/x-shellscript", "sh", "toExt"],
+	["application/yaml", "yaml", "both"],
+	["application/x-yaml", "yaml", "toExt"],
+	["text/yaml", "yaml", "toExt"],
+	["text/x-yaml", "yaml", "toExt"],
+	["application/toml", "toml", "both"],
+	["application/sql", "sql", "both"],
+	["text/x-python", "py", "both"],
+	["text/x-c", "c", "both"],
+	["text/x-c++", "cpp", "both"],
+	["text/x-java-source", "java", "both"],
+	["text/x-php", "php", "both"],
+	["application/x-httpd-php", "php", "toExt"],
+	["text/x-go", "go", "both"],
+	["text/x-rust", "rs", "both"]
+]
+
+// Both directions, built once. Parameters (`; charset=…`) are dropped before a MIME type is looked up.
+const MIME_TYPES = new Map<string, string>()
+const EXTENSION_TYPES = new Map<string, string>()
+
+for (const [mime, extension, direction] of TYPE_ROWS) {
+	if (direction !== "fromExt") {
+		MIME_TYPES.set(mime, extension)
+	}
+
+	if (direction !== "toExt") {
+		EXTENSION_TYPES.set(extension, mime)
+	}
+}
 
 function baseName(name: string): string {
 	const trimmed = name.trim()
 
 	return trimmed.slice(trimmed.lastIndexOf("/") + 1).toLowerCase()
+}
+
+// The extension a file named exactly so reads as, or null. None of these names has an extension (extensionStart), so
+// resolveFileKind asks before the extension without changing what any of them reads as.
+export function extensionForExactFileName(name: string): string | null {
+	return FILE_NAME_TYPES.get(baseName(name)) ?? null
 }
 
 // The extension a well-known file name reads as, or null. `.env.local` and its siblings read like `.env`.
@@ -128,37 +158,29 @@ export function extensionForFileName(name: string): string | null {
 	return FILE_NAME_TYPES.get(base) ?? (base.startsWith(".env.") ? "ini" : null)
 }
 
+function mimeEssence(mime: string): string {
+	return (mime.split(";")[0] ?? "").trim().toLowerCase()
+}
+
 // The extension a stored MIME type reads as, or null. Any other text/* type reads as plain text.
 export function extensionForMime(mime: string | null | undefined): string | null {
 	if (mime === null || mime === undefined) {
 		return null
 	}
 
-	const type = (mime.split(";")[0] ?? "").trim().toLowerCase()
+	const type = mimeEssence(mime)
 
 	return MIME_TYPES.get(type) ?? (type.startsWith("text/") ? "txt" : null)
 }
 
-// The extension a file is classified by: its own when `isKnownExtension` (the app's own tables) says so,
-// else its well-known name's, else its MIME type's — only when the app knows that one too — else its own
-// unrecognised extension ("" when it has none), which classifies as unknown just as before. Without content
-// verdicts; resolveFileKind (fileKind.ts) is the resolver that takes them.
-export function effectiveExtension(name: string, mime: string | null | undefined, isKnownExtension: (extension: string) => boolean): string {
-	const base = baseName(name)
-	const dot = extensionStart(base)
-	const own = dot === -1 ? "" : base.slice(dot + 1)
+// The MIME type a lowercase, dot-less extension is served as, or null.
+export function mimeForExtension(extension: string): string | null {
+	return EXTENSION_TYPES.get(extension) ?? null
+}
 
-	if (own !== "" && isKnownExtension(own)) {
-		return own
-	}
+// A stored MIME type's canonical form (`image/vnd.microsoft.icon` → `image/x-icon`), or null when no row names it.
+export function canonicalInlineType(mime: string): string | null {
+	const extension = MIME_TYPES.get(mimeEssence(mime))
 
-	const byName = extensionForFileName(base)
-
-	if (byName !== null) {
-		return byName
-	}
-
-	const byMime = extensionForMime(mime)
-
-	return byMime !== null && isKnownExtension(byMime) ? byMime : own
+	return extension === undefined ? null : mimeForExtension(extension)
 }

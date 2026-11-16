@@ -1,6 +1,7 @@
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { itemFileKind, needsImageTransform, isStreamedCategory } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
+import { mimeForExtension } from "@filen/shared"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in
 // sw.ts via the same isAllowedInlineContentType — see protocol.ts's own doc comment). First derives
@@ -12,24 +13,14 @@ import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 // must still fall through here, and a genuinely video/audio/image file with an unrecognized or absent
 // mime has nothing safe to serve as its inline Content-Type. `null` means "not inline-streamable" —
 // every caller falls back to the buffered blob path or a plain download, never a hard error.
-// Audio types by the extension that settled a file's kind, for a file stored with no type or a generic binary
-// one (`application/octet-stream`): code-owned, so the route serves what the extension promises and the browser
-// plays it as it is instead of having it decoded. A specific type that is not allowlisted is still refused.
-const AUDIO_TYPES_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
-	["mp3", "audio/mpeg"],
-	["m4a", "audio/mp4"],
-	["m4b", "audio/mp4"],
-	["aac", "audio/aac"],
-	["wav", "audio/wav"],
-	["ogg", "audio/ogg"],
-	["oga", "audio/ogg"],
-	["opus", "audio/ogg"],
-	["weba", "audio/webm"],
-	["flac", "audio/flac"],
-	["aiff", "audio/aiff"],
-	["aif", "audio/aiff"],
-	["caf", "audio/x-caf"]
-])
+// The type the inline route serves a file of `extension` as, when the file's own type cannot be served: the
+// extension's canonical type (mimeForExtension), code-owned, so the route serves what the extension promises and the
+// browser plays it as it is instead of having it decoded. Null where the allowlist refuses it.
+export function inlineTypeForExtension(extension: string): string | null {
+	const mime = mimeForExtension(extension)
+
+	return mime !== null && isAllowedInlineContentType(mime) ? mime : null
+}
 
 const GENERIC_TYPES: ReadonlySet<string> = new Set(["", "application/octet-stream", "binary/octet-stream"])
 
@@ -59,7 +50,8 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 
 	const generic = normalized === undefined || GENERIC_TYPES.has(normalized)
 
-	// The extension the kind was resolved for, however it was settled: an ambiguous one (`.m4a`, `.ogg`) by
-	// its usual meaning or a content verdict, which a generic type never contradicts.
-	return generic && category === "audio" && kind !== null ? (AUDIO_TYPES_BY_EXTENSION.get(kind.extension) ?? null) : null
+	// An audio file stored with no type or a generic binary one is served by the extension the kind was resolved for,
+	// however it was settled: an ambiguous one (`.m4a`, `.ogg`) by its usual meaning or a content verdict, which a
+	// generic type never contradicts. A specific type that is not allowlisted is still refused.
+	return generic && category === "audio" && kind !== null ? inlineTypeForExtension(kind.extension) : null
 }

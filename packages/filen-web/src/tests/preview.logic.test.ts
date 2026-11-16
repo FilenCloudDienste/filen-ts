@@ -24,7 +24,7 @@ import {
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { isEditable } from "@/features/drive/lib/previewSave.logic"
-import { CODE_FILE_EXTENSIONS } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, TYPE_ROWS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 import { deviceProfile } from "@/lib/deviceProfile"
 
@@ -908,5 +908,18 @@ describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () =>
 	// output — proven end to end here, mirroring previewType's own case-insensitivity proof.
 	it("is case-insensitive end to end through extensionOf", () => {
 		expect(codeMirrorLanguageFor(extensionOf("SCRIPT.TS"))).toBe("typescript")
+	})
+})
+
+describe("extensionless text/* files", () => {
+	it("keep the category their type names on web, the plain-text fallback never reached", () => {
+		for (const [mime, extension, direction] of TYPE_ROWS) {
+			if (direction !== "fromExt" && mime.startsWith("text/")) {
+				expect(fileTypeExtension("notes", mime)).toBe(extension)
+			}
+		}
+
+		expect(previewType(fileNamed("export", { mime: "text/csv" }))).toBe("spreadsheet")
+		expect(previewType(fileNamed("notes", { mime: "text/x-unknown-thing" }))).toBe("text")
 	})
 })

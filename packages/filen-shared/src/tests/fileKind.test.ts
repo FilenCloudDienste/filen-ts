@@ -285,3 +285,65 @@ describe("content sniffs", () => {
 		expect(verdictChangesKind({ name: "disk.dot", size: 300 }, "wordBinary", kindOf, table)).toBe(true)
 	})
 })
+
+describe("resolveFileKind for a text/* type the table does not know", () => {
+	it("reads it as plain text", () => {
+		// KINDS has no csv: the type names a kind of text the table lacks.
+		expect(resolveFileKind({ name: "export", mime: "text/csv" }, kindOf)).toMatchObject({
+			kind: "text",
+			extension: "txt",
+			source: "mime"
+		})
+		expect(resolveFileKind({ name: "export.weird", mime: "text/tab-separated-values; charset=utf-8" }, kindOf)).toMatchObject({
+			kind: "text",
+			extension: "txt",
+			source: "mime"
+		})
+	})
+
+	it("keeps a kind the table knows for the type", () => {
+		expect(resolveFileKind({ name: "script", mime: "text/x-python" }, kindOf)).toMatchObject({ kind: "code", extension: "py" })
+	})
+
+	it("has no kind when the table has no plain text either, nor for a type that is not text", () => {
+		const noText = (extension: string) => (extension === "txt" ? null : kindOf(extension))
+
+		expect(resolveFileKind({ name: "export", mime: "text/csv" }, noText)).toMatchObject({
+			kind: null,
+			extension: "",
+			source: "default"
+		})
+		expect(resolveFileKind({ name: "deck", mime: "application/vnd.ms-excel" }, kindOf)).toMatchObject({
+			kind: null,
+			extension: "",
+			source: "default"
+		})
+	})
+})
+
+describe("resolveFileKind for a well-known file name", () => {
+	it("reads the exact name before anything else", () => {
+		expect(resolveFileKind({ name: "src/Makefile", mime: "text/plain" }, kindOf)).toEqual({
+			kind: null,
+			extension: "makefile",
+			source: "name",
+			ambiguous: false,
+			sniffable: false
+		})
+		expect(resolveFileKind({ name: "LICENSE", mime: "application/octet-stream" }, kindOf)).toMatchObject({
+			kind: "text",
+			extension: "txt",
+			source: "name"
+		})
+		expect(resolveFileKind({ name: ".bashrc", mime: null }, kindOf)).toMatchObject({ kind: "code", extension: "sh", source: "name" })
+	})
+
+	it("reads a .env.* name only when its extension is unknown", () => {
+		expect(resolveFileKind({ name: ".env.local", mime: null }, kindOf)).toMatchObject({ extension: "ini", source: "name" })
+		expect(resolveFileKind({ name: ".env.sh", mime: null }, kindOf)).toMatchObject({
+			kind: "code",
+			extension: "sh",
+			source: "extension"
+		})
+	})
+})

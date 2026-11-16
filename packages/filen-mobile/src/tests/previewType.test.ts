@@ -377,6 +377,18 @@ describe("getPreviewType — stored mime", () => {
 		expect(getPreviewType("page", "text/x-unheard-of")).toBe("text")
 	})
 
+	// Before: "unknown" (csv and tsv are in no table here), with no type extension.
+	it("reads a text/* mime this platform has no kind for as plain text", () => {
+		expect(getPreviewType("export", "text/csv")).toBe("text")
+		expect(getPreviewType("export.dat", "text/tab-separated-values")).toBe("text")
+		expect(fileTypeExtension("export", "text/csv")).toBe("txt")
+	})
+
+	it("reads a well-known name before its extension, which changes none of them", () => {
+		expect(getPreviewType("Makefile", "text/csv")).toBe("code")
+		expect(fileTypeExtension(".gitignore", "text/csv")).toBe("txt")
+	})
+
 	it("stays unknown for a mime the platform cannot preview", () => {
 		// .avi is in neither mocked video set here, so its mime maps to nothing previewable.
 		expect(getPreviewType("clip", "video/x-msvideo")).toBe("unknown")
