@@ -254,7 +254,8 @@ export function report(overrides: Partial<SyncPassReport> = {}): SyncPassReport 
 		heldDeletions: 0n,
 		unsyncable: [],
 		unsyncableTotal: 0n,
-		unsyncableLocalAliasTotal: 0n,
+		// The engine counts its whole list; a report whose list is whole counts its own.
+		unsyncableLocalAliasTotal: BigInt((overrides.unsyncable ?? []).filter(path => path.reason.tag === "LocalAlias").length),
 		ignored: [],
 		ignoredTotal: 0n,
 		deferredPaths: 0n,

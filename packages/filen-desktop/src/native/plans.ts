@@ -218,12 +218,19 @@ export function truncatedUnsyncable(report: SyncPassReport): boolean {
 	return report.unsyncableTotal > BigInt(report.unsyncable.length)
 }
 
-// The split of the paths a report lists, and of all of them when those past its list are taken as issues.
-export function listedSplit(report: SyncPassReport, past: "unread" | "issues"): UnsyncableSplit {
-	const symlinks = symlinkCount(report.unsyncable)
-	const total = past === "issues" ? Number(report.unsyncableTotal) : report.unsyncable.length
+// The split of all a report's unsyncable paths, which the engine counts over its whole list.
+export function reportSplit(report: SyncPassReport): UnsyncableSplit {
+	return {
+		unsyncable: count(report.unsyncableTotal - report.unsyncableLocalAliasTotal),
+		skippedSymlinks: count(report.unsyncableLocalAliasTotal)
+	}
+}
 
-	return { unsyncable: total - symlinks, skippedSymlinks: symlinks }
+// The split of the paths a report lists.
+export function listedSplit(report: SyncPassReport): UnsyncableSplit {
+	const symlinks = symlinkCount(report.unsyncable)
+
+	return { unsyncable: report.unsyncable.length - symlinks, skippedSymlinks: symlinks }
 }
 
 // The page from `offset` of the entries `keep` admits, read in place.

@@ -204,6 +204,7 @@ describe("reduceEvents", () => {
 								{ relPath: "a", reason: { tag: "LocalNameCollision" } }
 							],
 							unsyncableTotal: 5n,
+							unsyncableLocalAliasTotal: 2n,
 							errorsTotal: 1n
 						})
 					}
@@ -223,8 +224,8 @@ describe("reduceEvents", () => {
 					lastSyncedAt: 2000,
 					lastError: null,
 					// The report's conflicts are its pass's; the held count comes from the host. A directory symlink is no
-					// unsyncable path; those past the report's list are counted by the host after (RuntimeFeed.unsyncable).
-					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 1, skippedSymlinks: 1, failed: 1 }
+					// unsyncable path, counted over all of them, its list or not.
+					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 3, skippedSymlinks: 2, failed: 1 }
 				}
 			]
 		})
@@ -415,33 +416,30 @@ describe("reduceEvents", () => {
 		expect(of("aggregate")).toEqual([])
 	})
 
-	it("takes the unsyncable paths the host counted past a report's list", async () => {
+	it("counts directory symlinks over all a pass's unsyncable paths, its list or not", async () => {
 		const { runtime, of } = feed()
+		const symlink = { relPath: "link", reason: { tag: "LocalAlias" as const, inner: { target: "real" } } }
 
 		runtime.setPairs([pairInfo()])
 		runtime.subscribe(true)
 		runtime.events([
 			passEvent({
 				tag: "PassCompleted",
-				inner: {
-					report: report({
-						unsyncable: [{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } }],
-						unsyncableTotal: 2500n
-					})
-				}
+				inner: { report: report({ unsyncable: [symlink], unsyncableTotal: 2500n, unsyncableLocalAliasTotal: 2500n }) }
 			})
 		])
-		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
-		// Those past the list are not counted until the host has read them.
-		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 1 } }] })
-
-		runtime.unsyncable("1", { unsyncable: 0, skippedSymlinks: 2500 })
 		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
 		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 2500 } }] })
 		expect(of("aggregate")).toEqual([])
 
-		runtime.unsyncable("1", { unsyncable: 3, skippedSymlinks: 2497 })
+		runtime.events([
+			passEvent({
+				tag: "PassCompleted",
+				inner: { report: report({ unsyncable: [symlink], unsyncableTotal: 2500n, unsyncableLocalAliasTotal: 2497n }) }
+			})
+		])
 		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 3, skippedSymlinks: 2497 } }] })
 		expect(of("aggregate")).toEqual([{ t: "aggregate", state: "attention" }])
 	})
 

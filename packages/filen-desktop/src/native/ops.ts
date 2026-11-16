@@ -13,7 +13,7 @@ import {
 	listedSplit,
 	planPage,
 	type PlanRegistry,
-	planSplit,
+	reportSplit,
 	toAction,
 	toConflict,
 	toIgnored,
@@ -21,8 +21,7 @@ import {
 	toSkippedSymlink,
 	toSummary,
 	toUnsyncable,
-	truncatedUnsyncable,
-	type UnsyncableSplit
+	truncatedUnsyncable
 } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
@@ -177,12 +176,9 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		}
 	}
 
-	// A report lists the first 1000 unsyncable paths, and the engine has no way to read the rest of a pass's. Where it
-	// left some out, they are read from a dry run, which reads both sides as a pass does: once per such pass for the
-	// split (`splits`, the plan let go once counted), and once more only when the Issues tab pages past the report's list
-	// (`pagers`, kept in the plan registry until the next pass or its TTL). A pass whose report lists them all reads
-	// nothing more.
-	const splits = new Map<string, Promise<UnsyncableSplit>>()
+	// A report lists the first 1000 unsyncable paths and counts them all; the engine has no way to read the rest of a
+	// pass's. Only when the Issues tab pages past the report's list are they read, from one dry run (`pagers`, kept in the
+	// plan registry until the next pass or its TTL).
 	const pagers = new Map<string, Promise<string | null>>()
 
 	function warnUnread(error: unknown): void {
@@ -202,51 +198,6 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 				}
 			})
 		}
-	}
-
-	async function readSplit(id: bigint, report: SyncPassReport): Promise<UnsyncableSplit> {
-		try {
-			const plan = await engine.planPair(id)
-
-			try {
-				return planSplit(plan)
-			} finally {
-				plan.release()
-			}
-		} catch (error) {
-			warnUnread(error)
-
-			// Unread, those past the list count as unsyncable: no issue goes unseen.
-			return listedSplit(report, "issues")
-		}
-	}
-
-	async function splitPass(id: bigint, report: SyncPassReport): Promise<void> {
-		const key = id.toString()
-
-		dropPager(key)
-
-		if (!truncatedUnsyncable(report)) {
-			splits.delete(key)
-
-			return
-		}
-
-		const split = readSplit(id, report)
-
-		splits.set(key, split)
-
-		const read = await split
-
-		// A later pass's split is its own.
-		if (splits.get(key) === split) {
-			feed.unsyncable(key, read)
-		}
-	}
-
-	// The split of the last report's unsyncable paths, all of them.
-	async function reportSplit(key: string, report: SyncPassReport): Promise<UnsyncableSplit> {
-		return truncatedUnsyncable(report) ? ((await splits.get(key)) ?? listedSplit(report, "issues")) : listedSplit(report, "unread")
 	}
 
 	// The dry run the pages past the last report's list read, run when first asked for since the pass.
@@ -350,7 +301,6 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			await engine.removePair(id)
 			watched.delete(pairId)
 			conflictReads.delete(pairId)
-			splits.delete(pairId)
 			dropPager(pairId)
 			ctx.convergence.forget(info.remoteRoot)
 
@@ -543,7 +493,7 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return null
 		},
-		// A page the report lists is read from it; past it, from a dry run (see `splits`).
+		// A page the report lists is read from it; past it, from a dry run (see `pagers`).
 		unsyncablePaths: async ({ pairId, offset, limit }) => {
 			const { id } = held(pairId)
 			const report = await engine.lastReport(id)
@@ -552,13 +502,13 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 				return null
 			}
 
-			const { unsyncable: total } = await reportSplit(pairId, report)
+			const { unsyncable: total } = reportSplit(report)
 			const listed = (): NativeOpResult<"unsyncablePaths"> => ({
 				total,
 				entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable)
 			})
 
-			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report, "unread").unsyncable) {
+			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report).unsyncable) {
 				return listed()
 			}
 
@@ -575,13 +525,13 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 				return null
 			}
 
-			const { skippedSymlinks: total } = await reportSplit(pairId, report)
+			const { skippedSymlinks: total } = reportSplit(report)
 			const listed = (): NativeOpResult<"skippedSymlinks"> => ({
 				total,
 				entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink)
 			})
 
-			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report, "unread").skippedSymlinks) {
+			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report).skippedSymlinks) {
 				return listed()
 			}
 
@@ -648,11 +598,11 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		// A pass records every conflict it reports, held ones again included, so one that reported none recorded none. A
 		// failed pass has no report to tell, and leaves the last one's unsyncable paths.
 		passEnded: async (pairId, report) => {
-			await Promise.all([
-				report === null || report.conflictsTotal > 0n ? countConflicts(pairId) : null,
-				report === null ? null : splitPass(pairId, report),
-				restoreGuard(pairId, report)
-			])
+			if (report !== null) {
+				dropPager(pairId.toString())
+			}
+
+			await Promise.all([report === null || report.conflictsTotal > 0n ? countConflicts(pairId) : null, restoreGuard(pairId, report)])
 		}
 	}
 }

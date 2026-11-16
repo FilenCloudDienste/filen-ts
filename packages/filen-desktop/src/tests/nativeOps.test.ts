@@ -453,19 +453,18 @@ describe("native ops", () => {
 		expect(engine.planPair).not.toHaveBeenCalled()
 	})
 
-	it("reads the unsyncable paths past a report's list once per pass, from a dry run, and pages over all of them", async () => {
+	it("counts a pass's unsyncable paths from its report, and pages past its list from one dry run", async () => {
 		// 2500 paths, the report listing the first 1000: issues at 0-4 and 1500-1504, directory symlinks elsewhere.
 		const full: UnsyncablePath[] = Array.from({ length: 2500 }, (_, index) =>
 			index < 5 || (index >= 1500 && index < 1505)
 				? { relPath: `i${String(index)}`, reason: { tag: "LocalNameCollision" } }
 				: { relPath: `s${String(index)}`, reason: { tag: "LocalAlias", inner: { target: "real" } } }
 		)
-		const passReport = report({ unsyncable: full.slice(0, 1000), unsyncableTotal: 2500n })
-		const scan = fakePlan([], {}, full)
+		const passReport = report({ unsyncable: full.slice(0, 1000), unsyncableTotal: 2500n, unsyncableLocalAliasTotal: 2490n })
 		const pager = fakePlan([], {}, full)
 		const { engine, host, feed, posted } = setup()
 
-		engine.planPair.mockResolvedValueOnce(scan.handle).mockResolvedValueOnce(pager.handle)
+		engine.planPair.mockResolvedValueOnce(pager.handle)
 		engine.lastReport.mockResolvedValue(passReport)
 		await host.refreshPairs()
 		feed.subscribe(true)
@@ -473,9 +472,8 @@ describe("native ops", () => {
 		await host.passEnded(1n, passReport)
 		await vi.advanceTimersByTimeAsync(250)
 
-		expect(engine.planPair).toHaveBeenCalledOnce()
-		// Counted, then let go.
-		expect(scan.plan.release).toHaveBeenCalledOnce()
+		// The report counts them all: a pass runs no dry run.
+		expect(engine.planPair).not.toHaveBeenCalled()
 		expect(posted.filter(message => message.t === "overview").at(-1)).toMatchObject({
 			pairs: [{ issues: { unsyncable: 10, skippedSymlinks: 2490 } }]
 		})
@@ -492,7 +490,7 @@ describe("native ops", () => {
 			total: 2490,
 			entries: [5, 6, 7].map(symlink)
 		})
-		expect(engine.planPair).toHaveBeenCalledOnce()
+		expect(engine.planPair).not.toHaveBeenCalled()
 
 		// Past it, from one dry run the pages share.
 		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
@@ -507,7 +505,7 @@ describe("native ops", () => {
 			total: 2490,
 			entries: [2498, 2499].map(symlink)
 		})
-		expect(engine.planPair).toHaveBeenCalledTimes(2)
+		expect(engine.planPair).toHaveBeenCalledOnce()
 		expect(pager.plan.release).not.toHaveBeenCalled()
 
 		// The next pass lets it go; one whose report lists every path reads nothing more.
@@ -521,49 +519,35 @@ describe("native ops", () => {
 			total: 3,
 			entries: [0, 1, 2].map(issue)
 		})
-		expect(engine.planPair).toHaveBeenCalledTimes(2)
+		expect(engine.planPair).toHaveBeenCalledOnce()
 	})
 
-	it("raises no attention for a pass whose unsyncable paths are all directory symlinks, however many", async () => {
-		const full: UnsyncablePath[] = Array.from({ length: 2500 }, (_, index) => ({
-			relPath: `s${String(index)}`,
-			reason: { tag: "LocalAlias", inner: { target: "real" } }
-		}))
-		const passReport = report({ unsyncable: full.slice(0, 1000), unsyncableTotal: 2500n })
-		const { engine, host, feed, posted } = setup()
-
-		engine.planPair.mockResolvedValue(fakePlan([], {}, full).handle)
-		await host.refreshPairs()
-		feed.subscribe(true)
-		feed.events([passEvent({ tag: "PassCompleted", inner: { report: passReport } })])
-		await vi.advanceTimersByTimeAsync(250)
-		await host.passEnded(1n, passReport)
-		await vi.advanceTimersByTimeAsync(250)
-
-		expect(posted.filter(message => message.t === "overview").at(-1)).toMatchObject({
-			pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 2500 } }]
-		})
-		expect(posted.filter(message => message.t === "aggregate")).toEqual([])
-	})
-
-	it("counts the paths past a report's list as unsyncable when the dry run fails", async () => {
+	it("pages past a report's list from the report when the dry run fails, keeping its counts", async () => {
 		const passReport = report({
-			unsyncable: [{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } }],
-			unsyncableTotal: 4n
+			unsyncable: [
+				{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } },
+				{ relPath: "a", reason: { tag: "LocalNameCollision" } }
+			],
+			unsyncableTotal: 5n,
+			unsyncableLocalAliasTotal: 3n
 		})
-		const { engine, host, feed, posted, log } = setup()
+		const { engine, host, log } = setup()
 
 		engine.planPair.mockRejectedValue(sdkError(fakeSdk.ErrorKind.StaleState))
+		engine.lastReport.mockResolvedValue(passReport)
 		await host.refreshPairs()
-		feed.subscribe(true)
-		feed.events([passEvent({ tag: "PassCompleted", inner: { report: passReport } })])
 		await host.passEnded(1n, passReport)
-		await vi.advanceTimersByTimeAsync(250)
+		expect(engine.planPair).not.toHaveBeenCalled()
 
-		expect(log.warn).toHaveBeenCalledOnce()
-		expect(posted.filter(message => message.t === "overview").at(-1)).toMatchObject({
-			pairs: [{ issues: { unsyncable: 3, skippedSymlinks: 1 } }]
+		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
+			total: 2,
+			entries: [{ relPath: "a", reason: "localNameCollision", detail: null }]
 		})
+		await expect(host.ops.skippedSymlinks({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
+			total: 3,
+			entries: [{ relPath: "link", target: "real" }]
+		})
+		expect(log.warn).toHaveBeenCalledTimes(2)
 	})
 
 	it("lists unsyncable paths and scan gaps from the last report", async () => {
