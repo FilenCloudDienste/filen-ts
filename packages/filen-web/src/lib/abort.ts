@@ -23,7 +23,8 @@ function abortReason(signal: AbortSignal): Error {
 }
 
 // Settles with `promise`, or rejects with the signal's reason once `signal` aborts first. The work behind `promise` goes
-// on for whoever else waits on it (a shared download, a memoised block).
+// on for whoever else waits on it (a shared download, a memoised block). A rejection passes through unchanged, so an SDK
+// error that is not an Error keeps its kind for the caller to label.
 export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
 	if (signal === undefined) {
 		return promise
@@ -38,15 +39,6 @@ export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefine
 			reject(abortReason(signal))
 		})
 
-		promise.then(
-			value => {
-				unsubscribe()
-				resolve(value)
-			},
-			(error: unknown) => {
-				unsubscribe()
-				reject(error instanceof Error ? error : new Error(String(error)))
-			}
-		)
+		promise.finally(unsubscribe).then(resolve, reject)
 	})
 }

@@ -120,6 +120,17 @@ describe("originSource", () => {
 		expect(readEntry).toHaveBeenCalledTimes(2)
 	})
 
+	it("passes an SDK failure that is not an Error through a range read unchanged, its kind intact", async () => {
+		const { readEntry, deps } = setUp({ r: record() })
+		const failure = { kind: "WrongPassword", message: "wrong password" }
+
+		readEntry.mockRejectedValueOnce(failure)
+
+		const source = originSource(entry(), deps)
+
+		await expect(source.read(0, 1, new AbortController().signal)).rejects.toBe(failure)
+	})
+
 	it("refuses an entry whose reader is closed or belongs to the other client", () => {
 		const { deps } = setUp({ r: record(true) })
 
