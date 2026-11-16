@@ -1,4 +1,5 @@
-// The window's areas F6 moves between, in order: the icon rail, the module sidebar, the content and the assistant.
+// The window's areas F6 moves between, in order: the icon rail, the module sidebar, the content, a route's side panel (chat
+// info) and the assistant.
 // Each carries this attribute; one that is not on screen (the sidebar while hidden or narrow, the closed assistant) is
 // skipped, and so is one with nothing to focus.
 export const PANE_ATTRIBUTE = "data-shell-pane"

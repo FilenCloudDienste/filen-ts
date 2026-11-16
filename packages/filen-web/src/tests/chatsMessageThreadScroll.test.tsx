@@ -45,6 +45,7 @@ vi.mock("@/features/chats/components/thread/messageRow", () => ({
 		)
 }))
 vi.mock("@/features/chats/components/chatMenu", () => ({ ChatDropdownMenuContent: () => null }))
+vi.mock("@/features/chats/components/chatInfoPanel", () => ({ ChatInfoHost: () => null, ChatInfoToggle: () => null }))
 vi.mock("@/features/chats/hooks/useChatDialogHost", () => ({
 	useChatDialogHost: () => ({ openChatDialog: vi.fn(), renderActiveDialog: () => null })
 }))

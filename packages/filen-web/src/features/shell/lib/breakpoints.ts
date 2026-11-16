@@ -6,31 +6,43 @@
 // (one mount only — see appShell.tsx).
 export const LAYOUT_BREAKPOINT_QUERY = "(min-width: 48rem)"
 
-// One MediaQueryList for the whole app, created lazily rather than at module scope: importing this
-// module stays side-effect-free where there is no `window` (vitest's node environment), matching how
-// themeProvider only touches matchMedia inside a function.
-let mediaQuery: MediaQueryList | null = null
+// A media query read as an external store: one MediaQueryList per query, created lazily rather than at module scope,
+// so importing a module that builds one stays side-effect-free where there is no `window` (vitest's node environment),
+// matching how themeProvider only touches matchMedia inside a function. Also the chat info panel's own inline width
+// (features/chats/lib/chatInfoLayout.ts), a panel-specific threshold rather than a second layout scale.
+export function mediaQueryStore(query: string): { matches: () => boolean; subscribe: (listener: () => void) => () => void } {
+	let mediaQuery: MediaQueryList | null = null
 
-function getMediaQuery(): MediaQueryList {
-	mediaQuery ??= window.matchMedia(LAYOUT_BREAKPOINT_QUERY)
+	function getMediaQuery(): MediaQueryList {
+		mediaQuery ??= window.matchMedia(query)
 
-	return mediaQuery
+		return mediaQuery
+	}
+
+	return {
+		matches: () => getMediaQuery().matches,
+		subscribe: listener => {
+			const list = getMediaQuery()
+
+			list.addEventListener("change", listener)
+
+			return () => {
+				list.removeEventListener("change", listener)
+			}
+		}
+	}
 }
+
+const layoutBreakpoint = mediaQueryStore(LAYOUT_BREAKPOINT_QUERY)
 
 // True below the layout breakpoint, where the shell hosts the contextual sidebar in a drawer instead of
 // the row.
 export function isNarrowViewport(): boolean {
-	return !getMediaQuery().matches
+	return !layoutBreakpoint.matches()
 }
 
 // External-store subscription shape, consumed both by useIsNarrowViewport (to read the value) and by
 // the shell (to react to the crossing itself). Returns its own unsubscribe.
 export function subscribeToLayoutBreakpoint(listener: () => void): () => void {
-	const query = getMediaQuery()
-
-	query.addEventListener("change", listener)
-
-	return () => {
-		query.removeEventListener("change", listener)
-	}
+	return layoutBreakpoint.subscribe(listener)
 }

@@ -163,16 +163,23 @@ describe("applyOfflineGate", () => {
 		expect(applyOfflineGate(actions, true)).toEqual(actions)
 	})
 
-	it("disables mute/rename/participants/delete while offline (owner)", () => {
+	it("disables mute/rename/delete while offline (owner)", () => {
 		const chat = mockChat({ ownerId: 1n, muted: false })
 		const gated = applyOfflineGate(chatMenuActions(chat, 1n, true), false)
-		const gatedIds = new Set(["mute", "rename", "participants", "delete"])
+		const gatedIds = new Set(["mute", "rename", "delete"])
 
 		for (const descriptor of gated) {
 			if (gatedIds.has(descriptor.id)) {
 				expect(descriptor.enabled).toBe(false)
 			}
 		}
+	})
+
+	// It only opens the chat info panel, whose writes are gated one by one.
+	it("leaves participants enabled while offline", () => {
+		const chat = mockChat({ ownerId: 1n })
+
+		expect(applyOfflineGate(chatMenuActions(chat, 1n, false), false).find(d => d.id === "participants")?.enabled).toBeUndefined()
 	})
 
 	it("leaves markRead enabled while offline — a read-state side effect, not a deliberate mutation", () => {

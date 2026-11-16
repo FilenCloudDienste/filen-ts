@@ -66,11 +66,12 @@ export function chatMenuActions(chat: Chat, currentUserId: bigint | undefined, h
 	return actions
 }
 
-// Offline-gated ids: mute/rename/participants/delete/leave all write to the SDK. markRead is left
+// Offline-gated ids: mute/rename/delete/leave all write to the SDK. Participants only opens the chat info
+// panel, whose writes are gated one by one, so it stays open offline. markRead is left
 // alone — it fires constantly as a read-state side effect (opening a conversation), not a deliberate
 // user mutation, and mirrors mobile leaving it ungated. "send" is the composer's own concern
 // (composer.tsx) and deliberately NEVER gates offline — it queues through the durable outbox instead.
-const OFFLINE_GATED_IDS: ReadonlySet<ChatActionId> = new Set(["mute", "rename", "participants", "delete", "leave"])
+const OFFLINE_GATED_IDS: ReadonlySet<ChatActionId> = new Set(["mute", "rename", "delete", "leave"])
 
 export function applyOfflineGate(actions: ChatActionDescriptor[], isOnline: boolean): ChatActionDescriptor[] {
 	if (isOnline) {

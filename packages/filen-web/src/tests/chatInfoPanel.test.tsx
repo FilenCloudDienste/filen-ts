@@ -1,0 +1,342 @@
+// @vitest-environment jsdom
+
+// The chat info panel: opening and closing it beside the thread or as a sheet, what each role sees, the per-row menus,
+// the add picker, mute and the Leave/Delete confirms. The writes themselves are stubbed; chatsParticipants and
+// chatsActions cover them.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { useState } from "react"
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { testUuid } from "@/tests/support/uuid"
+import { mockBlockedContact, mockContact } from "@/tests/support/contactFixtures"
+import "@/lib/i18n"
+
+const { viewport, online, contacts, participants, block, directActions, actions, navigate, router } = vi.hoisted(() => ({
+	viewport: { wide: true },
+	online: { current: true },
+	contacts: { data: { contacts: [] as unknown[], blocked: [] as unknown[] } },
+	participants: { addChatParticipants: vi.fn(), removeChatParticipant: vi.fn() },
+	block: { toggleParticipantBlocked: vi.fn() },
+	directActions: { runSetChatMuted: vi.fn(), runMarkChatRead: vi.fn() },
+	actions: { renameChat: vi.fn(), leaveChat: vi.fn(), deleteChat: vi.fn() },
+	navigate: vi.fn(() => Promise.resolve()),
+	router: { state: { location: { pathname: "/chats" } } }
+}))
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() }) }))
+vi.mock("@/queries/client", async () => {
+	const { QueryClient } = await import("@tanstack/react-query")
+
+	return { queryClient: new QueryClient() }
+})
+vi.mock("@/features/chats/lib/chatInfoLayout", () => ({
+	isChatInfoNarrow: () => !viewport.wide,
+	subscribeToChatInfoBreakpoint: () => () => undefined,
+	useIsChatInfoNarrow: () => !viewport.wide
+}))
+vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => online.current }))
+vi.mock("@/features/contacts/queries/contacts", () => ({ useContactsQuery: () => ({ status: "success", ...contacts }) }))
+vi.mock("@/features/chats/lib/participants", () => participants)
+vi.mock("@/features/contacts/lib/actions", () => block)
+vi.mock("@/features/chats/lib/directActions", () => directActions)
+vi.mock("@/features/chats/lib/actions", () => actions)
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => router, useRouterState: () => "" }))
+
+const { ChatInfoHost, ChatInfoToggle } = await import("@/features/chats/components/chatInfoPanel")
+const { useChatInfoStore } = await import("@/features/chats/store/useChatInfoStore")
+const { SidePanelSlotContext } = await import("@/features/shell/lib/sidePanelSlot")
+
+function participant(userId: bigint, email: string, nickName?: string): ChatParticipant {
+	return { userId, email, nickName, permissionsAdd: false, added: 0n, appearOffline: false, lastActive: 0n }
+}
+
+const SELF = participant(1n, "me@x.io", "Me")
+const BOB = participant(2n, "bob@x.io", "Bob")
+const CAROL = participant(3n, "carol@x.io", "Carol")
+
+function chat(overrides: Partial<Chat> = {}): Chat {
+	return {
+		uuid: testUuid("chat"),
+		ownerId: 1n,
+		key: "chat-key",
+		name: "Design team",
+		participants: [BOB, SELF, CAROL],
+		muted: false,
+		created: 0n,
+		lastFocus: 0n,
+		...overrides
+	}
+}
+
+// The thread's header toggle and its host, with the shell's side-panel slot beside them.
+function Thread({ target, blocked }: { target: Chat; blocked: BlockedUsers }) {
+	const [slot, setSlot] = useState<HTMLDivElement | null>(null)
+
+	return (
+		<SidePanelSlotContext value={slot}>
+			<ChatInfoToggle chat={target} />
+			<ChatInfoHost
+				chat={target}
+				currentUserId={1n}
+				blocked={blocked}
+			/>
+			<div ref={setSlot} />
+		</SidePanelSlotContext>
+	)
+}
+
+function renderThread(target: Chat = chat(), blocked: BlockedUsers = EMPTY_BLOCKED_USERS) {
+	return render(
+		<Thread
+			target={target}
+			blocked={blocked}
+		/>
+	)
+}
+
+function openPanel(): HTMLElement {
+	fireEvent.click(screen.getByRole("button", { name: "Participants" }))
+
+	return screen.getByRole("complementary", { name: "Chat info" })
+}
+
+beforeEach(() => {
+	vi.clearAllMocks()
+	viewport.wide = true
+	online.current = true
+	contacts.data = { contacts: [], blocked: [] }
+	useChatInfoStore.setState({ panelOpen: false, drawerChatUuid: null, focusRequested: false })
+})
+
+afterEach(() => {
+	cleanup()
+})
+
+describe("chat info panel — beside the thread", () => {
+	it("mounts nothing until opened, then takes focus and reports itself expanded", () => {
+		renderThread()
+
+		expect(screen.queryByRole("complementary")).toBeNull()
+
+		const panel = openPanel()
+
+		expect(document.activeElement).toBe(panel)
+		expect(screen.getByRole("button", { name: "Participants" }).getAttribute("aria-expanded")).toBe("true")
+	})
+
+	it("stays open for the next conversation in the session, without taking focus again", () => {
+		const { rerender } = renderThread()
+		const toggle = screen.getByRole("button", { name: "Participants" })
+
+		openPanel()
+		toggle.focus()
+		rerender(
+			<Thread
+				target={chat({ uuid: testUuid("other"), name: "Other" })}
+				blocked={EMPTY_BLOCKED_USERS}
+			/>
+		)
+
+		expect(within(screen.getByRole("complementary", { name: "Chat info" })).getByText("Other")).toBeTruthy()
+		expect(document.activeElement).toBe(toggle)
+	})
+
+	it("closes on Escape from inside, handing focus back to the toggle", () => {
+		renderThread()
+
+		const panel = openPanel()
+
+		fireEvent.keyDown(within(panel).getByRole("switch"), { key: "Escape" })
+
+		expect(screen.queryByRole("complementary")).toBeNull()
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Participants" }))
+	})
+
+	it("closes from its close button", () => {
+		renderThread()
+
+		fireEvent.click(within(openPanel()).getByRole("button", { name: "Close" }))
+
+		expect(screen.queryByRole("complementary")).toBeNull()
+	})
+
+	it("is never offered for an undecryptable conversation", () => {
+		useChatInfoStore.setState({ panelOpen: true })
+		// No `key` at all: the group key did not decrypt.
+		renderThread({ uuid: testUuid("chat"), ownerId: 1n, participants: [SELF, BOB], muted: false, created: 0n, lastFocus: 0n })
+
+		expect(screen.queryByRole("button", { name: "Participants" })).toBeNull()
+		expect(screen.queryByRole("complementary")).toBeNull()
+	})
+})
+
+describe("chat info panel — contents", () => {
+	it("shows the name, count and every participant, the viewer first as You, the owner badged, a blocked one marked", () => {
+		renderThread(chat(), deriveBlockedUsers([{ userId: 3n, email: CAROL.email }]))
+
+		const panel = openPanel()
+		const rows = within(within(panel).getByRole("list", { name: "Participants" })).getAllByRole("listitem")
+
+		expect(within(panel).getByText("Design team")).toBeTruthy()
+		expect(within(panel).getByText("3 participants")).toBeTruthy()
+		expect(rows.map(row => row.textContent)).toEqual([
+			// After each avatar's initial.
+			expect.stringMatching(/^MYou.*me@x\.io.*Owner$/),
+			expect.stringMatching(/^BBob/),
+			expect.stringMatching(/^CCarol · Blocked/)
+		])
+		// The viewer's own row has no menu.
+		expect(
+			within(panel)
+				.getAllByRole("button", { name: /^Actions for / })
+				.map(button => button.getAttribute("aria-label"))
+		).toEqual(["Actions for Bob", "Actions for Carol"])
+	})
+
+	it("gives the owner rename, add and Delete", () => {
+		renderThread()
+
+		const panel = openPanel()
+
+		expect(within(panel).getByRole("button", { name: "Rename" })).toBeTruthy()
+		expect(within(panel).getByRole("button", { name: "Add participants" })).toBeTruthy()
+		expect(within(panel).getByRole("button", { name: "Delete" })).toBeTruthy()
+		expect(within(panel).queryByRole("button", { name: "Leave" })).toBeNull()
+	})
+
+	it("gives a participant neither rename nor add, and Leave instead of Delete", () => {
+		renderThread(chat({ ownerId: 2n }))
+
+		const panel = openPanel()
+
+		expect(within(panel).queryByRole("button", { name: "Rename" })).toBeNull()
+		expect(within(panel).queryByRole("button", { name: "Add participants" })).toBeNull()
+		expect(within(panel).getByRole("button", { name: "Leave" })).toBeTruthy()
+	})
+
+	it("mutes from its switch", () => {
+		const target = chat()
+
+		renderThread(target)
+		fireEvent.click(within(openPanel()).getByRole("switch", { name: "Mute notifications" }))
+
+		expect(directActions.runSetChatMuted).toHaveBeenCalledExactlyOnceWith(target, true)
+	})
+
+	it("disables every write offline with the offline reason, but still opens", () => {
+		online.current = false
+		renderThread()
+
+		const panel = openPanel()
+
+		for (const control of [
+			within(panel).getByRole("button", { name: "Rename" }),
+			within(panel).getByRole("button", { name: "Add participants" }),
+			within(panel).getByRole("button", { name: "Delete" })
+		]) {
+			expect((control as HTMLButtonElement).disabled).toBe(true)
+			expect(control.getAttribute("title")).toBe("Unavailable while offline")
+		}
+
+		fireEvent.click(within(panel).getByRole("switch", { name: "Mute notifications" }))
+		expect(directActions.runSetChatMuted).not.toHaveBeenCalled()
+	})
+})
+
+describe("chat info panel — participant actions", () => {
+	it("removes a participant after the confirm (owner)", async () => {
+		const target = chat()
+
+		participants.removeChatParticipant.mockResolvedValue({ status: "success", item: target })
+		renderThread(target)
+		fireEvent.click(within(openPanel()).getByRole("button", { name: "Actions for Bob" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }))
+
+		await vi.waitFor(() => {
+			expect(participants.removeChatParticipant).toHaveBeenCalledExactlyOnceWith(target, BOB)
+		})
+	})
+
+	it("offers a participant block only, and unblocks a blocked one", async () => {
+		const blockedRecord = mockBlockedContact({ userId: 3n, email: CAROL.email })
+
+		contacts.data = { contacts: [], blocked: [blockedRecord] }
+		block.toggleParticipantBlocked.mockResolvedValue({ status: "success" })
+		renderThread(chat({ ownerId: 2n }), deriveBlockedUsers([blockedRecord]))
+
+		const panel = openPanel()
+
+		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Bob" }))
+		expect((await screen.findAllByRole("menuitem")).map(item => item.textContent)).toEqual(["Block"])
+		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+
+		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Carol" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Unblock" }))
+
+		await vi.waitFor(() => {
+			expect(block.toggleParticipantBlocked).toHaveBeenCalledExactlyOnceWith(CAROL, [blockedRecord], true)
+		})
+		// The menu's Escape stayed with the menu: the panel is still open.
+		expect(screen.getByRole("complementary", { name: "Chat info" })).toBeTruthy()
+	})
+
+	it("adds contacts from the picker inside the panel, then returns to the list", async () => {
+		const target = chat()
+		const dave = mockContact({ uuid: testUuid("dave"), userId: 9n, email: "dave@x.io", nickName: "Dave" })
+
+		contacts.data = { contacts: [dave], blocked: [] }
+		participants.addChatParticipants.mockResolvedValue({ status: "success", item: target })
+		renderThread(target)
+
+		const panel = openPanel()
+
+		fireEvent.click(within(panel).getByRole("button", { name: "Add participants" }))
+		expect(document.activeElement?.tagName).toBe("INPUT")
+		fireEvent.click(within(panel).getByRole("option", { name: /Dave/ }))
+		fireEvent.click(within(panel).getByRole("button", { name: "Add" }))
+
+		await vi.waitFor(() => {
+			expect(within(panel).getByRole("list", { name: "Participants" })).toBeTruthy()
+		})
+		expect(participants.addChatParticipants).toHaveBeenCalledExactlyOnceWith(target, [dave])
+		expect(document.activeElement).toBe(within(panel).getByRole("button", { name: "Add participants" }))
+	})
+
+	it("leaves through the chat's own confirm (participant)", async () => {
+		const target = chat({ ownerId: 2n })
+
+		actions.leaveChat.mockResolvedValue({ status: "success", item: undefined })
+		renderThread(target)
+		fireEvent.click(within(openPanel()).getByRole("button", { name: "Leave" }))
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Leave" }))
+
+		await vi.waitFor(() => {
+			expect(actions.leaveChat).toHaveBeenCalledExactlyOnceWith(target, expect.anything())
+		})
+	})
+})
+
+describe("chat info panel — below the breakpoint", () => {
+	it("opens as a sheet for this conversation only", async () => {
+		viewport.wide = false
+		const { rerender } = renderThread()
+
+		fireEvent.click(screen.getByRole("button", { name: "Participants" }))
+
+		expect(await screen.findByRole("dialog", { name: "Chat info" })).toBeTruthy()
+		expect(screen.queryByRole("complementary", { name: "Chat info" })).toBeTruthy()
+
+		rerender(
+			<Thread
+				target={chat({ uuid: testUuid("other") })}
+				blocked={EMPTY_BLOCKED_USERS}
+			/>
+		)
+		await act(() => new Promise(resolve => setTimeout(resolve, 50)))
+
+		expect(screen.queryByRole("dialog", { name: "Chat info" })).toBeNull()
+		expect(useChatInfoStore.getState().drawerChatUuid).toBeNull()
+	})
+})

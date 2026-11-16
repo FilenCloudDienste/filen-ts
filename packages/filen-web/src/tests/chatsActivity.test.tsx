@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
 // The chats' server writes as activity toasts: the chat menu's mark read / mute, the bulk bar's, the bulk
-// delete/leave confirms' hand-off and the participants dialog's bulk remove. The writes themselves are
+// delete/leave confirms' hand-off. The writes themselves are
 // stubbed; chatsActions/chatsBulk/chatsParticipants tests cover them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { ExternalToast } from "sonner"
@@ -14,7 +14,7 @@ import { testUuid } from "@/tests/support/uuid"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import "@/lib/i18n"
 
-const { toast, actions, bulk, participants, navigate, router } = vi.hoisted(() => ({
+const { toast, actions, bulk, navigate, router } = vi.hoisted(() => ({
 	toast: Object.assign(
 		vi.fn<(title: string, options?: ExternalToast) => string>(() => "id"),
 		{
@@ -33,7 +33,6 @@ const { toast, actions, bulk, participants, navigate, router } = vi.hoisted(() =
 		createChat: vi.fn()
 	},
 	bulk: { markChatsRead: vi.fn(), setChatsMuted: vi.fn(), deleteChatsPermanently: vi.fn(), leaveChats: vi.fn() },
-	participants: { addChatParticipants: vi.fn(), removeChatParticipant: vi.fn(), removeChatParticipants: vi.fn() },
 	navigate: vi.fn(() => Promise.resolve()),
 	router: { state: { location: { pathname: "/chats" } } }
 }))
@@ -43,7 +42,6 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/features/chats/lib/actions", () => actions)
 vi.mock("@/features/chats/lib/bulk", () => bulk)
-vi.mock("@/features/chats/lib/participants", () => participants)
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => navigate,
@@ -55,21 +53,8 @@ vi.mock("@/queries/account", async importOriginal => ({
 	useAccountQuery: () => ({ data: { id: 1n } }),
 	accountQueryGet: () => ({ id: 1n })
 }))
-vi.mock("@/features/contacts/queries/contacts", async importOriginal => ({
-	...(await importOriginal<typeof import("@/features/contacts/queries/contacts")>()),
-	useContactsQuery: () => ({ data: { contacts: [], blocked: [] } })
-}))
-
-const { chats } = vi.hoisted(() => ({ chats: { current: [] as Chat[] } }))
-
-vi.mock("@/features/chats/queries/chats", async importOriginal => ({
-	...(await importOriginal<typeof import("@/features/chats/queries/chats")>()),
-	useChats: () => ({ data: chats.current })
-}))
-
 const { ChatDropdownMenuContent } = await import("@/features/chats/components/chatMenu")
 const { ChatsBulkActionBar } = await import("@/features/chats/components/chatsBulkActionBar")
-const { ChatParticipantsDialog } = await import("@/features/chats/components/chatParticipantsDialog")
 const { DropdownMenu, DropdownMenuTrigger } = await import("@/components/ui/dropdown-menu")
 const { chatActivityName } = await import("@/features/chats/lib/activity")
 const { useChatDialogHost } = await import("@/features/chats/hooks/useChatDialogHost")
@@ -81,7 +66,6 @@ function participant(userId: bigint, email: string, nickName?: string): ChatPart
 
 const SELF = participant(1n, "me@x.io")
 const BOB = participant(2n, "bob@x.io", "Bob")
-const CAROL = participant(3n, "carol@x.io")
 
 function chat(overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -287,55 +271,5 @@ describe("bulk delete confirm", () => {
 			expect(toast.success).toHaveBeenCalledWith("Deleted A", expect.anything())
 		})
 		expect(toast).not.toHaveBeenCalled()
-	})
-})
-
-describe("participants dialog — bulk remove", () => {
-	function renderDialog(target: Chat): void {
-		chats.current = [target]
-		render(createElement(ChatParticipantsDialog, { chat: target, onClose: () => undefined }))
-	}
-
-	function confirmRemove(count: number): void {
-		fireEvent.click(screen.getByRole("button", { name: count === 1 ? "Remove 1 participant" : `Remove ${String(count)} participants` }))
-		fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }))
-	}
-
-	it("closes the confirm at once and hands several to the activity toast, keeping a failed one selected", async () => {
-		const target = chat({ participants: [SELF, BOB, CAROL] })
-		participants.removeChatParticipants.mockResolvedValue({
-			chat: target,
-			outcome: { succeeded: [BOB], failed: [{ item: CAROL, error: plainErrorDTO("nope") }] }
-		})
-		renderDialog(target)
-
-		fireEvent.click(screen.getByRole("option", { name: /Bob/ }))
-		fireEvent.click(screen.getByRole("option", { name: /carol@x\.io/ }))
-		confirmRemove(2)
-
-		expect(screen.queryByRole("alertdialog")).toBeNull()
-		expect(toast.mock.lastCall?.[0]).toBe("Removing 2 participants")
-
-		await vi.waitFor(() => {
-			expect(toast.error).toHaveBeenCalledWith("Removed 1 participant, 1 failed", expect.anything())
-		})
-		expect(participants.removeChatParticipants).toHaveBeenCalledExactlyOnceWith(target, [BOB, CAROL], expect.any(Function))
-		expect(screen.getByRole("option", { name: /carol@x\.io/ }).getAttribute("aria-selected")).toBe("true")
-		expect(screen.getByRole("option", { name: /Bob/ }).getAttribute("aria-selected")).toBe("false")
-	})
-
-	it("keeps the confirm's spinner for one participant, then shows only the result", async () => {
-		const target = chat({ participants: [SELF, BOB, CAROL] })
-		participants.removeChatParticipants.mockResolvedValue({ chat: target, outcome: { succeeded: [BOB], failed: [] } })
-		renderDialog(target)
-
-		fireEvent.click(screen.getByRole("option", { name: /Bob/ }))
-		confirmRemove(1)
-
-		await vi.waitFor(() => {
-			expect(toast.success).toHaveBeenCalledWith("Removed Bob", expect.anything())
-		})
-		expect(toast).not.toHaveBeenCalled()
-		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
 })

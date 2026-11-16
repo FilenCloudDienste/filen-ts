@@ -16,7 +16,7 @@ import type { Options } from "react-hotkeys-hook"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { defaultRangeExtractor, elementScroll, useVirtualizer, type Range, type VirtualizerOptions } from "@tanstack/react-virtual"
-import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon, UsersIcon } from "lucide-react"
+import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon } from "lucide-react"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import type { BlockedUsers } from "@filen/shared"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
@@ -43,9 +43,7 @@ import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayTimeLabel } from "@/features/chats/components/thread/timeLabel"
-import { chatTitle, chatAvatarUrl, isChatUndecryptable } from "@/features/chats/lib/sort"
-import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
-import { useIsOnline } from "@/lib/useIsOnline"
+import { chatTitle, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
@@ -58,6 +56,7 @@ import { adjacentMessageIndex, edgeMessageIndex, MESSAGE_FOCUS_SELECTOR } from "
 import { ignoredUnderOverlays, useAction } from "@/lib/keymap/useAction"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
+import { ChatInfoHost, ChatInfoToggle } from "@/features/chats/components/chatInfoPanel"
 import { useAccountQuery } from "@/queries/account"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { UserAvatar } from "@/components/userAvatar"
@@ -881,7 +880,6 @@ function ThreadList({
 // other): never auto-fired on mount — old-web's explicit-mark model, not mobile's own screen-open trigger.
 export function MessageThread({ chat }: { chat: Chat }) {
 	const { t } = useTranslation(["chats", "common"])
-	const isOnline = useIsOnline()
 	const chatUuid = chat.uuid
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
@@ -971,21 +969,8 @@ export function MessageThread({ chat }: { chat: Chat }) {
 						</p>
 					) : null}
 				</div>
-				{/* The menu's own participants entry, one click away; gated as that entry is. */}
-				{isChatUndecryptable(chat) ? null : (
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						disabled={!isOnline}
-						aria-label={t(CHAT_ACTION_DEFS.participants.labelKey)}
-						title={isOnline ? t(CHAT_ACTION_DEFS.participants.labelKey) : t("common:offlineActionDisabled")}
-						onClick={() => {
-							dialogHost.openChatDialog("participants", chat)
-						}}
-					>
-						<UsersIcon />
-					</Button>
-				)}
+				{/* The menu's own participants entry, one click away: toggles the chat info panel. */}
+				<ChatInfoToggle chat={chat} />
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
@@ -1031,6 +1016,11 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				}}
 			/>
 			{dialogHost.renderActiveDialog()}
+			<ChatInfoHost
+				chat={chat}
+				currentUserId={currentUserId}
+				blocked={blocked}
+			/>
 		</div>
 	)
 }

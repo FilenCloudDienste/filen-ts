@@ -1,0 +1,640 @@
+import { useEffect, useRef, useState, type KeyboardEvent, type Ref } from "react"
+import { createPortal } from "react-dom"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
+import {
+	MoreHorizontalIcon,
+	PencilIcon,
+	PlusIcon,
+	UserCheckIcon,
+	UserMinusIcon,
+	UsersIcon,
+	UserXIcon,
+	VolumeOffIcon,
+	XIcon
+} from "lucide-react"
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import { cn, contactDisplayName, toggleInSet, type BlockedUsers } from "@filen/shared"
+import { chatAvatarUrl, chatTitle, isChatUndecryptable } from "@/features/chats/lib/sort"
+import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
+import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
+import { runSetChatMuted } from "@/features/chats/lib/directActions"
+import {
+	chatInfoChatActions,
+	chatInfoParticipantRows,
+	participantRowActions,
+	type ChatInfoParticipantRow
+} from "@/features/chats/components/chatInfoPanel.logic"
+import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
+import { isChatInfoNarrow, subscribeToChatInfoBreakpoint, useIsChatInfoNarrow } from "@/features/chats/lib/chatInfoLayout"
+import {
+	closeChatInfoDrawer,
+	closeChatInfoPanel,
+	openChatInfo,
+	takeChatInfoFocusRequest,
+	useChatInfoOpen,
+	useChatInfoStore
+} from "@/features/chats/store/useChatInfoStore"
+import { useContactsQuery } from "@/features/contacts/queries/contacts"
+import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
+import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { useSidePanelSlot } from "@/features/shell/lib/sidePanelSlot"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { plainErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
+import { toastSideObstructionRef } from "@/lib/toastClearance"
+import { SIDE_PANEL_SURFACE_CLASS, SidePanelDrawer } from "@/components/sidePanel"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { UserAvatar } from "@/components/userAvatar"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
+
+// Mounted at most once (inline beside the thread, or in the sheet), so fixed ids are unique.
+export const CHAT_INFO_PANEL_ID = "chat-info-panel"
+export const CHAT_INFO_TITLE_ID = "chat-info-panel-title"
+export const CHAT_INFO_TOGGLE_ID = "chat-info-toggle"
+
+const SECTION_HEADING_CLASS = "text-xs font-medium tracking-wide text-muted-foreground uppercase"
+
+interface ChatInfoProps {
+	chat: Chat
+	currentUserId: bigint | undefined
+	// The thread's own blocked set (one enabled read for the whole conversation view).
+	blocked: BlockedUsers
+}
+
+function ParticipantRowMenu({
+	row,
+	pending,
+	onRemove,
+	onToggleBlock
+}: {
+	row: ChatInfoParticipantRow
+	pending: boolean
+	onRemove: (participant: ChatParticipant) => void
+	onToggleBlock: (participant: ChatParticipant, isBlockedNow: boolean) => void
+}) {
+	const { t } = useTranslation(["chats", "common", "contacts"])
+	const isOnline = useIsOnline()
+	const actions = participantRowActions(row)
+	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
+
+	if (actions.length === 0) {
+		return null
+	}
+
+	if (pending) {
+		return (
+			<span className="flex size-7 shrink-0 items-center justify-center">
+				<Spinner />
+			</span>
+		)
+	}
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("chatInfoParticipantMenu", { name: contactDisplayName(row.participant) })}
+					>
+						<MoreHorizontalIcon />
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="end">
+				{actions.map(action => {
+					switch (action) {
+						case "remove":
+							return (
+								<DropdownMenuItem
+									key={action}
+									variant="destructive"
+									disabled={!isOnline}
+									title={offlineTitle}
+									onClick={() => {
+										onRemove(row.participant)
+									}}
+								>
+									<UserMinusIcon aria-hidden="true" />
+									{t("common:participantRemoveDialogConfirm")}
+								</DropdownMenuItem>
+							)
+						case "block":
+						case "unblock":
+							return (
+								<DropdownMenuItem
+									key={action}
+									disabled={!isOnline}
+									title={offlineTitle}
+									onClick={() => {
+										onToggleBlock(row.participant, row.blocked)
+									}}
+								>
+									{action === "block" ? <UserXIcon aria-hidden="true" /> : <UserCheckIcon aria-hidden="true" />}
+									{t(action === "block" ? "contacts:contactsActionBlock" : "contacts:contactsActionUnblock")}
+								</DropdownMenuItem>
+							)
+					}
+				})}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	)
+}
+
+// The conversation's details and management: its name (rename for the owner), mute, the participants with their
+// per-row actions (remove for the owner, block/unblock for anyone), adding participants from contacts (owner), and
+// Leave or Delete. Every write is offline-disabled, as the chat menu's are. Remounted per conversation (keyed by the
+// host), so add mode and pending state never carry over.
+function ChatInfoSurface({
+	chat,
+	currentUserId,
+	blocked,
+	className,
+	ref,
+	onKeyDown,
+	onClose
+}: ChatInfoProps & {
+	className: string
+	ref?: Ref<HTMLElement>
+	onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
+	onClose: () => void
+}) {
+	const { t } = useTranslation(["chats", "common"])
+	const isOnline = useIsOnline()
+	// The thread's own dialog host is outside the sheet; one rendered in here keeps rename/leave/delete nested in it.
+	const dialogHost = useChatDialogHost()
+	// Shares the thread's query key (useBlockedUsers): the blocked records the unblock needs and the add picker's
+	// contacts, no request of its own.
+	const contactsQuery = useContactsQuery({ enabled: true })
+	const [mode, setMode] = useState<"list" | "add">("list")
+	const [pendingUserId, setPendingUserId] = useState<bigint | null>(null)
+	const [removing, setRemoving] = useState<ChatParticipant | null>(null)
+	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+	const [filter, setFilter] = useState("")
+	const [addPending, setAddPending] = useState(false)
+	// Leaving add mode unmounts the control that had focus; the Add button takes it back.
+	const refocusAddButton = useRef(false)
+
+	const title = chatTitle(chat, currentUserId, t("chatUndecryptable"), t("chatJustYou"))
+	const rows = chatInfoParticipantRows(chat, currentUserId, blocked)
+	const { rename, mute, end } = chatInfoChatActions(chat, currentUserId, isOnline)
+	const owner = end?.id === "delete"
+	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
+
+	function showList(): void {
+		setSelected(new Set())
+		setFilter("")
+		setMode("list")
+		refocusAddButton.current = true
+	}
+
+	async function handleRemoveConfirmed(participant: ChatParticipant): Promise<void> {
+		setPendingUserId(participant.userId)
+		const outcome = await removeChatParticipant(chat, participant)
+		setPendingUserId(null)
+		setRemoving(null)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	async function handleToggleBlock(participant: ChatParticipant, isBlockedNow: boolean): Promise<void> {
+		const toggled = toggleParticipantBlocked(participant, contactsQuery.data?.blocked, isBlockedNow)
+
+		if (toggled === "stale") {
+			toast.error(errorLabel(plainErrorDTO(t("common:participantBlockStale"))))
+
+			return
+		}
+
+		setPendingUserId(participant.userId)
+		const outcome = await toggled
+		setPendingUserId(null)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	async function handleAddSelected(): Promise<void> {
+		const chosen = resolveSelectedContacts(contactsQuery.data?.contacts ?? [], selected)
+
+		if (chosen.length === 0) {
+			return
+		}
+
+		setAddPending(true)
+		const outcome = await addChatParticipants(chat, chosen)
+		setAddPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+
+			return
+		}
+
+		showList()
+	}
+
+	function focusAddButton(element: HTMLButtonElement | null): void {
+		if (element !== null && refocusAddButton.current) {
+			refocusAddButton.current = false
+			element.focus()
+		}
+	}
+
+	// Entering add mode unmounts the Add button; focus goes to the picker's filter box, or Cancel without one.
+	function focusAddView(element: HTMLDivElement | null): void {
+		element?.querySelector<HTMLElement>("input, button:not([disabled])")?.focus()
+	}
+
+	function renderAddView() {
+		return (
+			<div
+				ref={focusAddView}
+				className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3"
+			>
+				<div className="px-1">
+					<h3 className="text-sm font-medium">{t("common:participantsAddDialogTitle")}</h3>
+					<p className="text-xs text-muted-foreground">{t("chatParticipantsAddDialogBody")}</p>
+				</div>
+				<ContactPickerList
+					contactsQuery={contactsQuery}
+					filter={filter}
+					onFilterChange={setFilter}
+					selected={selected}
+					onToggle={uuid => {
+						setSelected(prev => toggleInSet(prev, uuid))
+					}}
+					ariaLabel={t("common:participantsAddDialogTitle")}
+					emptyTitle={t("common:participantsAddEmpty")}
+					exclude={chat.participants}
+				/>
+				<div className="flex justify-end gap-2">
+					<Button
+						variant="outline"
+						disabled={addPending}
+						onClick={showList}
+					>
+						{t("common:cancel")}
+					</Button>
+					<Button
+						disabled={selected.size === 0 || addPending || !isOnline}
+						title={offlineTitle}
+						onClick={() => {
+							void handleAddSelected()
+						}}
+					>
+						{addPending && <Spinner data-icon="inline-start" />}
+						{t("common:participantsAddSubmit")}
+					</Button>
+				</div>
+			</div>
+		)
+	}
+
+	function renderRow(row: ChatInfoParticipantRow) {
+		const { participant } = row
+		const name = row.isSelf ? t("chatSenderYou") : contactDisplayName(participant)
+
+		return (
+			<li
+				key={participant.userId.toString()}
+				className="flex h-14 items-center gap-3 rounded-xl px-2 text-sm"
+			>
+				<UserAvatar
+					src={participant.avatar}
+					name={contactDisplayName(participant)}
+				/>
+				<div className="min-w-0 flex-1">
+					<p className="truncate font-medium">
+						{name}
+						{row.blocked ? (
+							<span className="font-normal text-muted-foreground"> · {t("chatParticipantBlockedMarker")}</span>
+						) : null}
+					</p>
+					<p className="truncate text-xs text-muted-foreground">{participant.email}</p>
+				</div>
+				{row.isOwner ? <span className="shrink-0 text-xs text-muted-foreground">{t("common:participantOwnerBadge")}</span> : null}
+				<ParticipantRowMenu
+					row={row}
+					pending={pendingUserId === participant.userId}
+					onRemove={setRemoving}
+					onToggleBlock={(target, isBlockedNow) => {
+						void handleToggleBlock(target, isBlockedNow)
+					}}
+				/>
+			</li>
+		)
+	}
+
+	function renderListView() {
+		return (
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-3">
+				<div className="flex flex-col items-center gap-1 px-2 pt-2 pb-4 text-center">
+					<UserAvatar
+						src={chatAvatarUrl(chat, currentUserId)}
+						name={title}
+						className="mb-2 size-16"
+						fallbackClassName="text-xl"
+					/>
+					<div className="flex max-w-full items-center gap-1">
+						<p className="min-w-0 truncate text-base font-semibold">{title}</p>
+						{rename?.run === "dialog" ? (
+							<TooltipIconButton
+								label={t(rename.labelKey)}
+								disabled={rename.enabled === false}
+								title={offlineTitle}
+								onClick={() => {
+									dialogHost.openChatDialog(rename.dialogKind, chat)
+								}}
+							>
+								<PencilIcon />
+							</TooltipIconButton>
+						) : null}
+					</div>
+					<p className="text-xs text-muted-foreground">{t("chatHeaderParticipants", { count: chat.participants.length })}</p>
+				</div>
+				{mute === undefined ? null : (
+					<label
+						title={offlineTitle}
+						className={cn(
+							"flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm",
+							mute.enabled === false ? "text-muted-foreground" : "hover:bg-accent/50"
+						)}
+					>
+						<VolumeOffIcon
+							aria-hidden="true"
+							className="size-4 shrink-0 text-muted-foreground"
+						/>
+						<span className="min-w-0 flex-1">{t("chatInfoMute")}</span>
+						<Switch
+							checked={chat.muted}
+							disabled={mute.enabled === false}
+							onCheckedChange={checked => {
+								runSetChatMuted(chat, checked)
+							}}
+						/>
+					</label>
+				)}
+				<div className="mt-3 flex h-8 items-center justify-between px-2">
+					<h3
+						id={`${CHAT_INFO_PANEL_ID}-participants`}
+						className={SECTION_HEADING_CLASS}
+					>
+						{t("common:participantsDialogTitle")}
+					</h3>
+					{owner ? (
+						<Button
+							ref={focusAddButton}
+							variant="ghost"
+							size="xs"
+							aria-label={t("common:participantsAddAction")}
+							disabled={!isOnline}
+							title={offlineTitle}
+							onClick={() => {
+								setSelected(new Set())
+								setMode("add")
+							}}
+						>
+							<PlusIcon data-icon="inline-start" />
+							{t("common:participantsAddSubmit")}
+						</Button>
+					) : null}
+				</div>
+				<ul
+					aria-labelledby={`${CHAT_INFO_PANEL_ID}-participants`}
+					className="flex flex-col"
+				>
+					{rows.map(renderRow)}
+				</ul>
+				{end?.run === "dialog" ? (
+					<>
+						<div className="mx-2 my-3 h-px shrink-0 bg-border/50" />
+						<Button
+							variant="ghost"
+							className="justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+							disabled={end.enabled === false}
+							title={offlineTitle}
+							onClick={() => {
+								dialogHost.openChatDialog(end.dialogKind, chat)
+							}}
+						>
+							<end.icon data-icon="inline-start" />
+							{t(end.labelKey)}
+						</Button>
+					</>
+				) : null}
+			</div>
+		)
+	}
+
+	return (
+		<aside
+			id={CHAT_INFO_PANEL_ID}
+			ref={ref}
+			tabIndex={-1}
+			aria-labelledby={CHAT_INFO_TITLE_ID}
+			className={cn(SIDE_PANEL_SURFACE_CLASS, className)}
+			onKeyDown={onKeyDown}
+		>
+			<header className="flex h-12 shrink-0 items-center gap-2 pr-2 pl-4">
+				<h2
+					id={CHAT_INFO_TITLE_ID}
+					className="min-w-0 flex-1 truncate text-sm font-semibold"
+				>
+					{t("chatInfoTitle")}
+				</h2>
+				<TooltipIconButton
+					label={t("common:close")}
+					onClick={onClose}
+				>
+					<XIcon />
+				</TooltipIconButton>
+			</header>
+			{mode === "list" ? renderListView() : renderAddView()}
+			<ConfirmDialog
+				open={removing !== null}
+				pending={pendingUserId !== null}
+				title={t("common:participantRemoveDialogTitle")}
+				body={t("chatParticipantRemoveDialogBody", { email: removing?.email ?? "" })}
+				confirmLabel={t("common:participantRemoveDialogConfirm")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) {
+						setRemoving(null)
+					}
+				}}
+				onConfirm={() => {
+					if (removing !== null) {
+						void handleRemoveConfirmed(removing)
+					}
+				}}
+			/>
+			{dialogHost.renderActiveDialog()}
+		</aside>
+	)
+}
+
+// Closing unmounts the inline panel; focus inside it would fall back to the document body, so it goes to the thread
+// header's toggle first. Focus elsewhere stays where the user put it.
+function closeInlinePanel(): void {
+	if (document.getElementById(CHAT_INFO_PANEL_ID)?.contains(document.activeElement) === true) {
+		document.getElementById(CHAT_INFO_TOGGLE_ID)?.focus()
+	}
+
+	closeChatInfoPanel()
+}
+
+// Escape closes the inline panel while focus is inside it. Only for keys from the panel's own DOM: a row menu or a
+// confirm is portalled out of it and closes itself first.
+function handleInlineKeyDown(event: KeyboardEvent<HTMLElement>): void {
+	if (
+		event.key !== "Escape" ||
+		event.defaultPrevented ||
+		!(event.target instanceof Node) ||
+		!event.currentTarget.contains(event.target)
+	) {
+		return
+	}
+
+	event.preventDefault()
+	// Never also a document-level Escape action (the sidebar's clear-selection).
+	event.stopPropagation()
+	closeInlinePanel()
+}
+
+// Module scope, so React keeps one stable ref callback: while mounted the panel is a right-docked toast obstruction, and
+// it takes focus when the user (not a panel left open from another conversation) opened it.
+function attachInlinePanel(element: HTMLElement | null): (() => void) | undefined {
+	if (element === null) {
+		return undefined
+	}
+
+	if (takeChatInfoFocusRequest()) {
+		element.focus()
+	}
+
+	return toastSideObstructionRef(element)
+}
+
+// The sheet itself (focusable via tabIndex -1), like the inline panel: its first control is the close button, whose
+// tooltip would otherwise open over the panel on every open.
+function drawerInitialFocus(): HTMLElement | true {
+	return document.getElementById(CHAT_INFO_PANEL_ID) ?? true
+}
+
+function setDrawerOpen(open: boolean): void {
+	if (!open) {
+		closeChatInfoDrawer()
+	}
+}
+
+// Mounted by the thread. From the chat info breakpoint up the panel is portalled into the shell's side-panel slot,
+// beside the content card; below it the panel is a sheet from the right. Either mounts only while open, and never for
+// an undecryptable conversation (the menu offers only Leave/Delete there).
+export function ChatInfoHost(props: ChatInfoProps) {
+	const { t } = useTranslation("chats")
+	const narrow = useIsChatInfoNarrow()
+	const slot = useSidePanelSlot()
+	const chatUuid = props.chat.uuid
+	const open = useChatInfoOpen(chatUuid, narrow)
+
+	// The sheet survives neither a crossing of the breakpoint (it would reappear by itself the next time the window
+	// narrows) nor the thread leaving this conversation.
+	useEffect(() => {
+		const unsubscribe = subscribeToChatInfoBreakpoint(closeChatInfoDrawer)
+
+		return () => {
+			unsubscribe()
+
+			if (useChatInfoStore.getState().drawerChatUuid === chatUuid) {
+				closeChatInfoDrawer()
+			}
+		}
+	}, [chatUuid])
+
+	if (isChatUndecryptable(props.chat)) {
+		return null
+	}
+
+	if (narrow) {
+		return (
+			<SidePanelDrawer
+				open={open}
+				onOpenChange={setDrawerOpen}
+				label={t("chatInfoTitle")}
+				initialFocus={drawerInitialFocus}
+				className="w-80"
+			>
+				<ChatInfoSurface
+					key={chatUuid}
+					{...props}
+					className="w-full flex-1"
+					onClose={closeChatInfoDrawer}
+				/>
+			</SidePanelDrawer>
+		)
+	}
+
+	if (!open || slot === null) {
+		return null
+	}
+
+	return createPortal(
+		<ChatInfoSurface
+			key={chatUuid}
+			{...props}
+			ref={attachInlinePanel}
+			className="w-80 shrink-0 app-region-pane"
+			onKeyDown={handleInlineKeyDown}
+			onClose={closeInlinePanel}
+		/>,
+		slot
+	)
+}
+
+// The thread header's toggle; offered wherever the panel can open (not for an undecryptable conversation). Opening
+// it writes nothing, so it stays enabled offline; the writes inside are gated one by one.
+export function ChatInfoToggle({ chat }: { chat: Chat }) {
+	const { t } = useTranslation("chats")
+	const narrow = useIsChatInfoNarrow()
+	const open = useChatInfoOpen(chat.uuid, narrow)
+	const label = t(CHAT_ACTION_DEFS.participants.labelKey)
+
+	if (isChatUndecryptable(chat)) {
+		return null
+	}
+
+	return (
+		<Button
+			id={CHAT_INFO_TOGGLE_ID}
+			variant="ghost"
+			size="icon-sm"
+			aria-label={label}
+			aria-expanded={open}
+			aria-controls={open ? CHAT_INFO_PANEL_ID : undefined}
+			title={label}
+			onClick={() => {
+				if (!open) {
+					openChatInfo(chat.uuid)
+				} else if (isChatInfoNarrow()) {
+					closeChatInfoDrawer()
+				} else {
+					closeChatInfoPanel()
+				}
+			}}
+		>
+			<UsersIcon />
+		</Button>
+	)
+}

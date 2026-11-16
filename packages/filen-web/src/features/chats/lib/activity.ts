@@ -18,8 +18,6 @@ export const CHATS_DELETE = activityKeys("chats:chatsDelete")
 
 export const CHATS_LEAVE = activityKeys("chats:chatsLeave")
 
-export const CHAT_PARTICIPANTS_REMOVE = activityKeys("chats:chatParticipantsRemove")
-
 // A conversation by the title its row shows.
 export function chatActivityName(chat: Chat): string {
 	return chatTitle(chat, accountQueryGet()?.id, i18n.t("chats:chatUndecryptable"), i18n.t("chats:chatJustYou"))

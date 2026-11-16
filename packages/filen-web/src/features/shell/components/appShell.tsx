@@ -14,6 +14,7 @@ import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { setSidebarHidden, useSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { WindowBarSlotContext } from "@/features/shell/lib/windowBarSlot"
+import { SidePanelSlotContext } from "@/features/shell/lib/sidePanelSlot"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
@@ -93,6 +94,7 @@ export function AppShell() {
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
+	const [sidePanelSlot, setSidePanelSlot] = useState<HTMLDivElement | null>(null)
 
 	useDismissBootSplash()
 
@@ -201,34 +203,43 @@ export function AppShell() {
 			/>
 			<div className="relative flex min-h-0 flex-1 gap-2 overflow-hidden p-2 app-region-drag">
 				<WindowBarSlotContext value={windowBarSlot}>
-					<IconRail />
-					{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
+					<SidePanelSlotContext value={sidePanelSlot}>
+						<IconRail />
+						{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
 					    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
 					    gap and make the sidebar-to-main spacing wider than the row's padding. */}
-					{narrow ? null : (
-						<div
-							data-shell-pane="sidebar"
-							className={cn("relative flex shrink-0", sidebarHidden && "hidden")}
+						{narrow ? null : (
+							<div
+								data-shell-pane="sidebar"
+								className={cn("relative flex shrink-0", sidebarHidden && "hidden")}
+							>
+								{sidebar}
+							</div>
+						)}
+						<main
+							data-shell-pane="main"
+							className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane"
 						>
-							{sidebar}
-						</div>
-					)}
-					<main
-						data-shell-pane="main"
-						className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane"
-					>
-						<Outlet />
-					</main>
-					{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
+							<Outlet />
+						</main>
+						{/* A route's own side panel (the chat info panel) is portalled here, between the content card and the
+					    assistant. Out of the layout while empty, so it adds no gap and F6 skips it. */}
+						<div
+							ref={setSidePanelSlot}
+							data-shell-pane="details"
+							className="flex shrink-0 empty:hidden"
+						/>
+						{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
 					    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
-					{narrow || !assistantPanelOpen ? null : (
-						<div
-							data-shell-pane="assistant"
-							className="relative flex shrink-0"
-						>
-							<AssistantSidePanel />
-						</div>
-					)}
+						{narrow || !assistantPanelOpen ? null : (
+							<div
+								data-shell-pane="assistant"
+								className="relative flex shrink-0"
+							>
+								<AssistantSidePanel />
+							</div>
+						)}
+					</SidePanelSlotContext>
 				</WindowBarSlotContext>
 				{/* Zero height, so it builds no drag region of its own and blocks nothing: a bar portalled in grows
 				    upwards from it (useWindowBarSlot). */}

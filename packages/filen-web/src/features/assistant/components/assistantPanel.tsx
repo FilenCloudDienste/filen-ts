@@ -1,8 +1,7 @@
 import { useSyncExternalStore, type CSSProperties, type Ref } from "react"
 import { useTranslation } from "react-i18next"
-import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
 import { cn } from "@filen/shared"
-import { SCRIM_CLASS } from "@/components/ui/surface"
+import { SIDE_PANEL_SURFACE_CLASS, SidePanelDrawer } from "@/components/sidePanel"
 import { toastSideObstructionRef } from "@/lib/toastClearance"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
@@ -22,11 +21,8 @@ import {
 	moveFocusOutOfAssistant
 } from "@/features/assistant/components/assistantFocus"
 
-// The same floating surface as the left sidebars (rounded-xl, --shell-border outline, bg-sidebar). An
-// <aside> labelled by its heading: a complementary landmark, deliberately NOT a dialog, because an open
-// role="dialog" makes isAnyDialogOpen (lib/keymap/dialogGuard.ts) stand down every shortcut in the app.
-// tabIndex -1 makes the panel itself the focus fallback when it holds no focusable control yet.
-const SURFACE_CLASS = "flex min-h-0 flex-col overflow-hidden rounded-xl border border-shell-border bg-sidebar outline-none"
+// The shared side-panel surface (sidePanel.tsx). tabIndex -1 makes the panel itself the focus fallback when it holds
+// no focusable control yet.
 
 function AssistantSurface({
 	className,
@@ -48,7 +44,7 @@ function AssistantSurface({
 			ref={ref}
 			tabIndex={-1}
 			aria-labelledby={ASSISTANT_TITLE_ID}
-			className={cn(SURFACE_CLASS, className)}
+			className={cn(SIDE_PANEL_SURFACE_CLASS, className)}
 			style={style}
 		>
 			<AssistantHeader onClose={onClose} />
@@ -150,15 +146,10 @@ function drawerInitialFocus(): HTMLElement | true {
 	return assistantInitialFocusTarget() ?? true
 }
 
-// Below the layout breakpoint the panel is a drawer from the right, mirroring the module sidebar's drawer
-// (sidebarDrawer.tsx): Base UI carries the focus trap, scroll lock, Escape/outside-press dismissal and
-// swipe-to-dismiss, and the shell closes it on every navigation and breakpoint crossing (appShell.tsx).
-// Unlike that drawer it mounts only while open: the conversation lives in the store, and a hidden
-// virtualizer would measure every row at zero. The modal drawer IS a dialog, so shortcuts stand down while
-// it covers the page, as they do for the module drawer. The root wraps nothing but its own portal, for the
-// same nesting reason as sidebarDrawer.tsx, and exists only below the breakpoint: widening closes the
-// drawer in the render that drops its portal, and a root outliving it waits forever for that exit animation,
-// so the closed drawer would come back stuck on screen once the window narrows again.
+// Below the layout breakpoint the panel is the shared side-panel drawer (sidePanel.tsx), which the shell closes on
+// every navigation and breakpoint crossing (appShell.tsx). It mounts only while open: the conversation lives in the
+// store, and a hidden virtualizer would measure every row at zero. It exists only below the breakpoint, where
+// widening closes the drawer in the render that drops its portal.
 export function AssistantDrawer({ open, narrow }: { open: boolean; narrow: boolean }) {
 	const { t } = useTranslation("assistant")
 
@@ -167,30 +158,20 @@ export function AssistantDrawer({ open, narrow }: { open: boolean; narrow: boole
 	}
 
 	return (
-		<DrawerPrimitive.Root
+		<SidePanelDrawer
 			open={open}
-			swipeDirection="right"
 			onOpenChange={setDrawerOpen}
+			label={t("assistantTitle")}
+			initialFocus={drawerInitialFocus}
+			className="w-[26rem]"
 		>
-			<DrawerPrimitive.Portal>
-				<DrawerPrimitive.Backdrop className={SCRIM_CLASS} />
-				{/* Desktop: the right-docked panel starts below the Windows/Linux window-controls band. */}
-				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex justify-end pt-(--window-inset-top) app-region-no-drag">
-					<DrawerPrimitive.Popup
-						aria-label={t("assistantTitle")}
-						initialFocus={drawerInitialFocus}
-						className="m-2 flex w-[26rem] max-w-[calc(100vw-1rem)] duration-100 outline-none data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right"
-					>
-						<SidebarPanelVisibilityProvider visible={open}>
-							<AssistantSurface
-								ref={attachDrawerPanel}
-								className="w-full flex-1"
-								onClose={closeDrawer}
-							/>
-						</SidebarPanelVisibilityProvider>
-					</DrawerPrimitive.Popup>
-				</DrawerPrimitive.Viewport>
-			</DrawerPrimitive.Portal>
-		</DrawerPrimitive.Root>
+			<SidebarPanelVisibilityProvider visible={open}>
+				<AssistantSurface
+					ref={attachDrawerPanel}
+					className="w-full flex-1"
+					onClose={closeDrawer}
+				/>
+			</SidebarPanelVisibilityProvider>
+		</SidePanelDrawer>
 	)
 }

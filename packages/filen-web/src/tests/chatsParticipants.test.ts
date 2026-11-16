@@ -18,8 +18,13 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
-import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
-import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
+import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
+import {
+	chatInfoChatActions,
+	chatInfoParticipantRows,
+	participantRowActions,
+	type ChatInfoParticipantRow
+} from "@/features/chats/components/chatInfoPanel.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
@@ -143,52 +148,58 @@ describe("removeChatParticipant", () => {
 	})
 })
 
-describe("chatParticipantRows — self-exclusion, ordering, and owner/participant view gating", () => {
+describe("chatInfoParticipantRows — ordering, self row and owner/participant view gating", () => {
 	const owner = mockParticipant({ userId: 1n })
 	const participantA = mockParticipant({ userId: 2n })
 	const participantB = mockParticipant({ userId: 3n })
 	const chat = mockChat({ ownerId: 1n, participants: [participantA, owner, participantB] })
 
-	it("excludes the viewer's own row entirely (self-management stays the menu's own Leave dialog)", () => {
-		expect(chatParticipantRows(chat, 2n, false).map(r => r.participant.userId)).toEqual([1n, 3n])
+	it("lists the viewer's own row first, then the owner's, then the rest in chat order", () => {
+		expect(chatInfoParticipantRows(chat, 3n).map(r => r.participant.userId)).toEqual([3n, 1n, 2n])
+		expect(chatInfoParticipantRows(chat, 1n).map(r => r.participant.userId)).toEqual([1n, 2n, 3n])
 	})
 
-	it("a chat with no OTHER participants (the solo-owner case) returns an empty list, not a self-row", () => {
-		expect(chatParticipantRows(mockChat({ ownerId: 1n, participants: [owner] }), 1n, true)).toEqual([])
+	it("marks only the viewer's own row isSelf", () => {
+		const rows = chatInfoParticipantRows(chat, 2n)
+
+		expect(rows.filter(r => r.isSelf).map(r => r.participant.userId)).toEqual([2n])
 	})
 
-	it("sorts the owner's row first among what remains", () => {
-		expect(chatParticipantRows(chat, 3n, false).map(r => r.participant.userId)).toEqual([1n, 2n])
+	it("a solo chat lists just the viewer", () => {
+		expect(chatInfoParticipantRows(mockChat({ ownerId: 1n, participants: [owner] }), 1n)).toMatchObject([
+			{ isSelf: true, isOwner: true }
+		])
 	})
 
 	it("marks the owner's row via isOwner (chat.ownerId, not a per-participant flag)", () => {
-		const rows = chatParticipantRows(chat, 3n, false)
+		const rows = chatInfoParticipantRows(chat, 3n)
 
 		expect(rows.find(r => r.participant.userId === 1n)?.isOwner).toBe(true)
 		expect(rows.find(r => r.participant.userId === 2n)?.isOwner).toBe(false)
 	})
 
-	it("owner viewer: canManage is true on every remaining (non-owner) row", () => {
-		const rows = chatParticipantRows(chat, 1n, true)
+	it("owner viewer: canRemove on every other row, never on their own", () => {
+		const rows = chatInfoParticipantRows(chat, 1n)
 
-		expect(rows.map(r => r.participant.userId)).toEqual([2n, 3n])
-		expect(rows.every(r => r.canManage)).toBe(true)
+		expect(rows.map(r => [r.participant.userId, r.canRemove])).toEqual([
+			[1n, false],
+			[2n, true],
+			[3n, true]
+		])
 	})
 
-	it("participant viewer: canManage is false on every row, including the owner's", () => {
-		const rows = chatParticipantRows(chat, 2n, false)
-
-		expect(rows.every(r => !r.canManage)).toBe(true)
+	it("participant viewer: canRemove on no row, including the owner's", () => {
+		expect(chatInfoParticipantRows(chat, 2n).every(r => !r.canRemove)).toBe(true)
 	})
 
-	it("the owner's row never gets canManage even when it survives another owner-viewer's self-filter", () => {
-		const rows = chatParticipantRows(chat, 3n, false)
+	it("an unresolved viewer (account not loaded) gets no self row and no management", () => {
+		const rows = chatInfoParticipantRows(chat, undefined)
 
-		expect(rows.find(r => r.participant.userId === 1n)?.canManage).toBe(false)
+		expect(rows.some(r => r.isSelf || r.canRemove)).toBe(false)
 	})
 })
 
-describe("chatParticipantRows blocked flag", () => {
+describe("chatInfoParticipantRows blocked flag", () => {
 	const owner = mockParticipant({ userId: 1n, email: "owner@x.io" })
 	const participantA = mockParticipant({ userId: 2n, email: "a@x.io" })
 	const participantB = mockParticipant({ userId: 3n, email: "b@x.io" })
@@ -196,7 +207,7 @@ describe("chatParticipantRows blocked flag", () => {
 
 	it("marks a participant blocked by userId, leaving the others unblocked", () => {
 		const blocked = deriveBlockedUsers([{ userId: 3n, email: "unlisted@x.io" }])
-		const rows = chatParticipantRows(chat, 1n, true, blocked)
+		const rows = chatInfoParticipantRows(chat, 1n, blocked)
 
 		expect(rows.find(r => r.participant.userId === 3n)?.blocked).toBe(true)
 		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(false)
@@ -204,148 +215,79 @@ describe("chatParticipantRows blocked flag", () => {
 
 	it("marks a participant blocked by email alone, case- and whitespace-insensitively", () => {
 		const blocked = deriveBlockedUsers([{ userId: 99n, email: " A@X.IO " }])
-		const rows = chatParticipantRows(chat, 1n, true, blocked)
+		const rows = chatInfoParticipantRows(chat, 1n, blocked)
 
 		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(true)
 	})
 
 	it("defaults every row to unblocked when the blocked argument is omitted", () => {
-		expect(chatParticipantRows(chat, 1n, true).every(r => !r.blocked)).toBe(true)
+		expect(chatInfoParticipantRows(chat, 1n).every(r => !r.blocked)).toBe(true)
 	})
 
-	// The whole point of the per-row toggle: a non-owner viewer still sees live block state.
-	it("is independent of canManage — a non-owner viewer's rows still carry it", () => {
-		const blocked = deriveBlockedUsers([{ userId: 3n, email: "b@x.io" }])
-		const rows = chatParticipantRows(chat, 2n, false, blocked)
-
-		expect(rows.every(r => !r.canManage)).toBe(true)
-		expect(rows.find(r => r.participant.userId === 3n)?.blocked).toBe(true)
-	})
-
-	it("carries a correct flag on the owner's own (never manageable) row", () => {
+	it("is independent of ownership: a non-owner viewer's rows still carry it, the owner's included", () => {
 		const blocked = deriveBlockedUsers([{ userId: 1n, email: "owner@x.io" }])
-		const rows = chatParticipantRows(chat, 2n, false, blocked)
+		const rows = chatInfoParticipantRows(chat, 2n, blocked)
 
-		expect(rows.find(r => r.participant.userId === 1n)).toMatchObject({ isOwner: true, canManage: false, blocked: true })
+		expect(rows.find(r => r.participant.userId === 1n)).toMatchObject({ isOwner: true, canRemove: false, blocked: true })
+	})
+
+	it("never marks the viewer's own row blocked", () => {
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "a@x.io" }])
+
+		expect(chatInfoParticipantRows(chat, 2n, blocked).find(r => r.isSelf)?.blocked).toBe(false)
 	})
 })
 
-describe("removeChatParticipants — sequential bulk remove", () => {
-	it("removes every targeted participant, threading each call's returned chat into the next", async () => {
-		const participantA = mockParticipant({ userId: 5n })
-		const participantB = mockParticipant({ userId: 6n })
-		const chat = mockChat({ participants: [participantA, participantB] })
-		const afterA = mockChat({ participants: [participantB] })
-		const afterB = mockChat({ participants: [] })
+function rowWhere(rows: readonly ChatInfoParticipantRow[], predicate: (row: ChatInfoParticipantRow) => boolean): ChatInfoParticipantRow {
+	const row = rows.find(predicate)
 
-		removeChatParticipantOp.mockResolvedValueOnce(afterA)
-		removeChatParticipantOp.mockResolvedValueOnce(afterB)
+	if (row === undefined) {
+		throw new Error("no such row")
+	}
 
-		const { chat: finalChat, outcome } = await removeChatParticipants(chat, [participantA, participantB])
+	return row
+}
 
-		// Call 1: the ORIGINAL chat. Call 2: call 1's OWN result, not the original — the same
-		// stale-snapshot hazard addChatParticipants' own sequential threading guards against.
-		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(1, chat, 5n)
-		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, afterA, 6n)
-		expect(finalChat).toEqual(afterB)
-		expect(outcome.succeeded).toEqual([participantA, participantB])
-		expect(outcome.failed).toHaveLength(0)
-		expect(chatsQueryGet()).toEqual([afterB])
+describe("participantRowActions", () => {
+	const owner = mockParticipant({ userId: 1n, email: "owner@x.io" })
+	const participantA = mockParticipant({ userId: 2n, email: "a@x.io" })
+	const chat = mockChat({ ownerId: 1n, participants: [owner, participantA] })
+
+	it("offers nothing on the viewer's own row", () => {
+		expect(participantRowActions(rowWhere(chatInfoParticipantRows(chat, 1n), r => r.isSelf))).toEqual([])
 	})
 
-	it("a rejected removal lands in `failed`, later removals still proceed against the last successful chat", async () => {
-		const participantA = mockParticipant({ userId: 5n })
-		const participantB = mockParticipant({ userId: 6n })
-		const chat = mockChat({ participants: [participantA, participantB] })
-		const afterB = mockChat({ participants: [participantA] })
+	it("owner viewer: remove, then block", () => {
+		expect(participantRowActions(rowWhere(chatInfoParticipantRows(chat, 1n), r => !r.isSelf))).toEqual(["remove", "block"])
+	})
 
-		removeChatParticipantOp.mockRejectedValueOnce(new Error("network"))
-		removeChatParticipantOp.mockResolvedValueOnce(afterB)
+	it("participant viewer: block only, unblock once blocked", () => {
+		expect(participantRowActions(rowWhere(chatInfoParticipantRows(chat, 2n), r => r.isOwner))).toEqual(["block"])
 
-		const { chat: finalChat, outcome } = await removeChatParticipants(chat, [participantA, participantB])
+		const blocked = deriveBlockedUsers([{ userId: 1n, email: "owner@x.io" }])
 
-		expect(outcome.succeeded).toEqual([participantB])
-		expect(outcome.failed).toHaveLength(1)
-		expect(outcome.failed[0]?.item).toBe(participantA)
-		// The failed removal's attempt used the ORIGINAL chat; the next (successful) one still ran
-		// against it too since the failed call never advanced `current`.
-		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, chat, 6n)
-		expect(finalChat).toEqual(afterB)
+		expect(participantRowActions(rowWhere(chatInfoParticipantRows(chat, 2n, blocked), r => r.isOwner))).toEqual(["unblock"])
 	})
 })
 
-describe("removeChatParticipants — progress and concurrent changes", () => {
-	it("reports each participant as it settles", async () => {
-		const participantA = mockParticipant({ userId: 5n })
-		const participantB = mockParticipant({ userId: 6n })
-		const chat = mockChat({ participants: [participantA, participantB] })
-		const onSettled = vi.fn()
+describe("chatInfoChatActions", () => {
+	const chat = mockChat({ ownerId: 1n, participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n })] })
 
-		removeChatParticipantOp.mockRejectedValueOnce(new Error("network"))
-		removeChatParticipantOp.mockResolvedValueOnce(mockChat({ participants: [participantA] }))
+	it("owner: rename, mute and Delete", () => {
+		const actions = chatInfoChatActions(chat, 1n, true)
 
-		await removeChatParticipants(chat, [participantA, participantB], onSettled)
-
-		expect(onSettled.mock.calls).toEqual([
-			[1, 2],
-			[2, 2]
-		])
+		expect([actions.rename?.id, actions.mute?.id, actions.end?.id]).toEqual(["rename", "mute", "delete"])
 	})
 
-	it("starts each step from the cached chat, so a change landing between steps is not undone", async () => {
-		const participantA = mockParticipant({ userId: 5n })
-		const participantB = mockParticipant({ userId: 6n })
-		const participantC = mockParticipant({ userId: 7n })
-		const chat = mockChat({ participants: [participantA, participantB, participantC] })
-		const afterA = mockChat({ participants: [participantB, participantC] })
-		// C left (a single remove, a socket event) once A's removal had landed.
-		const withoutC = mockChat({ participants: [participantB] })
+	it("participant: no rename, mute and Leave", () => {
+		const actions = chatInfoChatActions(chat, 2n, true)
 
-		removeChatParticipantOp.mockResolvedValueOnce(afterA)
-		removeChatParticipantOp.mockResolvedValueOnce(mockChat({ participants: [] }))
-
-		await removeChatParticipants(chat, [participantA, participantB], settled => {
-			if (settled === 1) {
-				testQueryClient.setQueryData(CHATS_QUERY_KEY, [withoutC])
-			}
-		})
-
-		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, withoutC, 6n)
-	})
-})
-
-describe("selectedParticipantsForRemoval", () => {
-	const owner = mockParticipant({ userId: 1n })
-	const participantA = mockParticipant({ userId: 2n })
-	const participantB = mockParticipant({ userId: 3n })
-	const chat = mockChat({ ownerId: 1n, participants: [participantA, owner, participantB] })
-
-	it("resolves selected userId strings back to the concrete ChatParticipant records, owner view", () => {
-		const rows = chatParticipantRows(chat, 1n, true)
-		const selected = new Set([participantA.userId.toString(), participantB.userId.toString()])
-
-		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([participantA, participantB])
+		expect([actions.rename?.id, actions.mute?.id, actions.end?.id]).toEqual([undefined, "mute", "leave"])
 	})
 
-	it("drops a selected id whose row is not manageable (defense-in-depth against a stale selection)", () => {
-		// A non-owner viewer's rows all have canManage: false — nothing should resolve even if the Set
-		// somehow carries a userId that matches a row.
-		const rows = chatParticipantRows(chat, 2n, false)
-		const selected = new Set([owner.userId.toString(), participantB.userId.toString()])
+	it("disables every write offline, as the chat menu does", () => {
+		const actions = chatInfoChatActions(chat, 1n, false)
 
-		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([])
-	})
-
-	it("ignores a selected id that matches nothing in `rows`", () => {
-		const rows = chatParticipantRows(chat, 1n, true)
-		const selected = new Set(["9999"])
-
-		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([])
-	})
-
-	it("returns an empty array for an empty selection", () => {
-		const rows = chatParticipantRows(chat, 1n, true)
-
-		expect(selectedParticipantsForRemoval(rows, new Set())).toEqual([])
+		expect([actions.rename?.enabled, actions.mute?.enabled, actions.end?.enabled]).toEqual([false, false, false])
 	})
 })

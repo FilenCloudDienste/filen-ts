@@ -22,7 +22,8 @@ export interface ChatMenuContentProps {
 	// feature works off one blocked set rather than a per-menu observer.
 	blocked: BlockedUsers
 	// Fires for every "dialog"-run descriptor (rename/delete/leave/participants) — the mounting
-	// surface's own dialog host (useChatDialogHost) turns this into an open dialog. Every "direct"
+	// surface's own dialog host (useChatDialogHost) turns this into an open dialog (participants: the
+	// chat info panel). Every "direct"
 	// descriptor (markRead/mute-toggle) runs in place below as an activity toast.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 }

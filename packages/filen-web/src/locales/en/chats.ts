@@ -146,7 +146,7 @@ export const chats = {
 	chatActionMute: "Mute",
 	/** Conversation menu — unmutes an already-muted conversation */
 	chatActionUnmute: "Unmute",
-	/** Conversation menu — opens the participants dialog */
+	/** Conversation menu — opens the chat info panel (also the thread header's toggle) */
 	chatActionParticipants: "Participants",
 	/** Conversation menu — renames the conversation (opens chatRenameDialog, owner-only) */
 	chatActionRename: "Rename",
@@ -238,25 +238,19 @@ export const chats = {
 	/** Bulk leave confirm — body copy (plural) */
 	chatsLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} conversations? You will lose access to them.",
 
-	// ── Participants dialog ──────────────────────────────────────────────────────
-	/** Participants dialog — inline marker appended to a blocked participant's email */
+	// ── Chat info panel ──────────────────────────────────────────────────────────
+	/** Chat info panel — heading, and the accessible name of its sheet on narrow screens */
+	chatInfoTitle: "Chat info",
+	/** Chat info panel — label on the mute switch */
+	chatInfoMute: "Mute notifications",
+	/** Chat info panel — accessible label on a participant row's ⋯ menu (Remove/Block/Unblock); {{name}} = the participant */
+	chatInfoParticipantMenu: "Actions for {{name}}",
+	/** Chat info panel — inline marker after a blocked participant's name */
 	chatParticipantBlockedMarker: "Blocked",
-	/** Participants dialog — shown when the conversation has no other participants */
-	chatParticipantsEmpty: "No other participants",
 	/** Remove-participant confirm — body copy */
 	chatParticipantRemoveDialogBody: "{{email}} will lose access to this conversation.",
-	/** Add-participants dialog — body copy */
+	/** Chat info panel — add-participants view, body copy */
 	chatParticipantsAddDialogBody: "Choose one or more contacts to add to this conversation.",
-	/** Participants dialog — owner-only bulk-remove footer button (list mode, 1+ rows selected) */
-	chatParticipantsRemoveSelectedAction_one: "Remove {{count}} participant",
-	/** Participants dialog — owner-only bulk-remove footer button (plural) */
-	chatParticipantsRemoveSelectedAction_other: "Remove {{count}} participants",
-	/** Bulk remove-participants confirm — heading */
-	chatParticipantRemoveSelectedDialogTitle: "Remove participants?",
-	/** Bulk remove-participants confirm — body copy */
-	chatParticipantRemoveSelectedDialogBody_one: "{{count}} participant will lose access to this conversation.",
-	/** Bulk remove-participants confirm — body copy (plural) */
-	chatParticipantRemoveSelectedDialogBody_other: "{{count}} participants will lose access to this conversation.",
 
 	// ── Message menu ─────────────────────────────────────────────────────────────
 	/** Hover action bar — accessible label on the floating per-message toolbar */
@@ -402,21 +396,5 @@ export const chats = {
 	/** Activity toast — leaving conversations partly failed; {{count}} succeeded, {{failed}} failed */
 	chatsLeavePartial_one: "Left {{count}} conversation, {{failed}} failed",
 	/** Activity toast — leaving conversations partly failed; {{count}} succeeded, {{failed}} failed */
-	chatsLeavePartial_other: "Left {{count}} conversations, {{failed}} failed",
-	/** Activity toast — removing participants from a conversation running; one item named ({{name}}) */
-	chatParticipantsRemoveRunning_one: "Removing {{name}}",
-	/** Activity toast — removing participants from a conversation running; {{count}} items */
-	chatParticipantsRemoveRunning_other: "Removing {{count}} participants",
-	/** Activity toast — removing participants from a conversation finished; one item named ({{name}}) */
-	chatParticipantsRemoveDone_one: "Removed {{name}}",
-	/** Activity toast — removing participants from a conversation finished; {{count}} items */
-	chatParticipantsRemoveDone_other: "Removed {{count}} participants",
-	/** Activity toast — removing participants from a conversation failed for every item; one item named ({{name}}) */
-	chatParticipantsRemoveFailed_one: "Couldn't remove {{name}}",
-	/** Activity toast — removing participants from a conversation failed for every item; {{count}} items */
-	chatParticipantsRemoveFailed_other: "Couldn't remove {{count}} participants",
-	/** Activity toast — removing participants from a conversation partly failed; {{count}} succeeded, {{failed}} failed */
-	chatParticipantsRemovePartial_one: "Removed {{count}} participant, {{failed}} failed",
-	/** Activity toast — removing participants from a conversation partly failed; {{count}} succeeded, {{failed}} failed */
-	chatParticipantsRemovePartial_other: "Removed {{count}} participants, {{failed}} failed"
+	chatsLeavePartial_other: "Left {{count}} conversations, {{failed}} failed"
 } as const
