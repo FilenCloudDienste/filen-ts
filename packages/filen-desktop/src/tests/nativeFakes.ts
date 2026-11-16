@@ -254,6 +254,7 @@ export function report(overrides: Partial<SyncPassReport> = {}): SyncPassReport 
 		heldDeletions: 0n,
 		unsyncable: [],
 		unsyncableTotal: 0n,
+		unsyncableLocalAliasTotal: 0n,
 		ignored: [],
 		ignoredTotal: 0n,
 		deferredPaths: 0n,
