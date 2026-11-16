@@ -97,47 +97,53 @@ test.describe("public links (unauthenticated)", () => {
 	})
 
 	// The challenge script and the report endpoint are both stubbed: no real report is ever sent. The stub
-	// still crosses the page's CSP and cross-origin isolation, as Cloudflare's script does.
-	test("sends an abuse report through the footer's dialog", async ({ page }) => {
-		const reports: unknown[] = []
+	// still crosses the page's CSP and cross-origin isolation, as Cloudflare's script does. WebKit routes
+	// none of a service-worker-controlled page's requests, and the worker claims the page once it boots, so
+	// the stubs would miss there and the real script and endpoint would be reached. Blocked for this test only.
+	test.describe("abuse report", () => {
+		test.use({ serviceWorkers: "block" })
 
-		await page.route(TURNSTILE_SCRIPT, route =>
-			route.fulfill({
-				contentType: "text/javascript",
-				headers: { "Cross-Origin-Resource-Policy": "cross-origin", "Access-Control-Allow-Origin": "*" },
-				body: `window.turnstile = { render: (el, o) => { setTimeout(() => o.callback("e2e-token"), 0); return "w" }, reset() {}, remove() {} }`
-			})
-		)
-		await page.route(REPORT_ENDPOINT, route => {
-			reports.push(route.request().postDataJSON())
+		test("sends an abuse report through the footer's dialog", async ({ page }) => {
+			const reports: unknown[] = []
 
-			return route.fulfill({
-				status: 200,
-				contentType: "application/json",
-				headers: { "Access-Control-Allow-Origin": "*" },
-				body: JSON.stringify({ success: true })
+			await page.route(TURNSTILE_SCRIPT, route =>
+				route.fulfill({
+					contentType: "text/javascript",
+					headers: { "Cross-Origin-Resource-Policy": "cross-origin", "Access-Control-Allow-Origin": "*" },
+					body: `window.turnstile = { render: (el, o) => { setTimeout(() => o.callback("e2e-token"), 0); return "w" }, reset() {}, remove() {} }`
+				})
+			)
+			await page.route(REPORT_ENDPOINT, route => {
+				reports.push(route.request().postDataJSON())
+
+				return route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					headers: { "Access-Control-Allow-Origin": "*" },
+					body: JSON.stringify({ success: true })
+				})
 			})
+			await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
+			await page.getByRole("button", { name: "Report abuse" }).click()
+
+			const dialog = page.getByRole("dialog", { name: "Report abuse" })
+			const send = dialog.getByRole("button", { name: "Send" })
+
+			await expect(dialog).toBeVisible()
+			await expect(send).toBeDisabled()
+
+			await dialog.getByRole("radio", { name: "Malware" }).click()
+			await dialog.getByLabel("Your email").fill("visitor@example.com")
+			await dialog.getByLabel("Details (optional)").fill("e2e")
+			await expect(send).toBeEnabled()
+			await send.click()
+
+			await expect(dialog).toBeHidden()
+			await expect(page.getByText("Report sent. Thank you.")).toBeVisible()
+			expect(reports).toEqual([
+				{ turnstileToken: "e2e-token", email: "visitor@example.com", reason: "malware", link: page.url(), comment: "e2e" }
+			])
 		})
-		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
-		await page.getByRole("button", { name: "Report abuse" }).click()
-
-		const dialog = page.getByRole("dialog", { name: "Report abuse" })
-		const send = dialog.getByRole("button", { name: "Send" })
-
-		await expect(dialog).toBeVisible()
-		await expect(send).toBeDisabled()
-
-		await dialog.getByRole("radio", { name: "Malware" }).click()
-		await dialog.getByLabel("Your email").fill("visitor@example.com")
-		await dialog.getByLabel("Details (optional)").fill("e2e")
-		await expect(send).toBeEnabled()
-		await send.click()
-
-		await expect(dialog).toBeHidden()
-		await expect(page.getByText("Report sent. Thank you.")).toBeVisible()
-		expect(reports).toEqual([
-			{ turnstileToken: "e2e-token", email: "visitor@example.com", reason: "malware", link: page.url(), comment: "e2e" }
-		])
 	})
 
 	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {
