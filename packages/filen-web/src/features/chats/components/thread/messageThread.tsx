@@ -93,9 +93,7 @@ function TimeHeader({ timestamp }: { timestamp: bigint }) {
 	return (
 		<div className="flex items-center gap-2 px-4 pt-3 pb-1">
 			<span className="h-px flex-1 bg-border" />
-			<span className="min-w-0 truncate text-xs leading-4 font-medium text-muted-foreground">
-				{dayTimeLabel(t, timestamp, false)}
-			</span>
+			<span className="min-w-0 truncate text-xs leading-4 font-medium text-muted-foreground">{dayTimeLabel(t, timestamp)}</span>
 			<span className="h-px flex-1 bg-border" />
 		</div>
 	)
@@ -149,6 +147,7 @@ function ThreadRowContent({
 	row,
 	chat,
 	currentUserId,
+	ownAvatarUrl,
 	blocked,
 	active,
 	actionsRef
@@ -156,6 +155,7 @@ function ThreadRowContent({
 	row: ThreadRow
 	chat: Chat
 	currentUserId: bigint | undefined
+	ownAvatarUrl: string | undefined
 	blocked: BlockedUsers
 	active: boolean
 	actionsRef: RefObject<MessageActionsHandle | null> | null
@@ -174,6 +174,7 @@ function ThreadRowContent({
 			message={row.message}
 			runStart={row.runStart}
 			currentUserId={currentUserId}
+			ownAvatarUrl={ownAvatarUrl}
 			blocked={blocked}
 			active={active}
 			actionsRef={actionsRef}
@@ -241,6 +242,7 @@ interface ThreadListProps {
 	isPending: boolean
 	isError: boolean
 	currentUserId: bigint | undefined
+	ownAvatarUrl: string | undefined
 	blocked: BlockedUsers
 }
 
@@ -265,6 +267,7 @@ function ThreadList({
 	isPending,
 	isError,
 	currentUserId,
+	ownAvatarUrl,
 	blocked
 }: ThreadListProps) {
 	const { t } = useTranslation("chats")
@@ -808,6 +811,7 @@ function ThreadList({
 										row={row}
 										chat={chat}
 										currentUserId={currentUserId}
+										ownAvatarUrl={ownAvatarUrl}
 										blocked={blocked}
 										active={row.key === activeKey}
 										actionsRef={row.key === activeKey ? activeActionsRef : null}
@@ -1008,6 +1012,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				isPending={messagesQuery.isPending}
 				isError={messagesQuery.isError}
 				currentUserId={currentUserId}
+				ownAvatarUrl={accountQuery.data?.avatarUrl}
 				blocked={blocked}
 			/>
 			<Composer

@@ -34,8 +34,3 @@ export function formatClockTime(timestamp: bigint): string {
 export function formatFullDate(timestamp: bigint): string {
 	return new Date(Number(timestamp)).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
 }
-
-// Numeric localized date, used for a run's header time that is neither today nor yesterday.
-export function formatShortDate(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleDateString(undefined, { year: "numeric", month: "numeric", day: "numeric" })
-}

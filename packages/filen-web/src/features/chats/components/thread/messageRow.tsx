@@ -77,6 +77,8 @@ export interface MessageRowProps {
 	// The run's oldest row (thread.logic.ts): it opens with the avatar, the sender's name and the time.
 	runStart: boolean
 	currentUserId: bigint | undefined
+	// The signed-in account's avatar, for own runs.
+	ownAvatarUrl: string | undefined
 	// From the thread's single enabled read (messageThread.tsx).
 	blocked: BlockedUsers
 	// The thread's roving message: its focus target is the thread's one Tab stop among the messages.
@@ -94,7 +96,7 @@ export interface MessageRowProps {
 // from the cache), so the special body states here are undecryptable (message === undefined → placeholder)
 // and a blocked sender's tap-to-reveal tombstone. The row carries its own right-click menu; the delete
 // confirm dialog is owned HERE (not the menu content) so it survives past the menu's own close.
-export function MessageRow({ chat, message, runStart, currentUserId, blocked, active, actionsRef }: MessageRowProps) {
+export function MessageRow({ chat, message, runStart, currentUserId, ownAvatarUrl, blocked, active, actionsRef }: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
 	const own = isOwnMessage(message, currentUserId)
@@ -161,6 +163,7 @@ export function MessageRow({ chat, message, runStart, currentUserId, blocked, ac
 
 	// The run gap sits outside the highlighted row, so hover and tint cover the message only.
 	const gapClassName = runStart ? "pt-3" : undefined
+	const sentLabel = runStart ? dayTimeLabel(t, message.sentTimestamp) : undefined
 
 	// Placed after every hook above (including the two useStates) — an earlier return would change hook
 	// order the moment "Show" flips this to false on a mounted row. Replaces the whole ContextMenu subtree:
@@ -169,7 +172,7 @@ export function MessageRow({ chat, message, runStart, currentUserId, blocked, ac
 	if (showTombstone) {
 		return (
 			<div className={gapClassName}>
-				<div className="flex gap-4 px-4 py-0.5">
+				<div className="flex gap-4 px-4 py-px">
 					<div className="w-10 shrink-0" />
 					<button
 						type="button"
@@ -204,7 +207,7 @@ export function MessageRow({ chat, message, runStart, currentUserId, blocked, ac
 								data-message-focus=""
 								tabIndex={active ? 0 : -1}
 								className={cn(
-									"group relative px-4 py-0.5 focus-ring-row outline-none focus-visible:ring-inset",
+									"group relative px-4 py-px focus-ring-row outline-none focus-visible:ring-inset",
 									failed
 										? "bg-destructive/6 hover:bg-destructive/10"
 										: own
@@ -225,7 +228,9 @@ export function MessageRow({ chat, message, runStart, currentUserId, blocked, ac
 									<div className="w-10 shrink-0">
 										{runStart ? (
 											<UserAvatar
-												src={safeAvatarUrl(message.senderAvatar)}
+												// Own runs show the account's current picture: a message's sender avatar is a
+												// snapshot from when it was sent.
+												src={safeAvatarUrl(own ? ownAvatarUrl : message.senderAvatar)}
 												name={name}
 												size="lg"
 											/>
@@ -242,9 +247,16 @@ export function MessageRow({ chat, message, runStart, currentUserId, blocked, ac
 												<span className="min-w-0 truncate text-sm leading-5 font-medium">
 													{own ? t("chatSenderYou") : name}
 												</span>
-												<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-													{dayTimeLabel(t, message.sentTimestamp, true)}
-												</span>
+												{/* Every day opens with a divider naming it (thread.logic.ts), so the run's line
+												    shows the clock only; the full date is its hover title and spoken label. */}
+												<time
+													dateTime={new Date(Number(message.sentTimestamp)).toISOString()}
+													title={sentLabel}
+													className="shrink-0 text-xs text-muted-foreground tabular-nums"
+												>
+													<span aria-hidden="true">{formatClockTime(message.sentTimestamp)}</span>
+													<span className="sr-only">{sentLabel}</span>
+												</time>
 											</div>
 										) : null}
 										<div className={cn("min-w-0 text-sm leading-5 select-text", sending && "opacity-60")}>

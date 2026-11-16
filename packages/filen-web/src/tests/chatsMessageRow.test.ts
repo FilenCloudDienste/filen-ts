@@ -59,6 +59,7 @@ function renderRow(overrides: { runStart?: boolean; currentUserId?: bigint } = {
 			message,
 			runStart: overrides.runStart ?? true,
 			currentUserId: overrides.currentUserId ?? 1n,
+			ownAvatarUrl: undefined,
 			blocked: deriveBlockedUsers([]),
 			active: false,
 			actionsRef: null
@@ -167,6 +168,17 @@ describe("MessageRow layout", () => {
 		renderRow()
 		expect(screen.getByText("You")).toBeTruthy()
 		expect(screen.queryByText("a@example.com")).toBeNull()
+	})
+
+	it("shows only the clock on a run's first line, the day divider above naming the day", () => {
+		renderRow()
+
+		const time = screen.getByText(formatClockTime(message.sentTimestamp)).closest("time")
+		const full = time?.getAttribute("title") ?? ""
+
+		expect(full).toContain(formatClockTime(message.sentTimestamp))
+		expect(full.length).toBeGreaterThan(formatClockTime(message.sentTimestamp).length)
+		expect(screen.getByText(full).className).toContain("sr-only")
 	})
 
 	it("draws no bubble", () => {

@@ -37,14 +37,14 @@ export type ThreadRow =
 // total size (a size change mid-scroll cancels Chromium's animated keyboard scroll).
 export const TIME_ROW_ESTIMATE = 32
 export const UNREAD_ROW_ESTIMATE = 36
-// A run's first row: the 12px run gap + 2px padding each side of the 40px avatar, which sits beside the
+// A run's first row: the 12px run gap + 1px padding each side of the 40px avatar, which sits beside the
 // name line and one body line.
-export const RUN_START_ROW_ESTIMATE = 56
-// A row continuing a run: one 20px body line + 2px padding each side.
-export const RUN_CONTINUATION_ROW_ESTIMATE = 24
+export const RUN_START_ROW_ESTIMATE = 54
+// A row continuing a run: one 20px body line + 1px padding each side, so consecutive lines sit 2px apart.
+export const RUN_CONTINUATION_ROW_ESTIMATE = 22
 // A blocked sender's tombstone: the 32px dashed pill + the row padding, after the run gap when it opens one.
-export const TOMBSTONE_RUN_START_ROW_ESTIMATE = 48
-export const TOMBSTONE_ROW_ESTIMATE = 36
+export const TOMBSTONE_RUN_START_ROW_ESTIMATE = 46
+export const TOMBSTONE_ROW_ESTIMATE = 34
 
 // A group chat: more than two participants.
 export function isGroupChat(participantCount: number): boolean {

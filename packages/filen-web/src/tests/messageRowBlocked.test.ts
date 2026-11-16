@@ -62,6 +62,7 @@ function renderRow(overrides: Partial<ChatMessage> = {}, blockedUsers: BlockedUs
 			// A run's first row, so an unhidden row shows its sender's name and avatar.
 			runStart: true,
 			currentUserId: 1n,
+			ownAvatarUrl: undefined,
 			blocked: blockedUsers,
 			active: false,
 			actionsRef: null
