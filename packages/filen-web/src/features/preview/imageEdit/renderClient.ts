@@ -3,18 +3,14 @@ import RenderWorker from "@/features/preview/imageEdit/worker/render.worker.ts?w
 import type { RenderWorkerApi } from "@/features/preview/imageEdit/worker/render.worker"
 import type { EditCapabilities, EditSession, ImageEditSource } from "@/features/preview/imageEdit/types"
 import { idleResource } from "@/lib/idleResource"
-import { isAppleMobile } from "@/lib/appleMobile"
+import { deviceProfile } from "@/lib/deviceProfile"
+import { edit } from "@/lib/pixelBudget"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // The image editor's render worker, spun up on Edit. Each open session holds ONE use of it for its whole life,
 // so the idle teardown (which frees the full-resolution source, the GPU context and the JPEG codec's wasm heap,
 // which never shrinks) only starts once the editor is left.
 const RENDER_WORKER_IDLE_MS = 30_000
-
-// The largest source an export takes: its RGBA buffer, the encoder's copy and the GPU tiles must fit a tab.
-// iOS and iPadOS kill a tab far sooner than desktop engines do.
-const MAX_PIXELS_DESKTOP = 50_000_000
-const MAX_PIXELS_IOS = 16_000_000
 
 interface RenderWorkerResource {
 	worker: Worker
@@ -55,13 +51,9 @@ const openSessions = new Set<() => void>()
 // Device facts do not change within a tab: asked of the first session's worker only.
 let capabilities: Promise<EditCapabilities> | null = null
 
-function maxPixels(): number {
-	return isAppleMobile() ? MAX_PIXELS_IOS : MAX_PIXELS_DESKTOP
-}
-
 function probe(remote: Comlink.Remote<RenderWorkerApi>): Promise<EditCapabilities> {
 	capabilities ??= remote.probe().then(
-		result => ({ ...result, maxPixels: maxPixels() }),
+		result => ({ ...result, maxPixels: edit(deviceProfile()) }),
 		(error: unknown) => {
 			capabilities = null
 

@@ -48,7 +48,7 @@ export const THUMB_SVG_SIZE_GATE = 4_194_304n
 // The working memory the SDK allots one thumbnail decode (microthumb's APP_PROCESS_MEM_BUDGET). A
 // different axis from THUMB_SIZE_GATE above — bytes of MEMORY, not bytes of source — that happens to
 // default to the same 64 MiB. This app configures neither.
-const THUMB_SDK_MEM_BUDGET = 67_108_864n
+export const THUMB_SDK_MEM_BUDGET = 67_108_864n
 
 // microthumb prices a decode target at 40 bytes for every pixel of the square it would have to hold:
 // `affordable_target(budget) = sqrt(budget / 40)`. Both requested dimensions are clamped to that

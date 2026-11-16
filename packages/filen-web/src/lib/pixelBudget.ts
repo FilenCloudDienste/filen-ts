@@ -1,0 +1,51 @@
+import { PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
+import { THUMB_SDK_MEM_BUDGET } from "@/features/drive/lib/thumbnails.logic"
+import type { DeviceProfile } from "@/lib/deviceProfile"
+
+// The pixel budgets every decode of untrusted image bytes checks, each with its basis. A decode compares the dimensions
+// its header names (read from bytes already in hand) against its budget before it allocates anything. Workers never
+// read the device profile: the page computes the number and sends it with the request.
+
+const MIB = 1024 * 1024
+
+// A decode by our own code (a wasm or JS decoder) into a worker heap: about half of wasm's 2 GiB ceiling on desktop,
+// leaving room for the file and the module; a phone's tab is killed far sooner.
+const WORKER_DECODE_BYTES_DESKTOP = 1024 * MIB
+const WORKER_DECODE_BYTES_MOBILE = 384 * MIB
+
+// The heap MuPDF needs per pixel of an image it decodes. Provisional until measured like the rest of the PDF budget.
+export const MUPDF_BYTES_PER_PIXEL = 8
+
+// A thumbnail decode works in the SDK's per-decode memory, at 4 bytes (RGBA) a pixel.
+const THUMBNAIL_BYTES_PER_PIXEL = 4
+
+// The image editor's largest source: its RGBA buffer, the encoder's copy and the GPU tiles must fit a tab. iOS and
+// iPadOS kill a tab far sooner than other engines do.
+const EDIT_PIXELS = 50_000_000
+const EDIT_PIXELS_APPLE_MOBILE = 16_000_000
+
+export function workerDecodeBytes(profile: DeviceProfile): number {
+	return profile.mobile ? WORKER_DECODE_BYTES_MOBILE : WORKER_DECODE_BYTES_DESKTOP
+}
+
+// What remains of the worker budget once the file is held, at the consumer's own bytes per pixel (its decoded frame
+// plus every copy it makes of it).
+export function workerDecodePixels(profile: DeviceProfile, fileBytes: number, bytesPerPixel: number): number {
+	return Math.max(0, Math.floor((workerDecodeBytes(profile) - fileBytes) / bytesPerPixel))
+}
+
+// One image page decoded by MuPDF. The engine reads an image file whole into the same heap that holds the decoded page,
+// so the file counts against it; `fileBytes` is 0 for a format it reads lazily.
+export function mupdf(profile: DeviceProfile, fileBytes: number): number {
+	const heapBudget = (profile.mobile ? PDF_MOBILE_MEMORY : PDF_DESKTOP_MEMORY).heapBudget
+
+	return Math.max(0, Math.floor((heapBudget - PDF_HEAP_BASELINE - fileBytes) / MUPDF_BYTES_PER_PIXEL))
+}
+
+export function thumbnail(): number {
+	return Number(THUMB_SDK_MEM_BUDGET) / THUMBNAIL_BYTES_PER_PIXEL
+}
+
+export function edit(profile: DeviceProfile): number {
+	return profile.appleMobile ? EDIT_PIXELS_APPLE_MOBILE : EDIT_PIXELS
+}
