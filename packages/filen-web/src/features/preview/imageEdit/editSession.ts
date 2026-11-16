@@ -1,6 +1,6 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, isHeicName } from "@/features/drive/lib/preview.logic"
+import { extensionOf, heldImageCap, isHeicName } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
@@ -16,6 +16,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
+import { deviceProfile } from "@/lib/deviceProfile"
 
 // Entering the image editor: what the original is (sniffed from its own bytes, never its name), whether this device
 // can edit it, and where the editor gets its full-resolution pixels, reusing whatever the viewer already holds.
@@ -182,7 +183,16 @@ async function enter(
 	// Decoded by libheif from its whole bytes on every browser, also where the viewer streams it natively: the editor
 	// needs its Exif and ICC, which only the bytes give.
 	const heic = isHeicName(item)
-	let held = getPreviewBytes(cacheScope, item.data.uuid) ?? (heic ? await wholeBytes(item, cacheScope, signal) : undefined)
+	const cached = getPreviewBytes(cacheScope, item.data.uuid)
+	// Where the viewer streams a HEIC natively it opens at any size: one past what is ever held is refused before its
+	// download, never buffered.
+	const cap = heic && cached === undefined ? heldImageCap(item, deviceProfile()) : null
+
+	if (cap !== null && BigInt(size) > cap) {
+		return { status: "refused", messageKey: "previewImageSaveRefusedTooLarge" }
+	}
+
+	let held = cached ?? (heic ? await wholeBytes(item, cacheScope, signal) : undefined)
 	let info = sniffImage(held ?? (await headBytes(item, signal)), size)
 
 	if (info === null || !matchesExtension(name, info.mime)) {
