@@ -11,7 +11,7 @@ export interface MakePdfOptions {
 	readonly ownerPassword?: string
 }
 
-function noise(length: number, seed: number): Uint8Array {
+export function noise(length: number, seed: number): Uint8Array {
 	const bytes = new Uint8Array(length)
 	let state = seed >>> 0 || 1
 

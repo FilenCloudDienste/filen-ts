@@ -1,15 +1,6 @@
 import type * as Mupdf from "mupdf"
 import { PdfEngineRefusal, type PdfEngineContext } from "./context"
-import type {
-	PdfAccess,
-	PdfDocumentSummary,
-	PdfEngineArgs,
-	PdfEngineOp,
-	PdfEngineValue,
-	PdfOpenResult,
-	PdfPageInfo,
-	PdfPermission
-} from "./protocol"
+import type { PdfAccess, PdfDocumentSummary, PdfEngineArgs, PdfEngineOp, PdfEngineValue, PdfOpenResult, PdfPermission } from "./protocol"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit/budget"
 import { saslPrepPassword } from "../../core/pdfwrite/crypto"
 import { ANNOTATION_REQUESTS } from "./annotationRequests"
@@ -23,6 +14,8 @@ import { TOOL_REQUESTS } from "./toolRequests"
 import { TileRenderer } from "./render"
 import { SyncRangeReader, syncRangeStreamHandle } from "./stream"
 import { fileRevisions } from "./verifyRequest"
+import { drawTile, pageInfos } from "./pageOps"
+import { openReadDocument, READ_ONLY_REQUESTS } from "./readRequests"
 
 // The engine's request table: one entry per request. A handler gets the engine context and the request's arguments
 // and returns its value (and what of it to transfer); it may throw a PdfEngineRefusal. Renders are queued by priority
@@ -129,9 +122,12 @@ function heap(context: PdfEngineContext): PdfHandled<{ readonly heapBytes: numbe
 }
 
 export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
-	open: (context, { channel, role, password, memory = PDF_DESKTOP_MEMORY }) => {
+	open: (context, args) => {
+		if (args.role === "read") return openReadDocument(context, args)
 		if (context.current !== null) throw new PdfEngineRefusal("badRequest", "a document is already open")
+		if (!("channel" in args)) throw new PdfEngineRefusal("badRequest", "a PDF is read through a channel")
 
+		const { channel, role, password, memory = PDF_DESKTOP_MEMORY } = args
 		const { mupdf, host } = context
 		const reader = new SyncRangeReader(channel.buffer, channel.port, channel.length, { deadlineMs: host.readDeadlineMs, now: host.now })
 		const stream = new mupdf.Stream(syncRangeStreamHandle(reader))
@@ -199,37 +195,11 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 
 		return { value: result }
 	},
-	pages: (context, { from, count }) => {
-		const { document } = context.open()
-		const total = document.countPages()
-		const pages: PdfPageInfo[] = []
-
-		for (let index = Math.max(0, from); index < Math.min(total, from + count); index++) {
-			const page = document.loadPage(index)
-			const bounds = page.getBounds()
-
-			pages.push({ width: bounds[2] - bounds[0], height: bounds[3] - bounds[1], label: page.getLabel() })
-			page.destroy()
-		}
-
-		return { value: pages }
-	},
-	render: async (context, { page, scale, rotation, tile, print, priority }) => {
+	pages: (context, { from, count }) => ({ value: pageInfos(context.open().document, from, count) }),
+	render: (context, args) => {
 		const { document, renderer } = context.open()
 
-		if (!Number.isInteger(page) || page < 0 || page >= document.countPages() || !(scale > 0)) throw new PdfEngineRefusal("badRequest")
-
-		const drawn = renderer.render(
-			page,
-			scale,
-			rotation,
-			tile,
-			print === undefined ? undefined : { annotations: print.annotations === true },
-			priority === "thumbnail"
-		)
-		const bitmap = await context.host.toBitmap(drawn.rgba, drawn.width, drawn.height)
-
-		return { value: { bitmap, tile: drawn.tile }, transfer: [bitmap] }
+		return drawTile(context, document, renderer, args)
 	},
 	evict: (context, { pages }) => {
 		context.open().renderer.evict(pages)
@@ -265,6 +235,8 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 	verifyRedaction: () => {
 		throw new PdfEngineRefusal("badRequest", "redaction verification is not served")
 	},
+	// Answered only for a read document (any other is refused by openRead).
+	...READ_ONLY_REQUESTS,
 	...EDIT_REQUESTS,
 	...FORM_REQUESTS,
 	...ANNOTATION_REQUESTS,

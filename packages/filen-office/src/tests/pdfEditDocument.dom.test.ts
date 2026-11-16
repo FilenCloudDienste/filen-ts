@@ -9,7 +9,7 @@ import { MupdfPdfDocument, PageViewport, placementKey, placementPosition, placem
 // The editor's engine behind pdf.js's document contract (react/pdfedit/mupdfDocument.ts), over a stand-in engine.
 
 const TEXT: PdfPageText = {
-	lines: [{ str: "Hello world", x: 72, y: 760, size: 18, dx: 1, dy: 0, width: 100 }],
+	lines: [{ str: "Hello world", x: 72, y: 760, size: 18, dx: 1, dy: 0, width: 100, dir: "ltr" }],
 	links: [
 		{ rect: [72, 450, 200, 470], url: "https://filen.io/" },
 		{ rect: [72, 420, 200, 440], page: 1, left: 0, top: 800 }

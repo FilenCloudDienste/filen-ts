@@ -1,5 +1,12 @@
 import { setTimer } from "../presentation/svgPort"
-import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost } from "./context"
+import {
+	isFatalEngineError,
+	PdfEngineRefusal,
+	type OpenDocument,
+	type PdfEngineContext,
+	type PdfEngineHost,
+	type ReadDocument
+} from "./context"
 import {
 	isToPdfEngine,
 	type FromPdfEngine,
@@ -10,12 +17,14 @@ import {
 	type PdfRenderPriority
 } from "./protocol"
 import { PDF_ENGINE_REQUESTS, type PdfRequestTable } from "./requests"
+import { READ_REQUESTS } from "./readRequests"
 import { wasmHeapBytes } from "./render"
 
 // The engine worker's side: requests are taken from the scope's messages and run one at a time. Renders wait in a
 // queue ordered by priority (visible tiles before overlays, thumbnails and prefetch) and can be cancelled until they
 // start; every other request runs in arrival order ahead of queued renders. Any wasm trap, out-of-memory or internal
-// abort poisons the engine: it answers everything with "poisoned" from then on, and the page terminates it.
+// abort poisons the engine: it answers everything with "poisoned" from then on, and the page terminates it. While a
+// read document (the read role) is open, only the read requests and heap are served; every other request is refused.
 
 export interface PdfEngineScope {
 	postMessage(message: FromPdfEngine, transfer: unknown[]): void
@@ -37,14 +46,7 @@ interface Queued {
 	readonly rank: number
 }
 
-// Errors that leave MuPDF's heap untrustworthy: a wasm trap or abort, allocation failure, a stack overflow.
-export function isFatalEngineError(error: unknown): boolean {
-	if (error === "ABORT") return true
-	if (!(error instanceof Error)) return false
-	if (error.name === "RuntimeError" || error instanceof RangeError) return true
-
-	return /out of memory|malloc|memory access out of bounds|cannot create mupdf context/i.test(error.message)
-}
+export { isFatalEngineError } from "./context"
 
 function rankOf(op: PdfEngineOp, args: unknown): number {
 	if (op !== "render") return -1
@@ -58,6 +60,7 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 	const table: PdfRequestTable = { ...PDF_ENGINE_REQUESTS, ...options.requests }
 	const queue: Queued[] = []
 	let current: OpenDocument | null = null
+	let reading: ReadDocument | null = null
 	let poisoned: string | null = null
 	let running = false
 	let stopped = false
@@ -72,9 +75,22 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 			current = open
 		},
 		open() {
+			if (reading !== null) throw new PdfEngineRefusal("badRequest", "the open document is not a PDF")
 			if (current === null) throw new PdfEngineRefusal("closed", "no document is open")
 
 			return current
+		},
+		get reading() {
+			return reading
+		},
+		setReading(read) {
+			reading = read
+		},
+		openRead() {
+			if (current !== null) throw new PdfEngineRefusal("badRequest", "the open document is a PDF")
+			if (reading === null) throw new PdfEngineRefusal("closed", "no document is open")
+
+			return reading
 		},
 		readBytes(offset, length) {
 			const { reader, heap } = context.open()
@@ -101,6 +117,16 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 		heapBytes: () => wasmHeapBytes(mupdf)
 	}
 
+	const refuseRead = (): never => {
+		throw new PdfEngineRefusal("badRequest", "not a request a read document serves")
+	}
+
+	const handlerOf = (op: PdfEngineOp): PdfRequestTable[PdfEngineOp] => {
+		if (reading === null || op === "heap") return table[op]
+
+		return Object.hasOwn(READ_REQUESTS, op) ? ((READ_REQUESTS as Partial<PdfRequestTable>)[op] ?? refuseRead) : refuseRead
+	}
+
 	const post = (message: FromPdfEngine, transfer: unknown[] = []): void => {
 		if (!stopped) scope.postMessage(message, transfer)
 	}
@@ -124,7 +150,7 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 			return
 		}
 
-		const handler = table[item.op] as (context: PdfEngineContext, args: unknown) => ReturnType<PdfRequestTable[PdfEngineOp]>
+		const handler = handlerOf(item.op) as (context: PdfEngineContext, args: unknown) => ReturnType<PdfRequestTable[PdfEngineOp]>
 
 		if (item.op === "render") post({ t: "started", id: item.id })
 
@@ -198,6 +224,18 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 			refuse(data.id, "badRequest", `unknown request ${data.op}`)
 
 			return
+		}
+
+		// A layout cannot be stopped once it runs, so only the newest of those waiting runs.
+		if (data.op === "layout") {
+			for (let index = queue.length - 1; index >= 0; index--) {
+				const item = queue[index]
+
+				if (item !== undefined && item.op === "layout") {
+					queue.splice(index, 1)
+					refuse(item.id, "cancelled", "a newer layout replaced it")
+				}
+			}
 		}
 
 		queue.push({ id: data.id, op: data.op, args: data.args, rank: rankOf(data.op, data.args) })

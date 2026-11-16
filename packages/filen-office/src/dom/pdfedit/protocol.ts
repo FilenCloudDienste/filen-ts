@@ -7,6 +7,7 @@ import type { PdfSecurityChoice, PdfSecurityRefusal } from "../../core/pdfedit/s
 import type { PdfCommandResult, PdfEditState, PdfPageWidgets } from "../../core/pdfedit/state"
 import type { PdfDigestName, PdfSignatureReport } from "../../core/pdfsign/types"
 import type { PdfSignatureFieldHint } from "../pdf/signatureFields"
+import type { MupdfFormat } from "./formats"
 import type { PdfExtractArgs, PdfExtractBegun } from "./pages/extractRequest"
 import type { PdfSourceAttach } from "./pages/sources"
 import type { SyncRangePort } from "./syncRange"
@@ -23,14 +24,26 @@ import type { TextEditHit } from "./textEdit/target"
 export type MupdfModule = typeof Mupdf
 
 // "edit": the document a user changes. "verify": opened read-only to check a file (signatures, a saved output);
-// it never saves and never changes the document.
-export type PdfEngineRole = "edit" | "verify"
+// it never saves and never changes the document. "read": a document other than PDF (formats.ts: an e-book) opened to
+// read; only the read requests (readRequests.ts) serve it, every PDF request is refused.
+export type PdfEngineRole = "edit" | "verify" | "read"
 
 // The bytes the engine reads: a sync range buffer (syncRange.ts) and the port its server listens on.
 export interface PdfByteChannel {
 	readonly buffer: SharedArrayBuffer
 	readonly port: SyncRangePort
 	readonly length: number
+}
+
+// Where an opened document's bytes are: behind a sync range channel, or (the read role only) the whole file,
+// transferred.
+export type PdfOpenSource = { readonly channel: PdfByteChannel } | { readonly bytes: Uint8Array }
+
+// A reflowable document's page size (points) and the font size its text is set at (points).
+export interface MupdfLayout {
+	readonly width: number
+	readonly height: number
+	readonly em: number
 }
 
 // An ImageBitmap, transferred; whoever holds it last closes it.
@@ -59,8 +72,11 @@ export type PdfEngineFailure =
 	| "notAllowed"
 	// MuPDF refused it (a damaged object, an unsupported feature).
 	| "failed"
-	// The document would grow past what the editor edits in this browser's memory (core/pdfedit/budget.ts fitsEdit).
+	// The document would grow past what the editor edits in this browser's memory (core/pdfedit/budget.ts fitsEdit), or
+	// (the read role) a page's image is over the pixel budget, or the heap grew past its budget.
 	| "overBudget"
+	// (The read role) not a document of its format the engine reads: damaged, empty or locked by DRM.
+	| "notSupported"
 
 export type PdfPermission = "print" | "printHq" | "copy" | "edit" | "annotate" | "form" | "assemble" | "accessibility"
 
@@ -102,6 +118,8 @@ export interface PdfPrintRender {
 
 export interface PdfRenderArgs {
 	readonly page: number
+	// The read role's layout generation the request belongs to (see layout).
+	readonly generation?: number
 	// Device pixels per point.
 	readonly scale: number
 	// View rotation added to the page's own, clockwise: 0, 90, 180 or 270.
@@ -126,20 +144,31 @@ export interface PdfHeapReport {
 // request table (requests.ts).
 export interface PdfEngineOps {
 	open: {
-		readonly args: {
-			readonly channel: PdfByteChannel
+		readonly args: PdfOpenSource & {
 			readonly role: PdfEngineRole
 			readonly password?: string
-			// The edit role's memory profile (what it lets the document grow to); the desktop one when absent.
+			// The edit role's memory profile (what it lets the document grow to), and the read role's (its heap budget); the
+			// desktop one when absent.
 			readonly memory?: PdfMemoryProfile
+			// --- The read role ---
+			readonly format?: MupdfFormat
+			// A reflowable document's first layout; MuPDF's default when absent.
+			readonly layout?: MupdfLayout
+			// The book's language (BCP 47) when the page knows it: picks the face for Han text MuPDF finds untagged.
+			readonly language?: string
+			// The most source pixels one image of a drawn page may have (the page's pixel budget for this file).
+			readonly maxImagePixels?: number
 		}
 		readonly value: PdfOpenResult
 	}
 	authenticate: { readonly args: { readonly password: string }; readonly value: PdfOpenResult }
-	pages: { readonly args: { readonly from: number; readonly count: number }; readonly value: readonly PdfPageInfo[] }
+	pages: {
+		readonly args: { readonly from: number; readonly count: number; readonly generation?: number }
+		readonly value: readonly PdfPageInfo[]
+	}
 	render: { readonly args: PdfRenderArgs; readonly value: PdfRenderValue }
 	// Drops a page's cached display list (the page left the view).
-	evict: { readonly args: { readonly pages: readonly number[] }; readonly value: null }
+	evict: { readonly args: { readonly pages: readonly number[]; readonly generation?: number }; readonly value: null }
 	heap: { readonly args: Record<string, never>; readonly value: PdfHeapReport }
 	close: { readonly args: Record<string, never>; readonly value: PdfHeapReport }
 	// The open document's signatures checked on its raw bytes. `fields` are what a second parser (pdf.js) found, null
@@ -193,12 +222,31 @@ export interface PdfEngineOps {
 	extractBegin: { readonly args: PdfExtractArgs; readonly value: PdfExtractBegun }
 	// --- Any role ---
 	// A page's text lines and links (the text layer, find, links after the swap).
-	text: { readonly args: { readonly page: number }; readonly value: PdfPageText }
+	text: { readonly args: { readonly page: number; readonly generation?: number }; readonly value: PdfPageText }
 	// Where a named destination or a page object leads: a 0-based page and a point in its bottom-left user space; null
 	// when nowhere.
 	destination: {
-		readonly args: { readonly name: string } | { readonly pageObject: number }
+		readonly args: ({ readonly name: string } | { readonly pageObject: number }) & { readonly generation?: number }
 		readonly value: PdfDestinationPoint | null
+	}
+	// --- The read role (readRequests.ts). Its pages, render, text, destination (a link's URI as `name`) and evict carry
+	// the layout generation they were asked under; one that is no longer current is answered "cancelled" before any
+	// work. ---
+	// Lays a reflowable document out again as generation `generation`, which must be above the current one (a lower one
+	// is stale: cancelled). Layouts still queued behind are dropped (cancelled) for the newest, as a running one cannot
+	// be stopped.
+	layout: {
+		readonly args: MupdfLayout & { readonly generation: number }
+		readonly value: { readonly pageCount: number; readonly generation: number }
+	}
+	// The table of contents, shaped as pdf.js's outline, its destinations resolved to page indexes.
+	outline: { readonly args: { readonly generation: number }; readonly value: readonly PdfReadOutlineNode[] }
+	metadata: { readonly args: Record<string, never>; readonly value: PdfReadMetadata }
+	// The first page from `around` outward (around, around + 1, around - 1, ...) within `radius` whose text holds
+	// `text`; null when none.
+	locate: {
+		readonly args: { readonly text: string; readonly around: number; readonly radius: number; readonly generation: number }
+		readonly value: number | null
 	}
 	// --- Annotations (any role; annotationRequests.ts) ---
 	// The annotations drawn on these 0-based pages (MuPDF page space: points, top-left origin, y down).
@@ -358,6 +406,23 @@ export type PdfSaveCheck = { readonly ok: true } | { readonly ok: false; readonl
 export type PdfAfterSave = "continue" | "adopt"
 
 export type PdfSaveOutcome = "saved" | "copied" | "failed"
+
+// A read document's outline entry: pdf.js's shape, `dest` a 0-based page index with an XYZ point in the page's
+// bottom-left user space (null: keep the axis), or null for a heading leading nowhere.
+export interface PdfReadOutlineNode {
+	readonly title: string
+	readonly dest: readonly [number, { readonly name: "XYZ" }, number | null, number | null] | null
+	readonly items: readonly PdfReadOutlineNode[]
+}
+
+// What a read document says about itself: MuPDF's format name ("EPUB", "MOBI", "FictionBook2") and its title, author
+// and subject when it has them.
+export interface PdfReadMetadata {
+	readonly format: string
+	readonly title: string | null
+	readonly author: string | null
+	readonly subject: string | null
+}
 
 export interface PdfDestinationPoint {
 	readonly page: number

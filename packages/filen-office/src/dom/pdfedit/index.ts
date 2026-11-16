@@ -34,12 +34,14 @@ export {
 } from "./commands/index"
 export type { PdfExtractArgs, PdfExtractBegun } from "./pages/extractRequest"
 export type { PdfSourceAttach } from "./pages/sources"
-export { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost } from "./context"
+export { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost, type ReadDocument } from "./context"
+export { isMupdfFormat, MUPDF_FORMATS, type MupdfFormat, type MupdfFormatRow } from "./formats"
 export {
 	isFromPdfEngine,
 	isToPdfEngine,
 	PDF_ENGINE_WASM,
 	type FromPdfEngine,
+	type MupdfLayout,
 	type MupdfModule,
 	type PdfAccess,
 	type PdfAfterSave,
@@ -56,10 +58,13 @@ export {
 	type PdfEngineValue,
 	type PdfHeapReport,
 	type PdfOpenResult,
+	type PdfOpenSource,
 	type PdfPageAnnotations,
 	type PdfPageInfo,
 	type PdfPermission,
 	type PdfPrintRender,
+	type PdfReadMetadata,
+	type PdfReadOutlineNode,
 	type PdfRenderArgs,
 	type PdfRenderPriority,
 	type PdfRenderValue,

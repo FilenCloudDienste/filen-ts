@@ -26,7 +26,7 @@ import { syncRangeStreamHandle } from "./stream"
 import { nameCreated, resolveTarget, targetKey, type PdfStepKey } from "./stepKeys"
 import { serveSyncRange } from "./syncRange"
 import { fileRevisions } from "./verifyRequest"
-import { pageTextLines, pageTextLinks, pointOf } from "./text"
+import { pageBoundsOf, pageTextLines, pageTextLinks, pointOf } from "./text"
 
 // The edit role's requests: commands as journal operations, undo and redo, the snapshot the page holds, and the save
 // path. A save is planned, written into the heap (saveToBuffer), served from there to a second, short-lived engine that
@@ -678,22 +678,7 @@ export const EDIT_REQUESTS: Handlers = {
 		if (!Number.isInteger(page) || page < 0 || page >= document.countPages()) throw new PdfEngineRefusal("badRequest")
 
 		const loaded = document.loadPage(page)
-		const bounds = new Map<number, Mupdf.Rect>([[page, loaded.getBounds()]])
-		const boundsOf = (index: number): Mupdf.Rect | null => {
-			if (!Number.isInteger(index) || index < 0 || index >= document.countPages()) return null
-
-			let rect = bounds.get(index)
-
-			if (rect === undefined) {
-				const target = document.loadPage(index)
-
-				rect = target.getBounds()
-				target.destroy()
-				bounds.set(index, rect)
-			}
-
-			return rect
-		}
+		const boundsOf = pageBoundsOf(document, page, loaded.getBounds())
 
 		try {
 			return { value: { lines: pageTextLines(loaded), links: pageTextLinks(document, loaded, boundsOf) } }

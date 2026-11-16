@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
 import type { MupdfModule, PdfPrintRender, PdfTile } from "./protocol"
+import { PdfEngineRefusal } from "./context"
 import { drawPendingRedactions } from "./redact/print"
 import { PDF_HEAP_BASELINE } from "../../core/pdfedit/budget"
 
@@ -43,12 +44,35 @@ export interface RenderedTile {
 
 export type PdfRotation = 0 | 90 | 180 | 270
 
+// A page's display list; for a guarded renderer also its structured text (whitespace and image blocks kept) and the
+// source pixels of its largest image, read from the image headers the text holds (nothing decoded).
+interface PageList {
+	readonly list: Mupdf.DisplayList
+	readonly bounds: Mupdf.Rect
+	readonly text: Mupdf.StructuredText | null
+	readonly largestImage: number
+}
+
+export interface TileRendererGuard {
+	// The most source pixels one image of a drawn page may have: a page holding a larger one is refused before it is
+	// drawn (MuPDF decodes an image whole, in the same heap).
+	readonly maxImagePixels: number
+}
+
+function dropList(entry: PageList): void {
+	entry.text?.destroy()
+	entry.list.destroy()
+}
+
 export class TileRenderer {
 	private readonly mupdf: MupdfModule
-	private readonly document: Mupdf.PDFDocument
+	private readonly document: Mupdf.Document
+	// The same document when it is a PDF (its print path draws annotations, widgets and redaction marks).
+	private readonly pdf: Mupdf.PDFDocument | null
 	private readonly maxLists: number
+	private readonly guard: TileRendererGuard | null
 	// Least recently used first.
-	private readonly lists = new Map<number, { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect }>()
+	private readonly lists = new Map<number, PageList>()
 	// The page being printed: its own list (a print reruns it for each tile of one page, then moves on).
 	private printing: {
 		readonly page: number
@@ -59,14 +83,22 @@ export class TileRenderer {
 	private readonly now: () => number
 	private lastShrinkCheck = Number.NEGATIVE_INFINITY
 
-	constructor(mupdf: MupdfModule, document: Mupdf.PDFDocument, maxLists = DEFAULT_LISTS, now: () => number = Date.now) {
+	constructor(
+		mupdf: MupdfModule,
+		document: Mupdf.Document,
+		maxLists = DEFAULT_LISTS,
+		now: () => number = Date.now,
+		guard: TileRendererGuard | null = null
+	) {
 		this.mupdf = mupdf
 		this.document = document
+		this.pdf = document.asPDF()
 		this.maxLists = Math.max(1, maxLists)
 		this.now = now
+		this.guard = guard
 	}
 
-	private list(page: number): { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect } {
+	private list(page: number): PageList {
 		const cached = this.lists.get(page)
 
 		if (cached !== undefined) {
@@ -77,24 +109,66 @@ export class TileRenderer {
 		}
 
 		const loaded = this.document.loadPage(page)
-		const entry = { list: loaded.toDisplayList(true), bounds: loaded.getBounds() }
+		const list = loaded.toDisplayList(true)
+		const bounds = loaded.getBounds()
 
 		loaded.destroy()
+
+		let text: Mupdf.StructuredText | null = null
+		let largestImage = 0
+
+		if (this.guard !== null) {
+			try {
+				text = list.toStructuredText("preserve-whitespace,preserve-images")
+				text.walk({
+					onImageBlock: (_bbox, _transform, image) => {
+						largestImage = Math.max(largestImage, image.getWidth() * image.getHeight())
+					}
+				})
+			} catch (error) {
+				text?.destroy()
+				list.destroy()
+
+				throw error
+			}
+		}
+
+		const entry: PageList = { list, bounds, text, largestImage }
+
 		this.lists.set(page, entry)
 
 		for (const [oldest, old] of this.lists) {
 			if (this.lists.size <= this.maxLists) break
 
-			old.list.destroy()
+			dropList(old)
 			this.lists.delete(oldest)
 		}
 
 		return entry
 	}
 
+	// A guarded renderer's page: its structured text (whitespace and images kept; owned by the renderer, valid until the
+	// page is evicted) and its bounds. The page is not checked against the guard: its text is read, not drawn.
+	pageText(page: number): { readonly text: Mupdf.StructuredText; readonly bounds: Mupdf.Rect } {
+		const { text, bounds } = this.list(page)
+
+		if (text === null) throw new Error("only a guarded renderer keeps a page's text")
+
+		return { text, bounds }
+	}
+
+	// The source pixels of the page's largest image (0 for a renderer without a guard).
+	largestImage(page: number): number {
+		return this.guard === null ? 0 : this.list(page).largestImage
+	}
+
 	// A page as printed: its content, its annotations and form fields when asked, and every pending redaction mark
 	// filled (the printed raster never shows what a mark covers, applied or not). Never cached with the view's lists.
-	private printList(page: number, print: PdfPrintRender): { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect } {
+	private printList(
+		pdf: Mupdf.PDFDocument,
+		page: number,
+		print: PdfPrintRender
+	): { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect } {
 		const held = this.printing
 
 		if (held !== null && held.page === page && held.annotations === print.annotations) return held
@@ -103,7 +177,7 @@ export class TileRenderer {
 		this.printing = null
 
 		const { mupdf } = this
-		const loaded = this.document.loadPage(page)
+		const loaded = pdf.loadPage(page)
 		const bounds = loaded.getBounds()
 		const list = new mupdf.DisplayList(bounds)
 		const device = new mupdf.DisplayListDevice(list)
@@ -146,9 +220,20 @@ export class TileRenderer {
 		return { ctm, size: [Math.ceil(box[2] - box[0]), Math.ceil(box[3] - box[1])] }
 	}
 
-	// A tile of the page; `print`: as printed (printList); `once`: a page drawn once (a thumbnail), straight from the page
-	// unless its list is held, so the lists of the pages in view are neither evicted nor reordered.
+	// A tile of the page; `print`: as printed (printList, a PDF's; any other document prints as shown); `once`: a page
+	// drawn once (a thumbnail), straight from the page unless its list is held, so the lists of the pages in view are
+	// neither evicted nor reordered. A guarded renderer always draws from the page's list, and refuses ("overBudget") a
+	// page whose largest image is over its guard.
 	render(page: number, scale: number, rotation: PdfRotation, tile: PdfTile, print?: PdfPrintRender, once = false): RenderedTile {
+		if (this.guard !== null) {
+			const entry = this.list(page)
+
+			if (entry.largestImage > this.guard.maxImagePixels)
+				throw new PdfEngineRefusal("overBudget", `the page holds an image of ${entry.largestImage} pixels`)
+
+			return this.draw(entry.list, entry.bounds, scale, rotation, tile)
+		}
+
 		if (print === undefined && once) {
 			const held = this.lists.get(page)
 
@@ -163,7 +248,7 @@ export class TileRenderer {
 			}
 		}
 
-		const { list, bounds } = print === undefined ? this.list(page) : this.printList(page, print)
+		const { list, bounds } = print === undefined || this.pdf === null ? this.list(page) : this.printList(this.pdf, page, print)
 
 		return this.draw(list, bounds, scale, rotation, tile)
 	}
@@ -224,7 +309,7 @@ export class TileRenderer {
 			const entry = this.lists.get(page)
 
 			if (entry !== undefined) {
-				entry.list.destroy()
+				dropList(entry)
 				this.lists.delete(page)
 				dropped = true
 			}
@@ -249,7 +334,7 @@ export class TileRenderer {
 		this.printing?.list.destroy()
 		this.printing = null
 
-		for (const entry of this.lists.values()) entry.list.destroy()
+		for (const entry of this.lists.values()) dropList(entry)
 
 		this.lists.clear()
 	}

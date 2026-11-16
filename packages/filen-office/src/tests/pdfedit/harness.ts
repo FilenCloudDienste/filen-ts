@@ -2,7 +2,7 @@ import { MessageChannel, Worker, type MessagePort } from "node:worker_threads"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import { PdfEngineClient, type PdfEngineWorkerLike } from "../../dom/pdfedit/client"
-import type { PdfOpenResult } from "../../dom/pdfedit/protocol"
+import type { PdfEngineArgs, PdfOpenResult } from "../../dom/pdfedit/protocol"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort, type SyncRangeServerStats } from "../../dom/pdfedit/syncRange"
 
 // The engine tests' harness: an engine worker thread (engineWorker.ts) with the real MuPDF, reading a file through the
@@ -25,6 +25,8 @@ export interface Engine {
 	readonly buffer: SharedArrayBuffer
 	readonly reads: { start: number; end: number }[]
 	open(password?: string, memory?: PdfMemoryProfile): Promise<PdfOpenResult>
+	// Opens the file in the read role through the channel.
+	openRead(args: Omit<PdfEngineArgs<"open">, "channel" | "bytes" | "role">): Promise<PdfOpenResult>
 }
 
 const running: PdfEngineClient[] = []
@@ -89,6 +91,12 @@ export function startEngine(bytes: Uint8Array, setup: EngineSetup = {}): Engine 
 					...(password === undefined ? {} : { password }),
 					...(memory === undefined ? {} : { memory })
 				},
+				[channel.port1]
+			),
+		openRead: args =>
+			client.call(
+				"open",
+				{ ...args, channel: { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length }, role: "read" },
 				[channel.port1]
 			)
 	}
