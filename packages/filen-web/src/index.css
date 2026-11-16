@@ -71,6 +71,12 @@
    traffic lights at x 10-70, y 8-22, gone in fullscreen. A full-window layer's top bar leaves
    --window-inset-top above itself and --window-inset-left before its first control; a panel in the
    top-left corner starts --window-inset-corner down. */
+/* HDR pictures stay at standard range everywhere (a grid of HDR photos would outshine the interface); the preview's
+   image surface lifts the limit. Inherited; ignored where unsupported. */
+:root {
+    dynamic-range-limit: standard;
+}
+
 :root {
     --window-inset-top: env(titlebar-area-height, 0px);
     --window-inset-left: 0px;
