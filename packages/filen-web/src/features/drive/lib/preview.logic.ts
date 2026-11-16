@@ -318,6 +318,25 @@ export type StreamedCategory = {
 	[K in PreviewCategory]: (typeof CATEGORY_POLICY)[K]["streamed"] extends true ? K : never
 }[PreviewCategory]
 
+// Grammar extensions whose files are mostly binary: they stay "other" (Open as text) rather than open as code.
+export const CODE_DERIVATION_EXCLUSIONS: ReadonlySet<string> = new Set([
+	// A compiled gettext catalog (its source is a `.po`).
+	"mo",
+	// An OpenPGP signature, binary unless ASCII-armored (`.asc`).
+	"sig",
+	// An OpenPGP encrypted message.
+	"pgp",
+	// A Python pickle.
+	"p"
+])
+
+// Every extension a grammar highlights (@filen/office/core/code), and the shared code set, some of which have no
+// grammar (Makefile, .bat, .ps). An extension an earlier tier lists keeps that tier's category.
+export const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
+	...CODE_FILE_EXTENSIONS,
+	...codeLanguageExtensions().filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension))
+])
+
 // The extension -> category tiers, in precedence order: the first tier listing an extension wins. icon.logic routes
 // through the same table, so a file's type icon and its preview category never disagree. Images come before rawImage
 // on purpose: if a RAW family ever gained a browser-decodable sibling extension, "image" renders the full picture,
@@ -337,12 +356,11 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// Decks, templates and shows, macro-enabled or not (macros never run), OpenDocument presentations, and PowerPoint
 	// 97–2003 files (viewed). A `.pot` is a 97–2003 template until a read of its signature says it is text (gettext).
 	[PRESENTATION_EXTENSIONS, "presentation"],
-	[["md", "markdown"], "markdown"],
+	[["md", "markdown", "mkd"], "markdown"],
 	[["txt", "log"], "text"],
 	[ARCHIVE_NAME_EXTENSIONS, "archive"],
-	[CODE_FILE_EXTENSIONS, "code"],
-	// TypeScript ES-module and CommonJS sources.
-	[["mts", "cts"], "code"]
+	// A `.vhd` is VHDL until a read of its head finds a Virtual Hard Disk.
+	[CODE_EXTENSIONS, "code"]
 ]
 
 const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensionCategories(EXTENSION_TIERS)

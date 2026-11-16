@@ -34,7 +34,8 @@ const KINDS: Readonly<Record<string, string>> = {
 	jpg: "image",
 	docx: "docx",
 	dot: "docx",
-	pot: "presentation"
+	pot: "presentation",
+	vhd: "code"
 }
 
 function kindOf(extension: string): string | null {
@@ -108,7 +109,11 @@ const ROWS: Row[] = [
 	["deck.pot", "application/vnd.ms-powerpoint", 30_000, null, "presentation", "pot", "default", true, true],
 	["deck.pot", null, 30_000, "presentationBinary", "presentation", "pot", "sniff", true, false],
 	["messages.pot", null, 300, "notPresentationBinary", "text", "txt", "sniff", true, false],
-	["messages.pot", "text/x-gettext-translation-template", 300, null, "text", "txt", "mime", true, true]
+	["messages.pot", "text/x-gettext-translation-template", 300, null, "text", "txt", "mime", true, true],
+	// A .vhd is VHDL source or a Virtual Hard Disk: only a read decides, never its type.
+	["alu.vhd", "text/x-vhdl", 3_000, null, "code", "vhd", "default", true, true],
+	["alu.vhd", null, 3_000, "notVirtualDisk", "code", "vhd", "sniff", true, false],
+	["disk.vhd", "application/x-vhd", 3 * MIB, "virtualDisk", null, "vhd", "sniff", true, false]
 ]
 
 describe("resolveFileKind", () => {
@@ -235,11 +240,12 @@ describe("verdictChangesKind", () => {
 
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
-		expect(["ts", "mts", "dot", "pot", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
+		expect(["ts", "mts", "dot", "pot", "vhd", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
 			"transportStream",
 			"transportStream",
 			"wordTemplate",
 			"presentationTemplate",
+			"virtualDisk",
 			null,
 			null,
 			null,
@@ -251,7 +257,8 @@ describe("content sniffs", () => {
 		expect(SNIFF_VERDICTS).toEqual({
 			transportStream: ["transportStream", "notTransportStream"],
 			wordTemplate: ["wordBinary", "notWordBinary"],
-			presentationTemplate: ["presentationBinary", "notPresentationBinary"]
+			presentationTemplate: ["presentationBinary", "notPresentationBinary"],
+			virtualDisk: ["virtualDisk", "notVirtualDisk"]
 		})
 	})
 
@@ -259,6 +266,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("ts")).toEqual(["ts", "m2ts", "ts"])
 		expect(sniffCandidates("dot")).toEqual(["dot", "dot", "txt"])
 		expect(sniffCandidates("pot")).toEqual(["pot", "pot", "txt"])
+		expect(sniffCandidates("vhd")).toEqual(["vhd", null, "vhd"])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 
@@ -283,6 +291,19 @@ describe("content sniffs", () => {
 
 	it("keeps a verdict that takes the kind away", () => {
 		expect(verdictChangesKind({ name: "disk.dot", size: 300 }, "wordBinary", kindOf, table)).toBe(true)
+		expect(verdictChangesKind({ name: "disk.vhd", size: 300 }, "virtualDisk", kindOf)).toBe(true)
+		expect(verdictChangesKind({ name: "alu.vhd", size: 300 }, "notVirtualDisk", kindOf)).toBe(false)
+	})
+
+	// An app whose table has no .vhd reads it as before: by its MIME type, else no kind.
+	it("leaves a .vhd to its MIME type on a table without it", () => {
+		const withoutVhd = (extension: string) => (extension === "vhd" ? null : kindOf(extension))
+
+		expect(resolveFileKind({ name: "alu.vhd", mime: "text/plain" }, withoutVhd)).toMatchObject({ kind: "text", extension: "txt" })
+		expect(resolveFileKind({ name: "disk.vhd", mime: "application/octet-stream" }, withoutVhd)).toMatchObject({
+			kind: null,
+			extension: "vhd"
+		})
 	})
 })
 

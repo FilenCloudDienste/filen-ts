@@ -2,19 +2,21 @@ import { describe, expect, it } from "vitest"
 import type { File, UuidStr } from "@filen/sdk-rs"
 import type { FileVerdict } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import {
 	canOpenAsText,
 	canPreview,
 	contentSniffFor,
 	needsContentSniff,
 	PREVIEW_MAX_BYTES,
+	previewType,
 	sniffAdmits,
 	sniffAdmitsFor,
 	TEXT_MAX_BYTES
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { canOpenEntry, entryAwaitsSniff } from "@/features/archive/lib/entryAccess.logic"
-import { EXTENSIONLESS_SNIFF, gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
+import { EXTENSIONLESS_SNIFF, gateRunsSniffer, isVirtualDiskHead, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { legacyUnprobedTransportStream, legacyUnsniffedTemplate } from "@/tests/support/legacySniff"
 import { storeOf } from "@/tests/support/archiveEntries"
@@ -84,6 +86,25 @@ describe("needsContentSniff", () => {
 		expect(needsContentSniff(fileNamed("talk.webm", 300n), null)).toBeNull()
 	})
 
+	// VHDL source or a Virtual Hard Disk: code until its head says it is a disk, which nothing previews.
+	it("reads a .vhd's head before opening it as code", () => {
+		const source = fileNamed("alu.vhd", 3_000n, "text/x-vhdl")
+
+		expect(needsContentSniff(source, null)).toBe("virtualDisk")
+		expect(previewType(source, null)).toBe("code")
+		expect(needsContentSniff(source, "notVirtualDisk")).toBeNull()
+		expect(previewType(source, "notVirtualDisk")).toBe("code")
+		expect(needsContentSniff(source, "virtualDisk")).toBeNull()
+		expect(previewType(source, "virtualDisk")).toBe("other")
+
+		const disk = fileNamed("disk.vhd", 3_000n)
+
+		expect(canPreview(disk)).toBe(true)
+		recordFileKindVerdict(disk.data.uuid, "virtualDisk")
+		expect(canPreview(disk)).toBe(false)
+		expect(needsContentSniff(fileNamed("alu.vhdl", 3_000n), null)).toBeNull()
+	})
+
 	it("ships no extensionless read", () => {
 		expect(EXTENSIONLESS_SNIFF).toBeNull()
 		expect(needsContentSniff(fileNamed("blob", 300n), null)).toBeNull()
@@ -119,6 +140,16 @@ describe("sniffAdmits", () => {
 		}
 	})
 
+	// A disk image opens nowhere, so only the text cap admits one: a fixed disk above it is refused before any read.
+	it("admits a .vhd up to the text cap", () => {
+		for (const surface of ["drive", "link", "entry"] as const) {
+			expect(sniffAdmits(fileNamed("alu.vhd", TEXT_MAX_BYTES), deviceProfile(), surface)).toBe(true)
+			expect(sniffAdmits(fileNamed("disk.vhd", TEXT_MAX_BYTES + 1n), deviceProfile(), surface)).toBe(false)
+		}
+
+		expect(canPreview(fileNamed("disk.vhd", 2n * 1024n * MIB))).toBe(false)
+	})
+
 	it("admits an archive's .ts as the code it opens as there: an entry never streams", () => {
 		const subject = { name: "clip.ts", mime: null, verdict: null }
 
@@ -149,6 +180,35 @@ describe("SNIFFERS", () => {
 		)
 		expect(gateRunsSniffer(SNIFFERS.wordTemplate, "file")).toBe(false)
 		expect(gateRunsSniffer(SNIFFERS.presentationTemplate, "entry")).toBe(false)
+	})
+
+	it("reads a .vhd's first 512 bytes in front of its viewer, from any origin", () => {
+		const sniffer = SNIFFERS.virtualDisk
+
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(512)
+		expect(["file", "linkedFile", "entry", "bytes"].map(origin => gateRunsSniffer(sniffer, origin as "file"))).toEqual([
+			true,
+			true,
+			true,
+			true
+		])
+	})
+
+	it("finds a Virtual Hard Disk by its footer copy's cookie", () => {
+		const encode = (text: string) => new TextEncoder().encode(text)
+		const disk = new Uint8Array(512)
+
+		disk.set(encode("conectix"))
+
+		expect(isVirtualDiskHead(disk)).toBe(true)
+		expect(isVirtualDiskHead(encode("library ieee;\nuse ieee.std_logic_1164.all;"))).toBe(false)
+		expect(isVirtualDiskHead(encode("conecti"))).toBe(false)
+		expect(isVirtualDiskHead(new Uint8Array())).toBe(false)
+
+		if (SNIFFERS.virtualDisk.mode === "head") {
+			expect(SNIFFERS.virtualDisk.decide(disk, 512)).toBe("virtualDisk")
+			expect(SNIFFERS.virtualDisk.decide(encode("entity alu is"), 13)).toBe("notVirtualDisk")
+		}
 	})
 
 	it("leaves an archive's .ts and template to the viewer their names pick", () => {

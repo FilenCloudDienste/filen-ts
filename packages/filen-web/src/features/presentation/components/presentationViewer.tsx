@@ -354,7 +354,6 @@ function PreparedDeck({
 				<TextViewer
 					item={item}
 					alt={alt}
-					rejectBinary
 				/>
 			)
 		case "error":

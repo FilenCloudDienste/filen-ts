@@ -1,12 +1,16 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import type { EntryAccess, File, UuidStr } from "@filen/sdk-rs"
-import { AUDIO_FORMATS } from "@filen/shared"
+import { AUDIO_FORMATS, CODE_FILE_EXTENSIONS, fileIconKey as sharedFileIconKey } from "@filen/shared"
+import { codeLanguageExtensions } from "@filen/office/core/code"
 import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import {
 	bufferedSizeCap,
+	canOpenAsText,
 	canPreview,
 	canPreviewWith,
 	CATEGORY_POLICY,
+	CODE_DERIVATION_EXCLUSIONS,
+	CODE_EXTENSIONS,
 	EXTENSION_TIERS,
 	fileTypeExtension,
 	isStreamedCategory,
@@ -317,7 +321,7 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 })
 
 describe("precedence tiers", () => {
-	// Every extension listed in more than one tier, and the tier that wins it: none today.
+	// Every extension listed in more than one tier, and the tier that wins it.
 	it("resolves each overlap to the first tier listing it", () => {
 		const seen = new Map<string, PreviewCategory>()
 		const overlaps: Record<string, PreviewCategory> = {}
@@ -334,11 +338,59 @@ describe("precedence tiers", () => {
 			}
 		}
 
-		expect(overlaps).toEqual({})
+		// Grammars the code tier derives that an earlier tier keeps.
+		expect(overlaps).toEqual({ svg: "image", md: "markdown", markdown: "markdown", mkd: "markdown" })
 
 		for (const [extension, winner] of Object.entries(overlaps)) {
 			expect(previewCategoryForExtension(extension)).toBe(winner)
 		}
+	})
+
+	it("derives code from every grammar but the binary ones, keeping the shared code set", () => {
+		const derived = codeLanguageExtensions().filter(extension => !CODE_FILE_EXTENSIONS.has(extension))
+		// Kept by an earlier tier, or code already (TypeScript's module and CommonJS sources).
+		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts"])
+
+		expect(CODE_DERIVATION_EXCLUSIONS).toEqual(new Set(["mo", "sig", "pgp", "p"]))
+		expect(CODE_EXTENSIONS.size).toBe(CODE_FILE_EXTENSIONS.size + derived.length - CODE_DERIVATION_EXCLUSIONS.size)
+
+		for (const extension of CODE_FILE_EXTENSIONS) {
+			expect(previewCategoryForExtension(extension), extension).toBe("code")
+		}
+
+		const newlyCode = derived.filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension) && !settled.has(extension))
+
+		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the four binary ones, plus GPX and KML.
+		expect(newlyCode).toHaveLength(179 - 1 - 4 + 2)
+
+		for (const extension of newlyCode) {
+			expect(previewCategoryForExtension(extension), extension).toBe("code")
+		}
+
+		expect(["gpx", "kml", "vhd", "yml", "pl", "mts", "cts"].map(previewCategoryForExtension)).toEqual(Array(7).fill("code"))
+	})
+
+	it("keeps the binary grammar extensions out of code, behind Open as text", () => {
+		for (const extension of CODE_DERIVATION_EXCLUSIONS) {
+			expect(previewCategoryForExtension(extension), extension).toBeNull()
+			expect(canOpenAsText(fileNamed(`blob.${extension}`, 1024n)), extension).toBe(true)
+			expect(CODE_EXTENSIONS.has(extension), extension).toBe(false)
+		}
+	})
+
+	// A derived code extension never has a glyph that says otherwise (a disk image, an executable).
+	it("gives no code extension another type's glyph", () => {
+		const noMedia = { isImage: () => false, isVideo: () => false, isAudio: () => false }
+
+		for (const extension of CODE_EXTENSIONS) {
+			if (previewCategoryForExtension(extension) === "code") {
+				expect(["code", "other"], extension).toContain(sharedFileIconKey(extension, noMedia))
+			}
+		}
+	})
+
+	it("opens .mkd as Markdown", () => {
+		expect(previewType(fileNamed("README.mkd", 1024n))).toBe("markdown")
 	})
 
 	it("can be iterated more than once", () => {

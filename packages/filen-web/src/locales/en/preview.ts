@@ -117,8 +117,10 @@ export const preview = {
 	// ── Body ─────────────────────────────────────────────────────────────────
 	/** Preview overlay body — shown in place of a viewer for a previewable category with no renderer built yet */
 	previewUnsupportedType: "Preview isn't available for this file type yet.",
-	/** Preview overlay body — a file opened through "Open as text" turned out to be binary, so it is not shown */
-	previewNotText: "This file isn't text, so it can't be shown as text.",
+	/** Preview overlay body — a file opened as text (by its type, or through "Open as text") turned out to be binary, so it is not shown unless the user asks */
+	previewNotText: "This file isn't text.",
+	/** Preview overlay button — beside "This file isn't text.": shows the file's bytes as text anyway, without editing */
+	previewShowAnyway: "Show anyway (read-only)",
 	/** Preview overlay body — a streamed image/video/audio failed mid-playback and the file is too large to safely retry buffered */
 	previewStreamFailed: "This preview failed and the file is too large to retry.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */

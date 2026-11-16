@@ -1,14 +1,11 @@
-import { useEffect, type RefObject } from "react"
-import { useTranslation } from "react-i18next"
-import { looksLikeText } from "@filen/shared/textEncoding"
+import { type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
-import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
+import { usePreviewTextFile } from "@/features/preview/hooks/usePreviewTextFile"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
-import { readTextFile } from "@/features/preview/lib/textFile"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewNotTextState } from "@/features/preview/components/previewErrorState"
 
 export interface TextViewerProps {
 	item: DriveItem
@@ -28,65 +25,49 @@ export interface TextViewerProps {
 	contentRef?: RefObject<(() => string) | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
-	// Opened through "Open as text": a file whose type is unknown, which may turn out to be binary.
-	rejectBinary?: boolean
-	// Asked to be editable, the file turned out to be text a save would change (not strict UTF-8): it shows
-	// read-only, and the overlay is told so.
+	// Asked to be editable, the file turned out to be text a save would change (not strict UTF-8), or not text at
+	// all: it shows read-only, and the overlay is told so.
 	onReadOnly?: () => void
 }
 
-// Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
-// category), then a decode that keeps the file's encoding, byte order mark and line ending for its saves
-// (readTextFile — never throws) and a per-extension language lookup. The editor under its command bar
-// lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte loading,
-// item-derived tag/alt).
+// Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile), then a decode that keeps the
+// file's encoding, byte order mark and line ending for its saves and a per-extension language lookup. The editor
+// under its command bar lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte
+// loading, item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, rejectBinary, onReadOnly }: TextViewerProps) {
-	const { t } = useTranslation("preview")
-	const result = usePreviewBytes(item)
-	const notText = result.status === "success" && rejectBinary === true && !looksLikeText(result.bytes)
-	const file = result.status === "success" && !notText ? readTextFile(result.bytes) : null
-	const readOnly = editable === true && file !== null && !file.editableAsIs
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onReadOnly }: TextViewerProps) {
+	const text = usePreviewTextFile(item, editable === true, onReadOnly)
 
 	useLeaveViewerFullScreen()
 
-	useEffect(() => {
-		if (readOnly) {
-			onReadOnly?.()
-		}
-	}, [readOnly, onReadOnly])
-
-	if (result.status === "pending") {
-		return <PreviewLoading />
+	switch (text.status) {
+		case "pending":
+			return <PreviewLoading />
+		case "error":
+			return (
+				<PreviewErrorState
+					message={errorLabel(text.dto)}
+					onRetry={text.refetch}
+				/>
+			)
+		case "notText":
+			return (
+				<PreviewNotTextState
+					item={item}
+					onShowAnyway={text.showAnyway}
+				/>
+			)
+		case "success":
+			return (
+				<CodeSurface
+					file={text.file}
+					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
+					alt={alt}
+					editable={editable === true && text.writable}
+					locked={locked ?? false}
+					onDirtyChange={onDirtyChange}
+					contentRef={contentRef}
+				/>
+			)
 	}
-
-	if (result.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
-			/>
-		)
-	}
-
-	if (file === null) {
-		return (
-			<PreviewUnsupportedState
-				item={item}
-				message={t("previewNotText")}
-			/>
-		)
-	}
-
-	return (
-		<CodeSurface
-			file={file}
-			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
-			alt={alt}
-			editable={editable === true && file.editableAsIs}
-			locked={locked ?? false}
-			onDirtyChange={onDirtyChange}
-			contentRef={contentRef}
-		/>
-	)
 }

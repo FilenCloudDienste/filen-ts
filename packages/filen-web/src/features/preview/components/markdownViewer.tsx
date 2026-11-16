@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
-import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
+import { usePreviewTextFile } from "@/features/preview/hooks/usePreviewTextFile"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { MarkdownRenderedBar, type MarkdownBar, type MarkdownMode } from "@/features/preview/components/codeCommandBar"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
-import { readTextFile } from "@/features/preview/lib/textFile"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
-import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewNotTextState } from "@/features/preview/components/previewErrorState"
 
 export interface MarkdownViewerProps {
 	item: DriveItem
@@ -30,22 +29,14 @@ export interface MarkdownViewerProps {
 	onReadOnly?: () => void
 }
 
-// Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
-// category) — decodes ONCE here and feeds both views, so flipping modes never downloads again. The
+// Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile, shared with the text viewer)
+// — decodes ONCE here and feeds both views, so flipping modes never downloads again. The
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
 // save rotates the uuid, remounting this whole viewer onto the new bytes.
 // No parameter defaults: the React Compiler skips a component that has them.
 export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onReadOnly }: MarkdownViewerProps) {
-	const result = usePreviewBytes(item)
+	const text = usePreviewTextFile(item, editable === true, onReadOnly)
 	const download = usePreviewDownload()
-	const file = result.status === "success" ? readTextFile(result.bytes) : null
-	const readOnly = editable === true && file !== null && !file.editableAsIs
-
-	useEffect(() => {
-		if (readOnly) {
-			onReadOnly?.()
-		}
-	}, [readOnly, onReadOnly])
 
 	useLeaveViewerFullScreen()
 	const [mode, setMode] = useState<MarkdownMode>("rendered")
@@ -104,22 +95,29 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		onCommandBarF6(event, root, focusDocument)
 	})
 
-	if (result.status === "pending") {
+	if (text.status === "pending") {
 		return <PreviewLoading />
 	}
 
-	if (result.status === "error") {
+	if (text.status === "error") {
 		return (
 			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
+				message={errorLabel(text.dto)}
+				onRetry={text.refetch}
 			/>
 		)
 	}
 
-	if (file === null) {
-		return <PreviewLoading />
+	if (text.status === "notText") {
+		return (
+			<PreviewNotTextState
+				item={item}
+				onShowAnyway={text.showAnyway}
+			/>
+		)
 	}
+
+	const { file, writable } = text
 	const bar: MarkdownBar = {
 		mode,
 		locked: dirty,
@@ -148,7 +146,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 					file={file}
 					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 					alt={alt}
-					editable={editable === true && file.editableAsIs}
+					editable={editable === true && writable}
 					locked={locked ?? false}
 					autoFocus={focusAfterToggle === "editor"}
 					markdown={bar}

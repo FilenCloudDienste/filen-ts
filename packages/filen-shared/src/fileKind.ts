@@ -13,7 +13,7 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 // 1. A known extension that means one thing wins.
 // 2. An extension that means two (`.ts` TypeScript or an MPEG transport stream; `.webm`, `.ogg`, `.mp4`,
 //    `.mkv` and their audio siblings; `.dot` a Word 97–2003 template or a Graphviz/text file; `.pot` a PowerPoint
-//    97–2003 template or a gettext template) is settled by a content verdict for the file when one exists, else by
+//    97–2003 template or a gettext template; `.vhd` VHDL source or a Virtual Hard Disk) is settled by a content verdict for the file when one exists, else by
 //    a MIME type that says audio or video (text, for a `.dot` or `.pot`), else by its usual meaning. A MIME type never makes a `.ts` a
 //    video: browsers upload TypeScript as video/mp2t too.
 // 3. No or an unknown extension: a well-known name prefix (`.env.local`), else its MIME type, else, for a text/*
@@ -26,9 +26,15 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 // What a read of the file's content found.
 export type ContentVerdict = "transportStream" | "notTransportStream" | "video" | "audio"
 
-// What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not.
-// Kept apart from the media verdicts the apps persist.
-export type DocumentVerdict = "wordBinary" | "notWordBinary" | "presentationBinary" | "notPresentationBinary"
+// What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not;
+// of a `.vhd`: a Virtual Hard Disk or not. Kept apart from the media verdicts the apps persist.
+export type DocumentVerdict =
+	| "wordBinary"
+	| "notWordBinary"
+	| "presentationBinary"
+	| "notPresentationBinary"
+	| "virtualDisk"
+	| "notVirtualDisk"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -37,15 +43,17 @@ export type FileVerdict = ContentVerdict | DocumentVerdict
 //   transportStream       ts mts  transportStream / notTransportStream
 //   wordTemplate          dot     wordBinary / notWordBinary
 //   presentationTemplate  pot     presentationBinary / notPresentationBinary
-// Reserved, added with their readers: virtualDisk (vhd), pdfCompatible (ai), iworkPackage (key), sqlite (db),
-// wavefront (obj), vobsub (sub), vcard (vcf), mpegPs (mod), executable (no extension).
-export type SniffId = "transportStream" | "wordTemplate" | "presentationTemplate"
+//   virtualDisk           vhd     virtualDisk / notVirtualDisk
+// Reserved, added with their readers: pdfCompatible (ai), iworkPackage (key), sqlite (db), wavefront (obj),
+// vobsub (sub), vcard (vcf), mpegPs (mod), executable (no extension).
+export type SniffId = "transportStream" | "wordTemplate" | "presentationTemplate" | "virtualDisk"
 
 // Each read's verdicts: what it found, what it did not.
 export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
 	transportStream: ["transportStream", "notTransportStream"],
 	wordTemplate: ["wordBinary", "notWordBinary"],
-	presentationTemplate: ["presentationBinary", "notPresentationBinary"]
+	presentationTemplate: ["presentationBinary", "notPresentationBinary"],
+	virtualDisk: ["virtualDisk", "notVirtualDisk"]
 }
 
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
@@ -82,6 +90,8 @@ export interface Ambiguity {
 	notWordBinary?: string | null
 	presentationBinary?: string | null
 	notPresentationBinary?: string | null
+	virtualDisk?: string | null
+	notVirtualDisk?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
@@ -110,7 +120,10 @@ const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	[
 		"pot",
 		{ fallback: "pot", presentationBinary: "pot", notPresentationBinary: "txt", text: "txt", mimeHint: false, sniff: "presentationTemplate" }
-	]
+	],
+	// VHDL source unless its head carries a Virtual Hard Disk's footer copy. Only a read decides: browsers type both by
+	// the extension alone.
+	["vhd", { fallback: "vhd", virtualDisk: null, notVirtualDisk: "vhd", mimeHint: false, sniff: "virtualDisk" }]
 ])
 
 function lowerName(name: string): string {
@@ -161,6 +174,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.presentationBinary
 		case "notPresentationBinary":
 			return ambiguity.notPresentationBinary
+		case "virtualDisk":
+			return ambiguity.virtualDisk
+		case "notVirtualDisk":
+			return ambiguity.notVirtualDisk
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

@@ -25,7 +25,7 @@ vi.mock("@/features/preview/components/textViewer", async () => {
 
 	return {
 		// Reports read-only as the real viewer does for text a save would change.
-		TextViewer: ({ editable, rejectBinary, onReadOnly }: { editable?: boolean; rejectBinary?: boolean; onReadOnly?: () => void }) => {
+		TextViewer: ({ editable, onReadOnly }: { editable?: boolean; onReadOnly?: () => void }) => {
 			useEffect(() => {
 				if (reportReadOnly.current && editable === true) {
 					onReadOnly?.()
@@ -34,8 +34,7 @@ vi.mock("@/features/preview/components/textViewer", async () => {
 
 			return createElement("div", {
 				"data-testid": "text",
-				"data-editable": String(editable === true),
-				"data-reject-binary": String(rejectBinary === true)
+				"data-editable": String(editable === true)
 			})
 		}
 	}
@@ -81,13 +80,12 @@ afterEach(() => {
 })
 
 describe("PreviewOverlay — opened as text", () => {
-	it("shows a file of an unknown type in the text viewer, read-only and guarded against binary content", async () => {
-		render(overlay("settings.cfg", true))
+	it("shows a file of an unknown type in the text viewer, read-only", async () => {
+		render(overlay("settings.bin", true))
 
 		const viewer = await screen.findByTestId("text")
 
 		expect(viewer.dataset["editable"]).toBe("false")
-		expect(viewer.dataset["rejectBinary"]).toBe("true")
 
 		usePreviewUnsavedGuardStore.setState({ dirty: true })
 
@@ -95,7 +93,7 @@ describe("PreviewOverlay — opened as text", () => {
 	})
 
 	it("has nothing to page to", async () => {
-		render(overlay("settings.cfg", true))
+		render(overlay("settings.bin", true))
 		await screen.findByTestId("text")
 
 		expect(screen.getByRole("button", { name: "Previous file" })).toHaveProperty("disabled", true)
@@ -103,7 +101,7 @@ describe("PreviewOverlay — opened as text", () => {
 	})
 
 	it("stays read-only after a rename to a text name", async () => {
-		const { rerender } = render(overlay("settings.cfg", true))
+		const { rerender } = render(overlay("settings.bin", true))
 		const viewer = await screen.findByTestId("text")
 
 		rerender(overlay("settings.txt", true))
@@ -112,13 +110,12 @@ describe("PreviewOverlay — opened as text", () => {
 		expect(viewer.dataset["editable"]).toBe("false")
 	})
 
-	it("keeps a real text file editable and unguarded when opened normally", async () => {
+	it("keeps a real text file editable when opened normally", async () => {
 		render(overlay("notes.txt", false))
 
 		const viewer = await screen.findByTestId("text")
 
 		expect(viewer.dataset["editable"]).toBe("true")
-		expect(viewer.dataset["rejectBinary"]).toBe("false")
 	})
 
 	it("locks a text file its viewer reports a save would change", async () => {

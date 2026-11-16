@@ -18,12 +18,13 @@ import {
 	bufferedSizeCap,
 	PREVIEW_MAX_BYTES,
 	TEXT_MAX_BYTES,
-	RAW_IMAGE_EXTENSIONS
+	RAW_IMAGE_EXTENSIONS,
+	CODE_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { isEditable } from "@/features/drive/lib/previewSave.logic"
-import { CODE_FILE_EXTENSIONS, TYPE_ROWS } from "@filen/shared"
+import { TYPE_ROWS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 import { deviceProfile } from "@/lib/deviceProfile"
 
@@ -364,7 +365,7 @@ describe("archive category", () => {
 	// Code is listed after archives, so an extension in both would silently stop being code.
 	it("shares no extension with the code set", () => {
 		for (const ext of ARCHIVE_NAME_EXTENSIONS) {
-			expect(CODE_FILE_EXTENSIONS.has(ext)).toBe(false)
+			expect(CODE_EXTENSIONS.has(ext)).toBe(false)
 		}
 	})
 

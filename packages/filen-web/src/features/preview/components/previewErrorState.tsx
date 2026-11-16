@@ -94,6 +94,26 @@ export function PreviewUnsupportedState({ item, message, secondary }: { item: Dr
 	)
 }
 
+// A text-family file whose bytes are not text: its card, with a way to see them anyway (read-only).
+export function PreviewNotTextState({ item, onShowAnyway }: { item: DriveItem; onShowAnyway: () => void }) {
+	const { t } = useTranslation("preview")
+
+	return (
+		<PreviewUnsupportedState
+			item={item}
+			message={t("previewNotText")}
+			secondary={
+				<Button
+					variant="outline"
+					onClick={onShowAnyway}
+				>
+					{t("previewShowAnyway")}
+				</Button>
+			}
+		/>
+	)
+}
+
 // The viewer-sized spinner, inheriting the overlay's foreground color.
 export function PreviewLoading() {
 	return (

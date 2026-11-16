@@ -2267,7 +2267,6 @@ export function PreviewOverlay({
 															editable={editable}
 															renamedReadOnly={renamedReadOnly}
 															neverEditable={variant !== "drive"}
-															asText={asText}
 															locked={saving}
 															onDirtyChange={setPreviewDirty}
 															onReadOnly={() => {
@@ -2639,8 +2638,6 @@ interface PreviewBodyProps {
 	renamedReadOnly: boolean
 	// Outside the drive nothing is ever editable, so a spreadsheet keeps only what it shows.
 	neverEditable: boolean
-	// Opened through "Open as text" (the text viewer guards against a binary file).
-	asText: boolean
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
@@ -2683,7 +2680,6 @@ function PreviewBody({
 	editable,
 	renamedReadOnly,
 	neverEditable,
-	asText,
 	locked,
 	onDirtyChange,
 	onReadOnly,
@@ -2828,7 +2824,6 @@ function PreviewBody({
 					onDirtyChange={onDirtyChange}
 					onReadOnly={onReadOnly}
 					contentRef={contentRef}
-					rejectBinary={asText}
 				/>
 			)
 		case "markdown":

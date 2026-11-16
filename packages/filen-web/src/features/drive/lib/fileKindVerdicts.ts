@@ -18,21 +18,27 @@ export interface FileKindVerdictStorage {
 }
 
 // A verdict as memory holds it: a document verdict (a `.dot` read as a Word template or not, a `.pot` as a
-// PowerPoint one or not) as well as the media ones kv keeps.
+// PowerPoint one or not, a `.vhd` as a disk image or not) as well as the media ones kv keeps.
 interface HeldVerdict {
 	v: FileVerdict
 	at: number
 }
 
+// Exhaustive, so a new document verdict cannot slip into kv.
 function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 	switch (verdict) {
+		case "transportStream":
+		case "notTransportStream":
+		case "video":
+		case "audio":
+			return true
 		case "wordBinary":
 		case "notWordBinary":
 		case "presentationBinary":
 		case "notPresentationBinary":
+		case "virtualDisk":
+		case "notVirtualDisk":
 			return false
-		default:
-			return true
 	}
 }
 

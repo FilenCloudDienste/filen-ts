@@ -196,6 +196,11 @@ describe("getPreviewType", () => {
 			expect(getPreviewType("archive.zip")).toBe("unknown")
 		})
 
+		// The shared code set stays as it was: grammars only web highlights add nothing here.
+		it.each(["module.pl", "data.yml", "README.mkd", "track.gpx"])("returns 'unknown' for %s", name => {
+			expect(getPreviewType(name)).toBe("unknown")
+		})
+
 		it("returns 'unknown' for .bin", () => {
 			expect(getPreviewType("file.bin")).toBe("unknown")
 		})
@@ -445,7 +450,10 @@ describe("getPreviewType — ambiguous extensions", () => {
 		// A mime never makes a .ts a video; a transport stream (.m2ts) shows no preview on iOS.
 		["main.ts", "video/mp2t", "code", "ts"],
 		["camera.mts", "video/mp2t", "unknown", "mts"],
-		["recording", "video/mp2t", "unknown", "m2ts"]
+		["recording", "video/mp2t", "unknown", "m2ts"],
+		// No .vhd in this table (VHDL source or a disk image elsewhere): read by its mime, as before.
+		["alu.vhd", "text/plain", "text", "txt"],
+		["disk.vhd", "application/octet-stream", "unknown", "vhd"]
 	])("%s (%s) is %s by .%s", (name, mime, type, extension) => {
 		expect(getPreviewType(name, mime)).toBe(type)
 		expect(fileTypeExtension(name, mime)).toBe(extension)

@@ -108,6 +108,19 @@ describe("runContentSniff, head reads", () => {
 		expect(downloadOriginBytes).not.toHaveBeenCalled()
 	})
 
+	it("tells a Virtual Hard Disk from VHDL source by its head", async () => {
+		const disk = new Uint8Array(4096)
+
+		disk.set(new TextEncoder().encode("conectix"))
+
+		await expect(runContentSniff("virtualDisk", bytesOrigin(new Blob([disk]), "parent/disk"), "t1", options())).resolves.toBe(
+			"virtualDisk"
+		)
+		await expect(runContentSniff("virtualDisk", bytesOrigin(new Blob(["library ieee;"]), "parent/alu"), "t2", options())).resolves.toBe(
+			"notVirtualDisk"
+		)
+	})
+
 	it("cancels its download under its token when called off", async () => {
 		const abort = new AbortController()
 		const download = Promise.withResolvers<Uint8Array<ArrayBuffer>>()

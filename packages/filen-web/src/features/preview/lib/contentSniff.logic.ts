@@ -12,13 +12,28 @@ export type Sniffer =
 	// Decided by the read the fallback viewer makes anyway, which records the verdict itself.
 	| { readonly mode: "viewer" }
 
+// A dynamic or differencing Virtual Hard Disk begins with a copy of its footer, whose cookie is "conectix". A fixed
+// disk carries the footer only at its end: above the text cap it is refused before any read, below it the text viewer
+// finds it is not text.
+const VHD_COOKIE = Uint8Array.from("conectix", char => char.charCodeAt(0))
+const VHD_FOOTER_BYTES = 512
+
+export function isVirtualDiskHead(head: Uint8Array): boolean {
+	return head.length >= VHD_COOKIE.length && VHD_COOKIE.every((byte, index) => head[index] === byte)
+}
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
 	// The docx viewer's legacy reader tells a Word 97–2003 template from a Graphviz or text file.
 	wordTemplate: { mode: "viewer" },
 	// The presentation viewer's head sniff tells a PowerPoint 97–2003 template from a gettext template.
-	presentationTemplate: { mode: "viewer" }
+	presentationTemplate: { mode: "viewer" },
+	virtualDisk: {
+		mode: "head",
+		headBytes: VHD_FOOTER_BYTES,
+		decide: head => (isVirtualDiskHead(head) ? "virtualDisk" : "notVirtualDisk")
+	}
 }
 
 // A head sniffer reads no more than this.

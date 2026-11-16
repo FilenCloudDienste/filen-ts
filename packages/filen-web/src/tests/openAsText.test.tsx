@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, render, renderHook, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
@@ -58,6 +58,10 @@ import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
+import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
+import { registerAllActions } from "@/lib/keymap/actions"
+import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 
 function named(name: string) {
 	return narrowItem({
@@ -83,7 +87,7 @@ afterEach(() => {
 
 describe("useDriveDialogHost — Open as text", () => {
 	it("opens the preview overlay in its text mode on just that file", () => {
-		const item = named("settings.cfg")
+		const item = named("settings.bin")
 		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems: [], hiddenNoticeApplies: false }))
 
 		act(() => {
@@ -151,29 +155,53 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 })
 
 describe("TextViewer — binary guard", () => {
-	it("shows a notice instead of a binary file's bytes when opened as text", () => {
+	function renderBinary(name: string, onReadOnly?: () => void) {
 		previewBytes.current = Uint8Array.of(0x7f, 0x45, 0x4c, 0x46, 0x02, 0x00, 0x01)
 
 		render(
-			<TextViewer
-				item={named("program.elf")}
-				alt="program.elf"
-				rejectBinary
-			/>
+			<PreviewDownloadableProvider
+				downloadable
+				onDownload={vi.fn()}
+			>
+				<TextViewer
+					item={named(name)}
+					alt={name}
+					editable
+					{...(onReadOnly === undefined ? {} : { onReadOnly })}
+				/>
+			</PreviewDownloadableProvider>
 		)
+	}
 
-		expect(screen.getByText("This file isn't text, so it can't be shown as text.")).toBeDefined()
+	// Any text-family open, by its type or through "Open as text".
+	it.each(["program.elf", "notes.txt", "module.pl"])("shows %s's binary bytes only behind a notice with Download", name => {
+		renderBinary(name)
+
+		expect(screen.getByText("This file isn't text.")).toBeDefined()
+		expect(screen.getByRole("button", { name: /download/i })).toBeDefined()
+		expect(screen.getByRole("button", { name: "Show anyway (read-only)" })).toBeDefined()
 		expect(screen.queryByTestId("source")).toBeNull()
 	})
 
-	it("shows a text file opened as text", () => {
+	it("shows the bytes anyway on request, read-only, and tells the overlay", () => {
+		const onReadOnly = vi.fn()
+
+		renderBinary("notes.txt", onReadOnly)
+		expect(onReadOnly).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Show anyway (read-only)" }))
+
+		expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
+		expect(onReadOnly).toHaveBeenCalled()
+	})
+
+	it("shows a text file", () => {
 		previewBytes.current = new TextEncoder().encode("key = value")
 
 		render(
 			<TextViewer
-				item={named("settings.cfg")}
-				alt="settings.cfg"
-				rejectBinary
+				item={named("settings.bin")}
+				alt="settings.bin"
 			/>
 		)
 
@@ -185,13 +213,39 @@ describe("TextViewer — binary guard", () => {
 
 		render(
 			<TextViewer
-				item={named("notes.cfg")}
-				alt="notes.cfg"
-				rejectBinary
+				item={named("notes.bin")}
+				alt="notes.bin"
 			/>
 		)
 
 		expect(screen.getByTestId("source").textContent).toBe("hi")
+	})
+})
+
+describe("MarkdownViewer — binary guard", () => {
+	registerAllActions()
+
+	it("shows binary bytes only on request, read-only, and tells the overlay", () => {
+		previewBytes.current = Uint8Array.of(0x23, 0x20, 0x00, 0x01)
+		const onReadOnly = vi.fn()
+
+		render(
+			<MarkdownViewer
+				item={named("notes.md")}
+				alt="notes.md"
+				editable
+				onReadOnly={onReadOnly}
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		expect(screen.getByText("This file isn't text.")).toBeDefined()
+		expect(onReadOnly).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Show anyway (read-only)" }))
+
+		expect(screen.queryByText("This file isn't text.")).toBeNull()
+		expect(onReadOnly).toHaveBeenCalled()
 	})
 })
 

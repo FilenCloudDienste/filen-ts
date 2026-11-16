@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import { CODE_LANGUAGES, codeLanguageExtensions, codeLanguageForExtension, isCodeLanguageId } from "../core/code/index"
 
 describe("code language table", () => {
-	it("covers mobile's 228 extensions (two of them only reachable lowercased, .text left plain) plus web's own seven", () => {
-		expect(codeLanguageExtensions()).toHaveLength(225 + 8)
+	it("covers mobile's 228 extensions (two of them only reachable lowercased, .text left plain), web's own seven, GPX and KML", () => {
+		expect(codeLanguageExtensions()).toHaveLength(225 + 8 + 2)
 	})
 
 	it("leaves .text as plain text rather than LaTeX", () => {
@@ -36,6 +36,8 @@ describe("code language table", () => {
 		["cql", "cql"],
 		["pls", "plsql"],
 		["svg", "xml"],
+		["gpx", "xml"],
+		["kml", "xml"],
 		["map", "json"],
 		["r", "r"],
 		["bzl", "python"],
