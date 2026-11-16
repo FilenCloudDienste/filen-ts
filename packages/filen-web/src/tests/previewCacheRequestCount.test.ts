@@ -334,7 +334,10 @@ describe("streamed preview revisits", () => {
 	it("keeps a registration two viewers share until the last one goes", async () => {
 		const postMessage = vi.fn<(message: { id?: unknown }) => void>()
 
-		Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { controller: { postMessage } } })
+		Object.defineProperty(navigator, "serviceWorker", {
+			configurable: true,
+			value: { controller: { postMessage }, addEventListener: vi.fn() }
+		})
 
 		try {
 			const first = renderHook(() => usePreviewStreamUrl(A, "a.mp4", "video/mp4"))

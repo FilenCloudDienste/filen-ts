@@ -17,12 +17,15 @@ describe("isAllowedInlineContentType — image allowlist (exact match only)", ()
 		"image/bmp",
 		"image/x-icon",
 		"image/apng",
-		"image/avif"
+		"image/avif",
+		"image/heic",
+		"image/heif",
+		"image/jxl"
 	])("allows %s", mime => {
 		expect(isAllowedInlineContentType(mime)).toBe(true)
 	})
 
-	it.each(["image/tiff", "image/heic", "image/heif", "image/vnd.adobe.photoshop", "image/svg"])(
+	it.each(["image/tiff", "image/heic-sequence", "image/x-qoi", "image/vnd.adobe.photoshop", "image/svg"])(
 		"rejects unlisted image type %s",
 		mime => {
 			expect(isAllowedInlineContentType(mime)).toBe(false)

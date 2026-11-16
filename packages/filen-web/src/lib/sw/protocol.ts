@@ -4,7 +4,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 19
+export const SW_PROTOCOL_VERSION = 20
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -86,6 +86,10 @@ export const SW_MSG_RELEASE_PREVIEW = "FILEN_SW_RELEASE_PREVIEW"
 // SW_STREAM_GONE_INTERVAL_MS; the id is the URL's own path segment, nothing secret.
 export const SW_MSG_STREAM_GONE = "FILEN_SW_STREAM_GONE"
 export const SW_STREAM_GONE_INTERVAL_MS = 2_000
+// SW → every window client, `{ type, id }`: a response for inline preview `id` enqueued the file's last byte without
+// error. An image that fails after it had every byte failed in its decoder, not on the network, and no retry of the
+// same bytes changes that. The id is the URL's own path segment, nothing secret.
+export const SW_MSG_PREVIEW_DELIVERED = "FILEN_SW_PREVIEW_DELIVERED"
 // Ack error a registration answers with when the worker holds no session Client. An idle worker is
 // terminated and restarts with empty module globals, so the handed-over Client is gone while the page's
 // handoff memo still believes otherwise — the page heals on this by re-handing the session over and
@@ -154,7 +158,11 @@ const INLINE_IMAGE_MIME_ALLOWLIST = new Set([
 	"image/bmp",
 	"image/x-icon",
 	"image/apng",
-	"image/avif"
+	"image/avif",
+	// Only offered where this browser decodes them itself (nativeImageSupport.ts, streamsNatively).
+	"image/heic",
+	"image/heif",
+	"image/jxl"
 ])
 
 export function isAllowedInlineContentType(contentType: string): boolean {

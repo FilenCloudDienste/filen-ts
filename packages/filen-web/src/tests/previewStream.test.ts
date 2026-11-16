@@ -318,7 +318,7 @@ describe("previewStreamUrl (anon)", () => {
 		sdk.openLinkedRangePortAnon.mockResolvedValue(undefined)
 		sdk.cancelPreviewDownload.mockResolvedValue(undefined)
 		sendToSw.mockResolvedValue(undefined)
-		vi.stubGlobal("navigator", { serviceWorker: { controller } })
+		vi.stubGlobal("navigator", { serviceWorker: { controller, addEventListener: vi.fn() } })
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(() => Promise.resolve(Response.json({ v: options.version ?? SW_PROTOCOL_VERSION })))
@@ -590,5 +590,54 @@ describe("onPreviewStreamGone", () => {
 
 		expect(listener).toHaveBeenCalledOnce()
 		vi.unstubAllGlobals()
+	})
+})
+
+describe("previewDelivered", () => {
+	function serviceWorkerContainer() {
+		const container = new EventTarget()
+
+		vi.stubGlobal("navigator", { serviceWorker: container })
+
+		return (data: unknown): void => {
+			container.dispatchEvent(new MessageEvent("message", { data }))
+		}
+	}
+
+	it("keeps an acknowledgement that lands before anything asks, for the registered id only", async () => {
+		vi.resetModules()
+
+		const post = serviceWorkerContainer()
+		const { previewDelivered, previewStreamUrl } = await import("@/features/preview/lib/previewStream")
+		const { SW_MSG_PREVIEW_DELIVERED } = await import("@/lib/sw/protocol")
+
+		registerWithSw.mockResolvedValue(undefined)
+		await previewStreamUrl(testFile(), "photo.heic", "image/heic", "id-1")
+		post({ type: SW_MSG_PREVIEW_DELIVERED, id: "id-1" })
+
+		expect(await previewDelivered("id-1", 0)).toBe(true)
+		expect(await previewDelivered("id-2", 0)).toBe(false)
+	})
+
+	it("waits a grace period for an acknowledgement still on its way, and forgets it when the id registers again", async () => {
+		vi.resetModules()
+
+		const post = serviceWorkerContainer()
+		const { previewDelivered, previewStreamUrl } = await import("@/features/preview/lib/previewStream")
+		const { SW_MSG_PREVIEW_DELIVERED } = await import("@/lib/sw/protocol")
+
+		registerWithSw.mockResolvedValue(undefined)
+		await previewStreamUrl(testFile(), "photo.heic", "image/heic", "id-1")
+
+		const waiting = previewDelivered("id-1", 1_000)
+
+		post({ type: "other", id: "id-1" })
+		post({ type: SW_MSG_PREVIEW_DELIVERED, id: "id-1" })
+
+		expect(await waiting).toBe(true)
+
+		await previewStreamUrl(testFile(), "photo.heic", "image/heic", "id-1")
+
+		expect(await previewDelivered("id-1", 10)).toBe(false)
 	})
 })

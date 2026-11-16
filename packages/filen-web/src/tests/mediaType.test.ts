@@ -4,7 +4,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { EXTENSION_TIERS, RAW_IMAGE_EXTENSIONS, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType, inlineTypeForExtension, isRescuable } from "@/features/preview/lib/mediaType"
 import { AUDIO_FORMATS } from "@filen/shared"
-import { IMAGE_FORMATS } from "@/features/preview/lib/imageFormat"
+import { deviceProfile } from "@/lib/deviceProfile"
 import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
@@ -113,6 +113,17 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("favicon.ico", "image/vnd.microsoft.icon"))).toBe("image/x-icon")
 	})
 
+	it("serves a HEIF image only where the browser decodes it, under its stored type or its extension's", () => {
+		const native = { ...deviceProfile(), heicNative: "yes" as const }
+		const libheif = { ...deviceProfile(), heicNative: "no" as const }
+
+		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"), native)).toBe("image/heic")
+		expect(allowedMediaContentType(fileNamed("photo.heic", "application/octet-stream"), native)).toBe("image/heic")
+		expect(allowedMediaContentType(fileNamed("photo.hif", undefined), native)).toBe("image/heif")
+		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"), libheif)).toBeNull()
+		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"), { ...native, heicNative: "unknown" })).toBeNull()
+	})
+
 	it("never serves an SVG by a type it did not store", () => {
 		expect(allowedMediaContentType(fileNamed("logo.svg", "image/svg+xml"))).toBe("image/svg+xml")
 		expect(allowedMediaContentType(fileNamed("logo.svg", undefined))).toBeNull()
@@ -125,15 +136,14 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("photo.jpg", "application/x-shockwave-flash"))).toBeNull()
 	})
 
-	it("gives every natively shown image, and every video and audio extension, a type the allowlist serves, unless it is never rescued", () => {
+	it("gives every image, video and audio extension a type the allowlist serves, unless it is never rescued", () => {
 		const media = EXTENSION_TIERS.flatMap(([extensions]) => [...extensions]).filter(extension => {
 			const category = previewCategoryForExtension(extension)
 
-			// An image the browser does not decode itself is never served inline.
-			return category === "image" ? IMAGE_FORMATS.get(extension)?.decode === "native" : category === "video" || category === "audio"
+			return category === "image" || category === "video" || category === "audio"
 		})
 
-		expect(media).toContain("pjp")
+		expect(media).toEqual(expect.arrayContaining(["pjp", "heic", "heif", "hif"]))
 
 		for (const extension of media) {
 			const served = inlineTypeForExtension(extension)
@@ -228,7 +238,8 @@ describe("inlineTypeForExtension", () => {
 		expect(inlineTypeForExtension("jpeg")).toBe("image/jpeg")
 		expect(inlineTypeForExtension("ico")).toBe("image/x-icon")
 		expect(inlineTypeForExtension("svg")).toBe("image/svg+xml")
-		expect(inlineTypeForExtension("heic")).toBeNull()
+		expect(inlineTypeForExtension("heic")).toBe("image/heic")
+		expect(inlineTypeForExtension("hif")).toBe("image/heif")
 		expect(inlineTypeForExtension("tiff")).toBeNull()
 		expect(inlineTypeForExtension("pdf")).toBeNull()
 		expect(inlineTypeForExtension("html")).toBeNull()

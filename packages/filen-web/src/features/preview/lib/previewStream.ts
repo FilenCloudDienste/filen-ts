@@ -6,6 +6,7 @@ import { originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOr
 import { controllerIsCurrent } from "@/lib/sw/register"
 import {
 	SW_DOWNLOAD_PREFIX,
+	SW_MSG_PREVIEW_DELIVERED,
 	SW_MSG_PREVIEW_STATUS,
 	SW_MSG_REGISTER_PORT_PREVIEW,
 	SW_MSG_REGISTER_PREVIEW,
@@ -42,6 +43,8 @@ export async function previewStreamUrl(
 	options: { transient?: boolean; access?: PreviewAccess } = {}
 ): Promise<string> {
 	const bucket = previewBucket(contentType, options.transient === true)
+
+	expectDelivery(id)
 
 	if (options.access === "anon") {
 		const token = crypto.randomUUID()
@@ -91,6 +94,7 @@ export async function registerPortStream(
 	open: (port: MessagePort) => Promise<PortStreamMeta>,
 	cancel: () => void
 ): Promise<string> {
+	expectDelivery(id)
 	await registerPortPreview(
 		id,
 		async port => {
@@ -423,4 +427,86 @@ export function onPreviewStreamGone(id: string, listener: () => void): () => voi
 	return () => {
 		container.removeEventListener("message", handle)
 	}
+}
+
+// Ids whose inline response reached the file's last byte (SW_MSG_PREVIEW_DELIVERED), oldest first. Bounded: only the
+// previews on screen are ever asked about.
+const delivered = new Set<string>()
+const MAX_DELIVERED = 64
+const deliveryWaiters = new Map<string, Set<() => void>>()
+let hearingDeliveries = false
+
+function markDelivered(id: string): void {
+	delivered.delete(id)
+	delivered.add(id)
+
+	if (delivered.size > MAX_DELIVERED) {
+		const oldest = delivered.values().next().value
+
+		if (oldest !== undefined) {
+			delivered.delete(oldest)
+		}
+	}
+
+	for (const waiter of deliveryWaiters.get(id) ?? []) {
+		waiter()
+	}
+}
+
+// A (re)registration of `id` starts its stream over: only a delivery after it counts. Listens from the first one on,
+// so an acknowledgement that lands before anything asks is kept.
+function expectDelivery(id: string): void {
+	delivered.delete(id)
+
+	if (hearingDeliveries || !("serviceWorker" in navigator)) {
+		return
+	}
+
+	hearingDeliveries = true
+	navigator.serviceWorker.addEventListener("message", (event: MessageEvent) => {
+		const data: unknown = event.data
+
+		if (
+			typeof data === "object" &&
+			data !== null &&
+			"type" in data &&
+			data.type === SW_MSG_PREVIEW_DELIVERED &&
+			"id" in data &&
+			typeof data.id === "string"
+		) {
+			markDelivered(data.id)
+		}
+	})
+}
+
+// Whether the worker has acknowledged that preview `id`'s response reached the file's last byte, waiting up to
+// `graceMs` for an acknowledgement still on its way (it may land just after the element's own error event). A
+// controller older than SW_MSG_PREVIEW_DELIVERED never sends one, so it reads as undelivered.
+export function previewDelivered(id: string, graceMs: number): Promise<boolean> {
+	if (delivered.has(id)) {
+		return Promise.resolve(true)
+	}
+
+	return new Promise(resolve => {
+		const waiters = deliveryWaiters.get(id) ?? new Set<() => void>()
+		const settle = (value: boolean) => {
+			clearTimeout(timer)
+			waiters.delete(arrived)
+
+			if (waiters.size === 0) {
+				deliveryWaiters.delete(id)
+			}
+
+			resolve(value)
+		}
+		const arrived = () => {
+			settle(true)
+		}
+		const timer = setTimeout(() => {
+			settle(false)
+		}, graceMs)
+
+		waiters.add(arrived)
+		deliveryWaiters.set(id, waiters)
+	})
 }

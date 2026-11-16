@@ -4,6 +4,7 @@ import { exposeRangePort } from "@/lib/media/rangePort"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_ERROR_SUPERSEDED,
+	SW_MSG_PREVIEW_DELIVERED,
 	SW_MSG_PREVIEW_STATUS,
 	SW_MSG_REGISTER_PORT_PREVIEW,
 	SW_MSG_RELEASE_PREVIEW,
@@ -436,6 +437,50 @@ describe("sw.ts port-backed preview", () => {
 		expect(await bodyOf(clamped)).toEqual(expected(290, 299))
 	})
 
+	it("acknowledges an inline response once it has enqueued the file's last byte, and no other", async () => {
+		await registerPort("p1", 300, "image/heic")
+
+		const head = get("p1", "bytes=0-9")
+
+		await bodyOf(head.response)
+		await head.settled
+		expect(posted).toEqual([])
+
+		const whole = get("p1")
+
+		expect(await bodyOf(whole.response)).toEqual(expected(0, 299))
+		await whole.settled
+		expect(posted).toEqual([{ type: SW_MSG_PREVIEW_DELIVERED, id: "p1" }])
+	})
+
+	it("acknowledges no response that failed or was released before the last byte, nor an attachment", async () => {
+		const failing = await registerPort("p1", 100, "image/heic", true)
+		const failed = get("p1")
+		const failedBody = failed.response.arrayBuffer()
+
+		await tick()
+		failing.lifetime.abort()
+		await expect(failedBody).rejects.toThrow()
+		await failed.settled
+
+		await registerPort("p2", 3 * BLOCK_BYTES, "image/heic", true)
+		const released = get("p2")
+		const releasedBody = released.response.arrayBuffer()
+
+		await tick()
+		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p2" }, ports: [] })
+		await releasedBody
+		await released.settled
+
+		await registerPort("p3", 100, "text/html")
+		const attachment = get("p3")
+
+		await bodyOf(attachment.response)
+		await attachment.settled
+
+		expect(posted.filter(message => (message as { type: string }).type === SW_MSG_PREVIEW_DELIVERED)).toEqual([])
+	})
+
 	it("serves a contentType off the inline allowlist as an attachment", async () => {
 		await registerPort("p1", 100, "text/html")
 
@@ -649,7 +694,7 @@ describe("sw.ts preview status", () => {
 
 describe("sw.ts version", () => {
 	it("reports its protocol version", async () => {
-		expect(SW_PROTOCOL_VERSION).toBe(19)
+		expect(SW_PROTOCOL_VERSION).toBe(20)
 
 		let response: Response | null = null
 
@@ -660,6 +705,6 @@ describe("sw.ts version", () => {
 			}
 		})
 
-		expect(await (response as Response | null)?.json()).toMatchObject({ v: 19 })
+		expect(await (response as Response | null)?.json()).toMatchObject({ v: 20 })
 	})
 })

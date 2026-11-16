@@ -136,7 +136,7 @@ describe("archiveEntryItem", () => {
 		expect(driveItemMime(archiveEntryItem(TEST_ARCHIVE, 0, "a.docx", 1, NaN))).toBe("application/octet-stream")
 	})
 
-	it("types each image entry as the hand-written map did, and every other viewed entry as generic binary", () => {
+	it("types each image entry the inline route may serve by its extension, and every other viewed entry as generic binary", () => {
 		const typed = new Map([
 			["jpg", "image/jpeg"],
 			["jpeg", "image/jpeg"],
@@ -147,10 +147,13 @@ describe("archiveEntryItem", () => {
 			["bmp", "image/bmp"],
 			["ico", "image/x-icon"],
 			["apng", "image/apng"],
-			["avif", "image/avif"]
+			["avif", "image/avif"],
+			["heic", "image/heic"],
+			["heif", "image/heif"],
+			["hif", "image/heif"]
 		])
 
-		const generic = ["heic", "heif", "hif", "tiff", "pdf", "docx", "xlsx", "pptx", "txt", "md", "json", "html"]
+		const generic = ["tiff", "pdf", "docx", "xlsx", "pptx", "txt", "md", "json", "html"]
 
 		for (const extension of [...typed.keys(), ...generic]) {
 			const item = archiveEntryItem(TEST_ARCHIVE, 0, `entry.${extension}`, 1, NaN)

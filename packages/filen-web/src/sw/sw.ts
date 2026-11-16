@@ -12,6 +12,7 @@ import initSdk, {
 import {
 	SW_PROTOCOL_VERSION,
 	SW_MSG_STREAM_GONE,
+	SW_MSG_PREVIEW_DELIVERED,
 	SW_STREAM_GONE_INTERVAL_MS,
 	SW_SKIP_WAITING_MESSAGE,
 	SW_MSG_BUILD,
@@ -384,6 +385,8 @@ function streamFileRange(
 	}
 
 	const { range, start, end } = served
+	// An inline body that runs to the file's last byte is acknowledged once it has (SW_MSG_PREVIEW_DELIVERED).
+	const delivers = headers.disposition === null && end === total - 1
 
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
 	// Only the whole file is the download; a ranged request is a probe or a seek.
@@ -413,20 +416,22 @@ function streamFileRange(
 		client,
 		writable,
 		() =>
-			client.downloadFileToWriter({
-				file: pending.file,
-				writer: writable,
-				// Only a reported download has anyone to tell; a preview leaves it out rather than pay a call
-				// into JS per write.
-				...(stream !== null
-					? {
-							progress: (bytes: bigint) => {
-								stream.progress(Number(bytes), total)
+			client
+				.downloadFileToWriter({
+					file: pending.file,
+					writer: writable,
+					// Only a reported download has anyone to tell; a preview leaves it out rather than pay a call
+					// into JS per write.
+					...(stream !== null
+						? {
+								progress: (bytes: bigint) => {
+									stream.progress(Number(bytes), total)
+								}
 							}
-						}
-					: {}),
-				...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
-			}),
+						: {}),
+					...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
+				})
+				.then(() => (delivers ? announceDelivered(id) : undefined)),
 		watched === null || stream === null ? null : { stream, cancelledByBrowser: watched.cancelledByBrowser }
 	)
 
@@ -558,13 +563,13 @@ interface PortSpares {
 // nothing is read past `end`. A cancel aborts every read in flight and leaves the windows that had arrived to
 // `spares`, which also serves any window an earlier response left. `ends` holds the body's quiet ending while it is
 // open: run (the page released the registration), it aborts the reads and closes the body where it stands, so the
-// consumer sees a finished body rather than an error.
+// consumer sees a finished body rather than an error. `finish` hears whether the body closed after byte `end`.
 function portBody(
 	reader: RangePortReader,
 	start: number,
 	end: number,
 	readAhead: number,
-	finish: () => void,
+	finish: (complete: boolean) => void,
 	spares?: PortSpares,
 	ends?: Set<() => void>
 ): ReadableStream<Uint8Array> {
@@ -578,7 +583,7 @@ function portBody(
 	let finished = false
 	let ended = false
 	let quietEnd: (() => void) | undefined
-	const settle = () => {
+	const settle = (complete: boolean) => {
 		if (!finished) {
 			finished = true
 			reads.abort()
@@ -587,7 +592,7 @@ function portBody(
 				ends?.delete(quietEnd)
 			}
 
-			finish()
+			finish(complete)
 		}
 	}
 	const readWindow = () => {
@@ -622,7 +627,7 @@ function portBody(
 			start(controller) {
 				if (position > end) {
 					controller.close()
-					settle()
+					settle(true)
 
 					return
 				}
@@ -634,7 +639,7 @@ function portBody(
 
 					ended = true
 					controller.close()
-					settle()
+					settle(false)
 				}
 				ends?.add(quietEnd)
 			},
@@ -670,7 +675,7 @@ function portBody(
 
 					if (position > end) {
 						controller.close()
-						settle()
+						settle(true)
 					}
 				} catch (e) {
 					// Ended quietly while this read waited: its abort is not the body's failure.
@@ -679,7 +684,7 @@ function portBody(
 					}
 
 					controller.error(e)
-					settle()
+					settle(false)
 				}
 			},
 			cancel(reason) {
@@ -694,7 +699,7 @@ function portBody(
 				}
 
 				reads.abort(reason)
-				settle()
+				settle(false)
 			}
 		},
 		{ highWaterMark: 0 }
@@ -719,14 +724,14 @@ function handlePortPreview(event: FetchEvent, id: string, pending: PendingPortPr
 		return unsatisfiable(total)
 	}
 
-	const done = Promise.withResolvers<undefined>()
+	const done = Promise.withResolvers<boolean>()
 	const body = portBody(
 		pending.reader,
 		served.start,
 		served.end,
 		pending.readAhead,
-		() => {
-			done.resolve(undefined)
+		complete => {
+			done.resolve(complete)
 		},
 		{
 			take: start => takeSpare(pending, start),
@@ -748,11 +753,13 @@ function handlePortPreview(event: FetchEvent, id: string, pending: PendingPortPr
 	downloads.beginStream(id)
 	// Keeps the worker alive while the browser reads, as pumpToResponse does.
 	event.waitUntil(
-		done.promise.finally(() => {
-			downloads.endStream(id)
-			pending.streams--
-			closePortIfDone(pending)
-		})
+		done.promise
+			.then(complete => (complete && inline && served.end === total - 1 ? announceDelivered(id) : undefined))
+			.finally(() => {
+				downloads.endStream(id)
+				pending.streams--
+				closePortIfDone(pending)
+			})
 	)
 
 	return response
@@ -793,16 +800,24 @@ function reportStreamGone(event: FetchEvent, id: string): void {
 		}
 	}
 
-	event.waitUntil(
-		self.clients
-			.matchAll({ type: "window" })
-			.then(clients => {
-				for (const client of clients) {
-					client.postMessage({ type: SW_MSG_STREAM_GONE, id })
-				}
-			})
-			.catch(() => undefined)
-	)
+	event.waitUntil(postToWindows({ type: SW_MSG_STREAM_GONE, id }))
+}
+
+// Posts `message` to every window client; never rejects.
+function postToWindows(message: { type: string; id: string }): Promise<void> {
+	return self.clients
+		.matchAll({ type: "window" })
+		.then(clients => {
+			for (const client of clients) {
+				client.postMessage(message)
+			}
+		})
+		.catch(() => undefined)
+}
+
+// An inline response for preview `id` enqueued the file's last byte (SW_MSG_PREVIEW_DELIVERED).
+function announceDelivered(id: string): Promise<void> {
+	return postToWindows({ type: SW_MSG_PREVIEW_DELIVERED, id })
 }
 
 // The "stream" kind: the page's own stream, which only one response can read. Range is ignored and a whole

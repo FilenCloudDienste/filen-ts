@@ -7,7 +7,8 @@ import {
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_PREVIEW,
 	SW_MSG_RELEASE_PREVIEW,
-	SW_MSG_PREVIEW_STATUS
+	SW_MSG_PREVIEW_STATUS,
+	SW_MSG_PREVIEW_DELIVERED
 } from "@/lib/sw/protocol"
 
 // sw.ts is a ServiceWorkerGlobalScope module: it registers its listeners on `self` at import and pulls
@@ -50,16 +51,22 @@ vi.mock("@filen/sdk-rs/service-worker/sdk-rs.js", () => ({
 type Listener = (event: unknown) => void
 
 let listeners: Map<string, Listener>
+// What the worker posted to its window clients.
+let posted: unknown[] = []
 
 async function loadSw(): Promise<void> {
 	listeners = new Map()
+	posted = []
 	vi.stubGlobal("self", {
 		location: { origin: "https://app.test" },
 		addEventListener: (type: string, listener: Listener) => {
 			listeners.set(type, listener)
 		},
 		skipWaiting: () => Promise.resolve(),
-		clients: { claim: () => Promise.resolve(), matchAll: () => Promise.resolve([]) }
+		clients: {
+			claim: () => Promise.resolve(),
+			matchAll: () => Promise.resolve([{ postMessage: (data: unknown) => posted.push(data) }])
+		}
 	})
 	vi.resetModules()
 	await import("@/sw/sw")
@@ -215,5 +222,58 @@ describe("sw.ts preview release", () => {
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1" }, ports: [] })
 
 		expect(await message({ type: SW_MSG_PREVIEW_STATUS, id: "p1" })).toEqual({ status: "missing" })
+	})
+})
+
+// Starts a GET of registered id `id` (optionally ranged) and returns the promise its waitUntil keeps alive.
+function fetchPreview(id: string, range?: string): Promise<unknown> {
+	let pump: Promise<unknown> = Promise.resolve()
+
+	listeners.get("fetch")?.({
+		request: {
+			url: `https://app.test${SW_DOWNLOAD_PREFIX}${id}`,
+			method: "GET",
+			mode: "no-cors",
+			headers: new Headers(range === undefined ? {} : { Range: range })
+		},
+		respondWith: () => undefined,
+		waitUntil: (p: Promise<unknown>) => {
+			pump = p
+		}
+	})
+
+	return pump
+}
+
+describe("sw.ts preview delivery", () => {
+	it("acknowledges a session preview whose stream wrote the file's last byte, and no ranged part or download", async () => {
+		await message({ type: SW_MSG_INIT_CLIENT, blob: {} })
+		await message({ type: SW_MSG_REGISTER_PREVIEW, id: "p1", file: {}, name: "a.heic", size: 10, contentType: "image/heic" })
+		await registerDownload("d1")
+
+		const part = fetchPreview("p1", "bytes=0-4")
+		const whole = fetchPreview("p1")
+		const download = streamDownload("d1")
+
+		sdk.clients[0]?.finishStream()
+		await Promise.all([part, whole, download])
+
+		expect(posted).toEqual([{ type: SW_MSG_PREVIEW_DELIVERED, id: "p1" }])
+	})
+
+	it("acknowledges nothing for a stream that failed", async () => {
+		await message({ type: SW_MSG_INIT_CLIENT, blob: {} })
+		await message({ type: SW_MSG_REGISTER_PREVIEW, id: "p1", file: {}, name: "a.heic", size: 10, contentType: "image/heic" })
+
+		const client = sdk.clients[0]
+
+		if (client === undefined) {
+			throw new Error("no client")
+		}
+
+		Object.assign(client, { downloadFileToWriter: () => Promise.reject(new Error("network")) })
+		await fetchPreview("p1")
+
+		expect(posted).toEqual([])
 	})
 })
