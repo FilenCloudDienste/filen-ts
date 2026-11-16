@@ -179,6 +179,15 @@ describe("openListingSession", () => {
 		expect(small.calls).toHaveLength(1)
 	})
 
+	it("lists a large zip-based package at once, though its name says no format", async () => {
+		const { calls, deps } = harness(nameInfo(null))
+
+		openListingSession(source("app.apk", 64 * MiB), deps)
+		await vi.advanceTimersByTimeAsync(150)
+
+		expect(calls).toHaveLength(1)
+	})
+
 	it("waits for the name's format when it is not known yet", async () => {
 		let answer: (info: ArchiveNameInfo) => void = () => undefined
 		const { deps } = harness(

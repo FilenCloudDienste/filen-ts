@@ -10,6 +10,7 @@ import {
 	formatChoice,
 	hasLevels,
 	isArchiveCandidateName,
+	isZipPackageName,
 	isFormatChoiceId,
 	isFormatRunnable,
 	probeFormat,
@@ -222,7 +223,20 @@ describe("isArchiveCandidateName", () => {
 		"notes.lz4",
 		"notes.br",
 		"notes.ZST",
-		".tar.gz"
+		".tar.gz",
+		"app.apk",
+		"bundle.AAB",
+		"lib.aar",
+		"App.ipa",
+		"tool.jar",
+		"site.war",
+		"app.ear",
+		"addon.xpi",
+		"pkg-1.0-py3-none-any.whl",
+		"Package.1.0.nupkg",
+		"ext.vsix",
+		"App.appx",
+		"App.msix"
 	])("offers %s", name => {
 		expect(isArchiveCandidateName(name)).toBe(true)
 	})
@@ -233,6 +247,14 @@ describe("isArchiveCandidateName", () => {
 			expect(isArchiveCandidateName(name)).toBe(false)
 		}
 	)
+
+	it("names zip-based packages, never a plain archive", () => {
+		expect(isZipPackageName("app.apk")).toBe(true)
+		expect(isZipPackageName("Tool.JAR")).toBe(true)
+		expect(isZipPackageName(".apk")).toBe(false)
+		expect(isZipPackageName("photos.zip")).toBe(false)
+		expect(isZipPackageName("map.kmz")).toBe(false)
+	})
 
 	it("holds the last extension of each name the SDK reads as an archive", () => {
 		expect([...ARCHIVE_NAME_EXTENSIONS].sort()).toEqual(

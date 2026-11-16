@@ -411,6 +411,14 @@ describe("getPreviewType — stored mime", () => {
 		}
 	})
 
+	// Before = after: an archive or package type names an extension this platform's tables lack.
+	it("keeps an extensionless archive or package unknown, with no type extension", () => {
+		for (const mime of ["application/zip", "application/x-zip-compressed", "application/vnd.android.package-archive", "application/java-archive"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+			expect(fileTypeExtension("download", mime), mime).toBe("")
+		}
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

@@ -352,6 +352,31 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("analysis.ipynb"))).toBe("other")
 	})
 
+	it.each(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "whl", "nupkg", "vsix", "appx", "msix"])("%s -> archive", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("archive")
+	})
+
+	it("reads an archive or package type as an archive without an extension", () => {
+		for (const [mime, extension] of [
+			["application/zip", "zip"],
+			["application/x-zip-compressed", "zip"],
+			["application/x-7z-compressed", "7z"],
+			["application/x-tar", "tar"],
+			["application/gzip", "gz"],
+			["application/x-bzip2", "bz2"],
+			["application/x-xz", "xz"],
+			["application/zstd", "zst"],
+			["application/java-archive", "jar"],
+			["application/vnd.android.package-archive", "apk"],
+			["application/x-xpinstall", "xpi"]
+		] as const) {
+			const item = fileNamed("download", { mime })
+
+			expect(itemTypeExtension(item), mime).toBe(extension)
+			expect(previewType(item), mime).toBe("archive")
+		}
+	})
+
 	it("reads a subtitle, calendar, contact or message type as text without an extension", () => {
 		for (const [mime, extension] of [
 			["text/vtt", "vtt"],

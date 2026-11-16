@@ -37,3 +37,20 @@ export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, A
 // Subtitle files a text editor reads as they are (videos/sidecars.ts names their formats). Image-based tracks (VobSub,
 // PGS) and the ambiguous `.sub` are not text.
 export const SUBTITLE_FILE_EXTENSIONS: ReadonlySet<string> = new Set(["srt", "vtt", "ass", "ssa", "smi", "sami"])
+
+// Application and library packages that are zip archives under their own extension: browsed and extracted as zips.
+export const ZIP_PACKAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+	"apk",
+	"aab",
+	"aar",
+	"ipa",
+	"jar",
+	"war",
+	"ear",
+	"xpi",
+	"whl",
+	"nupkg",
+	"vsix",
+	"appx",
+	"msix"
+])

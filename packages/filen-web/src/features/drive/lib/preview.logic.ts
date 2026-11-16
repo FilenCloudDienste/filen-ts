@@ -7,6 +7,7 @@ import {
 	AUDIO_FORMATS,
 	CODE_FILE_EXTENSIONS,
 	SUBTITLE_FILE_EXTENSIONS,
+	ZIP_PACKAGE_EXTENSIONS,
 	extensionStart,
 	resolveFileKind,
 	sniffCandidates,
@@ -363,7 +364,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
-	[ARCHIVE_NAME_EXTENSIONS, "archive"],
+	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],
 	// A `.vhd` is VHDL until a read of its head finds a Virtual Hard Disk.
 	[CODE_EXTENSIONS, "code"]
 ]

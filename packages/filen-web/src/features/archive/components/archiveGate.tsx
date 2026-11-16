@@ -4,6 +4,7 @@ import { FileArchiveIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { gateFor } from "@/features/archive/lib/archiveGate.logic"
+import { isZipPackageName } from "@/features/drive/lib/archiveFormats"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import { ArchiveExtractMenu } from "@/features/archive/components/archiveExtractMenu"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -46,7 +47,7 @@ export function ArchiveGate({
 				className="size-10 text-muted-foreground"
 			/>
 			<p className="max-w-sm text-sm text-muted-foreground">
-				{gateFor(format, source.size) === "gate"
+				{gateFor(format, source.size, isZipPackageName(source.name)) === "gate"
 					? t("previewArchiveGateBody", { size: formatBytes(source.size) })
 					: t("previewArchiveNotListed")}
 			</p>

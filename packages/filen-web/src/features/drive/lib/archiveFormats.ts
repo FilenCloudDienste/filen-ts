@@ -1,4 +1,5 @@
 import type { AesStrength, CompressFormat, SevenZMethod, StreamCodec, ZipMethod } from "@filen/sdk-rs"
+import { ZIP_PACKAGE_EXTENSIONS } from "@filen/shared"
 import type { ArchiveKey } from "@/lib/i18n"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
 
@@ -297,11 +298,25 @@ export const ARCHIVE_NAME_EXTENSIONS: ReadonlySet<string> = new Set([
 	"zst"
 ])
 
-// Whether to offer Extract: a string lookup, no SDK call. The SDK's archiveNameInfo, and the archive's
-// own bytes when it is read, decide what it is. As the SDK, the extension needs a name before it:
-// ".zip" alone is no archive's name.
-export function isArchiveCandidateName(name: string): boolean {
+function nameExtension(name: string): string | null {
 	const dot = name.lastIndexOf(".")
 
-	return dot > 0 && ARCHIVE_NAME_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
+	return dot > 0 ? name.slice(dot + 1).toLowerCase() : null
+}
+
+// Whether the name is a zip-based package's (an .apk, a .jar): a zip whatever the SDK's name table says, so it lists
+// from its index at once.
+export function isZipPackageName(name: string): boolean {
+	const extension = nameExtension(name)
+
+	return extension !== null && ZIP_PACKAGE_EXTENSIONS.has(extension)
+}
+
+// Whether to offer Extract: a string lookup, no SDK call. The SDK's archiveNameInfo, and the archive's
+// own bytes when it is read, decide what it is. As the SDK, the extension needs a name before it:
+// ".zip" alone is no archive's name. A package is a zip the SDK reads by its bytes.
+export function isArchiveCandidateName(name: string): boolean {
+	const extension = nameExtension(name)
+
+	return extension !== null && (ARCHIVE_NAME_EXTENSIONS.has(extension) || ZIP_PACKAGE_EXTENSIONS.has(extension))
 }

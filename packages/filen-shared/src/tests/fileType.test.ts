@@ -78,7 +78,19 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["text/vcard", "vcf"],
 	["text/x-vcard", "vcf"],
 	["message/rfc822", "eml"],
-	["application/mbox", "mbox"]
+	["application/mbox", "mbox"],
+	["application/zip", "zip"],
+	["application/x-zip-compressed", "zip"],
+	["application/x-7z-compressed", "7z"],
+	["application/x-tar", "tar"],
+	["application/gzip", "gz"],
+	["application/x-gzip", "gz"],
+	["application/x-bzip2", "bz2"],
+	["application/x-xz", "xz"],
+	["application/zstd", "zst"],
+	["application/java-archive", "jar"],
+	["application/vnd.android.package-archive", "apk"],
+	["application/x-xpinstall", "xpi"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.

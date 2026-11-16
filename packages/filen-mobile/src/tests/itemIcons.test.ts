@@ -363,6 +363,13 @@ describe("resolveFileIconKey", () => {
 		expect(resolveFileIconKey("blob", "application/octet-stream")).toBe("other")
 	})
 
+	// Before = after: archive and package types name extensions this platform's tables lack, so they stay unread.
+	it("keeps an extensionless archive or package the generic icon", () => {
+		for (const mime of ["application/zip", "application/x-7z-compressed", "application/gzip", "application/vnd.android.package-archive"]) {
+			expect(resolveFileIconKey("download", mime), mime).toBe("other")
+		}
+	})
+
 	it("keeps a known extension's icon whatever the mime says", () => {
 		expect(resolveFileIconKey("photo.jpg", "video/mp4")).toBe("image")
 		expect(resolveFileIconKey("main.rs", "text/plain")).toBe("code")
