@@ -26,6 +26,7 @@ import type {
 	DesktopSyncPlanSummary,
 	DesktopSyncResolution,
 	DesktopSyncScanGap,
+	DesktopSyncSkippedSymlink,
 	DesktopSyncStage,
 	DesktopSyncTransfer,
 	DesktopSyncUnsyncable,
@@ -71,7 +72,9 @@ const heldReasonSchema = pinned<DesktopSyncHeldReason>()(
 	type("'scanIncomplete' | 'firstSyncWithDeletions' | 'remoteUnconverged' | 'remoteEmptied' | 'exceededThreshold' | 'restoreUnfinished'")
 )
 
-export const planListSchema = pinned<DesktopSyncPlanList>()(type("'actions' | 'held' | 'conflicts' | 'unsyncable' | 'ignored'"))
+export const planListSchema = pinned<DesktopSyncPlanList>()(
+	type("'actions' | 'held' | 'conflicts' | 'unsyncable' | 'skippedSymlinks' | 'ignored'")
+)
 
 const nodeKindSchema = type("'file' | 'directory'")
 
@@ -146,7 +149,14 @@ const transferSchema = pinned<DesktopSyncTransfer>()(
 )
 
 const issueCountsSchema = pinned<DesktopSyncIssueCounts>()(
-	type({ conflicts: countSchema, heldDeletions: countSchema, unsyncable: countSchema, failed: countSchema, "+": "reject" })
+	type({
+		conflicts: countSchema,
+		heldDeletions: countSchema,
+		unsyncable: countSchema,
+		skippedSymlinks: countSchema,
+		failed: countSchema,
+		"+": "reject"
+	})
 )
 
 const stageSchema = pinned<DesktopSyncStage>()(
@@ -204,6 +214,7 @@ const planSummaryFields = {
 	heldReason: heldReasonSchema.or("null"),
 	conflicts: countSchema,
 	unsyncable: countSchema,
+	skippedSymlinks: countSchema,
 	ignored: countSchema,
 	refused: refusalSchema.or("null")
 } as const
@@ -256,11 +267,13 @@ const conflictResolvedSchema = pinned<DesktopSyncConflictResolved>()(
 const unsyncableSchema = pinned<DesktopSyncUnsyncable>()(
 	type({
 		relPath: relPathSchema,
-		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteNameNotStorable' | 'remoteBrokenParent' | 'localAlias' | 'localNameCollision' | 'remoteNameCollision' | 'remoteContentHashMismatch'",
+		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteNameNotStorable' | 'remoteBrokenParent' | 'localNameCollision' | 'remoteNameCollision' | 'remoteContentHashMismatch'",
 		detail: textSchema.or("null"),
 		"+": "reject"
 	})
 )
+
+const skippedSymlinkSchema = pinned<DesktopSyncSkippedSymlink>()(type({ relPath: relPathSchema, target: relPathSchema, "+": "reject" }))
 
 const ignoredSchema = pinned<DesktopSyncIgnored>()(
 	type({
@@ -277,6 +290,7 @@ const planPageSchema = pinned<DesktopSyncPlanPage>()(
 	type({ list: "'actions' | 'held'", total: countSchema, entries: planActionSchema.array(), "+": "reject" })
 		.or({ list: "'conflicts'", total: countSchema, entries: conflictSchema.array(), "+": "reject" })
 		.or({ list: "'unsyncable'", total: countSchema, entries: unsyncableSchema.array(), "+": "reject" })
+		.or({ list: "'skippedSymlinks'", total: countSchema, entries: skippedSymlinkSchema.array(), "+": "reject" })
 		.or({ list: "'ignored'", total: countSchema, entries: ignoredSchema.array(), "+": "reject" })
 )
 
@@ -388,6 +402,11 @@ export const SYNC_OPS = {
 	unsyncablePaths: {
 		args: pageArgs,
 		result: type({ total: countSchema, entries: unsyncableSchema.array(), "+": "reject" }).or("null")
+	},
+	// The same report's symlinks to a directory inside the root, which are no unsyncable paths.
+	skippedSymlinks: {
+		args: pageArgs,
+		result: type({ total: countSchema, entries: skippedSymlinkSchema.array(), "+": "reject" }).or("null")
 	},
 	// Holds every deletion until a clean pass of the pair applied or held none; then the engine's default comes back.
 	setMigratedGuard: { args: pairArgs, result: done },

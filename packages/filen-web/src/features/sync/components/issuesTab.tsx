@@ -15,7 +15,6 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { log } from "@/lib/log"
 import { SettingsBlock, SettingsGroup } from "@/features/settings/components/settingsLayout"
 import { type PagedEntries, usePagedEntries } from "@/features/sync/hooks/usePagedEntries"
 import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
@@ -36,6 +35,8 @@ import {
 } from "@/features/sync/lib/syncStatus.logic"
 import { EntryRow } from "@/features/desktop/components/entryRow"
 import { ActionEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
+import { PlannedEntries } from "@/features/sync/components/plannedEntries"
+import { SkippedSymlinksSection } from "@/features/sync/components/skippedSymlinksSection"
 
 const RESOLUTIONS: readonly { value: DesktopSyncResolution; key: "conflictKeepLocal" | "conflictKeepRemote" | "conflictKeepBoth" }[] = [
 	{ value: "keepLocal", key: "conflictKeepLocal" },
@@ -491,71 +492,6 @@ function UnsyncableRows({ pairId, readKey, paged }: { pairId: string; readKey: s
 	)
 }
 
-// Before this run saw a pass of the pair, only a dry run lists them: planned once while the section shows, and
-// released again.
-function PlannedUnsyncable({ pairId, readKey }: { pairId: string; readKey: string }) {
-	const { t } = useTranslation("sync")
-	const planRead = useSyncRead(readKey, () => syncApi().plan(pairId))
-	const planId = planRead.data?.planId ?? null
-	const paged = usePagedEntries<DesktopSyncUnsyncable>(planId, async (offset, limit) => {
-		const result = await syncApi().planPage(planId ?? "", "unsyncable", offset, limit)
-
-		if (!result.ok) {
-			return result
-		}
-
-		return { ok: true, value: { total: result.value.total, entries: result.value.list === "unsyncable" ? result.value.entries : [] } }
-	})
-
-	useEffect(() => {
-		if (planId === null) {
-			return
-		}
-
-		return () => {
-			syncApi()
-				.releasePlan(planId)
-				.catch((error: unknown) => {
-					log.warn("sync", "plan could not be released", error)
-				})
-		}
-	}, [planId])
-
-	if (planRead.error !== null) {
-		return (
-			<SettingsBlock>
-				<p
-					role="alert"
-					className="text-sm text-destructive"
-				>
-					{syncErrorLabel(planRead.error)}
-				</p>
-			</SettingsBlock>
-		)
-	}
-
-	if (planRead.data === null) {
-		// The cloud side has not caught up, so there is no dry run to list them from yet.
-		return <SettingsBlock className="text-sm text-muted-foreground">{t("reviewUnconverged")}</SettingsBlock>
-	}
-
-	if (planRead.data === undefined) {
-		return (
-			<SettingsBlock className="flex justify-center">
-				<Spinner className="size-5 text-muted-foreground" />
-			</SettingsBlock>
-		)
-	}
-
-	return (
-		<UnsyncableRows
-			pairId={pairId}
-			readKey={planRead.data.planId}
-			paged={paged}
-		/>
-	)
-}
-
 // Unsyncable items as the last pass this run saw reported them; without one, from a dry run. Read again in place
 // after each pass, whose report replaces the last.
 function UnsyncableSection({ pairId, count, lastSyncedAt }: { pairId: string; count: number; lastSyncedAt: number | null }) {
@@ -588,10 +524,20 @@ function UnsyncableSection({ pairId, count, lastSyncedAt }: { pairId: string; co
 	return (
 		<SettingsGroup title={t("unsyncableTitle")}>
 			{missing ? (
-				<PlannedUnsyncable
+				<PlannedEntries
 					pairId={pairId}
 					readKey={key}
-				/>
+					list="unsyncable"
+					pick={page => (page.list === "unsyncable" ? page.entries : [])}
+				>
+					{(planned, planId) => (
+						<UnsyncableRows
+							pairId={pairId}
+							readKey={planId}
+							paged={planned}
+						/>
+					)}
+				</PlannedEntries>
 			) : (
 				<UnsyncableRows
 					pairId={pairId}
@@ -640,7 +586,7 @@ function LastError({
 }
 
 // What the pair needs the user for: the last error (and why a pass held back or was refused), conflicts, held
-// deletions with what held them, unsyncable items. Each section
+// deletions with what held them, unsyncable items; below them the skipped symlinks, which are none. Each section
 // reads its list only while its count says there is something to list.
 export function IssuesTab({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
@@ -652,6 +598,7 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 				conflicts: pair?.issues.conflicts ?? 0,
 				heldDeletions: pair?.issues.heldDeletions ?? 0,
 				unsyncable: pair?.issues.unsyncable ?? 0,
+				skippedSymlinks: pair?.issues.skippedSymlinks ?? 0,
 				failed: pair?.issues.failed ?? 0,
 				lastError: pair?.lastError ?? null,
 				halted: pair?.halted ?? null,
@@ -662,18 +609,36 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 		})
 	)
 
+	const skipped =
+		issues.skippedSymlinks > 0 ? (
+			<SkippedSymlinksSection
+				pairId={pairId}
+				count={issues.skippedSymlinks}
+				lastSyncedAt={issues.lastSyncedAt}
+			/>
+		) : null
+
 	if (
 		issues.conflicts + issues.heldDeletions + issues.unsyncable + issues.failed === 0 &&
 		issues.lastError === null &&
 		issues.halted === null &&
 		issues.refused === null
 	) {
-		return (
+		const empty = (
 			<EmptyMessage
 				icon={CircleCheckIcon}
 				title={t("issuesEmptyTitle")}
 				description={t("issuesEmptyDescription")}
 			/>
+		)
+
+		return skipped === null ? (
+			empty
+		) : (
+			<div className="flex flex-col gap-8">
+				{empty}
+				{skipped}
+			</div>
 		)
 	}
 
@@ -708,6 +673,7 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 					lastSyncedAt={issues.lastSyncedAt}
 				/>
 			) : null}
+			{skipped}
 		</div>
 	)
 }

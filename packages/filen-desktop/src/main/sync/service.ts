@@ -23,6 +23,7 @@ import {
 	type DesktopSyncResolution,
 	type DesktopSyncResolvedConflicts,
 	type DesktopSyncResult,
+	type DesktopSyncSkippedSymlink,
 	type DesktopSyncUnsyncable,
 	type DesktopSyncUserIgnore,
 	SYNC_ATTENTION_HOLDS
@@ -129,6 +130,7 @@ export interface SyncService {
 	retryPath(pairId: string, relPath: string): Promise<Result<null>>
 	retryAll(pairId: string): Promise<Result<null>>
 	unsyncablePaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncUnsyncable> | null>>
+	skippedSymlinks(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncSkippedSymlink> | null>>
 	ignoredPaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncIgnored>>>
 	userIgnore(): Promise<Result<DesktopSyncUserIgnore>>
 	setUserIgnore(text: string): Promise<Result<null>>
@@ -853,6 +855,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				? { ok: true, value: { ...found.value, entries: found.value.entries.map(plainUnsyncable) } }
 				: found
 		},
+		skippedSymlinks: (pairId, offset, limit) => engineCall(pairId, "skippedSymlinks", id => ({ pairId: id, offset, limit })),
 		ignoredPaths: (pairId, offset, limit) => engineCall(pairId, "ignoredPaths", id => ({ pairId: id, offset, limit })),
 		userIgnore: async () => {
 			const [text, defaults] = await Promise.all([supervisor.call("userIgnore", {}), supervisor.call("defaultIgnore", {})])

@@ -8,6 +8,7 @@ import { editOutcome, realWorldFor, renameProblems } from "../../scripts/ci/e2e/
 import { type Cloud, type CloudEntry, excludeArgs, prefixFilterArgs } from "../../scripts/ci/e2e/cloud.ts"
 import {
 	expectedCloudReasons,
+	expectedSkippedSymlinks,
 	expectedUnsyncable,
 	NAME_FIXTURES,
 	namesFor,
@@ -193,13 +194,17 @@ describe("e2e cloud snapshot options", () => {
 describe("e2e names pair", () => {
 	it("expects of each OS what sdk-rs's device check and name validator make of it", () => {
 		expect(expectedUnsyncable("win")).toEqual(
-			["aux.c", "CON", "Q&A: what?.txt", "trailing dot.", "bad:dir", "alias-dir", `${"文件名".repeat(32)}.txt`].sort()
+			["aux.c", "CON", "Q&A: what?.txt", "trailing dot.", "bad:dir", `${"文件名".repeat(32)}.txt`].sort()
 		)
-		expect(expectedUnsyncable("mac")).toEqual(["Folder ", "Invoice 1:2.pdf", "alias-dir"].sort())
-		expect(expectedUnsyncable("linux")).toEqual(["Data.txt", "What?.txt", "alias-dir", "data.txt"].sort())
+		expect(expectedUnsyncable("mac")).toEqual(["Folder ", "Invoice 1:2.pdf"].sort())
+		expect(expectedUnsyncable("linux")).toEqual(["Data.txt", "What?.txt", "data.txt"].sort())
 		expect(expectedCloudReasons("win")).toEqual(
 			new Map(["aux.c", "CON", "Q&A: what?.txt", "trailing dot.", "bad:dir"].map(relPath => [relPath, "remoteNameNotStorable"]))
 		)
+		// A directory link inside the root is skipped, never unsyncable.
+		for (const os of ["linux", "win", "mac"] as const) {
+			expect(expectedSkippedSymlinks(os)).toEqual([{ relPath: "alias-dir", target: "real-dir" }])
+		}
 		expect(expectedCloudReasons("mac").size).toBe(0)
 		expect(expectedCloudReasons("linux").size).toBe(0)
 		// Every OS syncs the NFD names both ways and ignores the built-in set.

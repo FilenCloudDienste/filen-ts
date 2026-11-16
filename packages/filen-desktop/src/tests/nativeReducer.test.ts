@@ -194,7 +194,19 @@ describe("reduceEvents", () => {
 			passEvent(
 				{
 					tag: "PassCompleted",
-					inner: { report: report({ uploaded: 1n, conflictsTotal: 2n, heldDeletions: 3n, unsyncableTotal: 4n, errorsTotal: 1n }) }
+					inner: {
+						report: report({
+							uploaded: 1n,
+							conflictsTotal: 2n,
+							heldDeletions: 3n,
+							unsyncable: [
+								{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } },
+								{ relPath: "a", reason: { tag: "LocalNameCollision" } }
+							],
+							unsyncableTotal: 5n,
+							errorsTotal: 1n
+						})
+					}
 				},
 				1n,
 				2000n
@@ -210,8 +222,9 @@ describe("reduceEvents", () => {
 					transfers: [],
 					lastSyncedAt: 2000,
 					lastError: null,
-					// The report's conflicts are its pass's; the held count comes from the host.
-					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 4, failed: 1 }
+					// The report's conflicts are its pass's; the held count comes from the host. A directory symlink is no
+					// unsyncable path; those past the report's list are counted as unsyncable.
+					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 4, skippedSymlinks: 1, failed: 1 }
 				}
 			]
 		})
@@ -374,6 +387,28 @@ describe("reduceEvents", () => {
 		runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report({ refused: fakeSdk.RefuseReason.RemoteCollision }) } })])
 		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
 		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ refused: "remoteCollision" }] })
+	})
+
+	it("raises no attention for directory symlinks the pass skipped", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([
+			passEvent({
+				tag: "PassCompleted",
+				inner: {
+					report: report({
+						unsyncable: [{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } }],
+						unsyncableTotal: 1n
+					})
+				}
+			})
+		])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 1 } }] })
+		expect(of("aggregate")).toEqual([])
 	})
 
 	it("an offline pass, halted or failing to lock, raises no attention for the failures it reports", async () => {

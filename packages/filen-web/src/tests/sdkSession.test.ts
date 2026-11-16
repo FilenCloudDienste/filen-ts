@@ -215,6 +215,7 @@ const unusedSync: DesktopSync = {
 	retryPath: unused,
 	retryAll: unused,
 	unsyncablePaths: unused,
+	skippedSymlinks: unused,
 	ignoredPaths: unused,
 	userIgnore: unused,
 	setUserIgnore: unused,

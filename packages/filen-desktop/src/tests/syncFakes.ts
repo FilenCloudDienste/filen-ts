@@ -26,6 +26,7 @@ export const CLEAN_SUMMARY: NativePlanSummary = {
 	heldReason: null,
 	conflicts: 0,
 	unsyncable: 0,
+	skippedSymlinks: 0,
 	ignored: 0,
 	refused: null,
 	passToken: null

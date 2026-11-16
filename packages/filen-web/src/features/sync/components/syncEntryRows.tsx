@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import type { DesktopSyncIgnored, DesktopSyncPlanAction, DesktopSyncUnsyncable } from "@filen/shared/desktop"
+import type { DesktopSyncIgnored, DesktopSyncPlanAction, DesktopSyncSkippedSymlink, DesktopSyncUnsyncable } from "@filen/shared/desktop"
 import { formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -44,6 +44,17 @@ export function UnsyncableEntry({ entry, children }: { entry: DesktopSyncUnsynca
 		>
 			{children}
 		</EntryRow>
+	)
+}
+
+export function SkippedSymlinkEntry({ entry }: { entry: DesktopSyncSkippedSymlink }) {
+	const { t } = useTranslation("sync")
+
+	return (
+		<EntryRow
+			path={entry.relPath}
+			detail={t("skippedSymlinkTarget", { target: entry.target })}
+		/>
 	)
 }
 

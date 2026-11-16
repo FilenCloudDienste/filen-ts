@@ -428,6 +428,7 @@ const bridge: DesktopBridge = {
 		retryPath: (pairId, relPath) => syncInvoke("retryPath", pairId, relPath),
 		retryAll: pairId => syncInvoke("retryAll", pairId),
 		unsyncablePaths: (pairId, offset, limit) => syncInvoke("unsyncablePaths", pairId, offset, limit),
+		skippedSymlinks: (pairId, offset, limit) => syncInvoke("skippedSymlinks", pairId, offset, limit),
 		ignoredPaths: (pairId, offset, limit) => syncInvoke("ignoredPaths", pairId, offset, limit),
 		userIgnore: () => syncInvoke("userIgnore"),
 		setUserIgnore: text => syncInvoke("setUserIgnore", text),

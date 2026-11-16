@@ -14,6 +14,7 @@ import { ROOT_PROBLEM_KEY, ROOT_WARNING_KEY, SYNC_ERROR_KEY, UNSYNCABLE_REASON_K
 import {
 	ACTION_KIND_KEY,
 	aggregateSyncState,
+	issueTotal,
 	bulkResolutions,
 	canRestoreHeld,
 	conflictDetailKey,
@@ -63,7 +64,7 @@ const PAIR: DesktopSyncPair = {
 	transfers: [],
 	lastSyncedAt: null,
 	lastError: null,
-	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 },
 	degraded: { local: false, remote: false },
 	review: null,
 	notices: [],
@@ -83,6 +84,7 @@ const SUMMARY: DesktopSyncPlanSummary = {
 	heldReason: null,
 	conflicts: 1,
 	unsyncable: 0,
+	skippedSymlinks: 0,
 	ignored: 2,
 	refused: null
 }
@@ -191,7 +193,7 @@ describe("sync copy", () => {
 			"restoreUnfinished"
 		])
 		expectAllKeysExist(REFUSAL_KEY, ["remoteCollision", "localCollision"])
-		expectAllKeysExist(PLAN_LIST_KEY, ["actions", "held", "conflicts", "unsyncable", "ignored"])
+		expectAllKeysExist(PLAN_LIST_KEY, ["actions", "held", "conflicts", "unsyncable", "skippedSymlinks", "ignored"])
 		expectAllKeysExist(ACTION_KIND_KEY, [
 			"upload",
 			"download",
@@ -210,7 +212,6 @@ describe("sync copy", () => {
 			"remoteInvalidName",
 			"remoteNameNotStorable",
 			"remoteBrokenParent",
-			"localAlias",
 			"localNameCollision",
 			"remoteNameCollision",
 			"remoteContentHashMismatch"
@@ -272,6 +273,9 @@ describe("aggregateSyncState", () => {
 
 	it("is idle for paused, up-to-date and offline pairs", () => {
 		expect(aggregateSyncState(overview([PAIR, { ...PAIR, id: "2", phase: "paused" }]))).toBe("idle")
+		// A skipped directory symlink is no issue.
+		expect(aggregateSyncState(overview([{ ...PAIR, issues: { ...PAIR.issues, skippedSymlinks: 3 } }]))).toBe("idle")
+		expect(issueTotal({ conflicts: 1, heldDeletions: 0, unsyncable: 2, skippedSymlinks: 5, failed: 0 })).toBe(3)
 		expect(aggregateSyncState(overview([{ ...PAIR, phase: "offline", halted: "offline", lastError: "connect" }]))).toBe("idle")
 		expect(aggregateSyncState(overview([{ ...PAIR, phase: "preparing", holds: ["cloudListingSlow"] }]))).toBe("idle")
 	})
@@ -328,6 +332,13 @@ describe("sync status helpers", () => {
 
 	it("lists only plan lists that hold entries, and flags very large plans", () => {
 		expect(planListsWithEntries(SUMMARY)).toEqual(["actions", "conflicts", "ignored"])
+		expect(planListsWithEntries({ ...SUMMARY, unsyncable: 1, skippedSymlinks: 2 })).toEqual([
+			"actions",
+			"conflicts",
+			"unsyncable",
+			"skippedSymlinks",
+			"ignored"
+		])
 		expect(isLargePlan(SUMMARY)).toBe(false)
 		expect(isLargePlan({ ...SUMMARY, actions: 100_001 })).toBe(true)
 		expect(isLargePlan(null)).toBe(false)

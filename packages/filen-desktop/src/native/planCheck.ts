@@ -1,8 +1,8 @@
 import type { JsSyncPlan } from "@filen/sdk-rs"
 import type { NativeSdk } from "./addon.ts"
+import { ENGINE_PAGE } from "./plans.ts"
 
-// The engine's page limit.
-const PAGE = 1000n
+const PAGE = BigInt(ENGINE_PAGE)
 
 export interface PlanOverwrites {
 	files: number

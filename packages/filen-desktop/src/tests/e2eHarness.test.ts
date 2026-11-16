@@ -434,7 +434,7 @@ describe("e2e offline block", () => {
 			transfers: [],
 			lastSyncedAt: null,
 			lastError,
-			issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+			issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 },
 			degraded: { local: false, remote: false },
 			stage: phase === "waitingForCloud" ? { kind: "waitingForCloud" } : null,
 			halted: phase === "offline" ? "offline" : null,

@@ -27,6 +27,7 @@ export type SyncAggregate = "idle" | "syncing" | "attention"
 
 const ATTENTION_PHASES: ReadonlySet<DesktopSyncPhase> = new Set(["error", "review", "waitingForRoot"])
 
+// Skipped symlinks are no issue.
 export function issueTotal(issues: DesktopSyncIssueCounts): number {
 	return issues.conflicts + issues.heldDeletions + issues.unsyncable + issues.failed
 }
@@ -180,6 +181,7 @@ export const PLAN_LIST_KEY: Record<DesktopSyncPlanList, SyncKey> = {
 	held: "planListHeld",
 	conflicts: "planListConflicts",
 	unsyncable: "planListUnsyncable",
+	skippedSymlinks: "planListSkippedSymlinks",
 	ignored: "planListIgnored"
 }
 
@@ -195,7 +197,7 @@ export const ACTION_KIND_KEY: Record<DesktopSyncActionKind, SyncKey> = {
 	adoptBaseline: "actionAdoptBaseline"
 }
 
-const PLAN_LISTS: readonly DesktopSyncPlanList[] = ["actions", "held", "conflicts", "unsyncable", "ignored"]
+const PLAN_LISTS: readonly DesktopSyncPlanList[] = ["actions", "held", "conflicts", "unsyncable", "skippedSymlinks", "ignored"]
 
 export function planListTotal(summary: DesktopSyncPlanSummary, list: DesktopSyncPlanList): number {
 	switch (list) {
@@ -207,6 +209,8 @@ export function planListTotal(summary: DesktopSyncPlanSummary, list: DesktopSync
 			return summary.conflicts
 		case "unsyncable":
 			return summary.unsyncable
+		case "skippedSymlinks":
+			return summary.skippedSymlinks
 		case "ignored":
 			return summary.ignored
 	}

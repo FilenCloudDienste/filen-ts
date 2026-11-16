@@ -10,6 +10,7 @@ import {
 	type DesktopSyncPlanSummary,
 	type DesktopSyncResult,
 	type DesktopSyncReviewFinding,
+	type DesktopSyncSkippedSymlink,
 	type DesktopSyncUnsyncable,
 	SYNC_FINDING_KEY
 } from "@filen/shared/desktop"
@@ -30,12 +31,13 @@ import {
 } from "@/features/sync/lib/syncStatus.logic"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 import { EntryRow } from "@/features/desktop/components/entryRow"
-import { ActionEntry, IgnoredEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
+import { ActionEntry, IgnoredEntry, PagedFooter, SkippedSymlinkEntry, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
 
 type PlanRow =
 	| { list: "actions" | "held"; entry: DesktopSyncPlanAction }
 	| { list: "conflicts"; entry: DesktopSyncConflict }
 	| { list: "unsyncable"; entry: DesktopSyncUnsyncable }
+	| { list: "skippedSymlinks"; entry: DesktopSyncSkippedSymlink }
 	| { list: "ignored"; entry: DesktopSyncIgnored }
 
 async function readPlanPage(
@@ -67,6 +69,9 @@ async function readPlanPage(
 		case "unsyncable":
 			entries = page.entries.map(entry => ({ list: "unsyncable", entry }))
 			break
+		case "skippedSymlinks":
+			entries = page.entries.map(entry => ({ list: "skippedSymlinks", entry }))
+			break
 		case "ignored":
 			entries = page.entries.map(entry => ({ list: "ignored", entry }))
 			break
@@ -91,6 +96,8 @@ function PlanRowView({ row }: { row: PlanRow }) {
 			)
 		case "unsyncable":
 			return <UnsyncableEntry entry={row.entry} />
+		case "skippedSymlinks":
+			return <SkippedSymlinkEntry entry={row.entry} />
 		case "ignored":
 			return <IgnoredEntry entry={row.entry} />
 	}
@@ -173,6 +180,10 @@ function summaryLines(summary: DesktopSyncPlanSummary, t: TFunction<"sync">): st
 
 	if (summary.unsyncable > 0) {
 		lines.push(t("reviewUnsyncable", { count: summary.unsyncable }))
+	}
+
+	if (summary.skippedSymlinks > 0) {
+		lines.push(t("reviewSkippedSymlinks", { count: summary.skippedSymlinks }))
 	}
 
 	if (summary.ignored > 0) {

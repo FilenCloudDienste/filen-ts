@@ -400,8 +400,6 @@ export const sync = {
 	unsyncableRemoteNameNotStorable: "Its cloud name can't be stored on this device.",
 	/** Unsyncable — its cloud parent is broken */
 	unsyncableRemoteBrokenParent: "The cloud directory it's in can't be read.",
-	/** Unsyncable — two local names refer to the same file */
-	unsyncableLocalAlias: "Another name on this device refers to the same file.",
 	/** Unsyncable — another local item in its directory has the same name ignoring case or Unicode form */
 	unsyncableLocalNameCollision:
 		"Another item in its directory on this device has the same name when case is ignored. Rename one of them; until then neither syncs or moves.",
@@ -410,6 +408,14 @@ export const sync = {
 		"Another item in its cloud directory has the same name when case and Unicode form are ignored. Rename one of them; until then neither syncs or moves.",
 	/** Unsyncable — the cloud file's content does not match its stored checksum, so it is not downloaded until it changes; the download's error follows */
 	unsyncableRemoteContentHashMismatch: "Its cloud content doesn't match its stored checksum, so it isn't downloaded until it changes.",
+	/** Issues — the muted section, collapsed by default, listing local symlinks to a directory inside the synced directory; no issue */
+	skippedSymlinksTitle_one: "Skipped symlink ({{count}})",
+	/** Issues — the muted section, collapsed by default, listing local symlinks to a directory inside the synced directory; no issue */
+	skippedSymlinksTitle_other: "Skipped symlinks ({{count}})",
+	/** Issues — under the skipped symlinks title: the directory a link leads to syncs once, under its own path, and the link is left alone */
+	skippedSymlinksDescription: "Synced once under their real path.",
+	/** Skipped symlink row — under the link's path, the path of the directory it leads to, relative to the synced directory; flip the arrow for right-to-left scripts */
+	skippedSymlinkTarget: "→ {{target}}",
 	/** Paged lists — load the next page */
 	listLoadMore: "Load more",
 	/** Paged lists — load failure */
@@ -560,6 +566,10 @@ export const sync = {
 	reviewUnsyncable_one: "{{count}} item can't be synced",
 	/** Review — unsyncable count */
 	reviewUnsyncable_other: "{{count}} items can't be synced",
+	/** Review — local symlinks to a directory inside the synced directory, skipped because that directory syncs under its own path; no problem */
+	reviewSkippedSymlinks_one: "{{count}} symlink skipped",
+	/** Review — local symlinks to a directory inside the synced directory, skipped because that directory syncs under its own path; no problem */
+	reviewSkippedSymlinks_other: "{{count}} symlinks skipped",
 	/** Review — ignored count */
 	reviewIgnored_one: "{{count}} item ignored",
 	/** Review — ignored count */
@@ -594,6 +604,8 @@ export const sync = {
 	planListConflicts: "Conflicts",
 	/** Plan list — unsyncable */
 	planListUnsyncable: "Can't be synced",
+	/** Plan list — local symlinks to a directory inside the synced directory, which syncs under its own path */
+	planListSkippedSymlinks: "Skipped symlinks",
 	/** Plan list — ignored */
 	planListIgnored: "Ignored",
 	/** Plan action — upload */

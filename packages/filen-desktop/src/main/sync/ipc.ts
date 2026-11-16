@@ -63,6 +63,7 @@ const CALLS: Record<SyncCall, CheckedCall<SyncService>> = {
 	retryPath: call(type([pairIdSchema, relPathArgSchema]), (service, _page, args) => service.retryPath(...args)),
 	retryAll: call(one, (service, _page, [pairId]) => service.retryAll(pairId)),
 	unsyncablePaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.unsyncablePaths(...args)),
+	skippedSymlinks: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.skippedSymlinks(...args)),
 	ignoredPaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.ignoredPaths(...args)),
 	userIgnore: call(type([]), service => service.userIgnore()),
 	setUserIgnore: call(type([ignoreTextSchema]), (service, _page, [text]) => service.setUserIgnore(text)),

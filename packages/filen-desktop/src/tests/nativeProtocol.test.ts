@@ -34,7 +34,7 @@ const runtime = {
 	transfers: [{ relPath: "a.txt", direction: "upload", bytes: 10, total: 20 }],
 	lastSyncedAt: null,
 	lastError: null,
-	issues: { conflicts: 0, heldDeletions: 2, unsyncable: 0, failed: 0 },
+	issues: { conflicts: 0, heldDeletions: 2, unsyncable: 0, skippedSymlinks: 1, failed: 0 },
 	degraded: { local: false, remote: false },
 	stage: null,
 	halted: null,
@@ -135,6 +135,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	retryPath: { pairId: "1", relPath: "d/a.txt" },
 	retryAll: { pairId: "1" },
 	unsyncablePaths: { pairId: "1", offset: 0, limit: 1000 },
+	skippedSymlinks: { pairId: "1", offset: 0, limit: 1000 },
 	setMigratedGuard: { pairId: "1" },
 	ignoredPaths: { pairId: "1", offset: 0, limit: 1 },
 	userIgnore: {},
@@ -335,6 +336,7 @@ describe("opResult", () => {
 					heldReason: "firstSyncWithDeletions",
 					conflicts: 0,
 					unsyncable: 0,
+					skippedSymlinks: 1,
 					ignored: 2,
 					refused: null,
 					passToken: "token"
@@ -345,6 +347,15 @@ describe("opResult", () => {
 		expect(
 			accepts(opResult("planPage"), { list: "conflicts", total: 1, entries: [{ relPath: "a", local: "file", remote: null }] })
 		).toBe(true)
+		expect(accepts(opResult("planPage"), { list: "skippedSymlinks", total: 1, entries: [{ relPath: "link", target: "real" }] })).toBe(
+			true
+		)
+		expect(accepts(opResult("skippedSymlinks"), { total: 1, entries: [{ relPath: "link", target: "real" }] })).toBe(true)
+		expect(accepts(opResult("skippedSymlinks"), null)).toBe(true)
+		// A symlink is listed apart, never as an unsyncable path.
+		expect(
+			accepts(opResult("unsyncablePaths"), { total: 1, entries: [{ relPath: "link", reason: "localAlias", detail: "real" }] })
+		).toBe(false)
 		expect(
 			accepts(opResult("conflicts"), {
 				total: 1,

@@ -15,7 +15,7 @@ import {
 } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk } from "./addon.ts"
 import { clip } from "./errors.ts"
-import { refusal } from "./plans.ts"
+import { refusal, symlinkCount } from "./plans.ts"
 
 // How often at most the host reports what changed: overview pushes stay at 4 Hz however fast the engine emits.
 export const FEED_INTERVAL_MS = 250
@@ -59,7 +59,7 @@ export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRun
 				? null
 				: clip(info.lastPassError),
 		// Conflicts are the engine's held ones (RuntimeFeed.conflicts), the rest the last pass's counts.
-		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 },
 		degraded: { local: status?.localEventsDegraded !== undefined, remote: status?.remoteEventsDegraded !== undefined },
 		pending: null,
 		stage: null,
@@ -323,11 +323,15 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.halted = passHalt(sdk, report)
 				runtime.refused = refusal(sdk, report.refused)
 				// A report's conflicts are the ones its pass planned: none for a pass that read nothing (paused, a
-				// wake with nothing announced), so not the count held. The host reads that one after it.
+				// wake with nothing announced), so not the count held. The host reads that one after it. Its list keeps
+				// the first 1000 unsyncable paths: those past it count as unsyncable, symlink or not.
+				const symlinks = symlinkCount(report.unsyncable)
+
 				runtime.issues = {
 					conflicts: runtime.issues.conflicts,
 					heldDeletions: Number(report.heldDeletions),
-					unsyncable: Number(report.unsyncableTotal),
+					unsyncable: Number(report.unsyncableTotal) - symlinks,
+					skippedSymlinks: symlinks,
 					failed: Number(report.errorsTotal)
 				}
 				authFailed ||= report.passErrorKind === sdk.ErrorKind.Unauthenticated || report.halted === sdk.HaltReason.Unauthenticated

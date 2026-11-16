@@ -19,7 +19,7 @@ const PAIR: DesktopSyncPair = {
 	transfers: [],
 	lastSyncedAt: null,
 	lastError: null,
-	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 },
 	degraded: { local: false, remote: false },
 	review: null,
 	notices: [],

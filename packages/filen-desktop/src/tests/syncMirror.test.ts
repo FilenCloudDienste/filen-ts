@@ -39,7 +39,7 @@ function runtimeOf(pair: NativePair, overrides: Partial<NativePairRuntime> = {})
 		transfers: [],
 		lastSyncedAt: null,
 		lastError: null,
-		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 },
 		degraded: { local: false, remote: false },
 		stage: null,
 		halted: null,
@@ -171,7 +171,7 @@ describe("mergeOverview", () => {
 			progress: { done: 2, total: 5 },
 			transfers: [{ relPath: "a.bin", direction: "upload", bytes: 1, total: 2 }],
 			lastSyncedAt: 99,
-			issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
+			issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, skippedSymlinks: 0, failed: 0 },
 			degraded: { local: true, remote: false }
 		})
 		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["refusedLocalOverlap"] })], {
@@ -195,7 +195,7 @@ describe("mergeOverview", () => {
 					transfers: [{ relPath: "a.bin", direction: "upload", bytes: 1, total: 2 }],
 					lastSyncedAt: 99,
 					lastError: null,
-					issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
+					issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, skippedSymlinks: 0, failed: 0 },
 					degraded: { local: true, remote: false },
 					stage: null,
 					halted: null,

@@ -25,6 +25,7 @@ const SUMMARY: DesktopSyncPlanSummary = {
 	heldReason: null,
 	conflicts: 0,
 	unsyncable: 0,
+	skippedSymlinks: 0,
 	ignored: 0,
 	refused: null
 }
@@ -547,15 +548,24 @@ describe("registerSyncIpc", () => {
 		expect(store.get()).toMatchObject({ importNote: null, pairs: [{ info: [] }] })
 	})
 
-	it("retries every failed path of a pair, and lists its unsyncable paths from the last pass", async () => {
+	it("retries every failed path of a pair, and lists its unsyncable paths and skipped symlinks from the last pass", async () => {
 		const { invoke, argsOf } = setup({
 			pairs: [shellPair()],
-			answers: { retryAll: () => null, unsyncablePaths: () => null }
+			answers: {
+				retryAll: () => null,
+				unsyncablePaths: () => null,
+				skippedSymlinks: () => ({ total: 1, entries: [{ relPath: "link", target: "real" }] })
+			}
 		})
 
 		expect(await invoke("retryAll", "7")).toEqual({ ok: true, value: null })
 		expect(await invoke("unsyncablePaths", "7", 0, 50)).toEqual({ ok: true, value: null })
 		expect(argsOf("unsyncablePaths")).toEqual([{ pairId: "7", offset: 0, limit: 50 }])
+		expect(await invoke("skippedSymlinks", "7", 50, 50)).toEqual({
+			ok: true,
+			value: { total: 1, entries: [{ relPath: "link", target: "real" }] }
+		})
+		expect(argsOf("skippedSymlinks")).toEqual([{ pairId: "7", offset: 50, limit: 50 }])
 	})
 
 	it("resolves the conflicts listed up front in batches, never retrying a failed path or taking a later one", async () => {

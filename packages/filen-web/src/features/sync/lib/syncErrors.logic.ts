@@ -55,7 +55,6 @@ export const UNSYNCABLE_REASON_KEY: Record<DesktopSyncUnsyncableReason, SyncKey>
 	remoteInvalidName: "unsyncableRemoteInvalidName",
 	remoteNameNotStorable: "unsyncableRemoteNameNotStorable",
 	remoteBrokenParent: "unsyncableRemoteBrokenParent",
-	localAlias: "unsyncableLocalAlias",
 	localNameCollision: "unsyncableLocalNameCollision",
 	remoteNameCollision: "unsyncableRemoteNameCollision",
 	remoteContentHashMismatch: "unsyncableRemoteContentHashMismatch"

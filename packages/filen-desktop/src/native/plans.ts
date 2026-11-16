@@ -20,6 +20,7 @@ import type {
 	DesktopSyncPlanPage,
 	DesktopSyncRefusal,
 	DesktopSyncScanGap,
+	DesktopSyncSkippedSymlink,
 	DesktopSyncUnsyncable,
 	DesktopSyncUnsyncableReason
 } from "@filen/shared/desktop"
@@ -115,14 +116,26 @@ const HELD_REASONS: Record<SyncGuardReason["tag"], DesktopSyncHeldReason> = {
 	RestoreUnfinished: "restoreUnfinished"
 }
 
-const UNSYNCABLE_REASONS: Record<UnsyncablePath["reason"]["tag"], DesktopSyncUnsyncableReason> = {
+// A local symlink to a directory inside the root: the directory syncs under its real path, so the link is no issue and
+// is listed apart from the paths that cannot be synced.
+type SymlinkPath = UnsyncablePath & { reason: Extract<UnsyncablePath["reason"], { tag: "LocalAlias" }> }
+type IssuePath = UnsyncablePath & { reason: Exclude<UnsyncablePath["reason"], { tag: "LocalAlias" }> }
+
+export function isSymlink(path: UnsyncablePath): path is SymlinkPath {
+	return path.reason.tag === "LocalAlias"
+}
+
+export function isIssue(path: UnsyncablePath): path is IssuePath {
+	return path.reason.tag !== "LocalAlias"
+}
+
+const UNSYNCABLE_REASONS: Record<IssuePath["reason"]["tag"], DesktopSyncUnsyncableReason> = {
 	InvalidName: "invalidName",
 	RepeatedFailure: "repeatedFailure",
 	RemoteUndecodable: "remoteUndecodable",
 	RemoteInvalidName: "remoteInvalidName",
 	RemoteNameNotStorable: "remoteNameNotStorable",
 	RemoteBrokenParent: "remoteBrokenParent",
-	LocalAlias: "localAlias",
 	LocalNameCollision: "localNameCollision",
 	RemoteNameCollision: "remoteNameCollision",
 	RemoteContentHashMismatch: "remoteContentHashMismatch"
@@ -152,7 +165,7 @@ export function toConflict(sdk: NativeSdk, conflict: PlannedConflict): DesktopSy
 	}
 }
 
-function unsyncableDetail(reason: UnsyncablePath["reason"]): string | null {
+function unsyncableDetail(reason: IssuePath["reason"]): string | null {
 	switch (reason.tag) {
 		case "InvalidName":
 			return reason.inner.detail
@@ -162,8 +175,6 @@ function unsyncableDetail(reason: UnsyncablePath["reason"]): string | null {
 			return reason.inner.name
 		case "RemoteNameNotStorable":
 			return reason.inner.detail
-		case "LocalAlias":
-			return reason.inner.target
 		case "RemoteContentHashMismatch":
 			return reason.inner.lastError
 		default:
@@ -171,10 +182,123 @@ function unsyncableDetail(reason: UnsyncablePath["reason"]): string | null {
 	}
 }
 
-export function toUnsyncable(path: UnsyncablePath): DesktopSyncUnsyncable {
+export function toUnsyncable(path: IssuePath): DesktopSyncUnsyncable {
 	const detail = unsyncableDetail(path.reason)
 
 	return { relPath: clip(path.relPath), reason: UNSYNCABLE_REASONS[path.reason.tag], detail: detail === null ? null : clip(detail) }
+}
+
+// The engine reports the target relative to the root.
+export function toSkippedSymlink(path: SymlinkPath): DesktopSyncSkippedSymlink {
+	return { relPath: clip(path.relPath), target: clip(path.reason.inner.target) }
+}
+
+// How many of `list` are symlinks.
+export function symlinkCount(list: readonly UnsyncablePath[]): number {
+	let found = 0
+
+	for (const path of list) {
+		if (isSymlink(path)) {
+			found++
+		}
+	}
+
+	return found
+}
+
+// The page from `offset` of the entries `keep` admits, read in place.
+export function keptPage<T, U extends T>(list: readonly T[], keep: (entry: T) => entry is U, offset: number, limit: number): U[] {
+	const page: U[] = []
+	let skipped = 0
+
+	for (const entry of list) {
+		if (page.length >= limit) {
+			break
+		}
+
+		if (!keep(entry)) {
+			continue
+		}
+
+		if (skipped < offset) {
+			skipped++
+		} else {
+			page.push(entry)
+		}
+	}
+
+	return page
+}
+
+// The engine's page limit.
+export const ENGINE_PAGE = 1000
+
+// Where in a plan's unsyncable list its symlinks are, ascending; read once per plan.
+const symlinkIndices = new WeakMap<JsSyncPlan, readonly number[]>()
+
+function planSymlinks(plan: JsSyncPlan): readonly number[] {
+	const known = symlinkIndices.get(plan)
+
+	if (known !== undefined) {
+		return known
+	}
+
+	const found: number[] = []
+	const total = count(plan.summary().unsyncableTotal)
+
+	for (let offset = 0; offset < total; offset += ENGINE_PAGE) {
+		const page = plan.unsyncable(BigInt(offset), BigInt(ENGINE_PAGE))
+
+		for (const [index, path] of page.entries()) {
+			if (isSymlink(path)) {
+				found.push(offset + index)
+			}
+		}
+
+		if (page.length < ENGINE_PAGE) {
+			break
+		}
+	}
+
+	symlinkIndices.set(plan, found)
+
+	return found
+}
+
+// Where the `nth` (from 0) entry that is no symlink sits in the whole list.
+function issueIndex(symlinks: readonly number[], nth: number): number {
+	let index = nth
+
+	for (const at of symlinks) {
+		if (at > index) {
+			break
+		}
+
+		index++
+	}
+
+	return index
+}
+
+// The plan's unsyncable entries `keep` admits from list index `first` through `last`, read in engine-sized spans.
+function planSpan<U extends UnsyncablePath>(plan: JsSyncPlan, first: number, last: number, keep: (path: UnsyncablePath) => path is U): U[] {
+	const kept: U[] = []
+
+	for (let offset = first; offset <= last; offset += ENGINE_PAGE) {
+		const page = plan.unsyncable(BigInt(offset), BigInt(Math.min(ENGINE_PAGE, last - offset + 1)))
+
+		for (const path of page) {
+			if (keep(path)) {
+				kept.push(path)
+			}
+		}
+
+		if (page.length === 0) {
+			break
+		}
+	}
+
+	return kept
 }
 
 const GAP_CAUSES: Record<SyncScanGap["cause"]["tag"], DesktopSyncScanGap["cause"]> = {
@@ -213,7 +337,10 @@ export function refusal(sdk: NativeSdk, reason: SyncPlanSummary["refused"]): Des
 	return reason === sdk.RefuseReason.RemoteCollision ? "remoteCollision" : "localCollision"
 }
 
-export function toSummary(sdk: NativeSdk, summary: SyncPlanSummary): NativePlanSummary {
+export function toSummary(sdk: NativeSdk, plan: JsSyncPlan): NativePlanSummary {
+	const summary = plan.summary()
+	const symlinks = planSymlinks(plan).length
+
 	return {
 		actions: count(summary.actionsTotal),
 		uploadBytes: count(summary.uploadBytes),
@@ -221,7 +348,8 @@ export function toSummary(sdk: NativeSdk, summary: SyncPlanSummary): NativePlanS
 		heldDeletions: count(summary.heldDeletions),
 		heldReason: heldReason(summary.heldReason),
 		conflicts: count(summary.conflictsTotal),
-		unsyncable: count(summary.unsyncableTotal),
+		unsyncable: count(summary.unsyncableTotal) - symlinks,
+		skippedSymlinks: symlinks,
 		ignored: count(summary.ignoredTotal),
 		refused: refusal(sdk, summary.refused),
 		passToken: summary.passToken ?? null
@@ -241,8 +369,31 @@ export function planPage(sdk: NativeSdk, plan: JsSyncPlan, list: DesktopSyncPlan
 			return { list, total: count(summary.heldTotal), entries: plan.held(from, size).map(action => toAction(sdk, action)) }
 		case "conflicts":
 			return { list, total: count(summary.conflictsTotal), entries: plan.conflicts(from, size).map(entry => toConflict(sdk, entry)) }
-		case "unsyncable":
-			return { list, total: count(summary.unsyncableTotal), entries: plan.unsyncable(from, size).map(toUnsyncable) }
+		case "unsyncable": {
+			const symlinks = planSymlinks(plan)
+			const total = count(summary.unsyncableTotal) - symlinks.length
+			const end = Math.min(offset + limit, total)
+
+			return {
+				list,
+				total,
+				entries:
+					offset < end
+						? planSpan(plan, issueIndex(symlinks, offset), issueIndex(symlinks, end - 1), isIssue).map(toUnsyncable)
+						: []
+			}
+		}
+		case "skippedSymlinks": {
+			const symlinks = planSymlinks(plan)
+			const first = symlinks[offset]
+			const last = symlinks[Math.min(offset + limit, symlinks.length) - 1]
+
+			return {
+				list,
+				total: symlinks.length,
+				entries: first === undefined || last === undefined ? [] : planSpan(plan, first, last, isSymlink).map(toSkippedSymlink)
+			}
+		}
 		case "ignored":
 			return { list, total: count(summary.ignoredTotal), entries: plan.ignored(from, size).map(toIgnored) }
 	}

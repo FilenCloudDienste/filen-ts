@@ -28,7 +28,8 @@ import type {
 	SyncPassEvent,
 	SyncPassReport,
 	SyncPlanSummary,
-	SyncRefusal
+	SyncRefusal,
+	UnsyncablePath
 } from "@filen/sdk-rs"
 import type { NativeSdk, SyncEngine } from "../native/addon.ts"
 import type { TransferClient, TransferSdk } from "../native/transfers.ts"
@@ -274,7 +275,7 @@ export function action(tag: PlannedAction["kind"]["tag"], relPath: string, to?: 
 	return { kind, relPath, node: fakeSdk.PlannedNodeKind.File, size: 1n }
 }
 
-export function fakePlan(actions: PlannedAction[], summary: Partial<SyncPlanSummary> = {}) {
+export function fakePlan(actions: PlannedAction[], summary: Partial<SyncPlanSummary> = {}, unsyncable: UnsyncablePath[] = []) {
 	const plan = {
 		summary: (): SyncPlanSummary => ({
 			actionsTotal: BigInt(actions.length),
@@ -283,14 +284,14 @@ export function fakePlan(actions: PlannedAction[], summary: Partial<SyncPlanSumm
 			heldTotal: 0n,
 			heldDeletions: 0n,
 			conflictsTotal: 0n,
-			unsyncableTotal: 0n,
+			unsyncableTotal: BigInt(unsyncable.length),
 			ignoredTotal: 0n,
 			...summary
 		}),
 		actions: vi.fn((offset: bigint, limit: bigint) => actions.slice(Number(offset), Number(offset + limit))),
 		held: () => [],
 		conflicts: () => [],
-		unsyncable: () => [],
+		unsyncable: vi.fn((offset: bigint, limit: bigint) => unsyncable.slice(Number(offset), Number(offset + limit))),
 		ignored: () => [],
 		release: vi.fn()
 	}

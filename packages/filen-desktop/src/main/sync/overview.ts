@@ -10,7 +10,7 @@ import { shellPairId } from "./mirror.ts"
 import type { ShellPair } from "./store.ts"
 import { stripVerbatim, stripVerbatimIn } from "./localRoot.ts"
 
-const NO_ISSUES = { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 }
+const NO_ISSUES = { conflicts: 0, heldDeletions: 0, unsyncable: 0, skippedSymlinks: 0, failed: 0 }
 const NOT_DEGRADED = { local: false, remote: false }
 
 // What needs the user first wins: review, then an unreachable server, a failing pair, then activity.

@@ -1,11 +1,19 @@
 import { mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import type { DesktopSyncEntries, DesktopSyncMode, DesktopSyncPair, DesktopSyncResult, DesktopSyncUnsyncable } from "@filen/shared/desktop"
+import type {
+	DesktopSyncEntries,
+	DesktopSyncMode,
+	DesktopSyncPair,
+	DesktopSyncResult,
+	DesktopSyncSkippedSymlink,
+	DesktopSyncUnsyncable
+} from "@filen/shared/desktop"
 import { errorMessage, fail, runBounded } from "../../support.ts"
 import { desktop } from "../app.ts"
 import type { CloudEntry } from "../cloud.ts"
 import {
 	expectedCloudReasons,
+	expectedSkippedSymlinks,
 	expectedUnsyncable,
 	type NameFixture,
 	type NameOs,
@@ -42,6 +50,7 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 //   PN0 both sides seeded; rclone kept every cloud name exactly (else an infra failure)
 //   PN1 the first pass and two more on request (syncNow) complete
 //   PN2 the pair reports exactly this OS's unsyncable set, the cloud-seeded names as ones this device can't store
+//   PN2b the pair lists exactly its directory links inside the root as skipped symlinks, each with its target
 //   PN3 every cloud-seeded item keeps its uuid and exact name; the ones this OS can hold are on disk with their bytes
 //   PN4 every device-seeded item that syncs is in the cloud once, with its bytes (sha256Of); the rest are not; NFD names
 //       keep their spelling on disk with no NFC sibling
@@ -435,6 +444,27 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			}
 
 			return described.join(" | ") || "none"
+		})
+
+		await findings.check("PN2b the pair lists its directory links inside the root as skipped symlinks", async () => {
+			const page = ok(
+				"skippedSymlinks",
+				await desktop<DesktopSyncResult<DesktopSyncEntries<DesktopSyncSkippedSymlink> | null>>(
+					chain.page(),
+					`window.desktop.sync.skippedSymlinks(${json(pair.id)}, 0, 200)`
+				)
+			)
+			const entries = page?.entries ?? fail("no pass reported its skipped symlinks")
+			const expected = expectedSkippedSymlinks(os).filter(link => fixtures.some(fixture => nfc(fixture.path) === link.relPath))
+			const listed = entries.map(link => ({ relPath: nfc(link.relPath), target: nfc(link.target) }))
+			const sorted = (links: { relPath: string; target: string }[]) =>
+				json([...links].sort((a, b) => a.relPath.localeCompare(b.relPath)))
+
+			if (sorted(listed) !== sorted(expected)) {
+				fail(`expected ${sorted(expected)}; listed ${sorted(listed)}`)
+			}
+
+			return sorted(listed)
 		})
 
 		const localRaw = async () => localSnapshot(root, { raw: true, skip: relPath => relPath === BIN_DIR })

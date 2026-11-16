@@ -281,11 +281,12 @@ export const LEGACY_CONFLICTS: Readonly<Record<string, readonly string[]>> = {
 // never renamed in the cloud); E2E_NAMES_CHECK=0 turns the check off.
 //   synced      on both sides with the same bytes; a cloud-seeded item keeps its uuid and exact name
 //   unsyncable  reported by the pair (at `reportedAs`, else its own path) and left on its side alone
+//   skippedSymlink  a directory link inside the root, listed as skipped (not unsyncable) and left on its side alone
 //   ignored     a built-in ignore rule: left on its side, not reported as unsyncable
 export const NAMES_PAIR = "e2e-names"
 
 export type NameOs = "linux" | "win" | "mac"
-export type NameOutcome = "synced" | "unsyncable" | "ignored"
+export type NameOutcome = "synced" | "unsyncable" | "skippedSymlink" | "ignored"
 
 export interface NameFixture {
 	// As seeded: the exact spelling ("/"-separated, NFD where it says so).
@@ -361,7 +362,7 @@ export const NAME_FIXTURES: readonly NameFixture[] = [
 	{ path: ".config/x", side: "local", outcome: "synced" },
 	// Links: followed and synced as what they lead to, but a directory link inside the root is an alias of its target.
 	{ path: "real-dir/inside.txt", side: "local", outcome: "synced" },
-	{ path: "alias-dir", side: "local", outcome: "unsyncable", link: { target: "real-dir", dir: true } },
+	{ path: "alias-dir", side: "local", outcome: "skippedSymlink", link: { target: "real-dir", dir: true } },
 	{ path: "linked-out", side: "local", outcome: "synced", link: { target: "@out/outside", dir: true } },
 	{ path: "file-link.txt", side: "local", outcome: "synced", link: { target: "real-dir/inside.txt", dir: false } },
 	// Windows: a name NTFS holds but longer than the 255 bytes a cloud name may take, and a hidden file.
@@ -411,6 +412,15 @@ export function expectedUnsyncable(os: NameOs): string[] {
 				.map(fixture => (fixture.reportedAs ?? fixture.path).normalize("NFC"))
 		)
 	].sort()
+}
+
+// The directory links inside the root `os` must list as skipped, each with its target.
+export function expectedSkippedSymlinks(os: NameOs): { relPath: string; target: string }[] {
+	return namesFor(os).flatMap(fixture =>
+		fixture.expect === "skippedSymlink" && fixture.link !== undefined
+			? [{ relPath: fixture.path.normalize("NFC"), target: fixture.link.target.normalize("NFC") }]
+			: []
+	)
 }
 
 // Why `os` must report its unsyncable cloud-seeded paths: a cloud name this device can't store (sdk-rs

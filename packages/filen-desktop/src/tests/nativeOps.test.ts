@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { CacheStatusMessage, PlannedAction } from "@filen/sdk-rs"
+import type { CacheStatusMessage, PlannedAction, UnsyncablePath } from "@filen/sdk-rs"
 import { createConvergence } from "../native/convergence.ts"
 import { classify } from "../native/errors.ts"
 import { createHostEngine } from "../native/ops.ts"
@@ -156,6 +156,61 @@ describe("native ops", () => {
 		})
 		// Paged at the engine's limit.
 		expect(plan.actions).toHaveBeenCalledTimes(3)
+	})
+
+	it("evaluatePlan counts directory symlinks apart from the unsyncable paths, and pages each list without the other", async () => {
+		const alias = (relPath: string, target: string): UnsyncablePath => ({ relPath, reason: { tag: "LocalAlias", inner: { target } } })
+		const collision = (relPath: string): UnsyncablePath => ({ relPath, reason: { tag: "LocalNameCollision" } })
+		const { plan, handle } = fakePlan([], {}, [
+			alias("link", "real"),
+			collision("x"),
+			alias("b/loop", "b"),
+			collision("y"),
+			collision("z")
+		])
+		const { engine, convergence, host } = setup()
+
+		engine.planPair.mockResolvedValue(handle)
+		await host.refreshPairs()
+		convergence.onMessages(resync([REMOTE_ROOT], true))
+
+		await expect(host.ops.evaluatePlan({ pairId: "1" })).resolves.toMatchObject({
+			summary: { unsyncable: 3, skippedSymlinks: 2 }
+		})
+
+		const page = (list: "unsyncable" | "skippedSymlinks", offset: number, limit: number) =>
+			host.ops.planPage({ planId: "1", list, offset, limit })
+
+		await expect(page("unsyncable", 0, 2)).resolves.toEqual({
+			list: "unsyncable",
+			total: 3,
+			entries: [
+				{ relPath: "x", reason: "localNameCollision", detail: null },
+				{ relPath: "y", reason: "localNameCollision", detail: null }
+			]
+		})
+		plan.unsyncable.mockClear()
+		await expect(page("unsyncable", 2, 2)).resolves.toEqual({
+			list: "unsyncable",
+			total: 3,
+			entries: [{ relPath: "z", reason: "localNameCollision", detail: null }]
+		})
+		// Only the span the page covers is read.
+		expect(plan.unsyncable).toHaveBeenCalledExactlyOnceWith(4n, 1n)
+		await expect(page("unsyncable", 3, 2)).resolves.toEqual({ list: "unsyncable", total: 3, entries: [] })
+		await expect(page("skippedSymlinks", 0, 10)).resolves.toEqual({
+			list: "skippedSymlinks",
+			total: 2,
+			entries: [
+				{ relPath: "link", target: "real" },
+				{ relPath: "b/loop", target: "b" }
+			]
+		})
+		await expect(page("skippedSymlinks", 1, 10)).resolves.toEqual({
+			list: "skippedSymlinks",
+			total: 2,
+			entries: [{ relPath: "b/loop", target: "b" }]
+		})
 	})
 
 	it("evaluatePlan reads a listing that started over as not ready", async () => {
@@ -351,6 +406,48 @@ describe("native ops", () => {
 		await expect(host.ops.resolveConflicts({ pairId: "1", resolution: "keepLocal", relPaths: ["a.txt", "b.txt"] })).rejects.toThrow()
 		expect(engine.resolveConflict).toHaveBeenCalledOnce()
 		expect(engine.listConflicts).toHaveBeenCalledOnce()
+	})
+
+	it("keeps directory symlinks out of the last report's unsyncable paths, listing them as skipped", async () => {
+		const { engine, host } = setup()
+
+		await host.refreshPairs()
+		await expect(host.ops.skippedSymlinks({ pairId: "1", offset: 0, limit: 10 })).resolves.toBeNull()
+
+		engine.lastReport.mockResolvedValue(
+			report({
+				unsyncable: [
+					{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } },
+					{ relPath: "a", reason: { tag: "LocalNameCollision" } },
+					{ relPath: "b/loop", reason: { tag: "LocalAlias", inner: { target: "b" } } },
+					{ relPath: "c", reason: { tag: "RemoteNameCollision" } }
+				],
+				unsyncableTotal: 4n
+			})
+		)
+
+		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
+			total: 2,
+			entries: [
+				{ relPath: "a", reason: "localNameCollision", detail: null },
+				{ relPath: "c", reason: "remoteNameCollision", detail: null }
+			]
+		})
+		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 1, limit: 1 })).resolves.toEqual({
+			total: 2,
+			entries: [{ relPath: "c", reason: "remoteNameCollision", detail: null }]
+		})
+		await expect(host.ops.skippedSymlinks({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
+			total: 2,
+			entries: [
+				{ relPath: "link", target: "real" },
+				{ relPath: "b/loop", target: "b" }
+			]
+		})
+		await expect(host.ops.skippedSymlinks({ pairId: "1", offset: 1, limit: 1 })).resolves.toEqual({
+			total: 2,
+			entries: [{ relPath: "b/loop", target: "b" }]
+		})
 	})
 
 	it("lists unsyncable paths and scan gaps from the last report", async () => {

@@ -87,6 +87,7 @@ export const SYNC_CALLS = [
 	"retryPath",
 	"retryAll",
 	"unsyncablePaths",
+	"skippedSymlinks",
 	"ignoredPaths",
 	"userIgnore",
 	"setUserIgnore",

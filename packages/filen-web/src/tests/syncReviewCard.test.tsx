@@ -20,6 +20,7 @@ const SUMMARY: DesktopSyncPlanSummary = {
 	heldReason: null,
 	conflicts: 0,
 	unsyncable: 0,
+	skippedSymlinks: 0,
 	ignored: 0,
 	refused: null
 }
@@ -67,6 +68,20 @@ describe("ReviewCard", () => {
 })
 
 describe("ReviewSummary", () => {
+	it("counts skipped symlinks apart from what can't be synced", () => {
+		render(
+			<ReviewSummary
+				summary={{ ...SUMMARY, unsyncable: 1, skippedSymlinks: 2 }}
+				findings={[]}
+				planId="plan-1"
+				listsOpen
+			/>
+		)
+
+		expect(screen.getByText(/1 item can't be synced · 2 symlinks skipped/)).toBeTruthy()
+		expect(screen.getByRole("button", { name: /Skipped symlinks/ })).toBeTruthy()
+	})
+
 	it("keeps the lists behind a click by default", () => {
 		render(
 			<ReviewSummary

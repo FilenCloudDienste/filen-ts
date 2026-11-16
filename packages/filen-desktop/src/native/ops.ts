@@ -5,7 +5,22 @@ import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
 import { classify, clip, HostError, invalidIgnore } from "./errors.ts"
 import { checkPlan } from "./planCheck.ts"
-import { heldReason, planPage, type PlanRegistry, toAction, toConflict, toIgnored, toScanGap, toSummary, toUnsyncable } from "./plans.ts"
+import {
+	heldReason,
+	isIssue,
+	isSymlink,
+	keptPage,
+	planPage,
+	type PlanRegistry,
+	symlinkCount,
+	toAction,
+	toConflict,
+	toIgnored,
+	toScanGap,
+	toSkippedSymlink,
+	toSummary,
+	toUnsyncable
+} from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
 // How long a dry run (or awaitConverged) waits for the cache to converge on the pair's remote root: well inside main's
@@ -290,7 +305,7 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			return {
 				status: "ok",
 				planId,
-				summary: toSummary(sdk, plan.summary()),
+				summary: toSummary(sdk, plan),
 				check: check === true ? checkPlan(sdk, plan) : null
 			}
 		},
@@ -414,7 +429,20 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return report === undefined
 				? null
-				: { total: Number(report.unsyncableTotal), entries: report.unsyncable.slice(offset, offset + limit).map(toUnsyncable) }
+				: {
+						total: Number(report.unsyncableTotal) - symlinkCount(report.unsyncable),
+						entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable)
+					}
+		},
+		skippedSymlinks: async ({ pairId, offset, limit }) => {
+			const report = await engine.lastReport(held(pairId).id)
+
+			return report === undefined
+				? null
+				: {
+						total: symlinkCount(report.unsyncable),
+						entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink)
+					}
 		},
 		setMigratedGuard: async ({ pairId }) => {
 			await engine.setDeleteGuard(held(pairId).id, MIGRATED_GUARD.floor, MIGRATED_GUARD.ratio)

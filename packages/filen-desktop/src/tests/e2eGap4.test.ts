@@ -251,6 +251,7 @@ describe("L16 and L17 first-run table", () => {
 			heldReason: "firstSyncWithDeletions" as const,
 			conflicts: 0,
 			unsyncable: 0,
+			skippedSymlinks: 0,
 			ignored: 0,
 			refused: null
 		}
@@ -278,6 +279,7 @@ describe("L16 and L17 first-run table", () => {
 			heldReason: "firstSyncWithDeletions" as const,
 			conflicts: 0,
 			unsyncable: 0,
+			skippedSymlinks: 0,
 			ignored: 0,
 			refused: null
 		}
@@ -303,6 +305,7 @@ describe("L16 and L17 first-run table", () => {
 			heldReason: null,
 			conflicts: 0,
 			unsyncable: 0,
+			skippedSymlinks: 0,
 			ignored: 0,
 			refused: null
 		}

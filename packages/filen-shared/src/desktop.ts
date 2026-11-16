@@ -300,7 +300,7 @@ export type DesktopSyncHeldReason =
 // destination across such a pair refuses).
 export type DesktopSyncRefusal = "remoteCollision" | "localCollision"
 
-// What a dry run would do.
+// What a dry run would do. `skippedSymlinks` are no part of `unsyncable`.
 export interface DesktopSyncPlanSummary {
 	actions: number
 	uploadBytes: number
@@ -309,6 +309,7 @@ export interface DesktopSyncPlanSummary {
 	heldReason: DesktopSyncHeldReason | null
 	conflicts: number
 	unsyncable: number
+	skippedSymlinks: number
 	ignored: number
 	refused: DesktopSyncRefusal | null
 }
@@ -342,10 +343,12 @@ export interface DesktopSyncTransfer {
 	total: number
 }
 
+// `skippedSymlinks` is no issue (see DesktopSyncSkippedSymlink), so no part of `unsyncable`.
 export interface DesktopSyncIssueCounts {
 	conflicts: number
 	heldDeletions: number
 	unsyncable: number
+	skippedSymlinks: number
 	failed: number
 }
 
@@ -410,7 +413,7 @@ export interface DesktopSyncActivity {
 	detail?: string
 }
 
-export type DesktopSyncPlanList = "actions" | "held" | "conflicts" | "unsyncable" | "ignored"
+export type DesktopSyncPlanList = "actions" | "held" | "conflicts" | "unsyncable" | "skippedSymlinks" | "ignored"
 
 export type DesktopSyncNodeKind = "file" | "directory"
 
@@ -461,7 +464,6 @@ export type DesktopSyncUnsyncableReason =
 	| "remoteInvalidName"
 	| "remoteNameNotStorable"
 	| "remoteBrokenParent"
-	| "localAlias"
 	| "localNameCollision"
 	| "remoteNameCollision"
 	| "remoteContentHashMismatch"
@@ -470,6 +472,13 @@ export interface DesktopSyncUnsyncable {
 	relPath: string
 	reason: DesktopSyncUnsyncableReason
 	detail: string | null
+}
+
+// A local symlink to a directory inside the pair's root: the directory syncs once under its real path, `target`
+// (relative to the root), and the link is left alone on both sides.
+export interface DesktopSyncSkippedSymlink {
+	relPath: string
+	target: string
 }
 
 // `dir` is the directory of the `.filenignore` holding `pattern` ("" is the pair's root), for level "file" only.
@@ -486,6 +495,7 @@ export type DesktopSyncPlanPage =
 	| { list: "actions" | "held"; total: number; entries: DesktopSyncPlanAction[] }
 	| { list: "conflicts"; total: number; entries: DesktopSyncConflict[] }
 	| { list: "unsyncable"; total: number; entries: DesktopSyncUnsyncable[] }
+	| { list: "skippedSymlinks"; total: number; entries: DesktopSyncSkippedSymlink[] }
 	| { list: "ignored"; total: number; entries: DesktopSyncIgnored[] }
 
 // A path the local read could not vouch for, which holds every deletion of the pass. `kind` is the I/O error kind
@@ -648,6 +658,12 @@ export interface DesktopSync {
 		offset: number,
 		limit: number
 	): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncUnsyncable> | null>>
+	// From the same report as unsyncablePaths.
+	skippedSymlinks(
+		pairId: string,
+		offset: number,
+		limit: number
+	): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncSkippedSymlink> | null>>
 	ignoredPaths(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncIgnored>>>
 	userIgnore(): Promise<DesktopSyncResult<DesktopSyncUserIgnore>>
 	// Rejected as `invalidIgnore` with the first bad line.
