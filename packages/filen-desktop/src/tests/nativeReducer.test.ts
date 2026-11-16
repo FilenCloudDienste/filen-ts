@@ -223,8 +223,8 @@ describe("reduceEvents", () => {
 					lastSyncedAt: 2000,
 					lastError: null,
 					// The report's conflicts are its pass's; the held count comes from the host. A directory symlink is no
-					// unsyncable path; those past the report's list are counted as unsyncable.
-					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 4, skippedSymlinks: 1, failed: 1 }
+					// unsyncable path; those past the report's list are counted by the host after (RuntimeFeed.unsyncable).
+					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 1, skippedSymlinks: 1, failed: 1 }
 				}
 			]
 		})
@@ -369,7 +369,11 @@ describe("reduceEvents", () => {
 	})
 
 	it("asks for attention for a refusal and for paths that failed or cannot be synced", async () => {
-		for (const fields of [{ refused: fakeSdk.RefuseReason.LocalCollision }, { unsyncableTotal: 1n }, { errorsTotal: 1n }]) {
+		for (const fields of [
+			{ refused: fakeSdk.RefuseReason.LocalCollision },
+			{ unsyncable: [{ relPath: "a", reason: { tag: "LocalNameCollision" as const } }], unsyncableTotal: 1n },
+			{ errorsTotal: 1n }
+		]) {
 			const { runtime, of } = feed()
 
 			runtime.setPairs([pairInfo()])
@@ -409,6 +413,36 @@ describe("reduceEvents", () => {
 
 		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 1 } }] })
 		expect(of("aggregate")).toEqual([])
+	})
+
+	it("takes the unsyncable paths the host counted past a report's list", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([
+			passEvent({
+				tag: "PassCompleted",
+				inner: {
+					report: report({
+						unsyncable: [{ relPath: "link", reason: { tag: "LocalAlias", inner: { target: "real" } } }],
+						unsyncableTotal: 2500n
+					})
+				}
+			})
+		])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		// Those past the list are not counted until the host has read them.
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 1 } }] })
+
+		runtime.unsyncable("1", { unsyncable: 0, skippedSymlinks: 2500 })
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { unsyncable: 0, skippedSymlinks: 2500 } }] })
+		expect(of("aggregate")).toEqual([])
+
+		runtime.unsyncable("1", { unsyncable: 3, skippedSymlinks: 2497 })
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("aggregate")).toEqual([{ t: "aggregate", state: "attention" }])
 	})
 
 	it("an offline pass, halted or failing to lock, raises no attention for the failures it reports", async () => {

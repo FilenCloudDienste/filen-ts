@@ -1,4 +1,4 @@
-import type { ConflictReason, ConflictResolution, DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
+import type { ConflictReason, ConflictResolution, DeleteGuardState, JsSyncPlan, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
 import type { DesktopSyncResolution } from "@filen/shared/desktop"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
@@ -10,16 +10,19 @@ import {
 	isIssue,
 	isSymlink,
 	keptPage,
+	listedSplit,
 	planPage,
 	type PlanRegistry,
-	symlinkCount,
+	planSplit,
 	toAction,
 	toConflict,
 	toIgnored,
 	toScanGap,
 	toSkippedSymlink,
 	toSummary,
-	toUnsyncable
+	toUnsyncable,
+	truncatedUnsyncable,
+	type UnsyncableSplit
 } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
@@ -174,6 +177,120 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		}
 	}
 
+	// A report lists the first 1000 unsyncable paths, and the engine has no way to read the rest of a pass's. Where it
+	// left some out, they are read from a dry run, which reads both sides as a pass does: once per such pass for the
+	// split (`splits`, the plan let go once counted), and once more only when the Issues tab pages past the report's list
+	// (`pagers`, kept in the plan registry until the next pass or its TTL). A pass whose report lists them all reads
+	// nothing more.
+	const splits = new Map<string, Promise<UnsyncableSplit>>()
+	const pagers = new Map<string, Promise<string | null>>()
+
+	function warnUnread(error: unknown): void {
+		const failure = classify(sdk, error)
+
+		ctx.log.warn(`sync: unsyncable paths past the report not read: ${failure === "unauthenticated" ? failure : failure.code}`)
+	}
+
+	function dropPager(key: string): void {
+		const pager = pagers.get(key)
+
+		if (pager !== undefined) {
+			pagers.delete(key)
+			void pager.then(planId => {
+				if (planId !== null) {
+					plans.release(planId)
+				}
+			})
+		}
+	}
+
+	async function readSplit(id: bigint, report: SyncPassReport): Promise<UnsyncableSplit> {
+		try {
+			const plan = await engine.planPair(id)
+
+			try {
+				return planSplit(plan)
+			} finally {
+				plan.release()
+			}
+		} catch (error) {
+			warnUnread(error)
+
+			// Unread, those past the list count as unsyncable: no issue goes unseen.
+			return listedSplit(report, "issues")
+		}
+	}
+
+	async function splitPass(id: bigint, report: SyncPassReport): Promise<void> {
+		const key = id.toString()
+
+		dropPager(key)
+
+		if (!truncatedUnsyncable(report)) {
+			splits.delete(key)
+
+			return
+		}
+
+		const split = readSplit(id, report)
+
+		splits.set(key, split)
+
+		const read = await split
+
+		// A later pass's split is its own.
+		if (splits.get(key) === split) {
+			feed.unsyncable(key, read)
+		}
+	}
+
+	// The split of the last report's unsyncable paths, all of them.
+	async function reportSplit(key: string, report: SyncPassReport): Promise<UnsyncableSplit> {
+		return truncatedUnsyncable(report) ? ((await splits.get(key)) ?? listedSplit(report, "issues")) : listedSplit(report, "unread")
+	}
+
+	// The dry run the pages past the last report's list read, run when first asked for since the pass.
+	async function pagerPlan(key: string, id: bigint): Promise<JsSyncPlan | null> {
+		const known = pagers.get(key)
+		const planId = known === undefined ? null : await known
+		const plan = planId === null ? null : plans.get(planId)
+
+		if (plan !== null) {
+			return plan
+		}
+
+		// Expired, failed, or none yet; another page may have started one meanwhile.
+		if (known !== undefined && pagers.get(key) === known) {
+			pagers.delete(key)
+		}
+
+		let pager = pagers.get(key)
+
+		if (pager === undefined) {
+			pager = engine.planPair(id).then(
+				read => plans.put(read),
+				(error: unknown) => {
+					warnUnread(error)
+
+					return null
+				}
+			)
+			pagers.set(key, pager)
+		}
+
+		const read = await pager
+
+		if (read === null) {
+			if (pagers.get(key) === pager) {
+				pagers.delete(key)
+			}
+
+			return null
+		}
+
+		return plans.get(read)
+	}
+
 	function isStale(error: unknown): boolean {
 		return sdk.FilenSdkError.hasInner(error) && sdk.FilenSdkError.getInner(error).kind() === sdk.ErrorKind.StaleState
 	}
@@ -233,6 +350,8 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			await engine.removePair(id)
 			watched.delete(pairId)
 			conflictReads.delete(pairId)
+			splits.delete(pairId)
+			dropPager(pairId)
 			ctx.convergence.forget(info.remoteRoot)
 
 			return changed()
@@ -424,25 +543,52 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return null
 		},
+		// A page the report lists is read from it; past it, from a dry run (see `splits`).
 		unsyncablePaths: async ({ pairId, offset, limit }) => {
-			const report = await engine.lastReport(held(pairId).id)
+			const { id } = held(pairId)
+			const report = await engine.lastReport(id)
 
-			return report === undefined
-				? null
-				: {
-						total: Number(report.unsyncableTotal) - symlinkCount(report.unsyncable),
-						entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable)
-					}
+			if (report === undefined) {
+				return null
+			}
+
+			const { unsyncable: total } = await reportSplit(pairId, report)
+			const listed = (): NativeOpResult<"unsyncablePaths"> => ({
+				total,
+				entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable)
+			})
+
+			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report, "unread").unsyncable) {
+				return listed()
+			}
+
+			const plan = await pagerPlan(pairId, id)
+			const page = plan === null ? null : planPage(sdk, plan, "unsyncable", offset, limit)
+
+			return page?.list === "unsyncable" ? { total, entries: page.entries } : listed()
 		},
 		skippedSymlinks: async ({ pairId, offset, limit }) => {
-			const report = await engine.lastReport(held(pairId).id)
+			const { id } = held(pairId)
+			const report = await engine.lastReport(id)
 
-			return report === undefined
-				? null
-				: {
-						total: symlinkCount(report.unsyncable),
-						entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink)
-					}
+			if (report === undefined) {
+				return null
+			}
+
+			const { skippedSymlinks: total } = await reportSplit(pairId, report)
+			const listed = (): NativeOpResult<"skippedSymlinks"> => ({
+				total,
+				entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink)
+			})
+
+			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report, "unread").skippedSymlinks) {
+				return listed()
+			}
+
+			const plan = await pagerPlan(pairId, id)
+			const page = plan === null ? null : planPage(sdk, plan, "skippedSymlinks", offset, limit)
+
+			return page?.list === "skippedSymlinks" ? { total, entries: page.entries } : listed()
 		},
 		setMigratedGuard: async ({ pairId }) => {
 			await engine.setDeleteGuard(held(pairId).id, MIGRATED_GUARD.floor, MIGRATED_GUARD.ratio)
@@ -500,9 +646,13 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			watched.delete(pairId.toString())
 		},
 		// A pass records every conflict it reports, held ones again included, so one that reported none recorded none. A
-		// failed pass has no report to tell.
+		// failed pass has no report to tell, and leaves the last one's unsyncable paths.
 		passEnded: async (pairId, report) => {
-			await Promise.all([report === null || report.conflictsTotal > 0n ? countConflicts(pairId) : null, restoreGuard(pairId, report)])
+			await Promise.all([
+				report === null || report.conflictsTotal > 0n ? countConflicts(pairId) : null,
+				report === null ? null : splitPass(pairId, report),
+				restoreGuard(pairId, report)
+			])
 		}
 	}
 }

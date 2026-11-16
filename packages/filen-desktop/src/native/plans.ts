@@ -5,6 +5,7 @@ import type {
 	PlannedConflict,
 	PlannedNodeKind,
 	SyncGuardReason,
+	SyncPassReport,
 	SyncPlanSummary,
 	SyncScanGap,
 	UnsyncablePath
@@ -206,6 +207,25 @@ export function symlinkCount(list: readonly UnsyncablePath[]): number {
 	return found
 }
 
+// How many unsyncable paths are issues, and how many directory symlinks.
+export interface UnsyncableSplit {
+	unsyncable: number
+	skippedSymlinks: number
+}
+
+// A report lists only the first ENGINE_PAGE of its unsyncable paths: whether some are past its list.
+export function truncatedUnsyncable(report: SyncPassReport): boolean {
+	return report.unsyncableTotal > BigInt(report.unsyncable.length)
+}
+
+// The split of the paths a report lists, and of all of them when those past its list are taken as issues.
+export function listedSplit(report: SyncPassReport, past: "unread" | "issues"): UnsyncableSplit {
+	const symlinks = symlinkCount(report.unsyncable)
+	const total = past === "issues" ? Number(report.unsyncableTotal) : report.unsyncable.length
+
+	return { unsyncable: total - symlinks, skippedSymlinks: symlinks }
+}
+
 // The page from `offset` of the entries `keep` admits, read in place.
 export function keptPage<T, U extends T>(list: readonly T[], keep: (entry: T) => entry is U, offset: number, limit: number): U[] {
 	const page: U[] = []
@@ -263,6 +283,13 @@ function planSymlinks(plan: JsSyncPlan): readonly number[] {
 	symlinkIndices.set(plan, found)
 
 	return found
+}
+
+// The split over all of a plan's unsyncable paths.
+export function planSplit(plan: JsSyncPlan): UnsyncableSplit {
+	const symlinks = planSymlinks(plan).length
+
+	return { unsyncable: count(plan.summary().unsyncableTotal) - symlinks, skippedSymlinks: symlinks }
 }
 
 // Where the `nth` (from 0) entry that is no symlink sits in the whole list.
@@ -339,7 +366,7 @@ export function refusal(sdk: NativeSdk, reason: SyncPlanSummary["refused"]): Des
 
 export function toSummary(sdk: NativeSdk, plan: JsSyncPlan): NativePlanSummary {
 	const summary = plan.summary()
-	const symlinks = planSymlinks(plan).length
+	const split = planSplit(plan)
 
 	return {
 		actions: count(summary.actionsTotal),
@@ -348,8 +375,7 @@ export function toSummary(sdk: NativeSdk, plan: JsSyncPlan): NativePlanSummary {
 		heldDeletions: count(summary.heldDeletions),
 		heldReason: heldReason(summary.heldReason),
 		conflicts: count(summary.conflictsTotal),
-		unsyncable: count(summary.unsyncableTotal) - symlinks,
-		skippedSymlinks: symlinks,
+		...split,
 		ignored: count(summary.ignoredTotal),
 		refused: refusal(sdk, summary.refused),
 		passToken: summary.passToken ?? null

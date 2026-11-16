@@ -15,7 +15,7 @@ import {
 } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk } from "./addon.ts"
 import { clip } from "./errors.ts"
-import { refusal, symlinkCount } from "./plans.ts"
+import { listedSplit, refusal, type UnsyncableSplit } from "./plans.ts"
 
 // How often at most the host reports what changed: overview pushes stay at 4 Hz however fast the engine emits.
 export const FEED_INTERVAL_MS = 250
@@ -324,14 +324,12 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.refused = refusal(sdk, report.refused)
 				// A report's conflicts are the ones its pass planned: none for a pass that read nothing (paused, a
 				// wake with nothing announced), so not the count held. The host reads that one after it. Its list keeps
-				// the first 1000 unsyncable paths: those past it count as unsyncable, symlink or not.
-				const symlinks = symlinkCount(report.unsyncable)
-
+				// the first 1000 unsyncable paths: the host counts those past it after (RuntimeFeed.unsyncable), so that
+				// a directory symlink past it raises no attention meanwhile.
 				runtime.issues = {
 					conflicts: runtime.issues.conflicts,
 					heldDeletions: Number(report.heldDeletions),
-					unsyncable: Number(report.unsyncableTotal) - symlinks,
-					skippedSymlinks: symlinks,
+					...listedSplit(report, "unread"),
 					failed: Number(report.errorsTotal)
 				}
 				authFailed ||= report.passErrorKind === sdk.ErrorKind.Unauthenticated || report.halted === sdk.HaltReason.Unauthenticated
@@ -443,6 +441,8 @@ export interface RuntimeFeed {
 	pair(pairId: string): SyncPairInfo | undefined
 	// How many conflicts the engine holds for the pair, as listConflicts counts them.
 	conflicts(pairId: string, total: number): void
+	// The last pass's unsyncable paths, all of them, where its report listed only the first.
+	unsyncable(pairId: string, split: UnsyncableSplit): void
 	events(events: readonly SyncPassEvent[]): void
 	watchStatus(pairId: bigint, status: WatchStatus): void
 	subscribe(on: boolean): void
@@ -574,6 +574,18 @@ export function createRuntimeFeed(
 
 			if (runtime !== undefined && runtime.issues.conflicts !== total) {
 				runtime.issues = { ...runtime.issues, conflicts: total }
+				dirty = true
+				schedule()
+			}
+		},
+		unsyncable: (pairId, split) => {
+			const runtime = state.get(pairId)
+
+			if (
+				runtime !== undefined &&
+				(runtime.issues.unsyncable !== split.unsyncable || runtime.issues.skippedSymlinks !== split.skippedSymlinks)
+			) {
+				runtime.issues = { ...runtime.issues, ...split }
 				dirty = true
 				schedule()
 			}
