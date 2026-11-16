@@ -1,4 +1,4 @@
-import { PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
+import { MUPDF_BYTES_PER_PIXEL, PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
 import { THUMB_SDK_MEM_BUDGET } from "@/features/drive/lib/thumbnails.logic"
 import type { DeviceProfile } from "@/lib/deviceProfile"
 
@@ -12,9 +12,6 @@ const MIB = 1024 * 1024
 // leaving room for the file and the module; a phone's tab is killed far sooner.
 const WORKER_DECODE_BYTES_DESKTOP = 1024 * MIB
 const WORKER_DECODE_BYTES_MOBILE = 384 * MIB
-
-// The heap MuPDF needs per pixel of an image it decodes. Provisional until measured like the rest of the PDF budget.
-export const MUPDF_BYTES_PER_PIXEL = 8
 
 // A thumbnail decode works in the SDK's per-decode memory, at 4 bytes (RGBA) a pixel.
 const THUMBNAIL_BYTES_PER_PIXEL = 4
@@ -34,8 +31,9 @@ export function workerDecodePixels(profile: DeviceProfile, fileBytes: number, by
 	return Math.max(0, Math.floor((workerDecodeBytes(profile) - fileBytes) / bytesPerPixel))
 }
 
-// One image page decoded by MuPDF. The engine reads an image file whole into the same heap that holds the decoded page,
-// so the file counts against it; `fileBytes` is 0 for a format it reads lazily.
+// One image page decoded by MuPDF, at its measured bytes per pixel (core/pdfedit/budget.ts). The engine reads an image
+// file whole into the same heap that holds the decoded page, so the file counts against it; `fileBytes` is 0 for a
+// format it reads lazily.
 export function mupdf(profile: DeviceProfile, fileBytes: number): number {
 	const heapBudget = (profile.mobile ? PDF_MOBILE_MEMORY : PDF_DESKTOP_MEMORY).heapBudget
 

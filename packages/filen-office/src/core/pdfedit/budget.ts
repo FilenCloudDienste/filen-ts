@@ -32,6 +32,14 @@ export const PDF_HEAP_BASELINE = 22 * MIB
 // A save's peak above the baseline, per input byte: the largest measured factor, rounded up.
 export const PDF_SAVE_PEAK_FACTOR = 2.8
 
+// The heap one image costs per source pixel when a page holding it is drawn: the decoded image, the decoder's working
+// memory and the tiles drawn from it, with the memory's growth steps. Measured with mupdf 1.28.6 under Node like the
+// above (heap growth from drawing a page whose image is already read, in 1024-pixel tiles at full size), on
+// incompressible images: a CMYK JPEG 11.1 to 16.9 by size (the most), an RGB JPEG 8.8 to 11.1, an RGB PNG 6.0 to 6.5,
+// an RGBA PNG 8.3, gray 2.3 to 3.8. The largest measured, rounded up. The image's file is not in it: it is the file's
+// size for a format MuPDF reads whole, and its compressed bytes for one it reads as it goes.
+export const MUPDF_BYTES_PER_PIXEL = 17
+
 function profile(heapBudget: number, respawnHeapBytes: number): PdfMemoryProfile {
 	return { heapBudget, editMaxBytes: Math.floor((heapBudget - PDF_HEAP_BASELINE) / PDF_SAVE_PEAK_FACTOR), respawnHeapBytes }
 }

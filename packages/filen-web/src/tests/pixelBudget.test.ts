@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
+import { MUPDF_BYTES_PER_PIXEL, PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
 import type { DeviceProfile } from "@/lib/deviceProfile"
-import { edit, mupdf, MUPDF_BYTES_PER_PIXEL, thumbnail, workerDecodeBytes, workerDecodePixels } from "@/lib/pixelBudget"
+import { edit, mupdf, thumbnail, workerDecodeBytes, workerDecodePixels } from "@/lib/pixelBudget"
 
 const MIB = 1024 * 1024
 
@@ -34,11 +34,11 @@ describe("pixelBudget", () => {
 	})
 
 	it("prices a MuPDF image page from the PDF heap budget, less the baseline and the file it holds", () => {
-		expect(MUPDF_BYTES_PER_PIXEL).toBe(8)
-		expect(mupdf(DESKTOP, 0)).toBe((PDF_DESKTOP_MEMORY.heapBudget - PDF_HEAP_BASELINE) / 8)
-		expect(mupdf(ANDROID, 0)).toBe((PDF_MOBILE_MEMORY.heapBudget - PDF_HEAP_BASELINE) / 8)
+		expect(MUPDF_BYTES_PER_PIXEL).toBe(17)
+		expect(mupdf(DESKTOP, 0)).toBe(Math.floor((PDF_DESKTOP_MEMORY.heapBudget - PDF_HEAP_BASELINE) / 17))
+		expect(mupdf(ANDROID, 0)).toBe(Math.floor((PDF_MOBILE_MEMORY.heapBudget - PDF_HEAP_BASELINE) / 17))
 		expect(mupdf(DESKTOP, 64 * MIB)).toBeLessThan(mupdf(DESKTOP, 0))
-		expect(mupdf(DESKTOP, 63 * MIB + 1)).toBeLessThan(mupdf(DESKTOP, 63 * MIB))
+		expect(mupdf(DESKTOP, 63 * MIB + MUPDF_BYTES_PER_PIXEL)).toBeLessThan(mupdf(DESKTOP, 63 * MIB))
 		expect(mupdf(ANDROID, 1024 * MIB)).toBe(0)
 	})
 

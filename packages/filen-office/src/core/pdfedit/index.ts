@@ -2,6 +2,7 @@ export {
 	estimateSavePeak,
 	fitsBudget,
 	fitsEdit,
+	MUPDF_BYTES_PER_PIXEL,
 	PDF_DESKTOP_MEMORY,
 	PDF_FRESH_HEAP,
 	PDF_HEAP_BASELINE,
