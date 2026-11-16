@@ -29,8 +29,15 @@ export type UsePreviewStreamUrlResult =
 //
 // A revisit reuses the id this item was registered under earlier (previewCache.ts), re-registered so
 // it is live again, so the element gets the same URL and the browser can answer it from what it
-// already holds. A retry drops that id: a broken stream needs a URL the element has not seen.
-export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: string): UsePreviewStreamUrlResult {
+// already holds. A retry drops that id: a broken stream needs a URL the element has not seen. `fresh` registers under a
+// new id every time and keeps none: an element that must see its bytes arrive (the delivery acknowledgement) is never
+// answered from the browser's memory cache.
+export function usePreviewStreamUrl(
+	item: DriveItem,
+	name: string,
+	contentType: string,
+	options?: { readonly fresh?: boolean }
+): UsePreviewStreamUrlResult {
 	const [result, setResult] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error" }>({
 		status: "pending"
 	})
@@ -46,11 +53,12 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 	// A provided origin read by range (an archive's entry) streams through the SDK worker's port instead.
 	const provided = useProvidedPreviewOrigin()
 	const providedOf = useEffectEvent(() => provided)
+	const fresh = options?.fresh === true
 
 	useEffect(() => {
 		let live = true
 		const epoch = previewCacheEpoch()
-		const id = getPreviewStreamId(cacheScope, uuid, contentType) ?? crypto.randomUUID()
+		const id = (fresh ? undefined : getPreviewStreamId(cacheScope, uuid, contentType)) ?? crypto.randomUUID()
 
 		holdPreviewStream(id)
 
@@ -63,7 +71,9 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 					? await previewStreamUrl(fileOf(), name, contentType, id, { access })
 					: await previewOriginStreamUrl(origin, access, name, contentType, id)
 
-			setPreviewStreamId(cacheScope, uuid, contentType, id, epoch)
+			if (!fresh) {
+				setPreviewStreamId(cacheScope, uuid, contentType, id, epoch)
+			}
 
 			return url
 		}
@@ -85,7 +95,7 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 			live = false
 			releasePreviewStreamSoon(id)
 		}
-	}, [uuid, name, contentType, reloadToken, cacheScope, access])
+	}, [uuid, name, contentType, reloadToken, cacheScope, access, fresh])
 
 	function refetch(): void {
 		forgetPreviewStreamId(cacheScope, item.data.uuid, contentType)

@@ -13,7 +13,9 @@ import "@/lib/i18n"
 // arrived goes to libheif without retrying the stream; one without it keeps the stream's buffered retry, whose own
 // decode failure then goes to libheif on the bytes it holds.
 
-const { downloadFileBytes, registerWithSw, transformHeicBytes, probeNativeImage } = vi.hoisted(() => ({
+const { downloadFileBytes, registerWithSw, transformHeicBytes, probeNativeImage, controller } = vi.hoisted(() => ({
+	// Whether the controlling worker speaks this page's protocol (it answers status queries).
+	controller: { current: false },
 	downloadFileBytes: vi.fn<(file: AnyFile, token: string) => Promise<Uint8Array>>(),
 	registerWithSw: vi.fn<(type: string, payload: Record<string, unknown>) => Promise<void>>(),
 	transformHeicBytes: vi.fn<(bytes: Uint8Array) => Promise<Blob>>(),
@@ -34,14 +36,27 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 }))
 vi.mock("@/features/preview/lib/rasterDecode", () => ({ transformHeicBytes, transformHeicBytesOwned: transformHeicBytes }))
 vi.mock("@/lib/nativeImageSupport", () => ({ probeNativeImage }))
+vi.mock("@/lib/sw/register", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/sw/register")>()),
+	controllerIsCurrent: () => Promise.resolve(controller.current)
+}))
 
 const { ImageViewer } = await import("@/features/preview/components/imageViewer")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 const { refineDeviceProfile } = await import("@/lib/deviceProfile")
-const { SW_MSG_PREVIEW_DELIVERED } = await import("@/lib/sw/protocol")
+const { SW_MSG_PREVIEW_DELIVERED, SW_MSG_PREVIEW_STATUS } = await import("@/lib/sw/protocol")
 
-// One container for the file: the page listens on it from its first registration on.
-const container = Object.assign(new EventTarget(), { controller: { postMessage: vi.fn() } })
+// One container for the file: the page listens on it from its first registration on. Its worker says every
+// registration is still served.
+const container = Object.assign(new EventTarget(), {
+	controller: {
+		postMessage: vi.fn((message: { type?: unknown }, ports?: MessagePort[]) => {
+			if (message.type === SW_MSG_PREVIEW_STATUS) {
+				ports?.[0]?.postMessage({ status: "present" })
+			}
+		})
+	}
+})
 
 function deliver(id: string): void {
 	container.dispatchEvent(new MessageEvent("message", { data: { type: SW_MSG_PREVIEW_DELIVERED, id } }))
@@ -83,6 +98,7 @@ beforeEach(() => {
 	URL.createObjectURL = vi.fn(() => `blob:test-${String(++objectUrls)}`)
 	URL.revokeObjectURL = vi.fn()
 	refineDeviceProfile({ heicNative: "yes" })
+	controller.current = false
 })
 
 afterEach(() => {
@@ -133,6 +149,38 @@ describe("ImageViewer on a HEIC the browser decodes", () => {
 
 		await waitFor(() => {
 			expect(transformHeicBytes).toHaveBeenCalledOnce()
+		})
+		expect(downloadFileBytes).toHaveBeenCalledOnce()
+	})
+
+	it("registers every open under an id of its own, so a copy the browser kept never stands in for a delivery", async () => {
+		const item = heic("eeeeeeee-0000-0000-0000-000000000005", 10)
+		const first = render(createElement(ImageViewer, { item, alt: "photo" }))
+		const { id } = await streamed()
+
+		deliver(id)
+		first.unmount()
+		render(createElement(ImageViewer, { item, alt: "photo" }))
+
+		const again = await streamed()
+
+		expect(again.id).not.toBe(id)
+		expect(registerWithSw.mock.calls[1]?.[1]["id"]).toBe(again.id)
+	})
+
+	it("waits for an acknowledgement that lands late while the worker still serves the stream", async () => {
+		controller.current = true
+		render(createElement(ImageViewer, { item: heic("eeeeeeee-0000-0000-0000-000000000006", 10), alt: "photo" }))
+
+		const { image, id } = await streamed()
+
+		fireEvent.error(image)
+		await new Promise(resolve => setTimeout(resolve, 1_300))
+		deliver(id)
+
+		await waitFor(() => {
+			expect(transformHeicBytes).toHaveBeenCalledOnce()
+			expect(picture().getAttribute("src")).toMatch(/^blob:/)
 		})
 		expect(downloadFileBytes).toHaveBeenCalledOnce()
 	})

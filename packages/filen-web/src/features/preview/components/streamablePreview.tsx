@@ -3,7 +3,13 @@ import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-import { isMediaStreamAvailable, previewDelivered, previewStreamIdOf, waitForMediaStream } from "@/features/preview/lib/previewStream"
+import {
+	isMediaStreamAvailable,
+	onMediaStreamAvailable,
+	previewDeliveredAfterError,
+	previewStreamIdOf,
+	waitForMediaStream
+} from "@/features/preview/lib/previewStream"
 import { bufferedSizeCap, previewType, streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
@@ -19,10 +25,6 @@ import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState
 // the browser's own error state. Video and audio never come here: they always stream (mediaViewer.tsx).
 export type RenderPreviewUrl = (url: string, onError: ((image: HTMLImageElement) => void) | undefined) => ReactNode
 
-// How long a streamed image's error waits for the service worker's delivery acknowledgement, which may land just
-// after it.
-const DELIVERY_GRACE_MS = 1_000
-
 // Streamed mode: registers against the SW's inline route and renders once a URL resolves. A
 // registration failure hands control back to the parent (onFallback) for the buffered fallback ONLY
 // when the file is under the whole-buffer cap (streamFailureAction, the SAME decision the mid-
@@ -33,7 +35,9 @@ const DELIVERY_GRACE_MS = 1_000
 //
 // With `onDecodeFailure`, an <img> error is first classified: no pixels after the worker acknowledged every byte
 // (SW_MSG_PREVIEW_DELIVERED) is the browser failing to decode the file, which a retry of the same bytes cannot change,
-// so it goes there; anything else (no acknowledgement: the bytes never all arrived) takes the path above.
+// so it goes there; anything else (no acknowledgement: the bytes never all arrived) takes the path above. Such an image
+// registers under an id of its own each time: a URL the browser answers from its memory cache sends no new
+// acknowledgement.
 function StreamedPreview({
 	item,
 	contentType,
@@ -49,7 +53,7 @@ function StreamedPreview({
 }) {
 	const { t } = useTranslation("preview")
 	const name = driveItemName(item)
-	const result = usePreviewStreamUrl(item, name, contentType)
+	const result = usePreviewStreamUrl(item, name, contentType, { fresh: onDecodeFailure !== undefined })
 	// Mid-consumption-only (set from the onError DOM event below, a genuine event handler — never an
 	// effect). The registration-failure case is deliberately NOT routed through this: see
 	// registrationOverCap just below for why.
@@ -109,7 +113,7 @@ function StreamedPreview({
 
 		const blank = image.naturalWidth === 0
 
-		void previewDelivered(previewStreamIdOf(url), DELIVERY_GRACE_MS).then(delivered => {
+		void previewDeliveredAfterError(previewStreamIdOf(url)).then(delivered => {
 			if (delivered && blank) {
 				onDecodeFailure()
 			} else {
@@ -174,7 +178,8 @@ function BufferedPreview({
 }
 
 // A file too large to load whole that could stream once a service worker controls the page (the ordinary state for a
-// moment after an install or update): streams if one takes control, else says the file is too large to show here.
+// moment after an install or update): streams if one takes control, else says the file is too large to show here, and
+// still streams once one takes control later while it is shown.
 function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void }) {
 	const { t } = useTranslation("preview")
 	const [unavailable, setUnavailable] = useState(false)
@@ -182,6 +187,12 @@ function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void
 
 	useEffect(() => {
 		let live = true
+
+		const stop = onMediaStreamAvailable(() => {
+			if (live) {
+				stream()
+			}
+		})
 
 		void waitForMediaStream().then(available => {
 			if (!live) {
@@ -197,6 +208,7 @@ function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void
 
 		return () => {
 			live = false
+			stop()
 		}
 	}, [])
 

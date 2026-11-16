@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import type { File } from "@filen/sdk-rs"
 
 // An image whose bytes the preview already holds (a buffered slot revisited, an edited image just saved) shows from
@@ -12,17 +12,26 @@ interface StreamState {
 	available: boolean
 	later: Promise<boolean>
 	contentType: string | null
+	// Who hears of a service worker taking control of the page later.
+	onAvailable: Set<() => void>
 }
 
 const { streamUrl, stream, bytesRead } = vi.hoisted(() => {
-	const state: StreamState = { available: true, later: Promise.resolve(true), contentType: "image/jpeg" }
+	const state: StreamState = { available: true, later: Promise.resolve(true), contentType: "image/jpeg", onAvailable: new Set() }
 
 	return { streamUrl: vi.fn(() => ({ status: "pending" as const, refetch: vi.fn() })), stream: state, bytesRead: vi.fn() }
 })
 
 vi.mock("@/features/preview/lib/previewStream", () => ({
 	isMediaStreamAvailable: () => stream.available,
-	waitForMediaStream: () => stream.later
+	waitForMediaStream: () => stream.later,
+	onMediaStreamAvailable: (listener: () => void) => {
+		stream.onAvailable.add(listener)
+
+		return () => {
+			stream.onAvailable.delete(listener)
+		}
+	}
 }))
 vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: () => stream.contentType }))
 vi.mock("@/features/preview/hooks/usePreviewStreamUrl", () => ({ usePreviewStreamUrl: streamUrl }))
@@ -152,6 +161,26 @@ describe("StreamablePreview", () => {
 
 			expect(await screen.findByText("This file is too large to show here.")).toBeTruthy()
 			expect(streamUrl).not.toHaveBeenCalled()
+			expect(bytesRead).not.toHaveBeenCalled()
+		})
+
+		it("streams once a service worker takes control after the card showed", async () => {
+			stream.available = false
+			stream.later = Promise.resolve(false)
+			render(createElement(PreviewAccessModeProvider, { mode: "anon", children: preview("lateWorker", big) }))
+
+			expect(await screen.findByText("This file is too large to show here.")).toBeTruthy()
+			expect(streamUrl).not.toHaveBeenCalled()
+
+			stream.available = true
+			act(() => {
+				for (const listener of stream.onAvailable) {
+					listener()
+				}
+			})
+
+			expect(streamUrl).toHaveBeenCalled()
+			expect(screen.queryByText("This file is too large to show here.")).toBeNull()
 			expect(bytesRead).not.toHaveBeenCalled()
 		})
 

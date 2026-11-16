@@ -398,6 +398,28 @@ export async function waitForMediaStream(timeoutMs: number = SW_CONTROL_TIMEOUT_
 	})
 }
 
+// Calls `listener` once a service worker takes control of the page, however long after the page loaded (a first visit
+// whose worker claims it late: Firefox cannot finish clients.claim while the SDK's wasm threads block). Returns the
+// unsubscribe; a no-op where there are no service workers.
+export function onMediaStreamAvailable(listener: () => void): () => void {
+	if (!("serviceWorker" in navigator)) {
+		return () => undefined
+	}
+
+	const container = navigator.serviceWorker
+	const handle = (): void => {
+		if (container.controller !== null) {
+			listener()
+		}
+	}
+
+	container.addEventListener("controllerchange", handle)
+
+	return () => {
+		container.removeEventListener("controllerchange", handle)
+	}
+}
+
 // Calls `listener` whenever the controlling service worker answers a range request for preview `id` with
 // 404 (SW_MSG_STREAM_GONE): the element's stream is gone, whether or not the browser says so. Returns the
 // unsubscribe; a no-op where there are no service workers.
@@ -509,4 +531,25 @@ export function previewDelivered(id: string, graceMs: number): Promise<boolean> 
 		waiters.add(arrived)
 		deliveryWaiters.set(id, waiters)
 	})
+}
+
+// How long an image's error waits for its delivery acknowledgement, which may land just after it; and how much longer
+// while the worker still serves the registration, so its response may still be finishing (a background tab or a busy
+// worker posts late).
+const DELIVERY_GRACE_MS = 1_000
+const DELIVERY_FINISH_GRACE_MS = 10_000
+
+// Whether preview `id`'s response reached the file's last byte, for an element that just failed on it: true once
+// acknowledged; false at once when the worker no longer serves the registration (the stream broke), else after the
+// longer grace.
+export async function previewDeliveredAfterError(id: string): Promise<boolean> {
+	if (await previewDelivered(id, DELIVERY_GRACE_MS)) {
+		return true
+	}
+
+	if ((await previewStreamStatus(id)) !== "present") {
+		return delivered.has(id)
+	}
+
+	return await previewDelivered(id, DELIVERY_FINISH_GRACE_MS)
 }
