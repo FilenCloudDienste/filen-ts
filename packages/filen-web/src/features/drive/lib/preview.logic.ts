@@ -335,7 +335,9 @@ export const CODE_DERIVATION_EXCLUSIONS: ReadonlySet<string> = new Set([
 	// An OpenPGP encrypted message.
 	"pgp",
 	// A Python pickle.
-	"p"
+	"p",
+	// A ZX Spectrum snapshot (Z80 assembly sources mostly use .asm).
+	"z80"
 ])
 
 // Text a save must never write back: a message or a mailbox is evidence, kept byte for byte.

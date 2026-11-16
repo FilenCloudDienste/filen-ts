@@ -380,7 +380,7 @@ describe("precedence tiers", () => {
 		// Kept by an earlier tier, or code already (TypeScript's module and CommonJS sources).
 		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts"])
 
-		expect(CODE_DERIVATION_EXCLUSIONS).toEqual(new Set(["mo", "sig", "pgp", "p"]))
+		expect(CODE_DERIVATION_EXCLUSIONS).toEqual(new Set(["mo", "sig", "pgp", "p", "z80"]))
 		expect(CODE_EXTENSIONS.size).toBe(CODE_FILE_EXTENSIONS.size + derived.length - CODE_DERIVATION_EXCLUSIONS.size)
 
 		for (const extension of CODE_FILE_EXTENSIONS) {
@@ -389,14 +389,19 @@ describe("precedence tiers", () => {
 
 		const newlyCode = derived.filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension) && !settled.has(extension))
 
-		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the four binary ones, plus GPX and KML.
-		expect(newlyCode).toHaveLength(179 - 1 - 4 + 2)
+		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the five binary ones, plus GPX and KML.
+		expect(newlyCode).toHaveLength(179 - 1 - 5 + 2)
 
 		for (const extension of newlyCode) {
 			expect(previewCategoryForExtension(extension), extension).toBe("code")
 		}
 
 		expect(["gpx", "kml", "vhd", "yml", "pl", "mts", "cts"].map(previewCategoryForExtension)).toEqual(Array(7).fill("code"))
+	})
+
+	it("keeps a ZX Spectrum snapshot out of code, behind Open as text", () => {
+		expect(previewCategoryForExtension("z80")).toBeNull()
+		expect(canOpenAsText(fileNamed("game.z80", 49_179n))).toBe(true)
 	})
 
 	it("keeps the binary grammar extensions out of code, behind Open as text", () => {
