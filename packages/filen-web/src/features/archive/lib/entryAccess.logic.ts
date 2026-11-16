@@ -2,11 +2,17 @@ import { accessOfFlags, ENTRY_ACCESS, ENTRY_FLAG, ENTRY_KIND } from "@/lib/sdk/a
 import {
 	bufferedSizeCap,
 	CATEGORY_POLICY,
+	contentSniffFor,
 	fileTypeExtension,
 	previewCategoryForExtension,
-	type PreviewCategory
+	previewType,
+	sniffAdmitsFor,
+	type PreviewCategory,
+	type SniffSubject
 } from "@/features/drive/lib/preview.logic"
+import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { deviceProfile } from "@/lib/deviceProfile"
+import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 
 // What the browser can do with one listed entry on its own: open it in a viewer, or save it. The SDK reads
@@ -31,9 +37,35 @@ export function entryPreviewCategory(name: string): PreviewCategory | null {
 	return category !== null && CATEGORY_POLICY[category].entry !== "none" ? category : null
 }
 
+function entrySubject(store: EntryStore, slot: number): SniffSubject {
+	return { name: store.name(slot), mime: null, size: BigInt(Math.max(0, store.size(slot))), verdict: null }
+}
+
+// Whether the entry's viewer is picked by a content read run before it opens (ContentSniffGate), not by its name. A
+// viewer-mode read runs in the viewer its name picks.
+export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {
+	const id = contentSniffFor(entrySubject(store, slot))
+
+	return id !== null && gateRunsSniffer(SNIFFERS[id], "entry")
+}
+
+// The viewer an entry whose content read has run opens in, by its verdict; null when that kind does not open as an
+// entry.
+export function sniffedEntryCategory(item: DriveItem): PreviewCategory | null {
+	const category = previewType(item)
+	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, deviceProfile())
+
+	return cap !== null && item.data.size <= cap ? category : null
+}
+
 export function canOpenEntry(store: EntryStore, slot: number): boolean {
 	if (!canReadEntry(store, slot)) {
 		return false
+	}
+
+	// Opens if some kind its read may find opens as an entry.
+	if (entryAwaitsSniff(store, slot)) {
+		return sniffAdmitsFor(entrySubject(store, slot), deviceProfile(), "entry")
 	}
 
 	const category = entryPreviewCategory(store.name(slot))

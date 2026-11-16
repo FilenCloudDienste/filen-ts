@@ -15,7 +15,6 @@ import {
 	previewableSiblings,
 	previewCategoryForExtension,
 	previewType,
-	unprobedTransportStream,
 	PREVIEW_MAX_BYTES,
 	SPREADSHEET_MAX_BYTES,
 	TEXT_MAX_BYTES,
@@ -23,6 +22,7 @@ import {
 	type StreamedCategory
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
+import { legacyUnprobedTransportStream } from "@/tests/support/legacySniff"
 import { canOpenEntry } from "@/features/archive/lib/entryAccess.logic"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { isPhotoCategory } from "@/features/photos/lib/predicate"
@@ -118,7 +118,7 @@ function legacyCanPreview(item: DriveItem): boolean {
 		return false
 	}
 
-	if (unprobedTransportStream(item)) {
+	if (legacyUnprobedTransportStream(item)) {
 		return true
 	}
 
@@ -148,7 +148,7 @@ function legacyAnon(item: DriveItem): string {
 		return "unpreviewable"
 	}
 
-	if (unprobedTransportStream(item)) {
+	if (legacyUnprobedTransportStream(item)) {
 		return "previewable"
 	}
 

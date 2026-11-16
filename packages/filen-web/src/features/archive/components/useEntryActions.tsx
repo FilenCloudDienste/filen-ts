@@ -14,6 +14,7 @@ import {
 	canReadEntry,
 	entryCost,
 	entryKey,
+	entryAwaitsSniff,
 	entryPreviewCategory,
 	isEncryptedEntry,
 	needsCostConfirm
@@ -74,9 +75,11 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 
 	function open({ store, slot }: EntryTarget): void {
 		const request = entryRequest(source, store, slot)
-		const category = entryPreviewCategory(store.name(slot))
+		// Its content read picks the viewer once it opens.
+		const awaitsSniff = entryAwaitsSniff(store, slot)
+		const category = awaitsSniff ? null : entryPreviewCategory(store.name(slot))
 
-		if (request === null || category === null) {
+		if (request === null || (category === null && !awaitsSniff)) {
 			return
 		}
 

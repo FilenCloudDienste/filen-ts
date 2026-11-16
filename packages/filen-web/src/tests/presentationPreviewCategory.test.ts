@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { EntryAccess, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { canPreview, PREVIEW_MAX_BYTES, previewType, unsniffedTemplate } from "@/features/drive/lib/preview.logic"
+import { canPreview, needsContentSniff, PREVIEW_MAX_BYTES, previewType } from "@/features/drive/lib/preview.logic"
 import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { canOpenEntry } from "@/features/archive/lib/entryAccess.logic"
@@ -47,12 +47,12 @@ describe("presentation preview category", () => {
 		const messages = fileNamed("messages.pot", 300n)
 
 		expect(previewType(messages)).toBe("presentation")
-		expect(unsniffedTemplate(messages)).toBe(true)
+		expect(needsContentSniff(messages)).toBe("presentationTemplate")
 
 		recordFileKindVerdict(messages.data.uuid, "notPresentationBinary")
 
 		expect(previewType(messages)).toBe("text")
-		expect(unsniffedTemplate(messages)).toBe(false)
+		expect(needsContentSniff(messages)).toBeNull()
 		// A text MIME type says so without a read.
 		expect(previewType(fileNamed("de.pot", 300n, "text/x-gettext-translation-template"))).toBe("text")
 	})

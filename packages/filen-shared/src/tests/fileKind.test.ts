@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { resolveFileKind, verdictChangesKind, type FileKindSource, type FileVerdict } from "@filen/shared"
+import {
+	resolveFileKind,
+	SNIFF_VERDICTS,
+	sniffCandidates,
+	sniffForExtension,
+	verdictChangesKind,
+	type Ambiguity,
+	type AmbiguityTable,
+	type FileKindSource,
+	type FileVerdict
+} from "@filen/shared"
 
 // An app table as web's preview categories read it.
 const KINDS: Readonly<Record<string, string>> = {
@@ -220,5 +230,58 @@ describe("verdictChangesKind", () => {
 		expect(verdictChangesKind({ name: "talk.webm", mime: "video/webm" }, "video", kindOf)).toBe(false)
 		expect(verdictChangesKind({ name: "film.mp4" }, "video", kindOf)).toBe(false)
 		expect(verdictChangesKind({ name: "photo.jpg" }, "audio", kindOf)).toBe(false)
+	})
+})
+
+describe("content sniffs", () => {
+	it("names the read for each extension one settles, and none for another", () => {
+		expect(["ts", "mts", "dot", "pot", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
+			"transportStream",
+			"transportStream",
+			"wordTemplate",
+			"presentationTemplate",
+			null,
+			null,
+			null,
+			null
+		])
+	})
+
+	it("pairs each read with its found / not-found verdicts", () => {
+		expect(SNIFF_VERDICTS).toEqual({
+			transportStream: ["transportStream", "notTransportStream"],
+			wordTemplate: ["wordBinary", "notWordBinary"],
+			presentationTemplate: ["presentationBinary", "notPresentationBinary"]
+		})
+	})
+
+	it("lists what each read may make the file", () => {
+		expect(sniffCandidates("ts")).toEqual(["ts", "m2ts", "ts"])
+		expect(sniffCandidates("dot")).toEqual(["dot", "dot", "txt"])
+		expect(sniffCandidates("pot")).toEqual(["pot", "pot", "txt"])
+		expect(sniffCandidates("webm")).toEqual([])
+	})
+
+	// A read that finds no kind: a binary file under an extension that otherwise means text.
+	const disk: Ambiguity = { fallback: "dot", wordBinary: null, notWordBinary: "txt", mimeHint: false, sniff: "wordTemplate" }
+	const table: AmbiguityTable = new Map([["dot", disk]])
+
+	it("resolves a null verdict target to no kind, by its own extension", () => {
+		expect(resolveFileKind({ name: "disk.dot", size: 300, verdict: "wordBinary" }, kindOf, table)).toEqual({
+			kind: null,
+			extension: "dot",
+			source: "sniff",
+			ambiguous: true,
+			sniffable: false
+		})
+		expect(resolveFileKind({ name: "disk.dot", size: 300, verdict: "notWordBinary" }, kindOf, table)).toMatchObject({
+			kind: "text",
+			extension: "txt"
+		})
+		expect(sniffCandidates("dot", table)).toEqual(["dot", null, "txt"])
+	})
+
+	it("keeps a verdict that takes the kind away", () => {
+		expect(verdictChangesKind({ name: "disk.dot", size: 300 }, "wordBinary", kindOf, table)).toBe(true)
 	})
 })

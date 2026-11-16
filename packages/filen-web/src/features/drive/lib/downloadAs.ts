@@ -11,7 +11,7 @@ import { PresentationCallError, type SourceSpec } from "@filen/office/dom/presen
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { extensionOf, itemTypeExtension, unsniffedTemplate } from "@/features/drive/lib/preview.logic"
+import { extensionOf, itemTypeExtension, needsContentSniff } from "@/features/drive/lib/preview.logic"
 import {
 	DOWNLOAD_AS_TARGETS,
 	downloadAsFormat,
@@ -1061,7 +1061,7 @@ async function exportPresentation(
 	try {
 		let format: Format | null = presentationFileKind(extensionOf(name))?.format ?? null
 
-		if (unsniffedTemplate(item)) {
+		if (needsContentSniff(item) === "presentationTemplate") {
 			const sniffed = await sniffDeck(await abortable(openPort(), run.signal), Number(file.size), run.signal)
 			const verdict = presentationVerdict(sniffed ?? "text")
 

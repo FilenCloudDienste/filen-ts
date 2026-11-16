@@ -12,7 +12,7 @@ const probe = vi.hoisted(() => ({ probeTransportStream: vi.fn<() => Promise<bool
 
 vi.mock("@/features/preview/lib/transportStreamProbe", () => probe)
 
-const { TransportStreamGate } = await import("@/features/preview/components/transportStreamGate")
+const { ContentSniffGate } = await import("@/features/preview/components/contentSniffGate")
 const { previewType } = await import("@/features/drive/lib/preview.logic")
 const { linkedFileItem } = await import("@/tests/fixtures/sdk")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")
@@ -38,7 +38,11 @@ function renderGate(
 	access: "authed" | "anon" = "authed"
 ) {
 	const item = linkedFileItem(name, { size, uuid })
-	const gate = createElement(TransportStreamGate, { item, render: () => createElement("p", null, `viewer:${previewType(item)}`) })
+	const gate = createElement(ContentSniffGate, {
+		item,
+		asText: false,
+		render: () => createElement("p", null, `viewer:${previewType(item)}`)
+	})
 
 	render(access === "anon" ? createElement(PreviewAccessModeProvider, { mode: "anon", linkScope: "scope", children: gate }) : gate)
 }
@@ -48,7 +52,7 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
-describe("TransportStreamGate", () => {
+describe("ContentSniffGate on a .ts", () => {
 	it("renders a file that cannot be a transport stream at once, probing nothing", () => {
 		renderGate("index.ts", 4_000n, "a1000000-0000-0000-0000-000000000000")
 

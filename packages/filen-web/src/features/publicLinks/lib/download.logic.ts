@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { bufferedSizeCap, CATEGORY_POLICY, previewType, unprobedTransportStream } from "@/features/drive/lib/preview.logic"
+import { bufferedSizeCap, CATEGORY_POLICY, needsContentSniff, previewType, sniffAdmits } from "@/features/drive/lib/preview.logic"
 import { deviceProfile } from "@/lib/deviceProfile"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
@@ -54,9 +54,10 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 		return "unpreviewable"
 	}
 
-	// A `.ts` its probe still has to tell apart from TypeScript: a transport stream streams at any size.
-	if (unprobedTransportStream(item)) {
-		return "previewable"
+	// Its content read picks the viewer (a `.ts` that may be a transport stream, which streams at any size): it previews
+	// if some kind the read may find does.
+	if (needsContentSniff(item) !== null) {
+		return sniffAdmits(item, deviceProfile(), "link") ? "previewable" : "too-large"
 	}
 
 	const category = previewType(item)

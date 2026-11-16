@@ -31,6 +31,22 @@ export type DocumentVerdict = "wordBinary" | "notWordBinary" | "presentationBina
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
+// The content read that settles an extension meaning two things (the app runs it before choosing a viewer), named
+// `{format}`, its verdicts `{format}` / `not{Format}` (a verdict already in use keeps its name):
+//   transportStream       ts mts  transportStream / notTransportStream
+//   wordTemplate          dot     wordBinary / notWordBinary
+//   presentationTemplate  pot     presentationBinary / notPresentationBinary
+// Reserved, added with their readers: virtualDisk (vhd), pdfCompatible (ai), iworkPackage (key), sqlite (db),
+// wavefront (obj), vobsub (sub), vcard (vcf), mpegPs (mod), executable (no extension).
+export type SniffId = "transportStream" | "wordTemplate" | "presentationTemplate"
+
+// Each read's verdicts: what it found, what it did not.
+export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
+	transportStream: ["transportStream", "notTransportStream"],
+	wordTemplate: ["wordBinary", "notWordBinary"],
+	presentationTemplate: ["presentationBinary", "notPresentationBinary"]
+}
+
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
 
 export interface FileKindInput {
@@ -53,27 +69,33 @@ export interface FileKind<K> {
 	sniffable: boolean
 }
 
-interface Ambiguity {
+// What each verdict makes the file: another extension's kind, or null for no kind at all (a binary file under a text
+// extension).
+export interface Ambiguity {
 	// The usual meaning.
 	fallback: string
 	audio?: string
 	video?: string
-	transportStream?: string
-	wordBinary?: string
-	notWordBinary?: string
-	presentationBinary?: string
-	notPresentationBinary?: string
+	transportStream?: string | null
+	wordBinary?: string | null
+	notWordBinary?: string | null
+	presentationBinary?: string | null
+	notPresentationBinary?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
 	mimeHint: boolean
+	// The content read the app runs before choosing a viewer, while no verdict settles it.
+	sniff?: SniffId
 }
 
 const TRANSPORT_STREAM = "m2ts"
 
-const AMBIGUOUS: ReadonlyMap<string, Ambiguity> = new Map([
-	["ts", { fallback: "ts", transportStream: TRANSPORT_STREAM, mimeHint: false }],
-	["mts", { fallback: "mts", transportStream: TRANSPORT_STREAM, mimeHint: false }],
+export type AmbiguityTable = ReadonlyMap<string, Ambiguity>
+
+const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
+	["ts", { fallback: "ts", transportStream: TRANSPORT_STREAM, mimeHint: false, sniff: "transportStream" }],
+	["mts", { fallback: "mts", transportStream: TRANSPORT_STREAM, mimeHint: false, sniff: "transportStream" }],
 	["ogg", { fallback: "ogg", audio: "oga", video: "ogv", mimeHint: true }],
 	["oga", { fallback: "oga", audio: "oga", video: "ogv", mimeHint: true }],
 	["ogv", { fallback: "ogv", audio: "oga", video: "ogv", mimeHint: true }],
@@ -83,8 +105,11 @@ const AMBIGUOUS: ReadonlyMap<string, Ambiguity> = new Map([
 	["m4a", { fallback: "m4a", audio: "m4a", video: "mp4", mimeHint: true }],
 	["mkv", { fallback: "mkv", audio: "mka", video: "mkv", mimeHint: true }],
 	["mka", { fallback: "mka", audio: "mka", video: "mkv", mimeHint: true }],
-	["dot", { fallback: "dot", wordBinary: "dot", notWordBinary: "txt", text: "txt", mimeHint: false }],
-	["pot", { fallback: "pot", presentationBinary: "pot", notPresentationBinary: "txt", text: "txt", mimeHint: false }]
+	["dot", { fallback: "dot", wordBinary: "dot", notWordBinary: "txt", text: "txt", mimeHint: false, sniff: "wordTemplate" }],
+	[
+		"pot",
+		{ fallback: "pot", presentationBinary: "pot", notPresentationBinary: "txt", text: "txt", mimeHint: false, sniff: "presentationTemplate" }
+	]
 ])
 
 function lowerName(name: string): string {
@@ -97,7 +122,35 @@ export function isAmbiguousExtension(extension: string): boolean {
 	return AMBIGUOUS.has(extension)
 }
 
-function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | undefined {
+// The content read that settles `extension`, if it is one a read settles.
+export function sniffForExtension(extension: string, table: AmbiguityTable = AMBIGUOUS): SniffId | null {
+	return table.get(extension)?.sniff ?? null
+}
+
+// What `extension` may turn out to be once its read ran: its usual meaning, and what each of the read's verdicts makes
+// it (null: no kind). Empty when no read settles it.
+export function sniffCandidates(extension: string, table: AmbiguityTable = AMBIGUOUS): readonly (string | null)[] {
+	const ambiguity = table.get(extension)
+
+	if (ambiguity?.sniff === undefined) {
+		return []
+	}
+
+	const candidates: (string | null)[] = [ambiguity.fallback]
+
+	for (const verdict of SNIFF_VERDICTS[ambiguity.sniff]) {
+		const target = verdictExtension(ambiguity, verdict)
+
+		if (target !== undefined) {
+			candidates.push(target)
+		}
+	}
+
+	return candidates
+}
+
+// The extension a verdict makes the file, null for no kind, undefined when the verdict says nothing about it.
+function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | null | undefined {
 	switch (verdict) {
 		case "wordBinary":
 			return ambiguity.wordBinary
@@ -158,11 +211,16 @@ function fileKind<K>(kind: K | null, extension: string, source: FileKindSource, 
 	return { kind, extension, source, ambiguous, sniffable: canSniff }
 }
 
-export function resolveFileKind<K>(input: FileKindInput, kindOf: (extension: string) => K | null): FileKind<K> {
+// `table`: the ambiguous extensions, this module's own unless a test passes another.
+export function resolveFileKind<K>(
+	input: FileKindInput,
+	kindOf: (extension: string) => K | null,
+	table: AmbiguityTable = AMBIGUOUS
+): FileKind<K> {
 	const base = lowerName(input.name)
 	const dot = extensionStart(base)
 	const own = dot === -1 ? "" : base.slice(dot + 1)
-	const ambiguity = AMBIGUOUS.get(own)
+	const ambiguity = table.get(own)
 	let canSniff = false
 
 	if (ambiguity !== undefined) {
@@ -170,6 +228,11 @@ export function resolveFileKind<K>(input: FileKindInput, kindOf: (extension: str
 		const byVerdict = verdict === null ? undefined : verdictExtension(ambiguity, verdict)
 
 		canSniff = byVerdict === undefined && sniffable(ambiguity, base, own, input.size)
+
+		// A read found it is none of the kinds its extension names.
+		if (byVerdict === null) {
+			return fileKind<K>(null, own, "sniff", true, false)
+		}
 
 		if (byVerdict !== undefined) {
 			const kind = kindOf(byVerdict)
@@ -230,9 +293,10 @@ export function resolveFileKind<K>(input: FileKindInput, kindOf: (extension: str
 export function verdictChangesKind<K>(
 	input: Omit<FileKindInput, "verdict">,
 	verdict: FileVerdict,
-	kindOf: (extension: string) => K | null
+	kindOf: (extension: string) => K | null,
+	table: AmbiguityTable = AMBIGUOUS
 ): boolean {
-	const without = resolveFileKind({ ...input, verdict: null }, kindOf)
+	const without = resolveFileKind({ ...input, verdict: null }, kindOf, table)
 
 	if (!without.ambiguous) {
 		return false
@@ -242,5 +306,7 @@ export function verdictChangesKind<K>(
 		return without.sniffable
 	}
 
-	return resolveFileKind({ ...input, verdict }, kindOf).extension !== without.extension
+	const settled = resolveFileKind({ ...input, verdict }, kindOf, table)
+
+	return settled.extension !== without.extension || settled.kind !== without.kind
 }

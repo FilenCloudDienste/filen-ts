@@ -1,6 +1,6 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { CATEGORY_POLICY, itemFileKind, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, needsContentSniff, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 
 // Mobile parity (features/photos/utils.ts's own isPhotoGridItem): keep only file-kind items with
 // decrypted metadata whose preview category is image, rawImage or video — directories and
@@ -45,7 +45,5 @@ export function isPhotoCandidate(item: DriveItem): boolean {
 		return true
 	}
 
-	const kind = itemFileKind(item, null)
-
-	return kind !== null && kind.sniffable && (kind.extension === "ts" || kind.extension === "mts") && isPhotoItem(item, "transportStream")
+	return needsContentSniff(item, null) === "transportStream" && isPhotoItem(item, "transportStream")
 }

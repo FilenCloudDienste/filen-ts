@@ -9,9 +9,13 @@ import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { PreviewByteOriginProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
+import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
+import { PreviewDownloadButton, PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
+import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
 import { entryOrigin, isArchivePasswordError, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
@@ -23,7 +27,8 @@ const DOWNLOAD = ARCHIVE_ACTIONS.find(def => def.id === "archive.download")
 
 export interface ViewedEntry {
 	request: EntryRequest
-	category: PreviewCategory
+	// Null: its content read picks the viewer (entryAwaitsSniff).
+	category: PreviewCategory | null
 	// NaN when absent.
 	modified: number
 	encrypted: boolean
@@ -38,6 +43,29 @@ export interface ArchiveEntryViewerProps {
 	// Null where the entry may not be saved (a link allowing no downloads).
 	onDownload: (() => void) | null
 	onBack: () => void
+}
+
+// The entry's viewer: the one its name picked, else the one its content read found.
+function EntryBody({ item, category, alt }: { item: DriveItem; category: PreviewCategory | null; alt: string }) {
+	const { t } = useTranslation("preview")
+	const shown = category ?? sniffedEntryCategory(item)
+
+	if (shown === null) {
+		return (
+			<PreviewErrorState
+				message={t("previewUnsupportedType")}
+				action={<PreviewDownloadButton />}
+			/>
+		)
+	}
+
+	return (
+		<ReadOnlyPreviewBody
+			item={item}
+			category={shown}
+			alt={alt}
+		/>
+	)
 }
 
 // One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
@@ -195,10 +223,16 @@ export function ArchiveEntryViewer({
 							downloadable={onDownload !== null}
 							onDownload={onDownload}
 						>
-							<ReadOnlyPreviewBody
+							<ContentSniffGate
 								item={item}
-								category={entry.category}
-								alt={request.name}
+								asText={false}
+								render={() => (
+									<EntryBody
+										item={item}
+										category={entry.category}
+										alt={request.name}
+									/>
+								)}
 							/>
 						</PreviewDownloadableProvider>
 					</PreviewByteOriginProvider>

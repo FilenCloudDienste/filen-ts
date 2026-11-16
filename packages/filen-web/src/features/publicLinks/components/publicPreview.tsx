@@ -3,7 +3,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider, PreviewSiblingsProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
-import { TransportStreamGate } from "@/features/preview/components/transportStreamGate"
+import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
 
 const NO_SIBLINGS: readonly DriveItem[] = []
 
@@ -43,8 +43,9 @@ export function PublicPreview({
 			<PreviewDownloadableProvider downloadable={downloadable}>
 				<PreviewSiblingsProvider siblings={siblings ?? NO_SIBLINGS}>
 					<div className="size-full">
-						<TransportStreamGate
+						<ContentSniffGate
 							item={item}
+							asText={false}
 							render={() => (
 								<ReadOnlyPreviewBody
 									item={item}

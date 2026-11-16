@@ -27,13 +27,7 @@ import {
 import { toast } from "sonner"
 import { asDirectoryOrFile, driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import {
-	extensionOf,
-	previewType,
-	unprobedTransportStream,
-	unsniffedTemplate,
-	type PreviewCategory
-} from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewType, needsContentSniff, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
@@ -87,7 +81,7 @@ import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import type { FileVerdict } from "@filen/shared"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import { TransportStreamGate } from "@/features/preview/components/transportStreamGate"
+import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
 import { fileKindVerdict, subscribeFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
 import { DocxViewer } from "@/features/preview/components/docxViewer"
 import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
@@ -389,7 +383,7 @@ export function PreviewOverlay({
 	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
 	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
 	// ever clean (stepping to it, or a new document, see documentKeys): its name as it stands then decides.
-	// A `.ts` waiting on its probe (TransportStreamGate) has no viewer yet: the verdict that ends the wait
+	// A `.ts` waiting on its probe (ContentSniffGate) has no viewer yet: the verdict that ends the wait
 	// takes it once more, by the name it was pinned under; so does a `.dot` the docx viewer found to be text. A
 	// verdict landing after a viewer mounted (an audio-only `.webm` found out mid-playback) leaves it be until the
 	// slot is opened again.
@@ -405,7 +399,7 @@ export function PreviewOverlay({
 			documentKey: currentDocumentKey,
 			item: pinFrom,
 			verdict: streamVerdict,
-			awaitingVerdict: !asText && (unprobedTransportStream(pinFrom) || unsniffedTemplate(pinFrom)),
+			awaitingVerdict: !asText && needsContentSniff(pinFrom) !== null,
 			pin: derivedPin
 		})
 	}
@@ -2258,8 +2252,9 @@ export function PreviewOverlay({
 										downloadable={previewDownloadable(downloadable, variant)}
 										onDownload={download}
 									>
-										<TransportStreamGate
+										<ContentSniffGate
 											item={driveItem}
+											asText={asText}
 											render={() => (
 												<PreviewReplaceContext value={replaceInSlot}>
 													<PasswordDraftContext value={passwordDraft.draft}>

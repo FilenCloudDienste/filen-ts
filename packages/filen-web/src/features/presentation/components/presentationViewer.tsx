@@ -25,7 +25,7 @@ import { usePresentationPrintKey } from "@/features/presentation/print/usePresen
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
-import { itemFileKind } from "@/features/drive/lib/preview.logic"
+import { itemFileKind, needsContentSniff } from "@/features/drive/lib/preview.logic"
 import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
@@ -159,9 +159,7 @@ function formatOf(item: DriveItem, head: Uint8Array | undefined): Format | "text
 }
 
 function needsHead(item: DriveItem): boolean {
-	const kind = itemFileKind(item)
-
-	return kind !== null && kind.sniffable && kind.extension === "pot"
+	return needsContentSniff(item) === "presentationTemplate"
 }
 
 // What a sniffed `.pot` was, kept for its next open (presentationVerdict).

@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
-	unprobedTransportStream,
-	unsniffedTemplate,
+	needsContentSniff,
 	previewType,
 	canPreview,
 	needsImageTransform,
@@ -130,13 +129,13 @@ describe("previewType — extension category map", () => {
 
 		expect(previewType(clip)).toBe("code")
 		expect(isEditable(clip, "drive")).toBe(true)
-		expect(unprobedTransportStream(clip)).toBe(true)
+		expect(needsContentSniff(clip)).toBe("transportStream")
 
 		recordFileKindVerdict(clip.data.uuid, "transportStream")
 
 		expect(previewType(clip)).toBe("video")
 		expect(isEditable(clip, "drive")).toBe(false)
-		expect(unprobedTransportStream(clip)).toBe(false)
+		expect(needsContentSniff(clip)).toBeNull()
 	})
 
 	it("keeps a .ts the probe found to be TypeScript code, under the text cap", () => {
@@ -160,9 +159,9 @@ describe("previewType — extension category map", () => {
 	})
 
 	it("never asks about a small .ts or a declaration file", () => {
-		expect(unprobedTransportStream(fileNamed("index.ts", { size: 4_000n }))).toBe(false)
-		expect(unprobedTransportStream(fileNamed("lib.d.ts", { size: 4_000_000n }))).toBe(false)
-		expect(unprobedTransportStream(fileNamed("clip.mts", { size: 4_000_000n }))).toBe(true)
+		expect(needsContentSniff(fileNamed("index.ts", { size: 4_000n }))).toBeNull()
+		expect(needsContentSniff(fileNamed("lib.d.ts", { size: 4_000_000n }))).toBeNull()
+		expect(needsContentSniff(fileNamed("clip.mts", { size: 4_000_000n }))).toBe("transportStream")
 	})
 
 	it("reads a transport stream's mime as video for a file without an extension", () => {
@@ -207,12 +206,12 @@ describe("previewType — extension category map", () => {
 		const graph = fileNamed("graph.dot", { mime: "application/msword" })
 
 		expect(previewType(graph)).toBe("docx")
-		expect(unsniffedTemplate(graph)).toBe(true)
+		expect(needsContentSniff(graph)).toBe("wordTemplate")
 
 		recordFileKindVerdict(graph.data.uuid, "notWordBinary")
 
 		expect(previewType(graph)).toBe("text")
-		expect(unsniffedTemplate(graph)).toBe(false)
+		expect(needsContentSniff(graph)).toBeNull()
 		// A text MIME type says so without a read.
 		expect(previewType(fileNamed("flow.dot", { mime: "text/vnd.graphviz" }))).toBe("text")
 	})

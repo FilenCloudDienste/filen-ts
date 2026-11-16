@@ -3,10 +3,21 @@ import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
-import { AUDIO_FORMATS, CODE_FILE_EXTENSIONS, extensionStart, resolveFileKind, type FileVerdict, type FileKind } from "@filen/shared"
+import {
+	AUDIO_FORMATS,
+	CODE_FILE_EXTENSIONS,
+	extensionStart,
+	resolveFileKind,
+	sniffCandidates,
+	sniffForExtension,
+	type FileVerdict,
+	type FileKind,
+	type SniffId
+} from "@filen/shared"
 import { codeLanguageExtensions, codeLanguageForExtension, type CodeLanguageId } from "@filen/office/core/code"
 import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { IMAGE_FORMATS, streamsNatively } from "@/features/preview/lib/imageFormat"
+import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 
@@ -392,21 +403,157 @@ export function itemFileKind(item: DriveItem, verdict?: FileVerdict | null): Fil
 	)
 }
 
-// A `.ts`/`.mts` the preview has to read before it knows its viewer: TypeScript until a read says it is
-// a transport stream, and large enough to be one.
-export function unprobedTransportStream(item: DriveItem): boolean {
-	const kind = itemFileKind(item)
-
-	return kind !== null && kind.sniffable && (kind.extension === "ts" || kind.extension === "mts")
+// What a content sniff is decided for: a drive or link file, or an archive's entry (no MIME type, no verdict).
+export interface SniffSubject {
+	readonly name: string
+	readonly mime: string | null
+	readonly size: bigint
+	// Its verdict; null for none.
+	readonly verdict: FileVerdict | null
 }
 
-// A `.dot` or `.pot` no read has told apart yet: the docx (presentation) viewer's own read decides whether it is a
-// Word (PowerPoint) 97–2003 template or a text file (a Graphviz graph, a gettext template), and records the verdict
-// that settles it.
-export function unsniffedTemplate(item: DriveItem): boolean {
-	const kind = itemFileKind(item)
+// The content read (contentSniff.logic.ts) a file needs before its viewer is known: one its extension's meanings wait
+// on while no verdict or text MIME type settled them (a `.ts` large enough to be a transport stream, a `.dot` or
+// `.pot` template), or the extensionless read for a file nothing names. Null when its kind is settled.
+export function contentSniffFor(subject: SniffSubject, extensionless: ExtensionlessSniff | null = EXTENSIONLESS_SNIFF): SniffId | null {
+	const kind = resolveFileKind(subject, previewCategoryForExtension)
 
-	return kind !== null && kind.sniffable && (kind.extension === "dot" || kind.extension === "pot")
+	// Its extension's usual meaning, which a read could still overturn.
+	if (kind.sniffable && kind.source === "default") {
+		return sniffForExtension(kind.extension)
+	}
+
+	if (
+		extensionless !== null &&
+		kind.kind === null &&
+		kind.extension === "" &&
+		subject.verdict === null &&
+		subject.size <= extensionless.cap
+	) {
+		return extensionless.id
+	}
+
+	return null
+}
+
+// A drive or link item's (contentSniffFor), its verdict as itemFileKind reads it. Null for a directory or an
+// undecryptable file.
+export function needsContentSniff(
+	item: DriveItem,
+	verdict?: FileVerdict | null,
+	extensionless: ExtensionlessSniff | null = EXTENSIONLESS_SNIFF
+): SniffId | null {
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file" || base.data.decryptedMeta === null) {
+		return null
+	}
+
+	return contentSniffFor(
+		{
+			name: base.data.decryptedMeta.name,
+			mime: base.data.decryptedMeta.mime,
+			size: base.data.size,
+			verdict: (verdict === undefined ? fileKindVerdict(base.data.uuid) : verdict) ?? null
+		},
+		extensionless
+	)
+}
+
+// Where a file is opened: the drive (and an archive's own preview), a public link's page, an archive's entry.
+export type SniffSurface = "drive" | "link" | "entry"
+
+// Whether `category` (by `extension`) opens a file of `size` bytes on the drive: its format's cap, then its category's
+// (streamed and ranged ones at any size).
+function driveAdmits(category: PreviewCategory, extension: string, size: bigint, profile: DeviceProfile): boolean {
+	if (category === "other") {
+		return false
+	}
+
+	const policy: CategoryPolicy = CATEGORY_POLICY[category]
+	const ownCap = formatCap(extension, profile)
+
+	if (ownCap !== null && size > ownCap) {
+		return false
+	}
+
+	if (policy.streamed) {
+		const image = category === "image" ? IMAGE_FORMATS.get(extension) : undefined
+
+		if (category !== "image" || (image !== undefined && streamsNatively(image, profile))) {
+			return true
+		}
+	}
+
+	if (policy.ranged) {
+		return true
+	}
+
+	const cap = ownCap ?? bufferedSizeCap(category, profile)
+
+	return cap === null || size <= cap || policy.aboveCap === "largeText"
+}
+
+// A public link's inline preview (anonPreviewability): an archive is browsed apart, never previewed inline.
+function linkAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
+	switch (CATEGORY_POLICY[category].anon) {
+		case "none":
+		case "archive":
+			return false
+		case "stream":
+		case "ranged":
+			return true
+		case "buffer": {
+			const cap = bufferedSizeCap(category, profile)
+
+			return cap === null || size <= cap
+		}
+	}
+}
+
+function surfaceAdmits(surface: SniffSurface, category: PreviewCategory, extension: string, size: bigint, profile: DeviceProfile): boolean {
+	switch (surface) {
+		case "drive":
+			return driveAdmits(category, extension, size, profile)
+		case "link":
+			return linkAdmits(category, size, profile)
+		case "entry": {
+			const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
+
+			return cap !== null && size <= cap
+		}
+	}
+}
+
+// Whether a file waiting on its content read opens on `surface` at its size: some kind the read may find it to be
+// opens there. The extensionless read's cap was its admission.
+export function sniffAdmitsFor(subject: SniffSubject, profile: DeviceProfile, surface: SniffSurface): boolean {
+	const { extension } = resolveFileKind(subject, previewCategoryForExtension)
+
+	if (extension === "") {
+		return true
+	}
+
+	return sniffCandidates(extension).some(candidate => {
+		const category = candidate === null ? null : previewCategoryForExtension(candidate)
+
+		return candidate !== null && category !== null && surfaceAdmits(surface, category, candidate, subject.size, profile)
+	})
+}
+
+// sniffAdmitsFor a drive or link item; false for a directory or an undecryptable file.
+export function sniffAdmits(item: DriveItem, profile: DeviceProfile, surface: SniffSurface = "drive"): boolean {
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file" || base.data.decryptedMeta === null) {
+		return false
+	}
+
+	return sniffAdmitsFor(
+		{ name: base.data.decryptedMeta.name, mime: base.data.decryptedMeta.mime, size: base.data.size, verdict: null },
+		profile,
+		surface
+	)
 }
 
 // A directory (or a shared-directory arm, which asDirectoryOrFile normalizes to one) always resolves
@@ -446,41 +593,18 @@ export function canPreviewWith(item: DriveItem, profile: DeviceProfile): boolean
 		return false
 	}
 
-	// Its probe decides the viewer: a transport stream streams at any size.
-	if (unprobedTransportStream(item)) {
-		return true
+	// Its content read picks the viewer: it opens if some kind the read may find does.
+	if (needsContentSniff(item) !== null) {
+		return sniffAdmits(item, profile)
 	}
 
 	const kind = itemFileKind(item)
-	const category = kind?.kind ?? "other"
 
-	if (category === "other" || kind === null) {
+	if (kind === null) {
 		return false
 	}
 
-	const policy: CategoryPolicy = CATEGORY_POLICY[category]
-	const size = base.data.size
-	const ownCap = formatCap(kind.extension, profile)
-
-	if (ownCap !== null && size > ownCap) {
-		return false
-	}
-
-	if (policy.streamed) {
-		const image = category === "image" ? IMAGE_FORMATS.get(kind.extension) : undefined
-
-		if (category !== "image" || (image !== undefined && streamsNatively(image, profile))) {
-			return true
-		}
-	}
-
-	if (policy.ranged) {
-		return true
-	}
-
-	const cap = ownCap ?? bufferedSizeCap(category, profile)
-
-	return cap === null || size <= cap || policy.aboveCap === "largeText"
+	return kind.kind !== null && driveAdmits(kind.kind, kind.extension, base.data.size, profile)
 }
 
 // The gate with this device's current profile.
