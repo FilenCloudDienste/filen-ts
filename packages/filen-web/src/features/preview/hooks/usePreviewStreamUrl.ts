@@ -1,8 +1,8 @@
 import { useEffect, useEffectEvent, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { holdPreviewStream, previewStreamUrl, releasePreviewStreamSoon } from "@/features/preview/lib/previewStream"
-import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { holdPreviewStream, previewOriginStreamUrl, previewStreamUrl, releasePreviewStreamSoon } from "@/features/preview/lib/previewStream"
+import { usePreviewAccessMode, usePreviewCacheScope, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { forgetPreviewStreamId, getPreviewStreamId, previewCacheEpoch, setPreviewStreamId } from "@/features/preview/lib/previewCache"
 
 // `refetch` merged onto every variant — mirrors usePreviewBytes.ts's own identical shape/rationale.
@@ -43,6 +43,9 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 	// over a new item for the same uuid, whose registration would only be a redundant round trip to the
 	// service worker for the same URL.
 	const fileOf = useEffectEvent(() => narrowToAnyFile(item))
+	// A provided origin read by range (an archive's entry) streams through the SDK worker's port instead.
+	const provided = useProvidedPreviewOrigin()
+	const providedOf = useEffectEvent(() => provided)
 
 	useEffect(() => {
 		let live = true
@@ -54,7 +57,11 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		// A throw anywhere in here rejects: promise handlers below, not try/catch, which the React Compiler
 		// cannot lower around a logical expression and would skip the hook for.
 		async function register(): Promise<string> {
-			const url = await previewStreamUrl(fileOf(), name, contentType, id, { access })
+			const origin = providedOf()
+			const url =
+				origin === null
+					? await previewStreamUrl(fileOf(), name, contentType, id, { access })
+					: await previewOriginStreamUrl(origin, name, contentType, id)
 
 			setPreviewStreamId(cacheScope, uuid, contentType, id, epoch)
 

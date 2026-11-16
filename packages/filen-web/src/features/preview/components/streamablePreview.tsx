@@ -7,8 +7,9 @@ import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
-import { usePreviewAccessMode, usePreviewCacheScope, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
+import { usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
+import { originRanged } from "@/lib/sdk/byteOrigin"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -121,13 +122,13 @@ function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPrev
 // also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
 export function StreamablePreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
 	const contentType = allowedMediaContentType(item)
-	// An "anon" ambient mode (a public link) never streams an image: the service worker's wasm bundle has no
-	// UnauthClient, so the buffered path is the one that serves a logged-out visitor. Nor can a provided
-	// origin (an archive's entry), which is no file the worker could read.
-	const accessMode = usePreviewAccessMode()
-	const provided = useProvidedPreviewOrigin()
+	// A drive file streams through the service worker's own session read, and an archive's entry read by range
+	// through the SDK worker's port. A public link's file never streams an image (the service worker's wasm bundle
+	// has no UnauthClient, so the buffered path serves a logged-out visitor), nor do bytes read whole.
+	const origin = usePreviewOrigin(item)
 	const cacheScope = usePreviewCacheScope()
-	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed" && provided === null
+	const streamable =
+		contentType !== null && isMediaStreamAvailable() && (origin.kind === "file" || (origin.kind === "entry" && originRanged(origin)))
 	// Bytes already held (a revisited buffered slot, an edited image just saved) show from memory: streaming them
 	// would download the file again.
 	const [useBuffered, setUseBuffered] = useState(() => !streamable || getPreviewBytes(cacheScope, item.data.uuid) !== undefined)

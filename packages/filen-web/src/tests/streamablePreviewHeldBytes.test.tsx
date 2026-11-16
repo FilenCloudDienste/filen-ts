@@ -34,7 +34,8 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", async () => {
 import "@/lib/i18n"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
-import { previewCacheScope } from "@/features/preview/lib/accessMode"
+import { PreviewAccessModeProvider, PreviewByteOriginProvider, previewCacheScope } from "@/features/preview/lib/accessMode"
+import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { narrowItem } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -56,14 +57,20 @@ function photo(label: string) {
 	return narrowItem(file)
 }
 
+function preview(label: string) {
+	return createElement(StreamablePreview, {
+		item: photo(label),
+		render: (url: string, onError: (() => void) | undefined) =>
+			createElement("img", { alt: onError === undefined ? "buffered" : "streamed", src: url })
+	})
+}
+
 function show(label: string): void {
-	render(
-		createElement(StreamablePreview, {
-			item: photo(label),
-			render: (url: string, onError: (() => void) | undefined) =>
-				createElement("img", { alt: onError === undefined ? "buffered" : "streamed", src: url })
-		})
-	)
+	render(preview(label))
+}
+
+function entry(access: EntryAccessKind): ByteOrigin {
+	return { kind: "entry", reader: "r", entry: { archive: testUuid("zip"), index: 1 }, size: 3, access, anon: false, cacheKey: "k" }
 }
 
 beforeEach(() => {
@@ -84,6 +91,22 @@ describe("StreamablePreview", () => {
 		show("held")
 
 		expect(screen.getByAltText("buffered").getAttribute("src")).toBe("blob:held")
+		expect(streamUrl).not.toHaveBeenCalled()
+	})
+
+	it("streams an archive's entry read by range, and buffers one read whole", () => {
+		render(createElement(PreviewByteOriginProvider, { origin: entry("mapped"), children: preview("ranged") }))
+		expect(streamUrl).toHaveBeenCalled()
+
+		cleanup()
+		streamUrl.mockClear()
+		render(createElement(PreviewByteOriginProvider, { origin: entry("whole"), children: preview("whole") }))
+		expect(streamUrl).not.toHaveBeenCalled()
+	})
+
+	it("never streams a public link's image", () => {
+		render(createElement(PreviewAccessModeProvider, { mode: "anon", children: preview("linked") }))
+
 		expect(streamUrl).not.toHaveBeenCalled()
 	})
 

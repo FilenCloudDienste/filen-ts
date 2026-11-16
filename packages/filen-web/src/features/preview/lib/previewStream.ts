@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import { holdWorkerAlive, registerWithSw, sendToSw } from "@/features/drive/lib/saveDownload"
 import { sdkApi } from "@/lib/sdk/client"
+import { originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { controllerIsCurrent } from "@/lib/sw/register"
 import {
 	SW_DOWNLOAD_PREFIX,
@@ -101,6 +102,24 @@ export async function registerPortStream(
 	)
 
 	return `${SW_DOWNLOAD_PREFIX}${id}`
+}
+
+// previewStreamUrl for an origin the SDK worker reads by range that is no file of the drive (an archive's entry): the
+// worker serves its ranges on a port the service worker reads through, and no JS buffer holds the bytes.
+export function previewOriginStreamUrl(origin: ByteOrigin, name: string, contentType: string, id: string): Promise<string> {
+	const token = crypto.randomUUID()
+
+	return registerPortStream(
+		id,
+		async port => {
+			await sdkApi.openOriginRangePort(Comlink.transfer(port, [port]), origin, token)
+
+			return { name, size: originSize(origin), contentType }
+		},
+		() => {
+			void sdkApi.cancelPreviewDownload(token)
+		}
+	)
 }
 
 // Which SDK client reads the file: the session's, or the unauthenticated one for a public link's.
