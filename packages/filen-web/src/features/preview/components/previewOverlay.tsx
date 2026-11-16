@@ -100,7 +100,7 @@ import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { PreviewReplaceContext, type PreviewReplaceMake } from "@/features/preview/lib/previewReplace"
 import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/passwordDraft"
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
-import { PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isTextEditingTarget,
@@ -2861,9 +2861,10 @@ function PreviewBody({
 		// switch's required fallback.
 		case "other":
 			return (
-				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-					{t("previewUnsupportedType")}
-				</div>
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewUnsupportedType")}
+				/>
 			)
 		// Unreachable by construction, and that is the point: `category` narrows to `never` here only
 		// while every PreviewCategory has an arm above, so adding one without a viewer is a compile error

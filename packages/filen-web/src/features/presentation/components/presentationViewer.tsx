@@ -34,7 +34,13 @@ import { CommandFileMenu, FullScreenButton, PageControls } from "@/features/prev
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/components/docxPasswordPrompt"
-import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import {
+	PreviewDownloadButton,
+	PreviewErrorState,
+	PreviewGate,
+	PreviewLoading,
+	PreviewUnsupportedState
+} from "@/features/preview/components/previewErrorState"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import {
@@ -352,17 +358,24 @@ function PreparedDeck({
 				/>
 			)
 		case "error":
-			return (
+			// Only a failed load is an error a retry can fix; any other key says the file cannot be shown.
+			return prepared.key === "previewPptxLoadFailed" ? (
 				<PreviewErrorState
 					message={t(prepared.key)}
-					{...(onRetry === undefined || prepared.key !== "previewPptxLoadFailed" ? {} : { onRetry })}
+					{...(onRetry === undefined ? {} : { onRetry })}
 					action={<PreviewDownloadButton />}
+				/>
+			) : (
+				<PreviewUnsupportedState
+					item={item}
+					message={t(prepared.key)}
 				/>
 			)
 		case "ready":
 			return (
 				<DeckSession
 					key={prepared.attempt}
+					item={item}
 					source={prepared.source}
 					format={prepared.format}
 					alt={alt}
@@ -377,12 +390,14 @@ function PreparedDeck({
 const RETRYABLE: ReadonlySet<PresentationRefusal> = new Set(["failed", "aborted", "closed"])
 
 function DeckSession({
+	item,
 	source,
 	format,
 	alt,
 	place,
 	onRetry
 }: {
+	item: DriveItem
 	source: SourceSpec
 	format: Format
 	alt: string
@@ -412,13 +427,23 @@ function DeckSession({
 
 	if (document.status === "error") {
 		const reason = document.error?.reason ?? "failed"
+		// A refused deck cannot be shown; a failure a retry can fix is an error.
+		if (!RETRYABLE.has(reason)) {
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t(openRefusalKey(reason))}
+				/>
+			)
+		}
+
 		// A deck that was open and then failed (its worker went away) stopped; it was never refused.
-		const stopped = document.info !== undefined && RETRYABLE.has(reason)
+		const stopped = document.info !== undefined
 
 		return (
 			<PreviewErrorState
 				message={t(stopped ? "previewPptxStoppedWorking" : openRefusalKey(reason))}
-				{...(RETRYABLE.has(reason) && onRetry !== undefined ? { onRetry } : {})}
+				{...(onRetry !== undefined ? { onRetry } : {})}
 				action={<PreviewDownloadButton />}
 			/>
 		)

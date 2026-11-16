@@ -64,7 +64,7 @@ import { RtfDocument } from "@/features/preview/components/rtfDocument"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
@@ -167,6 +167,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 						/>
 					) : (
 						<DocxPasswordBoundary
+							item={item}
 							bytes={ready.bytes}
 							name={alt}
 						>
@@ -251,6 +252,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 
 				return format === "rtf" || (format === "odt" && edit && editing !== undefined) ? (
 					<RtfDocument
+						item={item}
 						bytes={ready.bytes}
 						edit={edit && editing !== undefined}
 						format={format === "odt" ? "odt" : "rtf"}
@@ -351,10 +353,12 @@ function protectionOf(opened: Exclude<DocxProtectedOpen, { kind: "aborted" }>): 
 // closes, whatever closes it (the overlay, a route change, a new version of the file, an error above). Reopening
 // asks again.
 function DocxPasswordBoundary({
+	item,
 	bytes,
 	name,
 	children
 }: {
+	item: DriveItem
 	bytes: Uint8Array
 	name: string
 	children: (content: DocxContent, key: DocxSessionKey | null, conversion: DocxConversionKey | null) => ReactNode
@@ -548,16 +552,16 @@ function DocxPasswordBoundary({
 			return <PreviewLoading />
 		case "legacyRefused":
 			return (
-				<PreviewErrorState
+				<PreviewUnsupportedState
+					item={item}
 					message={t(legacyRefusalKey(protection.refusal))}
-					action={<PreviewDownloadButton />}
 				/>
 			)
 		case "refused":
 			return (
-				<PreviewErrorState
+				<PreviewUnsupportedState
+					item={item}
 					message={t(docxRefusalKey(protection.reason))}
-					action={<PreviewDownloadButton />}
 				/>
 			)
 		case "legacyLocked": {

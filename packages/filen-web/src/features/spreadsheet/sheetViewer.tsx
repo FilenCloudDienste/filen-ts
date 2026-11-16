@@ -79,13 +79,19 @@ function SheetViewerBody({
 			)
 		case "unreadable":
 			return (
-				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-					{t("previewSpreadsheetUnreadable")}
-				</div>
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewSpreadsheetUnreadable")}
+				/>
 			)
 		// A protected workbook is refused, or asked its password, in the words a Word document is.
 		case "refused":
-			return <PreviewUnsupportedState message={t(docxRefusalKey(state.reason))} />
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t(docxRefusalKey(state.reason))}
+				/>
+			)
 		case "locked":
 			return (
 				<DocxPasswordGate

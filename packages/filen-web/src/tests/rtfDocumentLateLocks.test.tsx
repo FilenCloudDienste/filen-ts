@@ -5,6 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import { bytesSource } from "@filen/office/core/opc"
 import type { DocxRtfDocument, RtfLockedBlock } from "@filen/office/dom/docx/rtf"
 import { RtfDocument, type RtfOpened } from "@/features/preview/components/rtfDocument"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 import "@/lib/i18n"
 
 // An RTF document opened for editing: the editor opens on the taken copy while the document is proved in the
@@ -54,6 +55,8 @@ function Shown({ opened }: { opened: RtfOpened }) {
 	return <p>{opened.editing === undefined ? "viewing" : `editing ${String(opened.editing.docx.length)}`}</p>
 }
 
+const ITEM = linkedFileItem("letter.rtf", { size: 1536n })
+
 describe("RTF document opened for editing before its proof", () => {
 	it("hands the editor its copy while the document is still being proved", async () => {
 		const proved = deferred<readonly RtfLockedBlock[]>()
@@ -62,6 +65,7 @@ describe("RTF document opened for editing before its proof", () => {
 
 		render(
 			<RtfDocument
+				item={ITEM}
 				bytes={new Uint8Array([9])}
 				edit
 			>
@@ -79,6 +83,7 @@ describe("RTF document opened for editing before its proof", () => {
 
 		render(
 			<RtfDocument
+				item={ITEM}
 				bytes={new Uint8Array([9])}
 				edit
 			>
@@ -91,6 +96,9 @@ describe("RTF document opened for editing before its proof", () => {
 		await waitFor(() => {
 			expect(screen.queryByText("editing 3")).toBeNull()
 		})
+		// The unsupported card, naming the file.
+		expect(screen.getByText("letter.rtf")).toBeTruthy()
+		expect(screen.getByText("1.5 KiB")).toBeTruthy()
 	})
 
 	it("releases the document on close with the proof still pending", async () => {
@@ -99,6 +107,7 @@ describe("RTF document opened for editing before its proof", () => {
 
 		const view = render(
 			<RtfDocument
+				item={ITEM}
 				bytes={new Uint8Array([9])}
 				edit
 			>

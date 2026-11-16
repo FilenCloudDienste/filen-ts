@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import type { DriveItem } from "@/features/drive/lib/item"
 import {
 	RESTORE_TIMEOUT_MS,
 	backingSize,
@@ -18,6 +19,8 @@ import {
 } from "@/features/preview/components/canvasViewerShell.logic"
 
 export interface CanvasViewerShellProps<Status, Notice> {
+	// The file shown, named on the card offered when the display is lost.
+	readonly item: DriveItem
 	// The worker session the canvas belongs to (an owned worker's generation): a new value mints a fresh canvas and port.
 	readonly session: number
 	// Hands the shell's end of the channel to the worker; the shell posts the canvas over it.
@@ -61,6 +64,7 @@ function mintCanvas(
 // The host of a viewer whose worker renders into an OffscreenCanvas (3D, DXF, DICOM, geo): sizing, input, display
 // resets and the toolbar, notice and side-panel slots.
 export function CanvasViewerShell<Status = never, Notice = never>({
+	item,
 	session,
 	connect,
 	label,
@@ -332,6 +336,7 @@ export function CanvasViewerShell<Status = never, Notice = never>({
 				{state === "failed" ? (
 					<div className="absolute inset-0 bg-background">
 						<PreviewUnsupportedState
+							item={item}
 							message={t("previewRichShellContextFailed")}
 							secondary={
 								<Button

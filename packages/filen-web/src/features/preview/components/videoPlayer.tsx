@@ -183,9 +183,12 @@ export function VideoPlayer({
 			{status === "unsupported" ? (
 				<div className="absolute inset-0">
 					{cannotStream(snapshot?.decision ?? null) ? (
-						<MediaCannotStream />
+						<MediaCannotStream item={item} />
 					) : (
-						<MediaFormatFailure codecs={unplayableCodecs(snapshot?.probe ?? null, snapshot?.decision ?? null)} />
+						<MediaFormatFailure
+							item={item}
+							codecs={unplayableCodecs(snapshot?.probe ?? null, snapshot?.decision ?? null)}
+						/>
 					)}
 				</div>
 			) : status === "failed" ? (

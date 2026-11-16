@@ -1,12 +1,17 @@
 import type { ComponentProps, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { cn, driveItemName } from "@filen/shared"
 import { DownloadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
+import { CARD_SURFACE_CLASS } from "@/components/ui/surface"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { formatItemSize } from "@/features/drive/lib/format"
+import type { DriveItem } from "@/features/drive/lib/item"
 
 // Shared LABEL-FIRST error state for every buffered/streamed viewer's load-failure branch — a centered
 // message plus a Retry action, reused instead of each viewer hand-rolling its own bare error text. A
@@ -55,23 +60,37 @@ export function PreviewDownloadButton({ variant, size }: Pick<ComponentProps<typ
 	)
 }
 
-// The one state for a file the preview cannot show (unsupported, too large, unreadable): the message, the host's
-// Download and at most one other action, centered.
-export function PreviewUnsupportedState({ message, secondary }: { message: string; secondary?: ReactNode }) {
+// The one state for a file the preview cannot show (unsupported, too large, unreadable): a centered card with the
+// file's icon, name and size, a calm message, the host's Download and at most one other action.
+export function PreviewUnsupportedState({ item, message, secondary }: { item: DriveItem; message: string; secondary?: ReactNode }) {
+	const download = usePreviewDownload()
+
 	return (
-		<PreviewErrorState
-			message={message}
-			action={
-				secondary === undefined ? (
-					<PreviewDownloadButton />
-				) : (
+		<div className="flex size-full items-center justify-center p-6">
+			<div className={cn("flex w-full max-w-sm flex-col items-center gap-3 px-6 py-8 text-center", CARD_SURFACE_CLASS)}>
+				<ItemIcon
+					item={item}
+					className="size-12"
+				/>
+				<p className="flex max-w-full items-baseline gap-1.5 font-medium">
+					<span className="min-w-0 truncate">{driveItemName(item)}</span>
+					<span
+						aria-hidden="true"
+						className="text-muted-foreground"
+					>
+						·
+					</span>
+					<span className="shrink-0 text-muted-foreground">{formatItemSize(item)}</span>
+				</p>
+				<p className="text-muted-foreground">{message}</p>
+				{download !== null || secondary !== undefined ? (
 					<div className="flex flex-wrap justify-center gap-2">
 						<PreviewDownloadButton />
 						{secondary}
 					</div>
-				)
-			}
-		/>
+				) : null}
+			</div>
+		</div>
 	)
 }
 

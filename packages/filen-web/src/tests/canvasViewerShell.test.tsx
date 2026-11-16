@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { CanvasViewerShell } from "@/features/preview/components/canvasViewerShell"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 import {
 	backingSize,
 	coalesceInput,
@@ -82,11 +83,14 @@ afterEach(() => {
 	vi.useRealTimers()
 })
 
+const ITEM = linkedFileItem("scene.glb", { size: 2048n })
+
 function shell(session = 1, extra: Partial<Parameters<typeof CanvasViewerShell>[0]> = {}) {
 	const connect = vi.fn()
 	const onReload = vi.fn()
 	const element = (value: number) => (
 		<CanvasViewerShell
+			item={ITEM}
 			session={value}
 			connect={connect}
 			label="Model"
@@ -159,7 +163,9 @@ describe("CanvasViewerShell", () => {
 			vi.advanceTimersByTime(5000)
 		})
 
-		// No Download: this host offers none.
+		// The card names the file; no Download, as this host offers none.
+		expect(screen.getByText("scene.glb")).toBeTruthy()
+		expect(screen.getByText("2 KiB")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: /download/i })).toBeNull()
 		fireEvent.click(screen.getByRole("button", { name: "Reload viewer" }))
 		expect(onReload).toHaveBeenCalledTimes(1)

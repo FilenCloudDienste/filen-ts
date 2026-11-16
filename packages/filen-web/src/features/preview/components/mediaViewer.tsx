@@ -201,7 +201,12 @@ function DecodedAudio({
 	}, [file, access, resume, onStreamFailed])
 
 	if (state.status === "unsupported") {
-		return <MediaFormatFailure codecs={[]} />
+		return (
+			<MediaFormatFailure
+				item={item}
+				codecs={[]}
+			/>
+		)
 	}
 
 	if (state.status === "pending") {
@@ -286,7 +291,10 @@ function MediaSourceAudio({ item, alt, resume: initialResume }: { item: DriveIte
 			/>
 			{failure === "format" ? (
 				<div className="absolute inset-0">
-					<MediaFormatFailure codecs={[]} />
+					<MediaFormatFailure
+						item={item}
+						codecs={[]}
+					/>
 				</div>
 			) : failure === "other" ? (
 				<div className="absolute inset-0">
@@ -356,7 +364,7 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 	}
 
 	if (!hasMediaSource()) {
-		return <MediaCannotStream />
+		return <MediaCannotStream item={item} />
 	}
 
 	return (
@@ -376,7 +384,12 @@ export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const provided = useProvidedPreviewOrigin()
 
 	if (provided !== null) {
-		return <MediaFormatFailure codecs={[]} />
+		return (
+			<MediaFormatFailure
+				item={item}
+				codecs={[]}
+			/>
+		)
 	}
 
 	if (category === "video") {

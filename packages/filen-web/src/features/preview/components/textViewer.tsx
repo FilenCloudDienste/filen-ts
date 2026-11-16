@@ -8,7 +8,7 @@ import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { readTextFile } from "@/features/preview/lib/textFile"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 
 export interface TextViewerProps {
 	item: DriveItem
@@ -71,9 +71,10 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 
 	if (file === null) {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-				{t("previewNotText")}
-			</div>
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewNotText")}
+			/>
 		)
 	}
 

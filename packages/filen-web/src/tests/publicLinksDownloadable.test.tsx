@@ -81,7 +81,7 @@ describe("FileLinkView — the link's downloadable flag", () => {
 	it("offers neither on a link that disallows them, says why, and never asks who owns it", async () => {
 		await renderLink(false)
 
-		expect(screen.getByText("archive.bin")).toBeDefined()
+		expect(screen.getAllByText("archive.bin").length).toBeGreaterThan(0)
 		expect(screen.queryByRole("button", { name: "Download" })).toBeNull()
 		expect(screen.queryByRole("button", { name: "Save to Cloud Drive" })).toBeNull()
 		expect(screen.getByText("The owner has disabled downloads for this link.")).toBeDefined()
@@ -108,13 +108,14 @@ describe("PreviewOverlay — a chat embed's linked file", () => {
 	it("offers Download when the link allows it", () => {
 		renderOverlay(true)
 
-		expect(screen.getByRole("button", { name: "Download" })).toBeDefined()
+		// The header's and the unsupported card's.
+		expect(screen.getAllByRole("button", { name: "Download" })).toHaveLength(2)
 	})
 
 	it("offers none when it doesn't", () => {
 		renderOverlay(false)
 
-		expect(screen.getByText("archive.bin")).toBeDefined()
+		expect(screen.getAllByText("archive.bin").length).toBeGreaterThan(0)
 		expect(screen.queryByRole("button", { name: "Download" })).toBeNull()
 	})
 })

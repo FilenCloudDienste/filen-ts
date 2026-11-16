@@ -7,6 +7,7 @@ import type { DocxEditingBackend } from "@/features/preview/lib/docxEditing"
 import { docxOdt, docxRtf } from "@/features/preview/lib/docxEngine"
 import { rtfEditingBackend } from "@/features/preview/lib/rtfEditing"
 import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { log } from "@/lib/log"
 
 // An RTF file in the docx viewer (or an OpenDocument text file opened for editing): read in the docx worker into the
@@ -31,12 +32,14 @@ type State =
 	| { readonly kind: "unopened" }
 
 export function RtfDocument({
+	item,
 	bytes,
 	edit,
 	format = "rtf",
 	unopened,
 	children
 }: {
+	item: DriveItem
 	bytes: Uint8Array
 	edit: boolean
 	format?: "rtf" | "odt"
@@ -138,7 +141,12 @@ export function RtfDocument({
 		case "reading":
 			return <PreviewLoading />
 		case "failed":
-			return <PreviewUnsupportedState message={t("previewDocxLoadFailed")} />
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewDocxLoadFailed")}
+				/>
+			)
 		case "unopened":
 			return unopened?.() ?? null
 		case "ready":

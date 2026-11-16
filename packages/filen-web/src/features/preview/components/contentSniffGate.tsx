@@ -80,7 +80,14 @@ export function ContentSniffGate({ item, asText, render }: { item: DriveItem; as
 	}, [waiting, sniff, uuid, name, mime, size, access, attempt])
 
 	if (!waiting) {
-		return sniffedTooLarge(item, verdict) ? <PreviewUnsupportedState message={t("previewTextTooLarge")} /> : render()
+		return sniffedTooLarge(item, verdict) ? (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewTextTooLarge")}
+			/>
+		) : (
+			render()
+		)
 	}
 
 	if (failedAttempt === attempt) {

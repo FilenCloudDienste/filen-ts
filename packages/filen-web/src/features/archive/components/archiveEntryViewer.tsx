@@ -51,7 +51,12 @@ function EntryBody({ item, category, alt }: { item: DriveItem; category: Preview
 	const shown = category ?? sniffedEntryCategory(item)
 
 	if (shown === null) {
-		return <PreviewUnsupportedState message={t("previewUnsupportedType")} />
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewUnsupportedType")}
+			/>
+		)
 	}
 
 	return (
