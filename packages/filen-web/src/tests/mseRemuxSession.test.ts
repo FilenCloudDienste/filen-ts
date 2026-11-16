@@ -15,6 +15,7 @@ import type { MseFailure, RemuxSessionOptions } from "@/lib/media/mseController"
 type EventSink = (event: RemuxEvent) => Promise<void>
 
 const worker = vi.hoisted(() => ({
+	dead: null as unknown as PromiseWithResolvers<never>,
 	onEvent: null as EventSink | null,
 	open: null as unknown as Mock<(params: unknown, onEvent: EventSink) => Promise<{ id: number; info: RemuxMediaInfo }>>,
 	seek: null as unknown as Mock<(id: number, params: RemuxSeekParams) => Promise<RemuxSeekResult>>,
@@ -34,7 +35,7 @@ vi.mock("@/lib/media/remuxClient", () => ({
 				stats: () => null,
 				close: () => Promise.resolve()
 			},
-			dead: new Promise(() => undefined),
+			dead: worker.dead.promise,
 			release: () => undefined
 		})
 }))
@@ -335,6 +336,7 @@ beforeEach(() => {
 		return url
 	})
 	vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
+	worker.dead = Promise.withResolvers<never>()
 	worker.onEvent = null
 	worker.open = vi.fn((_params: unknown, onEvent: EventSink) => {
 		worker.onEvent = onEvent
@@ -559,6 +561,30 @@ describe("MediaSource remux session", () => {
 		await element.play()
 		session.dispose()
 		expect(rangeReads.playing).toBe(false)
+	})
+
+	it("stays quiet when the remux worker is ended at sign-out mid-play", async () => {
+		const { session, element, failures } = await open()
+
+		await element.play()
+		worker.dead.reject(new DOMException("remux worker ended", "AbortError"))
+		await settle()
+		await session.selectAudio(3, "copy").catch(() => undefined)
+		await settle()
+
+		expect(failures).toEqual([])
+		session.dispose()
+	})
+
+	it("reports a remux worker that dies mid-play", async () => {
+		const { session, element, failures } = await open()
+
+		await element.play()
+		worker.dead.reject(new Error("remux worker is gone (crashed)"))
+		await settle()
+
+		expect(failures).toEqual([["remux", "remux worker is gone (crashed)"]])
+		session.dispose()
 	})
 
 	it("takes over a warmed file without a port", async () => {

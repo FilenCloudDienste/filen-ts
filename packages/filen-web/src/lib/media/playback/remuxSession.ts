@@ -1,3 +1,4 @@
+import { isAbortError } from "@filen/shared"
 import { openRemuxSession, type MseFailure, type RemuxSession, type RemuxSessionOptions } from "@/lib/media/mseController"
 import { isIdrUnreachable, isSourceReadError, isWarmGone, SourceReadError, type RemuxTextCue } from "@/lib/media/remuxTypes"
 import type { ProbeIndex } from "@filen/shared/videos"
@@ -126,7 +127,10 @@ class RemuxPlaybackSession implements PlaybackSession {
 			this.session = session
 			await session.attach(video)
 		} catch (error) {
-			this.fail(remuxOpenFailure(error))
+			// An AbortError is the worker ended at sign-out, not a failure of the rung.
+			if (!isAbortError(error)) {
+				this.fail(remuxOpenFailure(error))
+			}
 		}
 	}
 

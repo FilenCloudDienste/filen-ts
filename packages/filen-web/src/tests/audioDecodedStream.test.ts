@@ -19,9 +19,11 @@ vi.mock("@/lib/media/playback/sources", () => ({
 	remuxSource: () => ({ openPort: () => Promise.resolve(new MessageChannel().port2), close: vi.fn() }),
 	linkedRemuxSource: vi.fn()
 }))
-vi.mock("@/lib/media/mseController", () => ({ openRemuxSession: vi.fn() }))
+const { openRemuxSession } = vi.hoisted(() => ({ openRemuxSession: vi.fn() }))
 
-const { openDecodedAudioStream } = await import("@/lib/media/playback/audioStream")
+vi.mock("@/lib/media/mseController", () => ({ openRemuxSession }))
+
+const { audioMediaSource, openDecodedAudioStream } = await import("@/lib/media/playback/audioStream")
 
 describe("openDecodedAudioStream", () => {
 	// Every window the service worker read ahead would be decoding the element has not asked for.
@@ -41,5 +43,23 @@ describe("openDecodedAudioStream", () => {
 		expect(stream.url).toBe("/sw/download/a1")
 		expect(metas).toEqual([{ name: "audio.wav", size: 44, contentType: "audio/wav", readAhead: false }])
 		stream.release()
+	})
+})
+
+describe("audioMediaSource", () => {
+	it.each([
+		[new DOMException("remux worker ended", "AbortError"), []],
+		[new Error("remux worker is gone (crashed)"), ["other"]]
+	])("reports an open that fails with %s as %j", async (error, reported) => {
+		const onFailure = vi.fn()
+
+		openRemuxSession.mockRejectedValueOnce(error)
+
+		const media = audioMediaSource({ file: { uuid: "f", size: 1000n } as never, access: "authed" })
+
+		await media.attach({} as HTMLMediaElement, { onFailure })
+
+		expect(onFailure.mock.calls.map(call => call[0] as unknown)).toEqual(reported)
+		media.dispose()
 	})
 })

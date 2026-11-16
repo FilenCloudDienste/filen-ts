@@ -1,4 +1,5 @@
 import * as Comlink from "comlink"
+import { isAbortError } from "@filen/shared"
 import { holdRemuxWorker, type RemuxWorkerHold } from "@/lib/media/remuxClient"
 import { splitForAppend } from "@/lib/media/fmp4Split"
 import {
@@ -689,6 +690,8 @@ class MseRemuxSession implements RemuxSession {
 	private restarts = 0
 	private endedStream = false
 	private disposed = false
+	// The worker was ended on purpose (sign-out): nothing after it is a playback failure.
+	private workerEnded = false
 	private releaseReads: (() => void) | null = null
 	private readonly elementListeners: [string, () => void][] = []
 
@@ -713,6 +716,12 @@ class MseRemuxSession implements RemuxSession {
 		this.events.push(this.listener)
 		this.disposedSignal.promise.catch(() => undefined)
 		this.hold.dead.catch((error: unknown) => {
+			if (isAbortError(error)) {
+				this.workerEnded = true
+
+				return
+			}
+
 			this.fail("remux", error)
 		})
 	}
@@ -1564,7 +1573,7 @@ class MseRemuxSession implements RemuxSession {
 	}
 
 	private fail(reason: MseFailure, error: unknown): void {
-		if (this.disposed) {
+		if (this.disposed || this.workerEnded) {
 			return
 		}
 

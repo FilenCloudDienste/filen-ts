@@ -95,6 +95,14 @@ describe("remux playback session", () => {
 		expect(failures[0]?.trigger).toBe("open-gop-start")
 	})
 
+	it("reports nothing when the remux worker is ended at sign-out while it opens", async () => {
+		const { session, failures } = setUp(() => Promise.reject(new DOMException("remux worker ended", "AbortError")))
+
+		await session.attach(new FakeVideo().asElement())
+
+		expect(failures).toEqual([])
+	})
+
 	it("switches audio in place with the ladder's mode, but cannot drop audio", async () => {
 		const { session, remux } = setUp()
 

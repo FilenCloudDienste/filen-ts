@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { cn, driveItemName } from "@filen/shared"
+import { cn, driveItemName, isAbortError } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
@@ -182,7 +182,8 @@ function DecodedAudio({
 				}
 			},
 			(error: unknown) => {
-				if (!live) {
+				// An AbortError is the worker ended at sign-out: nothing to fall back to.
+				if (!live || isAbortError(error)) {
 					return
 				}
 

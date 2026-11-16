@@ -1,4 +1,5 @@
 import * as Comlink from "comlink"
+import { isAbortError } from "@filen/shared"
 import type { AnyFile } from "@filen/sdk-rs"
 import { registerPortStream, releasePreviewStream } from "@/features/preview/lib/previewStream"
 import { mseFailureKind, mseOpenFailureKind } from "@/features/preview/lib/previewPlayback.logic"
@@ -139,7 +140,8 @@ export function audioMediaSource(params: { file: AnyFile; access: "authed" | "an
 				session = opened
 				await opened.attach(element)
 			} catch (error) {
-				if (!disposed()) {
+				// An AbortError is the worker ended at sign-out, not a failure of the file.
+				if (!disposed() && !isAbortError(error)) {
 					onFailure(mseOpenFailureKind(error))
 				}
 			}
