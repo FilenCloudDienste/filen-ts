@@ -1,6 +1,6 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { extensionOf, isHeicName } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
@@ -179,8 +179,9 @@ async function enter(
 ): Promise<EnterImageEditOutcome> {
 	const name = driveItemName(item)
 	const size = Number(narrowToAnyFile(item).size)
-	const heic = needsImageTransform(item)
-	// HEIC is only ever shown from its whole bytes, so they are held (or read again once, as the viewer would).
+	// Decoded by libheif from its whole bytes on every browser, also where the viewer streams it natively: the editor
+	// needs its Exif and ICC, which only the bytes give.
+	const heic = isHeicName(item)
 	let held = getPreviewBytes(cacheScope, item.data.uuid) ?? (heic ? await wholeBytes(item, cacheScope, signal) : undefined)
 	let info = sniffImage(held ?? (await headBytes(item, signal)), size)
 

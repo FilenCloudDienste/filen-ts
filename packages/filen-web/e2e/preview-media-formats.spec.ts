@@ -49,17 +49,19 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 	await expect(page.getByRole("img", { name: nameB })).toHaveCount(0)
 })
 
-// The one live proof the HEIC path actually decodes: a real WASM library, lazy-loaded on first HEIC
-// preview, running in a real browser — unlike the pure logic seams (preview.logic.test.ts,
-// mediaType.test.ts, heicCodec.test.ts), an injected/mocked decoder can't prove this. Also
-// proves the buffered-not-streamed guarantee end to end (the img's own src) and zero CSP violations
-// during the WASM load + decode (the CSP concession this feature could have needed, but didn't).
-test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({ page }) => {
+// The one live proof of either HEIC path in a real browser: where the boot probe found a native decoder (Safari) the
+// picture streams through the service worker's inline route like any image; elsewhere a real WASM library, lazy-loaded
+// on first HEIC preview, decodes it into a blob. The branch follows the probe's answer read in the page, never the
+// project name. Also zero CSP violations during either load (the CSP concession this feature could have needed, but
+// didn't).
+test("HEIC preview streams where the browser decodes HEIC itself, and is transformed client-side elsewhere", async ({ page }) => {
 	const [nameHeic] = FIXTURE_FILES["preview-heic"]
 
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
+
+	const { heic: native } = await page.evaluate(() => window.__filenE2E.nativeImageSupport())
 
 	const {
 		rows: [row]
@@ -71,16 +73,37 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 	await row.dblclick()
 	const img = page.getByRole("img", { name: nameHeic })
 	await expect(img).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect.poll(() => img.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(64)
 
-	// Buffered path only, never the SW's inline route (needsImageTransform's own unit test proves
-	// the logic-layer guarantee; this is the same guarantee observed live).
 	const src = await img.getAttribute("src")
-	expect(src).toMatch(/^blob:/)
+
+	expect(src).toMatch(native ? /^\/sw\/download\// : /^blob:/)
 
 	await page.keyboard.press("Escape")
 	await expect(img).toHaveCount(0)
 
 	expect(cspViolations).toEqual([])
+})
+
+// What each browser the suite runs decodes by itself, as the boot probe found it: recorded on the test, so a runner or
+// browser update that changes it is visible. Chromium and Firefox have no HEIC decoder; HEIC in WebKit comes from
+// Apple's platform decoders, so the Linux port is not expected to have one.
+test("boot probe reports which image formats this browser decodes natively", async ({ page, browserName }) => {
+	await bootTo(page)
+
+	const support = await page.evaluate(() => window.__filenE2E.nativeImageSupport())
+
+	test.info().annotations.push({
+		type: "native-images",
+		description: `${browserName}: heic ${String(support.heic)}, jxl ${String(support.jxl)}`
+	})
+
+	if (browserName !== "webkit") {
+		expect(support.heic).toBe(false)
+	}
+
+	// Answered once per tab: asking again decodes nothing new and answers the same.
+	expect(await page.evaluate(() => window.__filenE2E.nativeImageSupport())).toEqual(support)
 })
 
 // The one live proof the pdf.js path actually works: a real lazy chunk, a real dedicated worker

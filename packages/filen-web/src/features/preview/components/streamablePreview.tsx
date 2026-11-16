@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-import { isMediaStreamAvailable, waitForMediaStream } from "@/features/preview/lib/previewStream"
+import { isMediaStreamAvailable, previewDelivered, previewStreamIdOf, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { bufferedSizeCap, previewType, streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
@@ -14,10 +14,14 @@ import { originRanged } from "@/lib/sdk/byteOrigin"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 
-// Renders the image for a resolved URL. `onError` is set only on the streamed path — the buffered blob
-// path has nowhere further to fall back to, so it keeps the browser's own native error state. Video and
-// audio never come here: they always stream (mediaViewer.tsx).
-export type RenderPreviewUrl = (url: string, onError: (() => void) | undefined) => ReactNode
+// Renders the image for a resolved URL; `onError` takes the <img> that failed. It is set on the streamed path, and on
+// the buffered one only where a decode failure has somewhere to go (onDecodeFailure): otherwise the blob path keeps
+// the browser's own error state. Video and audio never come here: they always stream (mediaViewer.tsx).
+export type RenderPreviewUrl = (url: string, onError: ((image: HTMLImageElement) => void) | undefined) => ReactNode
+
+// How long a streamed image's error waits for the service worker's delivery acknowledgement, which may land just
+// after it.
+const DELIVERY_GRACE_MS = 1_000
 
 // Streamed mode: registers against the SW's inline route and renders once a URL resolves. A
 // registration failure hands control back to the parent (onFallback) for the buffered fallback ONLY
@@ -26,15 +30,21 @@ export type RenderPreviewUrl = (url: string, onError: (() => void) | undefined) 
 // never an unbounded buffered retry (a huge image on a prod SW hiccup would otherwise whole-buffer
 // straight into a tab-crashing allocation, since a streamed category is never capped at the open gate,
 // preview.logic.ts).
+//
+// With `onDecodeFailure`, an <img> error is first classified: no pixels after the worker acknowledged every byte
+// (SW_MSG_PREVIEW_DELIVERED) is the browser failing to decode the file, which a retry of the same bytes cannot change,
+// so it goes there; anything else (no acknowledgement: the bytes never all arrived) takes the path above.
 function StreamedPreview({
 	item,
 	contentType,
 	onFallback,
+	onDecodeFailure,
 	render
 }: {
 	item: DriveItem
 	contentType: string
 	onFallback: () => void
+	onDecodeFailure: (() => void) | undefined
 	render: RenderPreviewUrl
 }) {
 	const { t } = useTranslation("preview")
@@ -77,38 +87,85 @@ function StreamedPreview({
 		return <PreviewLoading />
 	}
 
-	return render(result.url, () => {
-		// A mid-consumption failure (network drop mid-load/seek, an SW-side decrypt abort, a lifecycle
-		// hiccup) — unlike the registration-failure effect above, retrying buffered here would
-		// re-download the whole file, so an oversize item gets the labeled error instead.
+	const url = result.url
+
+	// A mid-consumption failure (network drop mid-load/seek, an SW-side decrypt abort, a lifecycle
+	// hiccup) — unlike the registration-failure effect above, retrying buffered here would
+	// re-download the whole file, so an oversize item gets the labeled error instead.
+	function streamFailed(): void {
 		if (streamFailureAction(item) === "buffer") {
 			onFallback()
 		} else {
 			setCapExceeded(true)
 		}
+	}
+
+	return render(url, image => {
+		if (onDecodeFailure === undefined) {
+			streamFailed()
+
+			return
+		}
+
+		const blank = image.naturalWidth === 0
+
+		void previewDelivered(previewStreamIdOf(url), DELIVERY_GRACE_MS).then(delivered => {
+			if (delivered && blank) {
+				onDecodeFailure()
+			} else {
+				streamFailed()
+			}
+		})
 	})
 }
 
-function BufferedPreviewBytes({ bytes, mime, render }: { bytes: Uint8Array; mime: string | undefined; render: RenderPreviewUrl }) {
+function BufferedPreviewBytes({
+	bytes,
+	mime,
+	onDecodeFailure,
+	render
+}: {
+	bytes: Uint8Array
+	mime: string | undefined
+	onDecodeFailure: (() => void) | undefined
+	render: RenderPreviewUrl
+}) {
 	const url = useObjectUrl(bytes, mime)
 
 	if (!url) {
 		return null
 	}
 
-	return render(url, undefined)
+	// Bytes in hand failed to decode: nothing to retry, and the fallback decodes the same held bytes.
+	return render(
+		url,
+		onDecodeFailure === undefined
+			? undefined
+			: () => {
+					onDecodeFailure()
+				}
+	)
 }
 
 // Buffered mode: a whole-file download played back from a blob URL, minted/revoked by useObjectUrl so
 // the blob never outlives it. The open gate does not cap a streamed image (CATEGORY_POLICY, preview.logic.ts), so
 // StreamablePreview mounts this only at or below the category's buffer cap.
-function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
+function BufferedPreview({
+	item,
+	onDecodeFailure,
+	render
+}: {
+	item: DriveItem
+	onDecodeFailure: (() => void) | undefined
+	render: RenderPreviewUrl
+}) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
 				<BufferedPreviewBytes
 					bytes={ready.bytes}
 					mime={driveItemMime(item)}
+					onDecodeFailure={onDecodeFailure}
 					render={render}
 				/>
 			)}
@@ -161,7 +218,17 @@ function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void
 // previewStream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path is
 // also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands, but never above the
 // category's buffer cap: such a file waits for a service worker when it could stream, else says it is too large.
-export function StreamablePreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
+// `onDecodeFailure` is where an image goes when the browser received it whole and could not decode it (a format with a
+// decoder of our own); without it, every failure takes the stream's retry path.
+export function StreamablePreview({
+	item,
+	onDecodeFailure,
+	render
+}: {
+	item: DriveItem
+	onDecodeFailure?: (() => void) | undefined
+	render: RenderPreviewUrl
+}) {
 	const { t } = useTranslation("preview")
 	const profile = useDeviceProfile()
 	const contentType = allowedMediaContentType(item, profile)
@@ -187,6 +254,7 @@ export function StreamablePreview({ item, render }: { item: DriveItem; render: R
 				onFallback={() => {
 					setUseBuffered(true)
 				}}
+				onDecodeFailure={onDecodeFailure}
 				render={render}
 			/>
 		)
@@ -211,6 +279,7 @@ export function StreamablePreview({ item, render }: { item: DriveItem; render: R
 	return (
 		<BufferedPreview
 			item={item}
+			onDecodeFailure={onDecodeFailure}
 			render={render}
 		/>
 	)

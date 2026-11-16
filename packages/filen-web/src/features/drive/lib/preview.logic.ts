@@ -18,7 +18,8 @@ import {
 } from "@filen/shared"
 import { codeLanguageExtensions, codeLanguageForExtension, type CodeLanguageId } from "@filen/office/core/code"
 import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
-import { IMAGE_FORMATS, streamsNatively } from "@/features/preview/lib/imageFormat"
+import { HEIC_EXTENSIONS, IMAGE_FORMATS, pendingProbe, streamsNatively } from "@/features/preview/lib/imageFormat"
+import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
@@ -613,6 +614,23 @@ export function needsImageTransform(item: DriveItem, profile: DeviceProfile = de
 	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
 
 	return format !== undefined && !streamsNatively(format, profile)
+}
+
+// A HEIC/HEIF by its name, whatever this browser shows by itself: the image editor always decodes one with libheif.
+export function isHeicName(item: DriveItem): boolean {
+	return HEIC_EXTENSIONS.has(itemTypeExtension(item))
+}
+
+// The probe an image's route waits on (pendingProbe); null once the route is known, and for any other file.
+export function pendingImageProbe(item: DriveItem, profile: DeviceProfile): NativeImageFormat | null {
+	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
+
+	return format === undefined ? null : pendingProbe(format, profile)
+}
+
+// The largest image held whole to decode it ourselves: its format's cap, else the image category's; null for none.
+export function heldImageCap(item: DriveItem, profile: DeviceProfile): bigint | null {
+	return formatCap(itemTypeExtension(item), profile) ?? bufferedSizeCap("image", profile)
 }
 
 // The format's own cap, ahead of its category's: an image or audio row's.

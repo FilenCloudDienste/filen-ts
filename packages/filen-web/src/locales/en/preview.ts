@@ -127,6 +127,8 @@ export const preview = {
 	previewTooLargeToShowHere: "This file is too large to show here.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */
 	previewTransformFailed: "This image couldn't be converted for preview.",
+	/** Preview overlay body — the browser could not decode an image it received whole (a HEIC this browser normally shows by itself), and the file is too large to convert here instead */
+	previewImageNotDisplayable: "This image can't be displayed in this browser.",
 	/** Preview overlay body — a camera RAW file (.cr2, .nef, .arw, .dng…) embeds no preview image large enough to show, and no thumbnail could be made for it either */
 	previewRawNoPreview: "This RAW image has no embedded preview to show.",
 	/** Preview overlay body — shown by the scoped error boundary when a viewer throws while rendering (e.g. a parse failure) */

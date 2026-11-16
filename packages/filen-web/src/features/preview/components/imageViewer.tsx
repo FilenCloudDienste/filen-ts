@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { heldImageCap, isHeicName, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
+import type { DeviceProfile } from "@/lib/deviceProfile"
+import type { PreviewKey } from "@/lib/i18n"
+import { probeNativeImage } from "@/lib/nativeImageSupport"
 import { transformHeicBytes } from "@/features/preview/lib/rasterDecode"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 // side-effect: registers the generators getThumbnailUrl needs, as useThumbnail.ts does.
 import "@/features/drive/lib/thumbGenerators"
 import { useObjectUrl } from "@/lib/useObjectUrl"
-import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
@@ -41,8 +45,8 @@ function ZoomableImage({
 }: {
 	url: string
 	alt: string
-	// Unset on a blob URL, which has nowhere further to fall back to (see RenderPreviewUrl).
-	onError?: (() => void) | undefined
+	// Takes the <img> that failed. Unset on a blob URL with nowhere further to fall back to (see RenderPreviewUrl).
+	onError?: ((image: HTMLImageElement) => void) | undefined
 	imageRef?: RefObject<HTMLImageElement | null> | undefined
 }) {
 	const [transform, setTransform] = useState<ZoomTransform>({ scale: 1, x: 0, y: 0 })
@@ -183,7 +187,13 @@ function ZoomableImage({
 				src={url}
 				alt={alt}
 				draggable={false}
-				onError={onError}
+				onError={
+					onError === undefined
+						? undefined
+						: event => {
+								onError(event.currentTarget)
+							}
+				}
 				onLoad={event => {
 					setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
 				}}
@@ -278,10 +288,33 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 	)
 }
 
-// HEIC/HEIF: never streamable (needsImageTransform), always buffered — downloads the whole file like
+// HEIC/HEIF decoded by libheif (needsImageTransform, or a native decode that failed): downloads the whole file like
 // StreamablePreview's buffered path, then hands the bytes to TransformedImageBytes for the decode+re-encode step before
-// anything renders.
-function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
+// anything renders. Bytes already held decode at any size; otherwise nothing above the held-image cap is loaded whole,
+// and `tooLarge` says why (a native picture admitted at any size may land here once its decode failed).
+function TransformedImage({ item, alt, tooLarge }: { item: DriveItem; alt: string; tooLarge: PreviewKey }) {
+	const { t } = useTranslation("preview")
+	const cap = heldImageCap(item, useDeviceProfile())
+	const held = getPreviewBytes(usePreviewCacheScope(), item.data.uuid) !== undefined
+
+	if (!held && cap !== null && item.data.size > cap) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t(tooLarge)}
+			/>
+		)
+	}
+
+	return (
+		<TransformedImageLoad
+			item={item}
+			alt={alt}
+		/>
+	)
+}
+
+function TransformedImageLoad({ item, alt }: { item: DriveItem; alt: string }) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
@@ -393,26 +426,50 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 	)
 }
 
-// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs — HEIC/HEIF never
-// reach the streamed branch at all (mediaType.ts independently excludes them too, defense-in-depth), every other image
-// extension is unaffected. The route is picked once per file: a probe that refines the device profile while it is open
-// changes the next open, never this one (which would drop the decoded picture, its zoom, and download it again).
+// How an image is shown: as the browser decodes it (streamed, or from its buffered fallback), decoded by libheif
+// first, or decoded by libheif after the browser failed to decode the whole file.
+type ImageRoute = "native" | "transform" | "undecodable"
+
+function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
+	return needsImageTransform(item, profile) ? "transform" : "native"
+}
+
+// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs — a HEIC/HEIF this
+// browser does not decode never reaches the streamed branch (mediaType.ts excludes it too, defense-in-depth), every
+// other image extension is unaffected. A HEIC/HEIF opened before the boot probe answered waits for its answer (a
+// decode of a few hundred bytes) rather than take the libheif route an unknown answer reads as. The route is then
+// picked once per file: a probe that refines the device profile while it is open changes the next open, never this one
+// (which would drop the decoded picture, its zoom, and download it again).
 export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 	const profile = useDeviceProfile()
 	const uuid = item.data.uuid
-	const [route, setRoute] = useState(() => ({ uuid, transform: needsImageTransform(item, profile) }))
-	let transform = route.transform
+	const probe = pendingImageProbe(item, profile)
+	const [route, setRoute] = useState<{ uuid: string; route: ImageRoute } | null>(() =>
+		probe === null ? { uuid, route: routeFor(item, profile) } : null
+	)
+	let current = route?.uuid === uuid ? route.route : null
 
-	if (route.uuid !== uuid) {
-		transform = needsImageTransform(item, profile)
-		setRoute({ uuid, transform })
+	if (current === null && probe === null) {
+		current = routeFor(item, profile)
+		setRoute({ uuid, route: current })
 	}
 
-	if (transform) {
+	useEffect(() => {
+		if (probe !== null) {
+			void probeNativeImage(probe)
+		}
+	}, [probe])
+
+	if (current === null) {
+		return <PreviewLoading />
+	}
+
+	if (current !== "native") {
 		return (
 			<TransformedImage
 				item={item}
 				alt={alt}
+				tooLarge={current === "undecodable" ? "previewImageNotDisplayable" : "previewTooLargeToShowHere"}
 			/>
 		)
 	}
@@ -420,6 +477,15 @@ export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 	return (
 		<StreamablePreview
 			item={item}
+			// A HEIC/HEIF the browser received whole and could not decode goes to libheif, on the bytes already held where
+			// they are.
+			onDecodeFailure={
+				isHeicName(item)
+					? () => {
+							setRoute({ uuid, route: "undecodable" })
+						}
+					: undefined
+			}
 			render={(url, onError) => (
 				<ZoomableImage
 					url={url}

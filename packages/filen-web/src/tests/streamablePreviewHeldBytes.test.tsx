@@ -76,7 +76,7 @@ function photo(label: string, size = 3n) {
 function preview(label: string, size?: bigint) {
 	return createElement(StreamablePreview, {
 		item: photo(label, size),
-		render: (url: string, onError: (() => void) | undefined) =>
+		render: (url: string, onError: ((image: HTMLImageElement) => void) | undefined) =>
 			createElement("img", { alt: onError === undefined ? "buffered" : "streamed", src: url })
 	})
 }

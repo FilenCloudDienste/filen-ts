@@ -1,4 +1,5 @@
 import type { DeviceProfile } from "@/lib/deviceProfile"
+import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
 // route), or decoded from its whole bytes first ("heic", in libheif). The image tier of the preview's category table
@@ -54,4 +55,10 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 		case "heic":
 			return profile.heicNative === "yes"
 	}
+}
+
+// The probe whose answer picks the format's route while it is still unknown: a viewer waits on it rather than take the
+// decoded route an unknown answer reads as.
+export function pendingProbe(format: ImageFormat, profile: DeviceProfile): NativeImageFormat | null {
+	return format.decode === "heic" && profile.heicNative === "unknown" ? "heic" : null
 }

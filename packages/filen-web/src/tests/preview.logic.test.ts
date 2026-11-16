@@ -7,6 +7,9 @@ import {
 	canPreview,
 	canPreviewWith,
 	needsImageTransform,
+	isHeicName,
+	pendingImageProbe,
+	heldImageCap,
 	canOpenAsText,
 	fileTypeExtension,
 	itemTypeExtension,
@@ -449,6 +452,29 @@ describe("archive category", () => {
 	it("never offers Open as text, whatever the size", () => {
 		expect(canOpenAsText(fileNamed("bundle.zip"))).toBe(false)
 		expect(canOpenAsText(fileNamed("data.gz", { size: 1n }))).toBe(false)
+	})
+})
+
+describe("HEIC routing helpers", () => {
+	const native = { ...deviceProfile(), heicNative: "yes" as const }
+	const unknown = { ...deviceProfile(), heicNative: "unknown" as const }
+
+	it("names a HEIF by its extension whatever the browser decodes", () => {
+		expect(isHeicName(fileNamed("photo.HEIC"))).toBe(true)
+		expect(isHeicName(fileNamed("DSCF0001.hif"))).toBe(true)
+		expect(isHeicName(fileNamed("photo.jpg"))).toBe(false)
+		expect(needsImageTransform(fileNamed("photo.heic"), native)).toBe(false)
+	})
+
+	it("holds a HEIF's route on the HEIC probe only while it is unknown", () => {
+		expect(pendingImageProbe(fileNamed("photo.heic"), unknown)).toBe("heic")
+		expect(pendingImageProbe(fileNamed("photo.heic"), native)).toBeNull()
+		expect(pendingImageProbe(fileNamed("photo.jpg"), unknown)).toBeNull()
+		expect(pendingImageProbe(fileNamed("notes.txt"), unknown)).toBeNull()
+	})
+
+	it("caps a HEIF held whole at the image cap", () => {
+		expect(heldImageCap(fileNamed("photo.heic"), native)).toBe(PREVIEW_MAX_BYTES)
 	})
 })
 
