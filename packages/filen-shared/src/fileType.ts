@@ -59,6 +59,8 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["image/heic-sequence", "heic", "toExt"],
 	["image/heif", "heif", "both"],
 	["image/heif-sequence", "heif", "toExt"],
+	// Fujifilm's name for the same container.
+	["image/heif", "hif", "fromExt"],
 	["image/tiff", "tiff", "both"],
 	["video/mp4", "mp4", "both"],
 	["video/webm", "webm", "both"],

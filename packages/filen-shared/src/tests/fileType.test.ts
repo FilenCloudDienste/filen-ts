@@ -243,6 +243,13 @@ describe("mimeForExtension", () => {
 		expect(mimeForExtension("wav")).toBe("audio/wav")
 	})
 
+	it("serves every HEIF name as a HEIF type, and reads no type as .hif", () => {
+		expect(mimeForExtension("heic")).toBe("image/heic")
+		expect(mimeForExtension("heif")).toBe("image/heif")
+		expect(mimeForExtension("hif")).toBe("image/heif")
+		expect(extensionForMime("image/heif")).toBe("heif")
+	})
+
 	it("serves subtitles, calendars, contacts and mail as their own types", () => {
 		expect(mimeForExtension("vtt")).toBe("text/vtt")
 		expect(mimeForExtension("srt")).toBe("application/x-subrip")
