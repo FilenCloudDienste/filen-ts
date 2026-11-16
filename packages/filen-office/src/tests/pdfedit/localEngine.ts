@@ -1,6 +1,6 @@
 import * as mupdf from "mupdf"
 import { PdfEngineClient } from "../../dom/pdfedit/client"
-import type { PdfBitmapLike } from "../../dom/pdfedit/protocol"
+import type { MupdfModule, PdfBitmapLike } from "../../dom/pdfedit/protocol"
 import { servePdfEngine, type PdfEngineScope, type PdfEngineServeOptions } from "../../dom/pdfedit/server"
 
 // An engine served on the test's own thread, its messages delivered synchronously: several calls made in one go reach
@@ -9,7 +9,7 @@ import { servePdfEngine, type PdfEngineScope, type PdfEngineServeOptions } from 
 
 const running: PdfEngineClient[] = []
 
-export function localEngine(options: Partial<PdfEngineServeOptions> = {}): PdfEngineClient {
+export function localEngine(options: Partial<PdfEngineServeOptions> = {}, module: MupdfModule = mupdf): PdfEngineClient {
 	const toServer = new Set<(event: { readonly data: unknown }) => void>()
 	const toClient = new Set<(event: { readonly data: unknown }) => void>()
 	const scope: PdfEngineScope = {
@@ -23,7 +23,7 @@ export function localEngine(options: Partial<PdfEngineServeOptions> = {}): PdfEn
 			toServer.delete(listener)
 		}
 	}
-	const stop = servePdfEngine(mupdf, scope, {
+	const stop = servePdfEngine(module, scope, {
 		readDeadlineMs: 60_000,
 		now: () => performance.now(),
 		toBitmap: (rgba, width, height) => Promise.resolve({ width, height, rgba, close: () => undefined } as unknown as PdfBitmapLike),

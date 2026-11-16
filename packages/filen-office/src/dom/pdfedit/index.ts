@@ -35,6 +35,7 @@ export {
 export type { PdfExtractArgs, PdfExtractBegun } from "./pages/extractRequest"
 export type { PdfSourceAttach } from "./pages/sources"
 export { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost, type ReadDocument } from "./context"
+export { hanFamily, installReadFontHook, readFontFamily, SCRIPT_FAMILY, type ReadFontSource } from "./readFonts"
 export { isMupdfFormat, MUPDF_FORMATS, type MupdfFormat, type MupdfFormatRow } from "./formats"
 export {
 	isFromPdfEngine,

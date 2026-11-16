@@ -1,6 +1,7 @@
 import type * as Mupdf from "mupdf"
 import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import type { MupdfFormat } from "./formats"
+import type { ReadFontSource } from "./readFonts"
 import type { MupdfModule, PdfBitmapLike, PdfEngineFailure, PdfEngineRole } from "./protocol"
 import type { PdfEditSession } from "./editSession"
 import type { TileRenderer } from "./render"
@@ -39,6 +40,9 @@ export interface PdfEngineHost {
 	readonly yieldTask?: () => Promise<void>
 	// Tiles' display lists kept.
 	readonly maxDisplayLists?: number
+	// Where the read role's fallback faces come from (readFonts.ts); without it, text no embedded face covers shows as
+	// missing glyphs.
+	readonly readFonts?: ReadFontSource
 }
 
 export interface OpenDocument {

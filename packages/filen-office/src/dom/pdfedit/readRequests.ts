@@ -6,6 +6,7 @@ import { PDF_OUTLINE_LIMIT, PDF_OUTLINE_MAX_DEPTH } from "../pdf/outline"
 import { isFatalEngineError, PdfEngineRefusal, type PdfEngineContext, type ReadDocument } from "./context"
 import { isMupdfFormat, MUPDF_FORMATS, type MupdfFormat } from "./formats"
 import { drawTile, pageInfos } from "./pageOps"
+import { installReadFontHook } from "./readFonts"
 import type { MupdfLayout, PdfDocumentSummary, PdfEngineArgs, PdfOpenResult, PdfReadMetadata, PdfReadOutlineNode } from "./protocol"
 import { TileRenderer } from "./render"
 import type { PdfHandled, PdfRequestHandler } from "./requests"
@@ -186,12 +187,16 @@ export async function openReadDocument(context: PdfEngineContext, args: PdfEngin
 			: null
 	const bytes = "bytes" in args ? args.bytes : null
 	let document: Mupdf.Document | null = null
+	let release = (): void => undefined
 
 	try {
 		const size = reader?.length ?? bytes?.length ?? 0
 
 		if (await lockedByDrm(format, size, exactReader(reader ?? bytes ?? new Uint8Array(0))))
 			throw new PdfEngineRefusal("notSupported", "the book is locked by DRM")
+
+		// Before the open: laying the book out may already need a face.
+		if (host.readFonts !== undefined) release = installReadFontHook(mupdf, { ...host.readFonts, language: args.language })
 
 		if (reader === null) document = mupdf.Document.openDocument(bytes ?? new Uint8Array(0), row.magic)
 		else {
@@ -219,13 +224,14 @@ export async function openReadDocument(context: PdfEngineContext, args: PdfEngin
 			generation: 0,
 			memory,
 			maxImagePixels,
-			release: () => undefined
+			release
 		})
 
 		return { value: { status: "open", document: summary(document, pageCount), access: "none" } }
 	} catch (error) {
 		document?.destroy()
 		reader?.close()
+		release()
 
 		if (error instanceof PdfEngineRefusal || isFatalEngineError(error)) throw error
 		if (reader?.failure !== null && reader?.failure !== undefined) throw new PdfEngineRefusal("readFailed", reader.failure)
