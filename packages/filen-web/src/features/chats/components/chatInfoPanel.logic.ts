@@ -68,6 +68,11 @@ export function participantRowActions(row: ChatInfoParticipantRow): ParticipantR
 	return actions
 }
 
+// A running participant write, keyed by its kind and participant: block and unblock share "block" (one toggle).
+export function participantPendingKey(kind: "remove" | "block", userId: bigint): string {
+	return `${kind}:${userId.toString()}`
+}
+
 export interface ChatInfoChatActions {
 	rename: ChatActionDescriptor | undefined
 	mute: ChatActionDescriptor | undefined

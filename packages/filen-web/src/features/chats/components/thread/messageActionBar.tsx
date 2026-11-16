@@ -1,4 +1,4 @@
-import { createElement, useState, type ReactElement, type ReactNode } from "react"
+import { createElement, useRef, useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { MoreHorizontalIcon } from "lucide-react"
 import type { MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
@@ -53,11 +53,12 @@ function BarTooltip({
 // reach the same actions (messageThread.tsx).
 //
 // Every button has a tooltip naming it and its message key. The bar is mounted on every row, so its tooltips are created
-// when the pointer enters it and dropped when it leaves: entering swaps each button for its tooltip trigger before the
-// pointer can click, and an open ⋯ menu holds them until it closes, so its trigger is never remounted under it.
+// when a mouse enters it and dropped when it leaves: entering swaps each button for its tooltip trigger before the
+// pointer can click, and an open ⋯ menu holds them until it closes, so its trigger is never remounted under it. Touch and
+// pen never switch them on: a tap's pointerenter would remount the button it is pressing.
 export function MessageActionBar({ descriptors, runAction }: MessageActionsHandle) {
 	const { t } = useTranslation(["chats", "common"])
-	const [pointerInside, setPointerInside] = useState(false)
+	const toolbarRef = useRef<HTMLDivElement | null>(null)
 	const [menuOpen, setMenuOpen] = useState(false)
 	// Switched on by the pointer only: the menu opening never swaps the trigger it is opening from.
 	const [tooltips, setTooltips] = useState(false)
@@ -72,13 +73,13 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 		<div
 			role="toolbar"
 			aria-label={t("chatMessageActionsLabel")}
-			onPointerEnter={() => {
-				setPointerInside(true)
-				setTooltips(true)
+			ref={toolbarRef}
+			onPointerEnter={event => {
+				if (event.pointerType === "mouse") {
+					setTooltips(true)
+				}
 			}}
 			onPointerLeave={() => {
-				setPointerInside(false)
-
 				if (!menuOpen) {
 					setTooltips(false)
 				}
@@ -120,7 +121,9 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 				onOpenChange={open => {
 					setMenuOpen(open)
 
-					if (!open && !pointerInside) {
+					// The pointer may have left the bar for the menu and then the menu itself, which fires no pointerleave on
+					// the bar: whether it is still over the bar is read from the hover state the moment the menu closes.
+					if (!open && toolbarRef.current?.matches(":hover") !== true) {
 						setTooltips(false)
 					}
 				}}

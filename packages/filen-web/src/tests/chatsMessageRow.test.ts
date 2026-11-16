@@ -125,7 +125,7 @@ describe("MessageActionBar tooltips", () => {
 
 		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
 
-		fireEvent.pointerEnter(toolbar)
+		fireEvent.pointerEnter(toolbar, { pointerType: "mouse" })
 
 		const triggers = toolbar.querySelectorAll("[data-slot='tooltip-trigger']")
 
@@ -153,6 +153,38 @@ describe("MessageActionBar tooltips", () => {
 		fireEvent.pointerLeave(toolbar)
 
 		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
+	})
+
+	it("never creates them for a touch or pen, so a tap never remounts the button it presses", () => {
+		renderRow()
+
+		const toolbar = screen.getByRole("toolbar", { name: "Message actions" })
+		const reply = within(toolbar).getByRole("button", { name: "Reply" })
+
+		fireEvent.pointerEnter(toolbar, { pointerType: "touch" })
+		fireEvent.pointerEnter(toolbar, { pointerType: "pen" })
+
+		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
+		expect(within(toolbar).getByRole("button", { name: "Reply" })).toBe(reply)
+	})
+
+	it("drops them when the ⋯ menu closes with the pointer no longer over the bar", async () => {
+		renderRow()
+
+		const toolbar = screen.getByRole("toolbar", { name: "Message actions" })
+
+		fireEvent.pointerEnter(toolbar, { pointerType: "mouse" })
+		fireEvent.click(within(toolbar).getByRole("button", { name: "More actions" }))
+		await screen.findByRole("menu")
+		// Into the menu: the bar holds its tooltips while the menu is open.
+		fireEvent.pointerLeave(toolbar)
+		expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(4)
+
+		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+
+		await waitFor(() => {
+			expect(toolbar.querySelectorAll("[data-slot='tooltip-trigger']")).toHaveLength(0)
+		})
 	})
 })
 

@@ -22,12 +22,16 @@ import { runSetChatMuted } from "@/features/chats/lib/directActions"
 import {
 	chatInfoChatActions,
 	chatInfoParticipantRows,
+	participantPendingKey,
 	participantRowActions,
 	type ChatInfoParticipantRow
 } from "@/features/chats/components/chatInfoPanel.logic"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { isChatInfoNarrow, subscribeToChatInfoBreakpoint, useIsChatInfoNarrow } from "@/features/chats/lib/chatInfoLayout"
 import {
+	CHAT_INFO_PANEL_ID,
+	CHAT_INFO_TITLE_ID,
+	CHAT_INFO_TOGGLE_ID,
 	closeChatInfoDrawer,
 	closeChatInfoPanel,
 	openChatInfo,
@@ -52,11 +56,6 @@ import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
-
-// Mounted at most once (inline beside the thread, or in the sheet), so fixed ids are unique.
-export const CHAT_INFO_PANEL_ID = "chat-info-panel"
-export const CHAT_INFO_TITLE_ID = "chat-info-panel-title"
-export const CHAT_INFO_TOGGLE_ID = "chat-info-toggle"
 
 const SECTION_HEADING_CLASS = "text-xs font-medium tracking-wide text-muted-foreground uppercase"
 
@@ -174,7 +173,9 @@ function ChatInfoSurface({
 	// contacts, no request of its own.
 	const contactsQuery = useContactsQuery({ enabled: true })
 	const [mode, setMode] = useState<"list" | "add">("list")
-	const [pendingUserId, setPendingUserId] = useState<bigint | null>(null)
+	// One entry per running write, by action and participant (participantPendingKey), so a block settling never ends a
+	// removal's spinner or its confirm's, nor the other way round.
+	const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
 	const [removing, setRemoving] = useState<ChatParticipant | null>(null)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [filter, setFilter] = useState("")
@@ -195,11 +196,27 @@ function ChatInfoSurface({
 		refocusAddButton.current = true
 	}
 
+	function setActionPending(key: string, running: boolean): void {
+		setPending(prev => {
+			const next = new Set(prev)
+
+			if (running) {
+				next.add(key)
+			} else {
+				next.delete(key)
+			}
+
+			return next
+		})
+	}
+
 	async function handleRemoveConfirmed(participant: ChatParticipant): Promise<void> {
-		setPendingUserId(participant.userId)
+		const key = participantPendingKey("remove", participant.userId)
+
+		setActionPending(key, true)
 		const outcome = await removeChatParticipant(chat, participant)
-		setPendingUserId(null)
-		setRemoving(null)
+		setActionPending(key, false)
+		setRemoving(current => (current?.userId === participant.userId ? null : current))
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -215,9 +232,11 @@ function ChatInfoSurface({
 			return
 		}
 
-		setPendingUserId(participant.userId)
+		const key = participantPendingKey("block", participant.userId)
+
+		setActionPending(key, true)
 		const outcome = await toggled
-		setPendingUserId(null)
+		setActionPending(key, false)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -326,7 +345,10 @@ function ChatInfoSurface({
 				{row.isOwner ? <span className="shrink-0 text-xs text-muted-foreground">{t("common:participantOwnerBadge")}</span> : null}
 				<ParticipantRowMenu
 					row={row}
-					pending={pendingUserId === participant.userId}
+					pending={
+						pending.has(participantPendingKey("remove", participant.userId)) ||
+						pending.has(participantPendingKey("block", participant.userId))
+					}
 					onRemove={setRemoving}
 					onToggleBlock={(target, isBlockedNow) => {
 						void handleToggleBlock(target, isBlockedNow)
@@ -440,6 +462,7 @@ function ChatInfoSurface({
 	return (
 		<aside
 			id={CHAT_INFO_PANEL_ID}
+			data-chat-uuid={chat.uuid}
 			ref={ref}
 			tabIndex={-1}
 			aria-labelledby={CHAT_INFO_TITLE_ID}
@@ -463,7 +486,7 @@ function ChatInfoSurface({
 			{mode === "list" ? renderListView() : renderAddView()}
 			<ConfirmDialog
 				open={removing !== null}
-				pending={pendingUserId !== null}
+				pending={removing !== null && pending.has(participantPendingKey("remove", removing.userId))}
 				title={t("common:participantRemoveDialogTitle")}
 				body={t("chatParticipantRemoveDialogBody", { email: removing?.email ?? "" })}
 				confirmLabel={t("common:participantRemoveDialogConfirm")}
@@ -520,7 +543,7 @@ function attachInlinePanel(element: HTMLElement | null): (() => void) | undefine
 		return undefined
 	}
 
-	if (takeChatInfoFocusRequest()) {
+	if (takeChatInfoFocusRequest(element.dataset["chatUuid"])) {
 		element.focus()
 	}
 

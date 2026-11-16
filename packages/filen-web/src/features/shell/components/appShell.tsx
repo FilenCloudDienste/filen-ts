@@ -15,6 +15,7 @@ import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPane
 import { setSidebarHidden, useSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { WindowBarSlotContext } from "@/features/shell/lib/windowBarSlot"
 import { SidePanelSlotContext } from "@/features/shell/lib/sidePanelSlot"
+import { contentRoomRef } from "@/features/shell/lib/contentRoom"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
@@ -48,6 +49,10 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 	mounts: MountsSidebar,
 	drive: DriveSidebar
 }
+
+// The content card and the side-panel slot report the room a side panel has beside the card (contentRoom.ts).
+const measureMain = contentRoomRef("main")
+const measureSlot = contentRoomRef("slot")
 
 // The bridge never appears or disappears mid-session.
 const IS_DESKTOP = desktopBridge() !== undefined
@@ -95,6 +100,12 @@ export function AppShell() {
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
 	const [sidePanelSlot, setSidePanelSlot] = useState<HTMLDivElement | null>(null)
+
+	function attachSidePanelSlot(element: HTMLDivElement | null): (() => void) | undefined {
+		setSidePanelSlot(element)
+
+		return measureSlot(element)
+	}
 
 	useDismissBootSplash()
 
@@ -217,15 +228,17 @@ export function AppShell() {
 							</div>
 						)}
 						<main
+							ref={measureMain}
 							data-shell-pane="main"
 							className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane"
 						>
 							<Outlet />
 						</main>
 						{/* A route's own side panel (the chat info panel) is portalled here, between the content card and the
-					    assistant. Out of the layout while empty, so it adds no gap and F6 skips it. */}
+					    assistant. Out of the layout while empty, so it adds no gap and F6 skips it. It and the card are
+					    measured: the panel shows here only while the card keeps its minimum beside it (chatInfoLayout.ts). */}
 						<div
-							ref={setSidePanelSlot}
+							ref={attachSidePanelSlot}
 							data-shell-pane="details"
 							className="flex shrink-0 empty:hidden"
 						/>

@@ -44,7 +44,7 @@ vi.mock("@/features/chats/lib/actions", () => actions)
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => router, useRouterState: () => "" }))
 
 const { ChatInfoHost, ChatInfoToggle } = await import("@/features/chats/components/chatInfoPanel")
-const { useChatInfoStore } = await import("@/features/chats/store/useChatInfoStore")
+const { openChatInfo, useChatInfoStore } = await import("@/features/chats/store/useChatInfoStore")
 const { SidePanelSlotContext } = await import("@/features/shell/lib/sidePanelSlot")
 
 function participant(userId: bigint, email: string, nickName?: string): ChatParticipant {
@@ -106,7 +106,7 @@ beforeEach(() => {
 	viewport.wide = true
 	online.current = true
 	contacts.data = { contacts: [], blocked: [] }
-	useChatInfoStore.setState({ panelOpen: false, drawerChatUuid: null, focusRequested: false })
+	useChatInfoStore.setState({ panelOpen: false, drawerChatUuid: null, focusRequestedFor: null })
 })
 
 afterEach(() => {
@@ -140,6 +140,52 @@ describe("chat info panel — beside the thread", () => {
 
 		expect(within(screen.getByRole("complementary", { name: "Chat info" })).getByText("Other")).toBeTruthy()
 		expect(document.activeElement).toBe(toggle)
+	})
+
+	it("focuses the open panel at once when opened again, arming nothing a later conversation could take", () => {
+		const { rerender } = renderThread()
+		const toggle = screen.getByRole("button", { name: "Participants" })
+		const panel = openPanel()
+
+		toggle.focus()
+		// The menu's entry (or its key) on the conversation whose panel is already showing.
+		act(() => {
+			openChatInfo(testUuid("chat"))
+		})
+
+		expect(document.activeElement).toBe(panel)
+		expect(useChatInfoStore.getState().focusRequestedFor).toBeNull()
+
+		toggle.focus()
+		rerender(
+			<Thread
+				target={chat({ uuid: testUuid("other"), name: "Other" })}
+				blocked={EMPTY_BLOCKED_USERS}
+			/>
+		)
+
+		expect(document.activeElement).toBe(toggle)
+	})
+
+	it("hands focus to the panel of the conversation it was opened for, never to another one's", () => {
+		useChatInfoStore.setState({ panelOpen: true })
+		const { rerender } = renderThread()
+		const toggle = screen.getByRole("button", { name: "Participants" })
+
+		toggle.focus()
+		// Opened from another conversation's row: that conversation opens next.
+		act(() => {
+			openChatInfo(testUuid("other"))
+		})
+		rerender(
+			<Thread
+				target={chat({ uuid: testUuid("other"), name: "Other" })}
+				blocked={EMPTY_BLOCKED_USERS}
+			/>
+		)
+
+		expect(document.activeElement).toBe(screen.getByRole("complementary", { name: "Chat info" }))
+		expect(useChatInfoStore.getState().focusRequestedFor).toBeNull()
 	})
 
 	it("closes on Escape from inside, handing focus back to the toggle", () => {
@@ -280,6 +326,63 @@ describe("chat info panel — participant actions", () => {
 		})
 		// The menu's Escape stayed with the menu: the panel is still open.
 		expect(screen.getByRole("complementary", { name: "Chat info" })).toBeTruthy()
+	})
+
+	it("keeps a removal's confirm pending while a block on someone else settles", async () => {
+		const target = chat()
+		let finishRemove: (value: unknown) => void = () => undefined
+		let finishBlock: (value: unknown) => void = () => undefined
+
+		participants.removeChatParticipant.mockReturnValue(
+			new Promise(resolve => {
+				finishRemove = resolve
+			})
+		)
+		block.toggleParticipantBlocked.mockReturnValue(
+			new Promise(resolve => {
+				finishBlock = resolve
+			})
+		)
+		renderThread(target)
+
+		const panel = openPanel()
+
+		// Carol's block starts first; Bob's remove confirm is not pending because of it.
+		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Carol" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Block" }))
+		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Bob" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
+
+		const confirm = await screen.findByRole("alertdialog")
+		const confirmButton = within(confirm).getByRole<HTMLButtonElement>("button", { name: "Remove" })
+
+		expect(confirmButton.disabled).toBe(false)
+		fireEvent.click(confirmButton)
+		await vi.waitFor(() => {
+			expect(within(confirm).getByRole<HTMLButtonElement>("button", { name: /Remove/ }).disabled).toBe(true)
+		})
+
+		// The block settling leaves the removal running: its confirm stays pending and open.
+		await act(async () => {
+			finishBlock({ status: "success" })
+			await Promise.resolve()
+		})
+		await vi.waitFor(() => {
+			// Behind the modal confirm, so reached as hidden.
+			expect(within(panel).getByRole("button", { name: "Actions for Carol", hidden: true })).toBeTruthy()
+		})
+		expect(screen.getByRole("alertdialog")).toBeTruthy()
+		expect(within(screen.getByRole("alertdialog")).getByRole<HTMLButtonElement>("button", { name: /Remove/ }).disabled).toBe(true)
+		expect(within(panel).queryByRole("button", { name: "Actions for Bob", hidden: true })).toBeNull()
+
+		await act(async () => {
+			finishRemove({ status: "success", item: target })
+			await Promise.resolve()
+		})
+		await vi.waitFor(() => {
+			expect(screen.queryByRole("alertdialog")).toBeNull()
+		})
+		expect(within(panel).getByRole("button", { name: "Actions for Bob" })).toBeTruthy()
 	})
 
 	it("adds contacts from the picker inside the panel, then returns to the list", async () => {
