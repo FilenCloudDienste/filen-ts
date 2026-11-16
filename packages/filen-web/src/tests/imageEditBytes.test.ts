@@ -9,7 +9,7 @@ import {
 	walkJpegSegments
 } from "@/features/preview/imageEdit/lib/jpegMeta"
 import { buildPng, pngChunk, walkPngChunks } from "@/features/preview/imageEdit/lib/pngMeta"
-import { sniffImage } from "@/features/preview/imageEdit/lib/sniff"
+import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 import { buildWebp, walkWebpChunks } from "@/features/preview/imageEdit/lib/webpMeta"
 
 // ── Byte helpers ─────────────────────────────────────────────────────────────

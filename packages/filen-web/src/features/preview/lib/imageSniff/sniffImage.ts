@@ -24,6 +24,7 @@ import {
 	walkWebpChunks
 } from "@/features/preview/imageEdit/lib/webpMeta"
 import type { Orientation, SourceInfo } from "@/features/preview/imageEdit/types"
+import { startsWith, viewOf } from "@/features/preview/lib/imageSniff/bytes"
 
 // What an image's leading bytes say about it, from its magic and headers (never its name). `head` is the start of
 // the file (the whole file when small), `totalSize` the file's length. Retained metadata (ICC, Exif) is copied out
@@ -46,10 +47,6 @@ const BASE: Readonly<Base> = {
 // Orientations 5..8 swap the axes.
 function swapsAxes(orientation: Orientation): boolean {
 	return orientation >= 5
-}
-
-function viewOf(bytes: Uint8Array): DataView {
-	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 }
 
 // ── JPEG ─────────────────────────────────────────────────────────────────────
@@ -576,10 +573,6 @@ function sniffIco(head: Uint8Array): SourceInfo | null {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-
-function startsWith(bytes: Uint8Array, magic: readonly number[], at = 0): boolean {
-	return bytes.length >= at + magic.length && magic.every((byte, i) => bytes[at + i] === byte)
-}
 
 export function sniffImage(head: Uint8Array, totalSize: number): SourceInfo | null {
 	if (startsWith(head, [0xff, 0xd8, 0xff])) {
