@@ -1,14 +1,18 @@
-import { readFileSync } from "node:fs"
-import type { Locator, Page } from "@playwright/test"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { Locator, Page, Worker } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LAZY_VIEWER_TIMEOUT_MS, LARGE_UPLOAD_TIMEOUT_MS, uploadDiskFiles, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
-import { observeEgest } from "./helpers/requests"
+import { observeEgest, type EgestObserver } from "./helpers/requests"
 import { latinDocument } from "../scripts/pdf-fixtures/view/documents"
+import { RESIDENT_PDF_PAGES, writeResidentPdf } from "./fixtures/w4"
 
 // The PDF viewer reads a drive file on demand: a large file shows page 1 after downloading only part of it (counted
-// in the SDK's chunk requests, one per MiB), and the self-hosted pdf.js data files draw non-embedded CJK text,
-// JPEG 2000, JBIG2 and CMYK pages, all under the CSP.
+// in the SDK's chunk requests, one per MiB), a document that has read past the device's resident limit is reopened
+// where it was shown, and the self-hosted pdf.js data files draw non-embedded CJK text, JPEG 2000, JBIG2 and CMYK
+// pages, all under the CSP.
 test.describe.configure({ mode: "default" })
 
 const PDF_MIME = "application/pdf"
@@ -196,5 +200,147 @@ test("the viewer's own data files draw CJK text, JPEG 2000, JBIG2 and CMYK pages
 	expect(assets.some(path => path.endsWith("/openjpeg.wasm"))).toBe(true)
 	expect(assets.some(path => path.endsWith("/jbig2.wasm"))).toBe(true)
 	expect(assets.some(path => path.includes("quickjs"))).toBe(false)
+	expect(cspViolations).toEqual([])
+})
+
+// Resolves once no chunk request has started for `quietMs`: the reads of a scroll or a render have settled, and with
+// them the viewer's own wait (1 s idle) before it reopens a document over its resident limit.
+async function egestSettled(egest: EgestObserver, quietMs: number): Promise<void> {
+	let seen = -1
+	let since = Date.now()
+
+	await expect
+		.poll(
+			() => {
+				const now = egest.requests()
+
+				if (now !== seen) {
+					seen = now
+					since = Date.now()
+				}
+
+				return Date.now() - since >= quietMs
+			},
+			{ timeout: LAZY_VIEWER_TIMEOUT_MS, intervals: [100] }
+		)
+		.toBe(true)
+}
+
+// The chunks a document opened again reads to show page `shown`: the header and catalog, every page's own dictionary
+// (pdf.js walks the page tree at open), the pages within two of the one in view with their images (the view's
+// read-ahead margin), and the cross-reference table at the end.
+function reopenChunks(layout: ReturnType<typeof writeResidentPdf>, shown: number): number {
+	const chunks = new Set<number>()
+	const add = (from: number, to: number): void => {
+		for (let chunk = Math.floor(from / CHUNK); chunk <= Math.floor((to - 1) / CHUNK); chunk++) chunks.add(chunk)
+	}
+	const first = layout.pages[0]
+	const last = layout.pages.at(-1)
+
+	if (first === undefined || last === undefined) throw new Error("no pages")
+
+	add(0, first[0])
+
+	layout.pages.forEach(([start, end], index) => {
+		const page = index + 1
+
+		if (Math.abs(page - shown) <= 2) add(start, end)
+		else add(start, start + 1)
+	})
+
+	add(last[1], layout.length)
+
+	return chunks.size
+}
+
+// 20 pages of one 16 MiB image each (fixtures/w4.ts): viewed in turn, pdf.js reads past the desktop's 256 MiB resident
+// limit. Once those reads settle the viewer opens the document again (a new pdf.js worker, the old one going once the
+// new one shows), on the page and at the zoom it was showing, and the new document reads only what is near the view.
+test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page }, testInfo) => {
+	// The write lane's 900s holds the scratch directory's brackets; on top of them a 320 MiB upload (its own budget)
+	// and twenty 16-megapixel page renders.
+	test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + 300_000)
+
+	const cspViolations = trackCspViolations(page)
+	const dir = mkdtempSync(join(tmpdir(), "filen-e2e-resident-"))
+
+	try {
+		await withScratchDirectory(page, "pdf-resident", async ({ listbox, runId }) => {
+			const name = `e2e-pdf-resident-${runId}.pdf`
+			const layout = writeResidentPdf(join(dir, name))
+
+			await uploadDiskFiles(page, [join(dir, name)], listbox)
+
+			// The upload warm draws the row's thumbnail from the local file on a pdf.js worker of its own: done before
+			// the viewer's workers are counted.
+			await expect(listbox.getByRole("option", { name }).locator("img")).toHaveAttribute("src", /^blob:/, {
+				timeout: LAZY_VIEWER_TIMEOUT_MS
+			})
+
+			const egest = observeEgest(page.context())
+			const workers: Worker[] = []
+			const closed = new Set<Worker>()
+			let atReopen = -1
+
+			page.on("worker", worker => {
+				if (!/\/pdf\.worker[-.]/u.test(worker.url())) return
+
+				workers.push(worker)
+				worker.on("close", () => closed.add(worker))
+
+				if (workers.length === 2) atReopen = egest.requests()
+			})
+
+			// A desktop window: about one page in view at 200%.
+			await page.setViewportSize({ width: 1280, height: 720 })
+
+			const dialog = await openPdf(page, listbox, name)
+			const field = dialog.getByRole("textbox", { name: "Page number" })
+			const rendered = (n: number): Locator => dialog.locator(`[data-page="${String(n)}"][data-rendered="true"]`)
+
+			await expect(rendered(1)).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+			await dialog.getByRole("button", { name: /^Zoom level/u }).click()
+			await page.getByRole("menuitemradio", { name: "200%" }).click()
+			await expect(dialog.getByRole("button", { name: "Zoom level, 200%" })).toBeVisible()
+
+			let shown = 1
+
+			for (let next = 2; next <= RESIDENT_PDF_PAGES && workers.length < 2; next++) {
+				await field.fill(String(next))
+				await field.press("Enter")
+				await expect(rendered(next)).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+				shown = next
+				await egestSettled(egest, 1_500)
+			}
+
+			const [opened] = workers
+
+			if (workers.length < 2 || opened === undefined) {
+				await testInfo.attach("chunk-requests", {
+					body: `${String(egest.requests())} after page ${String(shown)}`,
+					contentType: "text/plain"
+				})
+			}
+
+			expect(workers.length, "the document was opened again").toBeGreaterThanOrEqual(2)
+			// The first document goes once the second shows.
+			await expect.poll(() => opened !== undefined && closed.has(opened), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBe(true)
+
+			// Same page, same zoom, drawn by the new document.
+			await expect(field).toHaveValue(String(shown))
+			await expect(dialog.getByRole("button", { name: "Zoom level, 200%" })).toBeVisible()
+			await expect(rendered(shown)).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+			await egestSettled(egest, 1_500)
+
+			const afterReopen = egest.requests() - atReopen
+
+			expect(afterReopen).toBeLessThanOrEqual(reopenChunks(layout, shown))
+			// Opened once more for it, not again and again.
+			expect(workers.length).toBe(2)
+		})
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+
 	expect(cspViolations).toEqual([])
 })

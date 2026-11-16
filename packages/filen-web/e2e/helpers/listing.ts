@@ -1,3 +1,4 @@
+import { basename } from "node:path"
 import type { Locator, Page } from "@playwright/test"
 import { expect, settleLeases } from "../fixtures"
 import { waitForE2eHooks } from "./e2eHooks"
@@ -374,6 +375,22 @@ export async function uploadFiles(page: Page, files: UploadFile[], listbox?: Loc
 
 	for (const { name } of files) {
 		await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	}
+
+	await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+}
+
+// A file of a few hundred MiB is encrypted and sent chunk by chunk before its row lands: far past a small write's
+// budget on a CI runner, and paid once per spec that uploads one.
+export const LARGE_UPLOAD_TIMEOUT_MS = 600_000
+
+// uploadFiles for files written on disk (the big fixtures, which never pass through the Playwright bridge as a
+// buffer): each lands under its own base name.
+export async function uploadDiskFiles(page: Page, paths: readonly string[], listbox: Locator): Promise<void> {
+	await fileInput(page).setInputFiles([...paths])
+
+	for (const path of paths) {
+		await expect(listbox.getByRole("option", { name: basename(path) })).toBeVisible({ timeout: LARGE_UPLOAD_TIMEOUT_MS })
 	}
 
 	await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })

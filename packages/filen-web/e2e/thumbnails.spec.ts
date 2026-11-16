@@ -4,6 +4,8 @@ import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { waitForSwReady } from "./helpers/sw"
+import { observeEgest } from "./helpers/requests"
+import { PDF_THUMB_LARGE_BYTES } from "./fixtures/w4"
 
 // The one live proof the whole thumbnail pipeline works end to end: a real SDK decode inside the sdk
 // worker (range reads against the stored file, a webp encode in wasm, nothing ever downloaded into JS),
@@ -162,4 +164,30 @@ test("a video row renders a real thumbnail off the service worker's stream", asy
 	await expect(videoThumb).toHaveAttribute("src", /^blob:/)
 
 	expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
+})
+
+// A PDF's thumbnail reads page 1 by range, whatever the file's size: the 100 MiB fixture keeps page 1 in its first
+// block and its cross-reference table in its last (fixtures/w4.ts), so drawing it costs two of its 100 chunk requests,
+// and at most four (pdf.js may probe a block beside each). Counted over the whole context from before boot: nothing
+// else in that listing has a thumbnail to read, and the fixture setup's upload warm drew its own thumbnail in another
+// context, so this one is generated here, on the drive side.
+test("a 100 MiB PDF gets a thumbnail after at most four chunk requests", async ({ page }) => {
+	const cspViolations = trackCspViolations(page)
+	const egest = observeEgest(page.context())
+
+	await bootTo(page)
+
+	const {
+		rows: [row]
+	} = await openFixtureRows(page, "pdf-thumb-large")
+	const thumb = row.locator("img")
+
+	await expect(thumb).toHaveAttribute("src", /^blob:/, { timeout: 60_000 })
+
+	const requests = egest.requests()
+
+	expect(requests).toBeGreaterThan(0)
+	expect(requests).toBeLessThanOrEqual(4)
+	expect(await egest.bytes()).toBeLessThan(PDF_THUMB_LARGE_BYTES / 16)
+	expect(cspViolations).toEqual([])
 })
