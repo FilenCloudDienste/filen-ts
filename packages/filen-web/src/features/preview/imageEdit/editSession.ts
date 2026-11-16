@@ -4,7 +4,7 @@ import { extensionOf, needsImageTransform } from "@/features/drive/lib/preview.l
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
-import { decodeHeicRgba } from "@/features/preview/lib/heicTransform"
+import { decodeHeicRgba } from "@/features/preview/lib/rasterDecode"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 import { saveTargets } from "@/features/preview/imageEdit/lib/targets"

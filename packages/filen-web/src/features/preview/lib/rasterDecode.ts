@@ -1,50 +1,30 @@
 import * as Comlink from "comlink"
-import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
-import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
-import { idleResource } from "@/lib/idleResource"
-import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import RasterDecodeWorker from "@/features/preview/workers/rasterDecode.worker.ts?worker"
+import type { RasterDecodeWorkerApi } from "@/features/preview/workers/rasterDecode.worker"
+import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
+import type { IdleResource } from "@/lib/idleResource"
 
-// libheif's wasm memory grows to fit the largest image it has decoded and can never shrink, so each
-// worker is torn down once it has sat idle; a later HEIC spins up a fresh one.
-const HEIC_WORKER_IDLE_MS = 30_000
+// A decoder's wasm memory grows to fit the largest image it has decoded and can never shrink, so each worker is torn
+// down once it has sat idle; a later decode spins up a fresh one. Sign-out terminates both at once, busy or idle.
+const RASTER_DECODE_IDLE_MS = 30_000
 
 // Two decodes at once: a batch of uploads or a preview stepped through quickly keeps two cores busy,
 // while each worker's heap stays bounded by the one image it decodes at a time.
-const HEIC_WORKERS = 2
+const RASTER_DECODE_WORKERS = 2
 
-// Each spun up on demand, not at module load — most sessions never open a HEIC, and a lone transform only
-// ever wakes the first. Wrapped with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers
-// (client.ts, storage/leader.ts); unlike those, these have no cross-tab role. A failed spin-up isn't
-// cached, so the next attempt gets a fresh worker instead of staying broken for the rest of the tab
-// session.
-function pooledWorker() {
-	return idleResource(
-		() => {
-			const worker = new HeicWorker()
-			// A deploy that changed this worker removes its old file (appUpdate.ts).
-			worker.addEventListener("error", () => {
-				recoverIfNewerBuild()
-			})
+type PooledWorker = IdleResource<WorkerHandle<RasterDecodeWorkerApi>>
 
-			return { worker, remote: Comlink.wrap<HeicWorkerApi>(worker) }
-		},
-		({ worker, remote }) => {
-			remote[Comlink.releaseProxy]()
-			worker.terminate()
-		},
-		HEIC_WORKER_IDLE_MS
-	)
-}
-
-type PooledWorker = ReturnType<typeof pooledWorker>
-
-const heicWorkers = Array.from({ length: HEIC_WORKERS }, pooledWorker)
-// Workers with no transform posted, the first last so it is the one taken next: a lone transform keeps
+// Each spun up on demand, not at module load: most sessions never open an image our code decodes, and a lone decode
+// only ever wakes the first. A failed spin-up isn't cached, so the next attempt gets a fresh worker.
+const decodeWorkers: readonly PooledWorker[] = Array.from({ length: RASTER_DECODE_WORKERS }, (_, i) =>
+	statelessWorker<RasterDecodeWorkerApi>(() => new RasterDecodeWorker(), RASTER_DECODE_IDLE_MS, `raster-decode-${String(i + 1)}`)
+)
+// Workers with no decode posted, the first last so it is the one taken next: a lone decode keeps
 // reusing the same worker and the other idles out.
-const freeWorkers = heicWorkers.toReversed()
-const waiting: ((heic: PooledWorker) => void)[] = []
+const freeWorkers = decodeWorkers.toReversed()
+const waiting: ((worker: PooledWorker) => void)[] = []
 
-// One transform posted per worker. A worker decodes its jobs one by one anyway, and every job queued
+// One decode posted per worker. A worker decodes its jobs one by one anyway, and every job queued
 // there holds its own copy of the file; waiting here instead lets a caller that went away (a preview
 // stepped past) drop out before anything is copied or posted.
 function takeWorker(): Promise<PooledWorker> {
@@ -59,33 +39,33 @@ function takeWorker(): Promise<PooledWorker> {
 	})
 }
 
-function giveBack(heic: PooledWorker): void {
+function giveBack(worker: PooledWorker): void {
 	const next = waiting.shift()
 
 	if (next !== undefined) {
-		next(heic)
+		next(worker)
 
 		return
 	}
 
-	freeWorkers.push(heic)
+	freeWorkers.push(worker)
 }
 
 async function onWorker<T>(
 	take: () => Uint8Array,
 	signal: AbortSignal | undefined,
-	run: (remote: Comlink.Remote<HeicWorkerApi>, bytes: Uint8Array) => Promise<T>
+	run: (remote: Comlink.Remote<RasterDecodeWorkerApi>, bytes: Uint8Array) => Promise<T>
 ): Promise<T> {
-	const heic = await takeWorker()
+	const worker = await takeWorker()
 
 	try {
 		signal?.throwIfAborted()
 
 		const bytes = take()
 
-		return await heic.use(({ remote }) => run(remote, Comlink.transfer(bytes, [bytes.buffer])))
+		return await worker.use(({ remote }) => run(remote, Comlink.transfer(bytes, [bytes.buffer])))
 	} finally {
-		giveBack(heic)
+		giveBack(worker)
 	}
 }
 
@@ -129,11 +109,4 @@ export async function decodeHeicRgba(
 		signal,
 		(remote, copy) => remote.decodeRgba(copy)
 	)
-}
-
-// Logout: nothing of the previous session's photos should outlive it in a worker's heap.
-export function releaseHeicWorker(): void {
-	for (const heic of heicWorkers) {
-		heic.disposeIfIdle()
-	}
 }

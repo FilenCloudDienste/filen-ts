@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
 import { Semaphore } from "@filen/shared"
-import { runHeicDecodeRgba, runHeicTransform, productionDeps, type DecodedHeicImage } from "@/features/preview/lib/heicCodec"
+import { runHeicDecodeRgba, runHeicTransform, productionDeps, type DecodedHeicImage } from "@/features/preview/lib/rasterCodecs/heic"
 
-// Thin glue only — heicCodec.ts owns every real step (decode, orientation, freeing WASM handles, JPEG
-// encode, error normalization). One of heicTransform.ts's two pooled workers, each spun up lazily;
-// every call while it lives reuses this same instance, so heicCodec.ts's own decoder memoization
+// Thin glue only — rasterCodecs/heic.ts owns every real step (decode, orientation, freeing WASM handles, JPEG
+// encode, error normalization). One of rasterDecode.ts's two pooled workers, each spun up lazily;
+// every call while it lives reuses this same instance, so rasterCodecs/heic.ts's own decoder memoization
 // (getSharedDecoder) applies across calls.
 //
 // Comlink runs an async handler per message without waiting for the previous one, and a transform
@@ -37,6 +37,6 @@ const api = {
 	}
 }
 
-export type HeicWorkerApi = typeof api
+export type RasterDecodeWorkerApi = typeof api
 
 Comlink.expose(api)

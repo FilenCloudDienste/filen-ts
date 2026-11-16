@@ -568,7 +568,7 @@ export function isStreamedCategory(category: PreviewCategory): category is Strea
 
 // An "image"-category item this browser cannot show from the service worker's stream (HEIC/HEIF without a native
 // decoder): imageViewer.tsx routes it through the buffered download and a client-side transform
-// (features/preview/lib/heicTransform.ts) instead. Keyed on the same type extension as previewType, so a HEIC-named
+// (features/preview/lib/rasterDecode.ts) instead. Keyed on the same type extension as previewType, so a HEIC-named
 // file always routes here whatever its mime says (mediaType.ts refuses it the inline route through this too).
 export function needsImageTransform(item: DriveItem, profile: DeviceProfile = deviceProfile()): boolean {
 	const format = IMAGE_FORMATS.get(itemTypeExtension(item))

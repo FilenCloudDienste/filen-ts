@@ -27,7 +27,6 @@ import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { releaseAllPreviewWorkers } from "@/lib/workers/ownedWorker"
 import { clearArchiveListings } from "@/features/archive/lib/listingCache"
-import { releaseHeicWorker } from "@/features/preview/lib/heicTransform"
 import { releaseImageEditWorker } from "@/features/preview/imageEdit/renderClient"
 import { releaseVideoEditWorkers } from "@/features/preview/videoEdit/client"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
@@ -154,15 +153,13 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
-	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits,
-	// any idle HEIC worker whose heap still holds this account's decoded photos, the image editor's
-	// render worker with the picture it was editing, and the video editor's preview worker. The preview registry
-	// terminates every other preview worker at once, busy ones included (the remux worker among them), and closes
-	// whatever else a preview still holds (the ports it serves).
+	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits, the image
+	// editor's render worker with the picture it was editing, and the video editor's preview worker. The preview registry
+	// terminates every other preview worker at once, busy ones included (the raster decoders whose heaps hold this
+	// account's decoded photos, the remux worker), and closes whatever else a preview still holds (the ports it serves).
 	clearPreviewCache()
 	releaseAllPreviewWorkers()
 	clearArchiveListings()
-	releaseHeicWorker()
 	releaseImageEditWorker()
 	releaseVideoEditWorkers()
 	// Videos probes, artwork and frames held for this account, and the frame worker's heap; the drive's own

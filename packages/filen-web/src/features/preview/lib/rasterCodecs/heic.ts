@@ -3,10 +3,10 @@ import { log } from "@/lib/log"
 
 // Pure decode (HEIC/HEIF bytes -> RGBA) + encode (RGBA -> JPEG Blob) logic, dependency-injected so
 // runHeicTransform below runs in node against a fake decoder (see heicCodec.test.ts) with no WASM and
-// no OffscreenCanvas involved. heic.worker.ts is the only real caller: browsers can't decode HEIC/HEIF
+// no OffscreenCanvas involved. rasterDecode.worker.ts is the only real caller: browsers can't decode HEIC/HEIF
 // natively (preview.logic.ts's needsImageTransform), and libheif's decode is a synchronous embind call
 // — running it in place would freeze the tab for as long as a multi-megapixel photo takes to decode.
-// imageViewer.tsx never imports this file directly; heicTransform.ts is its entry point and owns
+// imageViewer.tsx never imports this file directly; rasterDecode.ts is its entry point and owns
 // getting bytes to that worker and a Blob back.
 
 // Matches the old web app's HEIC->JPEG quality. That app reaches JPEG output via a WebP-first path
@@ -146,7 +146,7 @@ async function initLibheifDecoder(): Promise<HeicDecoderModule> {
 	return lib
 }
 
-// Runs worker-side — this module's only real caller is heic.worker.ts — where OffscreenCanvas is fully
+// Runs worker-side — this module's only real caller is rasterDecode.worker.ts — where OffscreenCanvas is fully
 // spec'd to work with no main-thread handoff, and is available in every browser this app targets
 // (Chromium, Firefox, Safari 16.4+). Encoding here rather than on the main thread means the only thing
 // crossing back over Comlink is the final JPEG Blob, not the much larger raw RGBA buffer
@@ -164,17 +164,17 @@ async function encodeJpegReal(pixels: DecodedHeicImage, quality: number): Promis
 	return await canvas.convertToBlob({ type: "image/jpeg", quality })
 }
 
-// heic.worker.ts's only wiring: the real decoder + real encoder, handed to runHeicTransform below.
+// rasterDecode.worker.ts's only wiring: the real decoder + real encoder, handed to runHeicTransform below.
 export const productionDeps: HeicTransformDeps = {
 	getDecoder: initLibheifDecoder,
 	encodeJpeg: encodeJpegReal
 }
 
-// DI'd core: heic.worker.ts wires productionDeps for the real path; tests inject fakes so the
+// DI'd core: rasterDecode.worker.ts wires productionDeps for the real path; tests inject fakes so the
 // memoization + error-mapping below run with no WASM/OffscreenCanvas involved. This is also the
 // boundary every failure mode gets normalized at, before a thrown value has any chance to cross the
-// worker's postMessage hop back to its caller (see heic.worker.test.ts for why that ordering matters).
-// Always full-resolution JPEG, and NOT preview-only: heicTransform.ts feeds this same worker path both
+// worker's postMessage hop back to its caller (see rasterDecode.worker.test.ts for why that ordering matters).
+// Always full-resolution JPEG, and NOT preview-only: rasterDecode.ts feeds this same worker path both
 // imageViewer.tsx and convert-on-upload (heicUpload.ts's defaultHeicUploadConvertDeps), so JPEG_QUALITY
 // and the always-JPEG rule decide the bytes an upload STORES on the user's drive, not just what a
 // preview shows. The downscaled webp-first encode this once offered behind a maxDimension option is

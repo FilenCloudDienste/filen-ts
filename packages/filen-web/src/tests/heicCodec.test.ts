@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { HeicTransformDeps } from "@/features/preview/lib/heicCodec"
+import type { HeicTransformDeps } from "@/features/preview/lib/rasterCodecs/heic"
 import { depsFor, fakeLib } from "@/tests/heicFakes"
 
-// heicCodec.ts keeps its shared-decoder memoization in a module-level `let`, so every test needs its
+// rasterCodecs/heic.ts keeps its shared-decoder memoization in a module-level `let`, so every test needs its
 // own module instance -- vi.resetModules() + a dynamic re-import before each one (mirrors
 // saveDownload.test.ts's own freshModule() pattern), instead of a reset export added just for tests.
 // log is hoisted-mocked up front: a plain vi.spyOn on the statically-imported instance wouldn't reach
@@ -15,7 +15,7 @@ vi.mock("@/lib/log", () => ({
 
 async function freshModule() {
 	vi.resetModules()
-	return import("@/features/preview/lib/heicCodec")
+	return import("@/features/preview/lib/rasterCodecs/heic")
 }
 
 afterEach(() => {

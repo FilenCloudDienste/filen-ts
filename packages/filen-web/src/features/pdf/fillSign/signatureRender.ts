@@ -3,7 +3,7 @@ import type { PdfSignatureImage } from "@filen/office/core/pdfedit/visualSignatu
 import { PDF_SIGNATURE_MAX_PNG_BYTES } from "@filen/shared/pdfSignatures"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
-import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
+import { transformHeicBytesOwned } from "@/features/preview/lib/rasterDecode"
 import {
 	needsSignatureFallback,
 	SIGNATURE_FALLBACK_FAMILY,

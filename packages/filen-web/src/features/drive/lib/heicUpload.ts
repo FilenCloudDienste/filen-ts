@@ -3,7 +3,7 @@ import { extensionStart, Semaphore } from "@filen/shared"
 import { kvPreference } from "@/lib/storage/preference"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
-import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
+import { transformHeicBytesOwned } from "@/features/preview/lib/rasterDecode"
 import { log } from "@/lib/log"
 
 // ── Preference ───────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ export const defaultHeicUploadConvertDeps: HeicUploadConvertDeps = { transform: 
 
 // Both upload entry points start every file's conversion at once. Without a bound, a large HEIC batch
 // would read every source file into memory together while the workers decode them two at a time. Two,
-// one per HEIC worker (heicTransform.ts), so no file sits in memory waiting for a decode; SDK upload
+// one per raster decode worker (rasterDecode.ts), so no file sits in memory waiting for a decode; SDK upload
 // concurrency is untouched.
 const heicConvertLock = new Semaphore(2)
 

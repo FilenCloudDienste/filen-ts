@@ -18,7 +18,6 @@ const {
 	clearAllTyping,
 	detachUnreadBadges,
 	disposeAudioEngine,
-	releaseHeicWorker,
 	releaseImageEditWorker,
 	resetConversationHistory,
 	shutdownAssistant,
@@ -54,7 +53,6 @@ const {
 		clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
 		detachUnreadBadges: vi.fn(record("detachUnreadBadges", () => undefined)),
 		disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
-		releaseHeicWorker: vi.fn(record("releaseHeicWorker", () => undefined)),
 		releaseImageEditWorker: vi.fn(record("releaseImageEditWorker", () => undefined)),
 		resetConversationHistory: vi.fn(record("resetConversationHistory", () => undefined)),
 		shutdownAssistant: vi.fn(record("shutdownAssistant", () => undefined)),
@@ -89,7 +87,6 @@ const TEARDOWN_STEPS = [
 	"clearAllTyping",
 	"detachUnreadBadges",
 	"disposeAudioEngine",
-	"releaseHeicWorker",
 	"releaseImageEditWorker",
 	"resetVideoSession",
 	"resetConversationHistory",
@@ -124,7 +121,7 @@ vi.mock("@/features/videos/lib/watchState", () => ({ watchState: { cancel: watch
 vi.mock("@/features/audio/lib/audioEngine", () => ({ disposeAudioEngine }))
 vi.mock("@/features/assistant/store/conversationHistory", () => ({ resetConversationHistory, withHistoryWritesHeld }))
 vi.mock("@/features/assistant/store/assistantSession", () => ({ shutdownAssistant }))
-vi.mock("@/features/preview/lib/heicTransform", () => ({ releaseHeicWorker, transformHeicBytesOwned: vi.fn() }))
+vi.mock("@/features/preview/lib/rasterDecode", () => ({ transformHeicBytesOwned: vi.fn() }))
 vi.mock("@/features/preview/imageEdit/renderClient", () => ({ releaseImageEditWorker }))
 vi.mock("@/queries/client", () => ({ queryClient: { cancelQueries: vi.fn(), clear: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
@@ -361,7 +358,6 @@ describe("performLogout — pre-wipe teardown", () => {
 			clearAllTyping,
 			detachUnreadBadges,
 			disposeAudioEngine,
-			releaseHeicWorker,
 			releaseImageEditWorker,
 			socketStop
 		]) {

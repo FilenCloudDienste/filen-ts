@@ -1,5 +1,5 @@
 import { vi } from "vitest"
-import type { HeicDecoderModule, HeicTransformDeps } from "@/features/preview/lib/heicCodec"
+import type { HeicDecoderModule, HeicTransformDeps } from "@/features/preview/lib/rasterCodecs/heic"
 
 interface FakeImageTarget {
 	width: number

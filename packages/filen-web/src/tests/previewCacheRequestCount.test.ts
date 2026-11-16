@@ -52,7 +52,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	isFsaAvailable: () => typeof window.showSaveFilePicker === "function",
 	isPickerCancelled: () => false
 }))
-vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes, transformHeicBytesOwned: transformHeicBytes }))
+vi.mock("@/features/preview/lib/rasterDecode", () => ({ transformHeicBytes, transformHeicBytesOwned: transformHeicBytes }))
 
 const createObjectURL = vi.fn<(object: Blob | MediaSource) => string>(() => "blob:test")
 

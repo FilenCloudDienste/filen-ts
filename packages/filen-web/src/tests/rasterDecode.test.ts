@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// heicTransform.ts's client-side contract: lazily spins up + memoizes a pool of two workers (never
+// rasterDecode.ts's client-side contract: lazily spins up + memoizes a pool of two workers (never
 // at module load), wraps each with Comlink, and forwards transform() calls through it. The worker
-// itself is heic.worker.ts, which heic.worker.test.ts already pins over a real MessageChannel — this
-// file only needs to prove heicTransform.ts's OWN seam (lazy spin-up, memoization, retry-after-failure,
+// itself is rasterDecode.worker.ts, which rasterDecode.worker.test.ts already pins over a real MessageChannel — this
+// file only needs to prove rasterDecode.ts's OWN seam (lazy spin-up, memoization, retry-after-failure,
 // transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
 // Comlink.wrap are replaced with plain fakes rather than a second real worker boundary.
 
@@ -17,12 +17,12 @@ const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock
 	releaseMock: vi.fn()
 }))
 
-vi.mock("@/features/preview/workers/heic.worker.ts?worker", () => ({ default: WorkerCtor }))
+vi.mock("@/features/preview/workers/rasterDecode.worker.ts?worker", () => ({ default: WorkerCtor }))
 vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild }))
 
 // wrap() is faked (no real postMessage boundary here — that round trip, including genuine buffer
-// detachment, is already proven by heic.worker.test.ts). transfer() stays real but spied on: it's
-// heicTransform.ts's own responsibility to mark the bytes as transferable with the right transfer
+// detachment, is already proven by rasterDecode.worker.test.ts). transfer() stays real but spied on: it's
+// rasterDecode.ts's own responsibility to mark the bytes as transferable with the right transfer
 // list, which is what this file actually needs to pin.
 vi.mock("comlink", async importOriginal => {
 	const actual = await importOriginal<typeof import("comlink")>()
@@ -54,7 +54,11 @@ async function freshModule() {
 	})
 	const { releaseProxy } = await import("comlink")
 	wrap.mockImplementation(() => ({ transform: transformMock, [releaseProxy]: releaseMock }))
-	return import("@/features/preview/lib/heicTransform")
+	const module = await import("@/features/preview/lib/rasterDecode")
+	// The registry of the same module instance the pool registered its workers with.
+	const { releaseAllPreviewWorkers } = await import("@/lib/workers/ownedWorker")
+
+	return { ...module, releaseAllPreviewWorkers }
 }
 
 afterEach(() => {
@@ -207,8 +211,8 @@ describe("heic worker lifetime", () => {
 		expect(WorkerCtor).toHaveBeenCalledTimes(2)
 	})
 
-	it("never terminates while a transform is still running", async () => {
-		const { transformHeicBytes, releaseHeicWorker } = await freshModule()
+	it("never idles out while a transform is still running", async () => {
+		const { transformHeicBytes } = await freshModule()
 		vi.useFakeTimers()
 		let finish: (blob: Blob) => void = () => undefined
 		transformMock.mockImplementation(
@@ -221,14 +225,29 @@ describe("heic worker lifetime", () => {
 		const running = transformHeicBytes(new Uint8Array([1]))
 
 		await vi.advanceTimersByTimeAsync(60_000)
-		releaseHeicWorker()
 
 		expect(terminateMock).not.toHaveBeenCalled()
 
 		finish(new Blob())
 		await running
-		releaseHeicWorker()
+		await vi.advanceTimersByTimeAsync(30_000)
 
+		expect(terminateMock).toHaveBeenCalledTimes(1)
+	})
+
+	// Sign-out does not wait for a decode: the worker holding this account's photo ends at once.
+	it("is terminated at sign-out while busy, and its transform rejects as cancelled", async () => {
+		const { transformHeicBytes, releaseAllPreviewWorkers } = await freshModule()
+		transformMock.mockImplementation(() => new Promise<Blob>(() => undefined))
+
+		const running = transformHeicBytes(new Uint8Array([1]))
+
+		await vi.waitFor(() => {
+			expect(transformMock).toHaveBeenCalledTimes(1)
+		})
+		releaseAllPreviewWorkers()
+
+		await expect(running).rejects.toMatchObject({ name: "AbortError" })
 		expect(terminateMock).toHaveBeenCalledTimes(1)
 	})
 
@@ -321,7 +340,7 @@ describe("heic worker pool", () => {
 	})
 
 	it("releases both workers on logout", async () => {
-		const { transformHeicBytes, releaseHeicWorker } = await freshModule()
+		const { transformHeicBytes, releaseAllPreviewWorkers } = await freshModule()
 		vi.useFakeTimers()
 		const finishers = held()
 
@@ -336,7 +355,7 @@ describe("heic worker pool", () => {
 		}
 
 		await Promise.all(both)
-		releaseHeicWorker()
+		releaseAllPreviewWorkers()
 
 		expect(terminateMock).toHaveBeenCalledTimes(2)
 		expect(releaseMock).toHaveBeenCalledTimes(2)
