@@ -9,6 +9,7 @@ import {
 	PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES
 } from "@/features/publicLinks/lib/download.logic"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
+import { deviceProfile } from "@/lib/deviceProfile"
 
 describe("chooseDownloadStrategy", () => {
 	it("streams via FSA whenever available, regardless of size", () => {
@@ -62,6 +63,13 @@ describe("anonPreviewability", () => {
 		expect(anonPreviewability(linkedFileItem("logo.svg", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("too-large")
 		expect(anonPreviewability(linkedFileItem("photo.heic", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("too-large")
 		expect(anonPreviewability(linkedFileItem("logo.svg", { size: PREVIEW_MAX_BYTES }))).toBe("previewable")
+	})
+
+	it("reads the profile it is given, so a viewer subscribed to a probe gets its answer", () => {
+		const heic = linkedFileItem("photo.heic", { size: PREVIEW_MAX_BYTES + 1n, mime: { Decrypted: "image/jpeg" } })
+
+		expect(anonPreviewability(heic, { ...deviceProfile(), heicNative: "no" })).toBe("too-large")
+		expect(anonPreviewability(heic, { ...deviceProfile(), heicNative: "yes" })).toBe("previewable")
 	})
 
 	it("never caps a camera RAW — its preview is the SDK-extracted embedded JPEG, not the file's bytes", () => {

@@ -2,6 +2,7 @@ import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { itemFileKind, needsImageTransform, isStreamedCategory } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 import { AUDIO_FORMATS, canonicalInlineType, mimeForExtension } from "@filen/shared"
+import { deviceProfile, type DeviceProfile } from "@/lib/deviceProfile"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in
 // sw.ts via the same isAllowedInlineContentType — see protocol.ts's own doc comment). First derives
@@ -37,7 +38,8 @@ export function isRescuable(extension: string): boolean {
 	return !NO_RESCUE.has(extension)
 }
 
-export function allowedMediaContentType(item: DriveItem): string | null {
+// `profile` decides the formats only some browsers decode (streamsNatively); a component passes its subscribed one.
+export function allowedMediaContentType(item: DriveItem, profile: DeviceProfile = deviceProfile()): string | null {
 	const kind = itemFileKind(item)
 	const category = kind?.kind ?? "other"
 
@@ -48,10 +50,9 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 		return null
 	}
 
-	// HEIC/HEIF resolve to "image" but can never stream (no browser decodes them inline) — excluded
-	// independently of the mime check below, so a spoofed streamable mime on a HEIC-named file can't
-	// slip through (defense-in-depth: imageViewer.tsx's own dispatch checks this first too).
-	if (needsImageTransform(item)) {
+	// An image this browser does not decode by itself (HEIC/HEIF without a native decoder) never streams, whatever
+	// type it stored: excluded ahead of the type checks below (imageViewer.tsx routes on the same rule).
+	if (needsImageTransform(item, profile)) {
 		return null
 	}
 

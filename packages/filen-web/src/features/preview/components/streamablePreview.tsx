@@ -5,7 +5,7 @@ import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { bufferedSizeCap, previewType, streamFailureAction } from "@/features/drive/lib/preview.logic"
-import { deviceProfile } from "@/lib/deviceProfile"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
@@ -163,7 +163,8 @@ function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void
 // category's buffer cap: such a file waits for a service worker when it could stream, else says it is too large.
 export function StreamablePreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
 	const { t } = useTranslation("preview")
-	const contentType = allowedMediaContentType(item)
+	const profile = useDeviceProfile()
+	const contentType = allowedMediaContentType(item, profile)
 	// A drive file streams through the service worker's own session read, a public link's file through the SDK
 	// worker's unauthenticated range port, and an archive's entry read by range through the SDK worker's port. Bytes
 	// read whole never stream.
@@ -176,7 +177,7 @@ export function StreamablePreview({ item, render }: { item: DriveItem; render: R
 	// would download the file again.
 	const held = getPreviewBytes(cacheScope, item.data.uuid) !== undefined
 	const [useBuffered, setUseBuffered] = useState(() => !canStream || !isMediaStreamAvailable() || held)
-	const cap = bufferedSizeCap(previewType(item), deviceProfile())
+	const cap = bufferedSizeCap(previewType(item), profile)
 
 	if (!useBuffered && contentType !== null) {
 		return (

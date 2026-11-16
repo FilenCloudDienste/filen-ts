@@ -8,7 +8,7 @@ import {
 	sniffAdmits
 } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-import { deviceProfile } from "@/lib/deviceProfile"
+import { deviceProfile, type DeviceProfile } from "@/lib/deviceProfile"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
 // every cap and branch is directly unit-testable. FSA streams to disk when the browser has it; otherwise the
@@ -54,7 +54,7 @@ export type AnonPreviewability = "previewable" | "too-large" | "archive" | "unpr
 // only ever held whole, so above its cap it is too large — the view then offers download instead. A non-file /
 // undecryptable / unknown-category item is simply not previewable. An archive is never previewed inline: a signed-in
 // visitor may browse it on request, through the authed client, at any size (its listing is not a buffered read).
-export function anonPreviewability(item: DriveItem): AnonPreviewability {
+export function anonPreviewability(item: DriveItem, profile: DeviceProfile = deviceProfile()): AnonPreviewability {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {
@@ -64,7 +64,7 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 	// Its content read picks the viewer (a `.ts` that may be a transport stream, which streams at any size): it previews
 	// if some kind the read may find does.
 	if (needsContentSniff(item) !== null) {
-		return sniffAdmits(item, deviceProfile(), "link") ? "previewable" : "too-large"
+		return sniffAdmits(item, profile, "link") ? "previewable" : "too-large"
 	}
 
 	const category = previewType(item)
@@ -75,8 +75,8 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 		case "archive":
 			return "archive"
 		case "stream":
-			if (category === "image" && allowedMediaContentType(item) === null) {
-				const cap = bufferedSizeCap(category, deviceProfile())
+			if (category === "image" && allowedMediaContentType(item, profile) === null) {
+				const cap = bufferedSizeCap(category, profile)
 
 				return cap === null || base.data.size <= cap ? "previewable" : "too-large"
 			}
@@ -84,7 +84,7 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 			return "previewable"
 		case "ranged":
 		case "buffer":
-			return linkAdmits(category, base.data.size, deviceProfile()) ? "previewable" : "too-large"
+			return linkAdmits(category, base.data.size, profile) ? "previewable" : "too-large"
 	}
 }
 

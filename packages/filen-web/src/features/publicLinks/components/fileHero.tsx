@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
 import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
@@ -62,13 +63,14 @@ export function FileHero({
 	const base = asDirectoryOrFile(item)
 	const name = base.type === "file" ? driveItemName(base) : base.data.uuid
 	const size = base.data.size
-	const previewability = anonPreviewability(item)
-	const [showPreview, setShowPreview] = useState(previewability === "previewable")
+	// A probe that resolves later (a HEIC this browser shows by itself) may make the file previewable.
+	const previewability = anonPreviewability(item, useDeviceProfile())
+	const [previewHidden, setPreviewHidden] = useState(false)
 	const [showContents, setShowContents] = useState(false)
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
 	const archiveSource = previewability === "archive" && archiveFile !== undefined ? linkedArchiveSource(item, archiveFile) : null
 	// Contents only ever open from "Browse contents", which a signed-in visitor alone is offered.
-	const pane = showPreview && previewability === "previewable" ? "preview" : showContents && archiveSource !== null ? "contents" : null
+	const pane = !previewHidden && previewability === "previewable" ? "preview" : showContents && archiveSource !== null ? "contents" : null
 
 	function downloadError(dto: ErrorDTO): string {
 		return `${t("downloadFailed")} ${errorLabel(dto)}`
@@ -157,7 +159,7 @@ export function FileHero({
 						size="sm"
 						aria-label={pane === "contents" ? t("archiveHideContents") : t("hidePreview")}
 						onClick={() => {
-							setShowPreview(false)
+							setPreviewHidden(true)
 							setShowContents(false)
 						}}
 					>
@@ -246,7 +248,7 @@ export function FileHero({
 						<Button
 							variant="outline"
 							onClick={() => {
-								setShowPreview(true)
+								setPreviewHidden(false)
 							}}
 						>
 							<EyeIcon data-icon="inline-start" />

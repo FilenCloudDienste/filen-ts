@@ -22,6 +22,7 @@ import { installSessionEndedCheck } from "@/features/shell/lib/sessionEnded"
 import { desktopBridge } from "@/lib/desktop"
 import { syncDesktopShellStrings } from "@/lib/i18n/desktopShell"
 import { refreshDocumentTitle } from "@/lib/head/refreshTitle"
+import { startNativeImageProbes } from "@/lib/nativeImageSupport"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the
@@ -116,4 +117,6 @@ void languageReady.then(() => {
 			<RouterProvider router={router} />
 		</StrictMode>
 	)
+	// Which images this browser decodes by itself, once the first paint is done.
+	startNativeImageProbes()
 })

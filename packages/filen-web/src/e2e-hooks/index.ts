@@ -19,6 +19,7 @@ import { withLevel } from "@/features/drive/lib/archiveFormats"
 import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
 import { patchedListingsWritten } from "@/features/drive/queries/drive"
 import { clearPhotosRoots } from "@/e2e-hooks/photosLibrary"
+import { probeNativeImage } from "@/lib/nativeImageSupport"
 import {
 	pruneDeadVideoRoots,
 	videosSyncFileText,
@@ -211,6 +212,8 @@ interface E2eHooks {
 	pruneDeadVideoRoots: (minAgeMs: number) => Promise<number>
 	// The photos specs' start: removes every photos root, each once uploaded. Returns the count.
 	clearPhotosRoots: () => Promise<number>
+	// The boot probe's answers (nativeImageSupport.ts), awaited: which formats this browser decodes by itself.
+	nativeImageSupport: () => Promise<{ heic: boolean; jxl: boolean }>
 }
 
 interface ArchiveCatalogueRow {
@@ -532,6 +535,11 @@ export function installE2eHooks(): void {
 		videosSyncRestore: ready(videosSyncRestore),
 		videosSyncFileText: ready(videosSyncFileText),
 		pruneDeadVideoRoots: ready(pruneDeadVideoRoots),
-		clearPhotosRoots: ready(clearPhotosRoots)
+		clearPhotosRoots: ready(clearPhotosRoots),
+		nativeImageSupport: async () => {
+			const [heic, jxl] = await Promise.all([probeNativeImage("heic"), probeNativeImage("jxl")])
+
+			return { heic, jxl }
+		}
 	}
 }

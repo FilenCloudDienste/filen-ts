@@ -20,6 +20,7 @@ import { mediaFailureDTO, reportMediaFailure, type MediaFailureKind } from "@/li
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { noop } from "@/lib/utils"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
 
@@ -318,7 +319,7 @@ function FilenInlineMedia({
 	downloadable: boolean
 	fallback: ReactNode
 }) {
-	const contentType = allowedMediaContentType(item)
+	const contentType = allowedMediaContentType(item, useDeviceProfile())
 
 	if (contentType === null || !isMediaStreamAvailable()) {
 		return <>{fallback}</>

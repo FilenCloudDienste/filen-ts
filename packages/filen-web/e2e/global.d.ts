@@ -62,6 +62,7 @@ interface E2eHooks {
 	videosSyncFileText: (name: string) => Promise<string | null>
 	pruneDeadVideoRoots: (minAgeMs: number) => Promise<number>
 	clearPhotosRoots: () => Promise<number>
+	nativeImageSupport: () => Promise<{ heic: boolean; jxl: boolean }>
 }
 
 // `.filen/videos` as a Videos spec found it (src/e2e-hooks/videosSync.ts): plain strings, so it crosses the

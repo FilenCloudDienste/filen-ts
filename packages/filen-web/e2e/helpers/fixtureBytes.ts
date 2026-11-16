@@ -1,3 +1,5 @@
+import { HEIC_PROBE_BASE64 } from "@/lib/imageProbeFixtures"
+
 // Every fixture BYTE payload the e2e suite uploads, in one place. Two reasons it is a module rather
 // than a per-spec const: the same PNG was byte-identical in four specs and the same text fixture in two
 // (a drift hazard nothing would have caught), and — the load-bearing one — setup/fixtures.setup.ts
@@ -47,16 +49,9 @@ export const DOCX_BYTES = Buffer.from(
 	"base64"
 )
 
-// A real, tiny (754-byte) HEIC image — a 64x64 still picture, HEVC-encoded. Deliberately NOT smaller:
-// libheif 1.23 enforces a security limit that caps a decoded frame against the container's DECLARED
-// size, and HEVC pads a tiny picture up to its own minimum coded dimensions — an 8x8 still codes as
-// 160x64 and is refused ("Image size 160x64 exceeds the maximum image size 5184"). 64x64 clears it with
-// room to spare; real camera HEICs were never near the limit (verified by decoding 64x64 and 256x256
-// through this exact libheif-js build). Regenerate with: sips -s format heic in.png --out out.heic
-export const HEIC_BYTES = Buffer.from(
-	"AAAAJGZ0eXBoZWljAAAAAG1pZjFNaVBybWlhZk1pSEJoZWljAAABhW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAADnBpdG0AAAAAAAEAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAOVpcHJwAAAAxGlwY28AAAATY29scm5jbHgAAgACAAaAAAAADGNsbGkAywBAAAAAFGlzcGUAAAAAAAAAQAAAAEAAAAAJaXJvdAAAAAAQcGl4aQAAAAADCAgIAAAAcGh2Y0MBA3AAAACwAAAAAAAe8AD8/fj4AAALA6AAAQAXQAEMAf//A3AAAAMAsAAAAwAAAwAecCShAAEAIkIBAQNwAAADALAAAAMAAAMAHqAUIEHBj4h7kWVTcCAgYAiiAAEACUQBwGFyyERTZAAAABlpcG1hAAAAAAAAAAEAAQaBAgMFhoQAAAAeaWxvYwAAAABEAAABAAEAAAABAAABuQAAATkAAAABbWRhdAAAAAAAAAFJAAABNSgBr6ERkEZ9HA86/vpv71GtvoM4HwXdXfRABkZ3iD/fuZPiCjiwnuhQMOvRTiY5x0a8lknl3ivjRHRAgz651/a2gjDYH2F5godiPDUAHIXDPIvyLW1+NPIw4Jm0HV3S7apwNGdRPINvtf9Gvqvh741XtvAfhpQ1r+TH1WichLthDxwA8vxfy2AJ/Jn2/6SqgoF/oEUvCeBV1cjAEBIRq+YGF2M5O5+tMZKbcVVT0xX2k7vV3TdoKXWebv8M7di4GqnythvHVx9jRsNJXYCxGxivmhjJpC7xgGfr+32QylQGvLenMmQSble5LbPjIroBFjLKVW0Wr1RXYwTOkYOWGMKB8Leuo+CRugS1rIsZYpJx4mFQxVLSLDENcPy/cdY1j1TGcvVameGxN5Mg22DDYHf+ZnXD/w==",
-	"base64"
-)
+// The boot probe's own 754-byte 64x64 HEIC still (src/lib/imageProbeFixtures.ts says why it is not smaller), so the
+// fixture and the probe decode the same bytes.
+export const HEIC_BYTES = Buffer.from(HEIC_PROBE_BASE64, "base64")
 
 // A hand-built, minimal 2-page PDF (PDF 1.4, no external resources — no cMap/font/wasm URL is
 // configured so nothing this fixture needs ever leaves the page, exactly the production config).
