@@ -8,11 +8,11 @@ import { trackCspViolations } from "./helpers/csp"
 import { observeEgest } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { waitForSwReady } from "./helpers/sw"
-import { LINK_IMAGE_BYTES, MIB, writeLargeLinkImage } from "./fixtures/w4"
+import { LINK_IMAGE_BYTES, MIB, writeLargeLinkImage } from "./fixtures/largeFiles"
 import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
 import { preview } from "@/locales/en/preview"
 
-// A public link's image above the image buffer cap (300 MiB, fixtures/w4.ts) is never loaded whole: with a service
+// A public link's image above the image buffer cap (300 MiB, fixtures/largeFiles.ts) is never loaded whole: with a service
 // worker controlling the page it streams through the worker's inline route; on a first visit with none it waits for
 // one, and where none ever controls the page it shows the unsupported card with Download. A write-lane spec of its own,
 // apart from public-links.spec.ts: it uploads the file and creates the link (premium), where that one only reads.

@@ -5,7 +5,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { waitForSwReady } from "./helpers/sw"
 import { observeEgest } from "./helpers/requests"
-import { PDF_THUMB_LARGE_BYTES } from "./fixtures/w4"
+import { PDF_THUMB_LARGE_BYTES } from "./fixtures/largeFiles"
 
 // The one live proof the whole thumbnail pipeline works end to end: a real SDK decode inside the sdk
 // worker (range reads against the stored file, a webp encode in wasm, nothing ever downloaded into JS),
@@ -167,7 +167,7 @@ test("a video row renders a real thumbnail off the service worker's stream", asy
 })
 
 // A PDF's thumbnail reads page 1 by range, whatever the file's size: the 100 MiB fixture keeps page 1 in its first
-// block and its cross-reference table in its last (fixtures/w4.ts), so drawing it costs two of its 100 chunk requests,
+// block and its cross-reference table in its last (fixtures/largeFiles.ts), so drawing it costs two of its 100 chunk requests,
 // and at most four (pdf.js may probe a block beside each). Counted over the whole context from before boot: nothing
 // else in that listing has a thumbnail to read, and the fixture setup's upload warm drew its own thumbnail in another
 // context, so this one is generated here, on the drive side.

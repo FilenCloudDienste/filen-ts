@@ -7,7 +7,7 @@ import { LAZY_VIEWER_TIMEOUT_MS, LARGE_UPLOAD_TIMEOUT_MS, uploadDiskFiles, uploa
 import { trackCspViolations } from "./helpers/csp"
 import { observeEgest, type EgestObserver } from "./helpers/requests"
 import { latinDocument } from "../scripts/pdf-fixtures/view/documents"
-import { RESIDENT_PDF_PAGES, writeResidentPdf } from "./fixtures/w4"
+import { RESIDENT_PDF_PAGES, writeResidentPdf } from "./fixtures/largeFiles"
 
 // The PDF viewer reads a drive file on demand: a large file shows page 1 after downloading only part of it (counted
 // in the SDK's chunk requests, one per MiB), a document that has read past the device's resident limit is reopened
@@ -253,7 +253,7 @@ function reopenChunks(layout: ReturnType<typeof writeResidentPdf>, shown: number
 	return chunks.size
 }
 
-// 20 pages of one 16 MiB image each (fixtures/w4.ts): viewed in turn, pdf.js reads past the desktop's 256 MiB resident
+// 20 pages of one 16 MiB image each (fixtures/largeFiles.ts): viewed in turn, pdf.js reads past the desktop's 256 MiB resident
 // limit. Once those reads settle the viewer opens the document again (a new pdf.js worker, the old one going once the
 // new one shows), on the page and at the zoom it was showing, and the new document reads only what is near the view.
 test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page }, testInfo) => {

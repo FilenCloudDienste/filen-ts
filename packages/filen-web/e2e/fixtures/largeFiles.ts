@@ -141,7 +141,7 @@ function largeThumbPdf(): Buffer {
 	return layoutBuffer(pdfLayout(objects).parts)
 }
 
-export const W4_SCENARIOS = scenarioModule(
+export const LARGE_FILE_SCENARIOS = scenarioModule(
 	{
 		// Synthesized on disk (100 MiB), so it is a scenario of its own.
 		"pdf-thumb-large": ["pdf-thumb-large.pdf"]
