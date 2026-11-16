@@ -37,7 +37,13 @@ export type TypeRow = readonly [mime: string, extension: string, direction: Type
 export const TYPE_ROWS: readonly TypeRow[] = [
 	["image/jpeg", "jpg", "both"],
 	["image/jpeg", "jpeg", "fromExt"],
+	["image/jpeg", "jfif", "fromExt"],
+	["image/jpeg", "jpe", "fromExt"],
+	["image/jpeg", "pjpeg", "fromExt"],
+	["image/jpeg", "pjp", "fromExt"],
+	["image/pjpeg", "jpg", "toExt"],
 	["image/png", "png", "both"],
+	["image/x-png", "png", "toExt"],
 	["image/gif", "gif", "both"],
 	["image/webp", "webp", "both"],
 	["image/svg+xml", "svg", "both"],

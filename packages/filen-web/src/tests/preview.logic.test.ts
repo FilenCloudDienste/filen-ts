@@ -108,9 +108,12 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("shot.arw", { mime: "image/x-sony-arw" }))).toBe("rawImage")
 	})
 
-	it.each(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])("%s -> image", ext => {
-		expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
-	})
+	it.each(["jpg", "jpeg", "jfif", "jpe", "pjpeg", "pjp", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])(
+		"%s -> image",
+		ext => {
+			expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
+		}
+	)
 
 	// HEIC/HEIF join "image" too (they're previewable), but can't stream — needsImageTransform below
 	// is the seam a viewer branches on to route them through the buffered + transform path instead.

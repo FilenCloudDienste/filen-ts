@@ -192,6 +192,11 @@ describe("saveTargets", () => {
 	it("names in-place formats by extension only", () => {
 		expect(inPlaceFormatByName("a.JPG")).toBe("image/jpeg")
 		expect(inPlaceFormatByName("a.jfif")).toBe("image/jpeg")
+		expect(inPlaceFormatByName("a.jpe")).toBe("image/jpeg")
+		expect(inPlaceFormatByName("a.pjpeg")).toBe("image/jpeg")
+		expect(inPlaceFormatByName("a.pjp")).toBe("image/jpeg")
+		expect(inPlaceFormatByName("a.apng")).toBeNull()
+		expect(inPlaceFormatByName("a.gif")).toBeNull()
 		expect(inPlaceFormatByName("a.png")).toBe("image/png")
 		expect(inPlaceFormatByName("a.webp")).toBe("image/webp")
 		expect(inPlaceFormatByName("a.heic")).toBeNull()

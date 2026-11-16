@@ -1,3 +1,4 @@
+import { mimeForExtension } from "@filen/shared"
 import type { SaveTarget, SourceInfo, SourceMime } from "@/features/preview/imageEdit/types"
 
 // Where an edit can be saved. In place only where we can re-encode the same format without losing what it is
@@ -42,21 +43,16 @@ function extensionOf(name: string): string {
 	return dot > 0 ? name.slice(dot + 1).toLowerCase() : ""
 }
 
-// The format an in-place save writes, from the name alone (sync; the sniffed bytes decide the rest later).
+// The format an in-place save writes, from the name alone (sync; the sniffed bytes decide the rest later): the type the
+// name's extension is served as, when the editor writes that type.
 export function inPlaceFormatByName(name: string): "image/jpeg" | "image/png" | "image/webp" | null {
-	switch (extensionOf(name)) {
-		case "jpg":
-		case "jpeg":
-		case "jfif": {
-			return "image/jpeg"
-		}
+	const mime = mimeForExtension(extensionOf(name))
 
-		case "png": {
-			return "image/png"
-		}
-
-		case "webp": {
-			return "image/webp"
+	switch (mime) {
+		case "image/jpeg":
+		case "image/png":
+		case "image/webp": {
+			return mime
 		}
 
 		default: {
@@ -66,7 +62,7 @@ export function inPlaceFormatByName(name: string): "image/jpeg" | "image/png" | 
 }
 
 const EXTENSION_FAMILIES: Readonly<Record<SourceMime, readonly string[]>> = {
-	"image/jpeg": ["jpg", "jpeg", "jfif", "jpe"],
+	"image/jpeg": ["jpg", "jpeg", "jfif", "jpe", "pjpeg", "pjp"],
 	"image/png": ["png"],
 	"image/webp": ["webp"],
 	"image/gif": ["gif"],

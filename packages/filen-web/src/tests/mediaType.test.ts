@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
-import { allowedMediaContentType, inlineTypeForExtension } from "@/features/preview/lib/mediaType"
+import { EXTENSION_TIERS, RAW_IMAGE_EXTENSIONS, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { allowedMediaContentType, inlineTypeForExtension, isRescuable } from "@/features/preview/lib/mediaType"
 import { AUDIO_FORMATS } from "@filen/shared"
+import { IMAGE_FORMATS } from "@/features/preview/lib/imageFormat"
 import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
@@ -90,9 +91,64 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("doc.pdf", "application/pdf"))).toBeNull()
 	})
 
-	it("rejects an empty-string mime on an otherwise video/audio/image-extension file", () => {
-		expect(allowedMediaContentType(fileNamed("clip.mp4", undefined))).toBeNull()
-		expect(allowedMediaContentType(fileNamed("photo.jpg", undefined))).toBeNull()
+	it("serves a video or image file stored without a type, or a generic binary one, as its extension says", () => {
+		expect(allowedMediaContentType(fileNamed("clip.mp4", undefined))).toBe("video/mp4")
+		expect(allowedMediaContentType(fileNamed("clip.mkv", "application/octet-stream"))).toBe("video/x-matroska")
+		expect(allowedMediaContentType(fileNamed("photo.jpg", undefined))).toBe("image/jpeg")
+		expect(allowedMediaContentType(fileNamed("photo.png", "application/octet-stream"))).toBe("image/png")
+		expect(allowedMediaContentType(fileNamed("favicon.ico", "binary/octet-stream"))).toBe("image/x-icon")
+		expect(allowedMediaContentType(fileNamed("photo.jfif", "application/octet-stream"))).toBe("image/jpeg")
+		expect(allowedMediaContentType(fileNamed("photo.pjp", undefined))).toBe("image/jpeg")
+	})
+
+	it("serves an allowlisted stored type verbatim, never its canonical form", () => {
+		expect(allowedMediaContentType(fileNamed("track.wav", "audio/x-wav"))).toBe("audio/x-wav")
+		expect(allowedMediaContentType(fileNamed("photo.jfif", "image/jpeg"))).toBe("image/jpeg")
+	})
+
+	it("serves a stored alias the allowlist refuses as its canonical type", () => {
+		expect(allowedMediaContentType(fileNamed("photo.jpg", "image/pjpeg"))).toBe("image/jpeg")
+		expect(allowedMediaContentType(fileNamed("photo.pjpeg", "image/pjpeg"))).toBe("image/jpeg")
+		expect(allowedMediaContentType(fileNamed("logo.png", "image/x-png"))).toBe("image/png")
+		expect(allowedMediaContentType(fileNamed("favicon.ico", "image/vnd.microsoft.icon"))).toBe("image/x-icon")
+	})
+
+	it("never serves an SVG by a type it did not store", () => {
+		expect(allowedMediaContentType(fileNamed("logo.svg", "image/svg+xml"))).toBe("image/svg+xml")
+		expect(allowedMediaContentType(fileNamed("logo.svg", undefined))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("logo.svg", "application/octet-stream"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("logo.svg", "image/x-png"))).toBeNull()
+	})
+
+	it("refuses a specific type that is neither allowlisted nor an alias of one", () => {
+		expect(allowedMediaContentType(fileNamed("photo.jpg", "text/html"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("photo.jpg", "application/x-shockwave-flash"))).toBeNull()
+	})
+
+	it("gives every natively shown image, and every video and audio extension, a type the allowlist serves, unless it is never rescued", () => {
+		const media = EXTENSION_TIERS.flatMap(([extensions]) => [...extensions]).filter(extension => {
+			const category = previewCategoryForExtension(extension)
+
+			// An image the browser does not decode itself is never served inline.
+			return category === "image" ? IMAGE_FORMATS.get(extension)?.decode === "native" : category === "video" || category === "audio"
+		})
+
+		expect(media).toContain("pjp")
+
+		for (const extension of media) {
+			const served = inlineTypeForExtension(extension)
+
+			expect(served !== null || !isRescuable(extension), extension).toBe(true)
+		}
+
+		for (const decoded of ["mka", "ac3", "eac3", "ec3", "dts"]) {
+			expect(isRescuable(decoded), decoded).toBe(false)
+			expect(allowedMediaContentType(fileNamed(`track.${decoded}`, "application/octet-stream"))).toBeNull()
+		}
+
+		for (const markup of ["svg", "svgz", "eps"]) {
+			expect(isRescuable(markup), markup).toBe(false)
+		}
 	})
 
 	it("serves an audio file stored without a type, or a generic binary one, as its extension says", () => {
@@ -108,7 +164,7 @@ describe("allowedMediaContentType", () => {
 		// A specific type still decides, and only extensions the browser may play as they are get one.
 		expect(allowedMediaContentType(fileNamed("track.mp3", "text/html"))).toBeNull()
 		expect(allowedMediaContentType(fileNamed("film.mka", "application/octet-stream"))).toBeNull()
-		expect(allowedMediaContentType(fileNamed("clip.mp4", "application/octet-stream"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("clip.mp4", "application/octet-stream"))).toBe("video/mp4")
 	})
 
 	it("serves every audio format stored with a generic type exactly as the hand-written map did", () => {

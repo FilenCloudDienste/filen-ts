@@ -68,6 +68,12 @@ describe("extensionForMime", () => {
 	})
 })
 
+// Aliases added after the hand-written map, each a type browsers and older tools still store.
+const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
+	["image/pjpeg", "jpg"],
+	["image/x-png", "png"]
+]
+
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
 const MIME_TYPES_SNAPSHOT: readonly (readonly [string, string])[] = [
 	["image/jpeg", "jpg"],
@@ -187,12 +193,12 @@ describe("TYPE_ROWS", () => {
 		}
 	})
 
-	it("reads every MIME type as the hand-written map did, and no other", () => {
+	it("reads every MIME type as the hand-written map did, plus the aliases added since, and no other", () => {
 		const derived = new Map(
 			TYPE_ROWS.filter(([, , direction]) => direction !== "fromExt").map(([mime, extension]) => [mime, extension])
 		)
 
-		expect(derived).toEqual(new Map(MIME_TYPES_SNAPSHOT))
+		expect(derived).toEqual(new Map([...MIME_TYPES_SNAPSHOT, ...MIME_TYPES_ADDED]))
 
 		for (const [mime, extension] of MIME_TYPES_SNAPSHOT) {
 			expect(extensionForMime(mime)).toBe(extension)
@@ -211,6 +217,9 @@ describe("mimeForExtension", () => {
 		expect(mimeForExtension("jpg")).toBe("image/jpeg")
 		expect(mimeForExtension("jpeg")).toBe("image/jpeg")
 		expect(mimeForExtension("ico")).toBe("image/x-icon")
+		for (const alias of ["jfif", "jpe", "pjpeg", "pjp"]) {
+			expect(mimeForExtension(alias)).toBe("image/jpeg")
+		}
 		expect(mimeForExtension("opus")).toBe("audio/ogg")
 		expect(mimeForExtension("wav")).toBe("audio/wav")
 	})
@@ -225,6 +234,8 @@ describe("mimeForExtension", () => {
 describe("canonicalInlineType", () => {
 	it("maps an alias to its canonical type", () => {
 		expect(canonicalInlineType("image/vnd.microsoft.icon")).toBe("image/x-icon")
+		expect(canonicalInlineType("image/pjpeg")).toBe("image/jpeg")
+		expect(canonicalInlineType("image/x-png")).toBe("image/png")
 		expect(canonicalInlineType("audio/x-wav")).toBe("audio/wav")
 		expect(canonicalInlineType("Audio/X-FLAC; codecs=flac")).toBe("audio/flac")
 		expect(canonicalInlineType("audio/opus")).toBe("audio/ogg")

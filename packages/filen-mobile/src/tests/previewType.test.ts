@@ -389,6 +389,20 @@ describe("getPreviewType — stored mime", () => {
 		expect(fileTypeExtension("export", "text/csv")).toBe("txt")
 	})
 
+	// Before: "unknown" (no row named either alias), with no type extension.
+	it("reads the image/pjpeg and image/x-png aliases as their formats", () => {
+		expect(getPreviewType("photo", "image/pjpeg")).toBe("image")
+		expect(fileTypeExtension("photo", "image/pjpeg")).toBe("jpg")
+		expect(getPreviewType("logo", "image/x-png")).toBe("image")
+		expect(fileTypeExtension("logo", "image/x-png")).toBe("png")
+	})
+
+	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
+	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
+		expect(getPreviewType("photo.jfif")).toBe("unknown")
+		expect(getPreviewType("photo.pjp", "image/jpeg")).toBe("image")
+	})
+
 	it("reads a well-known name before its extension, which changes none of them", () => {
 		expect(getPreviewType("Makefile", "text/csv")).toBe("code")
 		expect(fileTypeExtension(".gitignore", "text/csv")).toBe("txt")

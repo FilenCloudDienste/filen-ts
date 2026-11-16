@@ -1,7 +1,7 @@
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { itemFileKind, needsImageTransform, isStreamedCategory } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
-import { mimeForExtension } from "@filen/shared"
+import { AUDIO_FORMATS, canonicalInlineType, mimeForExtension } from "@filen/shared"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in
 // sw.ts via the same isAllowedInlineContentType — see protocol.ts's own doc comment). First derives
@@ -24,6 +24,19 @@ export function inlineTypeForExtension(extension: string): string | null {
 
 const GENERIC_TYPES: ReadonlySet<string> = new Set(["", "application/octet-stream", "binary/octet-stream"])
 
+// Never served by a type the file did not store itself: SVG and its compressed form carry script, PostScript is a
+// program; and the formats the remux worker decodes, which no browser plays as they are.
+const NO_RESCUE: ReadonlySet<string> = new Set([
+	"svg",
+	"svgz",
+	"eps",
+	...[...AUDIO_FORMATS].filter(([, format]) => format.decoded === true).map(([extension]) => extension)
+])
+
+export function isRescuable(extension: string): boolean {
+	return !NO_RESCUE.has(extension)
+}
+
 export function allowedMediaContentType(item: DriveItem): string | null {
 	const kind = itemFileKind(item)
 	const category = kind?.kind ?? "other"
@@ -31,7 +44,7 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 	// "rawImage" is not a streamed category: a RAW container has no browser decoder, so serving one
 	// inline would hand the page bytes nothing can render, and a camera's RAW mime (image/x-nikon-nef
 	// and friends) must never be treated as a streamable image just because it starts with "image/".
-	if (!isStreamedCategory(category)) {
+	if (kind === null || !isStreamedCategory(category)) {
 		return null
 	}
 
@@ -44,14 +57,24 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 
 	const normalized = driveItemMime(item)?.toLowerCase().trim()
 
+	// 1. The stored type, as it is.
 	if (normalized !== undefined && isAllowedInlineContentType(normalized)) {
 		return normalized
 	}
 
-	const generic = normalized === undefined || GENERIC_TYPES.has(normalized)
+	if (!isRescuable(kind.extension)) {
+		return null
+	}
 
-	// An audio file stored with no type or a generic binary one is served by the extension the kind was resolved for,
-	// however it was settled: an ambiguous one (`.m4a`, `.ogg`) by its usual meaning or a content verdict, which a
-	// generic type never contradicts. A specific type that is not allowlisted is still refused.
-	return generic && category === "audio" && kind !== null ? inlineTypeForExtension(kind.extension) : null
+	// 2. The stored type's canonical form (`image/pjpeg` → `image/jpeg`).
+	const canonical = normalized === undefined ? null : canonicalInlineType(normalized)
+
+	if (canonical !== null && isAllowedInlineContentType(canonical)) {
+		return canonical
+	}
+
+	// 3. No type or a generic binary one: the type of the extension the kind was resolved for, however it was settled
+	// (an ambiguous `.m4a` or `.ogg` by its usual meaning or a content verdict, which a generic type never
+	// contradicts). A specific type that is not allowlisted is still refused.
+	return normalized === undefined || GENERIC_TYPES.has(normalized) ? inlineTypeForExtension(kind.extension) : null
 }

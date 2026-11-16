@@ -21,6 +21,11 @@ const HEIC: ImageFormat = { decode: "heic", editable: true }
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
 	["jpeg", NATIVE_EDITABLE],
+	// JPEG under the names older tools and browsers save it as.
+	["jfif", NATIVE_EDITABLE],
+	["jpe", NATIVE_EDITABLE],
+	["pjpeg", NATIVE_EDITABLE],
+	["pjp", NATIVE_EDITABLE],
 	["png", NATIVE_EDITABLE],
 	["gif", NATIVE_EDITABLE],
 	["webp", NATIVE_EDITABLE],
