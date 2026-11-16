@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { bytesOrigin, requireOriginAccess, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
+import { requireOriginAccess, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 
 // Which worker surface the preview viewers are allowed to reach for bytes. The authenticated app
 // leaves this at its default ("authed"), so every existing caller keeps hitting the authed
@@ -124,9 +124,9 @@ export function usePreviewOrigin(item: DriveItem): ByteOrigin {
 
 	const base = asDirectoryOrFile(item)
 
-	// A directory never reaches a viewer; it has no bytes.
+	// A directory never reaches a viewer: one that did is a bug to surface, not bytes to fabricate.
 	if (base.type === "directory") {
-		return bytesOrigin(new Blob([]), base.data.uuid)
+		throw new Error("a directory has no preview origin")
 	}
 
 	return mode === "anon" ? { kind: "linkedFile", file: base.data } : { kind: "file", file: base.data }

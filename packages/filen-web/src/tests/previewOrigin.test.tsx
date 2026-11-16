@@ -85,11 +85,13 @@ describe("usePreviewOrigin", () => {
 		vi.restoreAllMocks()
 	})
 
-	it("never yields a file origin for a directory", () => {
+	it("refuses a directory rather than fabricate an origin for it", () => {
 		const dir = { ...item, type: "directory" } as unknown as typeof item
-		const { result } = renderHook(() => usePreviewOrigin(dir))
 
-		expect(result.current.kind).toBe("bytes")
+		vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+		expect(() => renderHook(() => usePreviewOrigin(dir))).toThrow("directory")
+		vi.restoreAllMocks()
 	})
 })
 
