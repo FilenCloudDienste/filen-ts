@@ -5,7 +5,7 @@ import { visibleTypingUsers, typingText } from "@/features/chats/lib/typing"
 // Reactive per-chat typing users, self excluded. Selects the raw per-chat slice (a stable reference that
 // only changes on a store write, so no getSnapshot churn) and derives the visible list in render —
 // React Compiler owns the memoization, so a fresh filter here is free.
-export function useChatTyping(chatUuid: string, currentUserId: bigint | undefined): ChatTypingUser[] {
+function useChatTyping(chatUuid: string, currentUserId: bigint | undefined): ChatTypingUser[] {
 	const users = useChatTypingStore(state => state.typing[chatUuid])
 
 	return visibleTypingUsers(users, currentUserId)

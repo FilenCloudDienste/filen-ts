@@ -37,6 +37,7 @@ import {
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { chatTitle } from "@/features/chats/lib/sort"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
@@ -602,7 +603,7 @@ export function Composer({
 				}}
 			/>
 			{mode.kind !== "new" ? (
-				<div className="mb-2 ml-11">
+				<div className="mb-2">
 					<ComposerModeBanner
 						kind={mode.kind}
 						message={mode.message}
@@ -611,140 +612,140 @@ export function Composer({
 					/>
 				</div>
 			) : null}
-			<div className="flex items-end gap-2">
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-lg"
-								className={cn("rounded-full text-muted-foreground", GLASS_SURFACE_CLASS)}
-								// Attach-menu pre-gate — both entries need network right away (an upload/
-								// drive-attach start, not a durably-queued send), unlike the send button below,
-								// which stays enabled offline by design (its outbox queues and flushes later).
-								// A free account gets the reason and an upgrade inside instead.
-								disabled={attachTriggerDisabled}
-								aria-label={t("chatComposerAttach")}
-								title={attachGateReason}
-							>
-								<PlusIcon className="size-5" />
-							</Button>
-						}
+			{/* The popover is the box's sibling, not its child, so the box's rounded clip never cuts it off. */}
+			<div className="relative">
+				{suggestList !== null ? (
+					<ComposerSuggestions
+						listboxId={listboxId}
+						list={suggestList}
+						activeIndex={safeIndex}
+						onSelectMention={participant => {
+							if (mention !== null) {
+								selectMention(participant, mention)
+							}
+						}}
+						onSelectEmoji={suggestion => {
+							if (emoji !== null) {
+								selectEmoji(suggestion, emoji)
+							}
+						}}
 					/>
-					<DropdownMenuContent
-						align="start"
-						side="top"
-						sideOffset={8}
-						className="w-auto"
-					>
-						{isPro ? (
-							<>
-								<DropdownMenuItem
-									onClick={() => {
-										fileInputRef.current?.click()
-									}}
+				) : null}
+				<div
+					className={cn(
+						"flex items-end gap-1 rounded-xl p-1 transition-shadow focus-within:ring-ring/50 dark:focus-within:ring-ring/50",
+						GLASS_SURFACE_CLASS
+					)}
+				>
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									className="rounded-full text-muted-foreground"
+									// Attach-menu pre-gate — both entries need network right away (an upload/
+									// drive-attach start, not a durably-queued send), unlike the send button below,
+									// which stays enabled offline by design (its outbox queues and flushes later).
+									// A free account gets the reason and an upgrade inside instead.
+									disabled={attachTriggerDisabled}
+									aria-label={t("chatComposerAttach")}
+									title={attachGateReason}
 								>
-									<UploadIcon aria-hidden="true" />
-									{t("chatComposerAttachUpload")}
-								</DropdownMenuItem>
-								<DropdownMenuItem
-									onClick={() => {
-										setAttachDriveOpen(true)
-									}}
-								>
-									<HardDriveIcon aria-hidden="true" />
-									{t("chatComposerAttachFromDrive")}
-								</DropdownMenuItem>
-							</>
-						) : (
-							<DropdownMenuGroup>
-								<DropdownMenuLabel className="max-w-64 font-normal whitespace-normal">
-									{t("chatComposerAttachPremiumRequired")}
-								</DropdownMenuLabel>
-								<DropdownMenuItem onClick={upgrade}>
-									<SparklesIcon aria-hidden="true" />
-									{t("settings:settingsStorageFullUpgrade")}
-								</DropdownMenuItem>
-							</DropdownMenuGroup>
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
-				{/* The popover is the pill's sibling, not its child, so the pill's rounded clip never cuts it off. */}
-				<div className="relative min-w-0 flex-1">
-					{suggestList !== null ? (
-						<ComposerSuggestions
-							listboxId={listboxId}
-							list={suggestList}
-							activeIndex={safeIndex}
-							onSelectMention={participant => {
-								if (mention !== null) {
-									selectMention(participant, mention)
-								}
-							}}
-							onSelectEmoji={suggestion => {
-								if (emoji !== null) {
-									selectEmoji(suggestion, emoji)
-								}
-							}}
+									<PlusIcon />
+								</Button>
+							}
 						/>
-					) : null}
-					<div
-						className={cn(
-							"flex items-end gap-2 rounded-[20px] py-1 pr-1 pl-4 transition-shadow focus-within:ring-ring/50 dark:focus-within:ring-ring/50",
-							GLASS_SURFACE_CLASS
-						)}
-					>
-						<textarea
-							ref={textareaRef}
-							value={draft}
-							onChange={onChange}
-							onKeyDown={onKeyDown}
-							onKeyUp={syncCaret}
-							onClick={syncCaret}
-							onSelect={syncCaret}
-							onBlur={() => {
-								// Leaving the input ends the typing burst (mobile fires "up" onBlur).
-								signalStopped(chat)
-							}}
-							rows={1}
-							aria-label={t("chatComposerPlaceholder")}
-							aria-autocomplete="list"
-							aria-expanded={suggestList !== null}
-							aria-controls={suggestList !== null ? listboxId : undefined}
-							aria-activedescendant={suggestList !== null ? suggestionOptionId(listboxId, safeIndex) : undefined}
-							aria-invalid={overLimit}
-							placeholder={t("chatComposerPlaceholder")}
-							className="max-h-[200px] min-h-7 flex-1 resize-none bg-transparent py-1 text-sm leading-5 outline-none placeholder:text-muted-foreground"
-						/>
-						{shouldShowCounter(draft) ? (
-							<span
-								className={cn(
-									"shrink-0 text-xs leading-7 tabular-nums",
-									overLimit ? "font-medium text-destructive" : "text-muted-foreground"
-								)}
-							>
-								{remainingChars(draft)}
-							</span>
-						) : null}
-						<Button
-							size="icon-sm"
-							className="rounded-full bg-chat-own text-chat-own-foreground hover:bg-chat-own-strong"
-							// No sender until the account has loaded, and submit() cannot send without one: an enabled
-							// button (or Enter) would do nothing, silently, keeping the text.
-							disabled={!canSend(draft) || sender === undefined}
-							aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
-							onClick={() => {
-								void submit()
-							}}
+						<DropdownMenuContent
+							align="start"
+							side="top"
+							sideOffset={8}
+							className="w-auto"
 						>
-							<ArrowUpIcon className="size-4" />
-						</Button>
-					</div>
+							{isPro ? (
+								<>
+									<DropdownMenuItem
+										onClick={() => {
+											fileInputRef.current?.click()
+										}}
+									>
+										<UploadIcon aria-hidden="true" />
+										{t("chatComposerAttachUpload")}
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={() => {
+											setAttachDriveOpen(true)
+										}}
+									>
+										<HardDriveIcon aria-hidden="true" />
+										{t("chatComposerAttachFromDrive")}
+									</DropdownMenuItem>
+								</>
+							) : (
+								<DropdownMenuGroup>
+									<DropdownMenuLabel className="max-w-64 font-normal whitespace-normal">
+										{t("chatComposerAttachPremiumRequired")}
+									</DropdownMenuLabel>
+									<DropdownMenuItem onClick={upgrade}>
+										<SparklesIcon aria-hidden="true" />
+										{t("settings:settingsStorageFullUpgrade")}
+									</DropdownMenuItem>
+								</DropdownMenuGroup>
+							)}
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<textarea
+						ref={textareaRef}
+						value={draft}
+						onChange={onChange}
+						onKeyDown={onKeyDown}
+						onKeyUp={syncCaret}
+						onClick={syncCaret}
+						onSelect={syncCaret}
+						onBlur={() => {
+							// Leaving the input ends the typing burst (mobile fires "up" onBlur).
+							signalStopped(chat)
+						}}
+						rows={1}
+						aria-label={t("chatComposerPlaceholder")}
+						aria-autocomplete="list"
+						aria-expanded={suggestList !== null}
+						aria-controls={suggestList !== null ? listboxId : undefined}
+						aria-activedescendant={suggestList !== null ? suggestionOptionId(listboxId, safeIndex) : undefined}
+						aria-invalid={overLimit}
+						placeholder={t("chatComposerPlaceholderChat", {
+							name: chatTitle(chat, sender?.id, t("chatUndecryptable"), t("chatJustYou"))
+						})}
+						className="max-h-[200px] min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+					/>
+					{shouldShowCounter(draft) ? (
+						<span
+							className={cn(
+								"shrink-0 text-xs leading-7 tabular-nums",
+								overLimit ? "font-medium text-destructive" : "text-muted-foreground"
+							)}
+						>
+							{remainingChars(draft)}
+						</span>
+					) : null}
+					<Button
+						size="icon-sm"
+						className="rounded-full bg-chat-own text-chat-own-foreground hover:bg-chat-own-strong"
+						// No sender until the account has loaded, and submit() cannot send without one: an enabled
+						// button (or Enter) would do nothing, silently, keeping the text.
+						disabled={!canSend(draft) || sender === undefined}
+						aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
+						onClick={() => {
+							void submit()
+						}}
+					>
+						<ArrowUpIcon className="size-4" />
+					</Button>
 				</div>
 			</div>
 
 			{overLimit ? (
-				<p className="mt-1.5 ml-11 px-4 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
+				<p className="mt-1.5 px-1 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
 			) : null}
 
 			{attachDriveOpen ? (

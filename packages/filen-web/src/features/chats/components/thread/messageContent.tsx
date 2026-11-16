@@ -22,16 +22,8 @@ import { ExternalAnchor } from "@/features/chats/components/thread/externalAncho
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
 // `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
-// Colours inherit from the bubble; `own` picks the link and code-block treatment that reads on it.
-export function MessageContent({
-	participants,
-	segments,
-	own
-}: {
-	participants: readonly ChatParticipant[]
-	segments: MessageSegment[]
-	own: boolean
-}) {
+// Text colour inherits from the row.
+export function MessageContent({ participants, segments }: { participants: readonly ChatParticipant[]; segments: MessageSegment[] }) {
 	const { t } = useTranslation("chats")
 	const jumbo = isEmojiOnly(segments)
 
@@ -40,8 +32,8 @@ export function MessageContent({
 	}
 
 	return (
-		// wrap-anywhere, not break-words: the bubble shrinks to its content, and only `anywhere` lets a long
-		// unbroken link lower that content's min-content width instead of pushing the bubble past its cap.
+		// wrap-anywhere, not break-words: only `anywhere` lets a long unbroken link lower the text's
+		// min-content width instead of pushing the column past its cap.
 		<span className="text-sm wrap-anywhere whitespace-pre-wrap">
 			{segments.map((segment, index) => {
 				switch (segment.kind) {
@@ -55,10 +47,7 @@ export function MessageContent({
 						return (
 							<code
 								key={index}
-								className={cn(
-									"my-1 block rounded-lg px-2 py-1 font-mono text-xs whitespace-pre-wrap",
-									own ? "bg-chat-own-strong" : "bg-chat-other-strong"
-								)}
+								className="my-1 block rounded-lg bg-chat-other px-2 py-1 font-mono text-xs whitespace-pre-wrap"
 							>
 								{segment.code}
 							</code>
@@ -74,7 +63,7 @@ export function MessageContent({
 							return <Fragment key={index}>{segment.raw}</Fragment>
 						}
 
-						const linkClassName = cn("underline underline-offset-2 hover:no-underline", own ? "text-current" : "text-chat-link")
+						const linkClassName = "text-chat-link underline underline-offset-2 hover:no-underline"
 
 						// A Filen public link is this app's own domain — no external-navigation trust gate,
 						// same posture as the embed card below it (filenLinkCard.tsx) opens with.

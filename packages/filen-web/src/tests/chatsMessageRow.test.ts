@@ -50,7 +50,7 @@ const message: ChatMessage = {
 
 const descriptors = messageMenuActions(message, 1n, "confirmed")
 
-function renderRow(overrides: { runStart?: boolean; runEnd?: boolean; group?: boolean; currentUserId?: bigint } = {}) {
+function renderRow(overrides: { runStart?: boolean; currentUserId?: bigint } = {}) {
 	useMessageActions.mockReturnValue({ descriptors, runAction })
 
 	return render(
@@ -58,8 +58,6 @@ function renderRow(overrides: { runStart?: boolean; runEnd?: boolean; group?: bo
 			chat,
 			message,
 			runStart: overrides.runStart ?? true,
-			runEnd: overrides.runEnd ?? true,
-			group: overrides.group ?? false,
 			currentUserId: overrides.currentUserId ?? 1n,
 			blocked: deriveBlockedUsers([]),
 			active: false,
@@ -113,62 +111,68 @@ describe("MessageRow action model", () => {
 	})
 })
 
-// jsdom has no layout, so this pins the classes that keep the row's height at its estimate; the heights
-// themselves were measured in Chromium, Firefox and WebKit (thread.logic.ts).
-describe("MessageRow bubble layout", () => {
-	it("keeps the hover time and action bar out of the row's height, beside the bubble's inner side", () => {
-		renderRow({ runEnd: false })
+// jsdom has no layout, so this pins the classes that keep the row's height at its estimate (thread.logic.ts).
+describe("MessageRow layout", () => {
+	it("keeps the action bar out of the row's height, over its top-right corner", () => {
+		renderRow()
+
+		const bar = screen.getByRole("toolbar", { name: "Message actions" }).parentElement
+
+		expect(bar?.classList).toContain("absolute")
+		expect(bar?.classList).toContain("right-4")
+		expect(bar?.classList).toContain("pointer-events-none")
+	})
+
+	it("shows a run's later lines with their time in the gutter, revealed on hover", () => {
+		renderRow({ runStart: false })
 
 		const stamp = screen.getByText(formatClockTime(message.sentTimestamp))
-		const aside = stamp.parentElement
 
 		expect(stamp.classList).toContain("whitespace-nowrap")
-		expect(aside?.classList).toContain("absolute")
-		expect(aside?.classList).toContain("right-full")
-		expect(aside?.contains(screen.getByRole("toolbar", { name: "Message actions" }))).toBe(true)
+		expect(stamp.classList).toContain("opacity-0")
+		expect(stamp.classList).toContain("group-hover:opacity-100")
+		expect(screen.queryByText("You")).toBeNull()
 	})
 
-	it("puts own messages on the right in the brand bubble and others on the left", () => {
+	it("left-aligns every row, tinting own rows only", () => {
 		renderRow()
 
-		const own = screen.getByText("hello").closest(".rounded-\\[18px\\]")
+		const own = screen.getByText("hello").closest(".group")
 
-		expect(own?.classList).toContain("bg-chat-own")
-		expect(screen.getByText("hello").closest(".group")?.classList).toContain("items-end")
+		expect(own?.classList).toContain("bg-chat-own/6")
+		expect(own?.classList).not.toContain("items-end")
 		cleanup()
 
 		renderRow({ currentUserId: 2n })
 
-		expect(screen.getByText("hello").closest(".rounded-\\[18px\\]")?.classList).toContain("bg-chat-other")
-		expect(screen.getByText("hello").closest(".group")?.classList).toContain("items-start")
+		const other = screen.getByText("hello").closest(".group")
+
+		expect(other?.className).not.toContain("bg-chat-own")
+		expect(other?.classList).toContain("hover:bg-muted")
 	})
 
-	it("sizes the bubble's lines to the body text", () => {
+	it("caps the text column's measure while the row spans the pane", () => {
 		renderRow()
 
-		expect(screen.getByText("hello").closest(".rounded-\\[18px\\]")?.classList).toContain("text-sm")
+		expect(screen.getByText("hello").closest(".max-w-\\[760px\\]")).not.toBeNull()
+		expect(screen.getByText("hello").closest(".group")?.className).not.toContain("max-w-")
 	})
 
-	it("draws the tail only on a run's newest bubble", () => {
-		const { container, unmount } = renderRow({ runEnd: false })
-
-		expect(container.querySelector("svg.fill-current")).toBeNull()
-		unmount()
-
-		expect(renderRow().container.querySelector("svg.fill-current")).not.toBeNull()
-	})
-
-	it("names and pictures someone else's run in a group chat, never in a 1:1 or on own messages", () => {
+	it("opens every run with the avatar and name, in a 1:1 too, naming own runs You", () => {
 		renderRow({ currentUserId: 2n })
-		expect(screen.queryByText("a@example.com")).toBeNull()
-		cleanup()
-
-		renderRow({ currentUserId: 2n, group: true })
 		expect(screen.getByText("a@example.com")).toBeTruthy()
 		expect(screen.getByText("A")).toBeTruthy()
 		cleanup()
 
-		renderRow({ group: true })
+		renderRow()
+		expect(screen.getByText("You")).toBeTruthy()
 		expect(screen.queryByText("a@example.com")).toBeNull()
+	})
+
+	it("draws no bubble", () => {
+		const { container } = renderRow()
+
+		expect(container.querySelector(".rounded-\\[18px\\]")).toBeNull()
+		expect(container.querySelector("svg.fill-current")).toBeNull()
 	})
 })

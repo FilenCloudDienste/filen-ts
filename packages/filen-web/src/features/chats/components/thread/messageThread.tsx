@@ -16,7 +16,7 @@ import type { Options } from "react-hotkeys-hook"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { defaultRangeExtractor, elementScroll, useVirtualizer, type Range, type VirtualizerOptions } from "@tanstack/react-virtual"
-import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon } from "lucide-react"
+import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon, UsersIcon } from "lucide-react"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import type { BlockedUsers } from "@filen/shared"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
@@ -41,8 +41,10 @@ import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
-import { dayKind, formatClockTime, formatFullDate } from "@/features/chats/lib/time"
-import { chatTitle, chatAvatarUrl } from "@/features/chats/lib/sort"
+import { dayTimeLabel } from "@/features/chats/components/thread/timeLabel"
+import { chatTitle, chatAvatarUrl, isChatUndecryptable } from "@/features/chats/lib/sort"
+import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
@@ -82,22 +84,19 @@ const scrollToOffsetFromBottom: ThreadVirtualizerOptions["scrollToFn"] = (offset
 	elementScroll(0 - (offset + (options.adjustments ?? 0)), { ...options, adjustments: 0 }, instance)
 }
 
-// Centred above the first message of each day and of each stretch after a quiet hour: the day in words
-// when it is today or yesterday, the full date otherwise, and the clock time of the message it heads.
+// A rule with the label centred on it, above the first message of each day and of each stretch after a
+// quiet hour: the day in words when it is today or yesterday, the full date otherwise, and the clock time
+// of the message it heads.
 function TimeHeader({ timestamp }: { timestamp: bigint }) {
 	const { t } = useTranslation("chats")
-	const kind = dayKind(timestamp)
-	const time = formatClockTime(timestamp)
-	const label =
-		kind === "today"
-			? t("chatTimeHeaderToday", { time })
-			: kind === "yesterday"
-				? t("chatTimeHeaderYesterday", { time })
-				: t("chatTimeHeaderDate", { date: formatFullDate(timestamp), time })
 
 	return (
-		<div className="flex justify-center px-4 pt-3 pb-1">
-			<span className="min-w-0 truncate text-xs text-muted-foreground">{label}</span>
+		<div className="flex items-center gap-2 px-4 pt-3 pb-1">
+			<span className="h-px flex-1 bg-border" />
+			<span className="min-w-0 truncate text-xs leading-4 font-medium text-muted-foreground">
+				{dayTimeLabel(t, timestamp, false)}
+			</span>
+			<span className="h-px flex-1 bg-border" />
 		</div>
 	)
 }
@@ -149,7 +148,6 @@ function UnreadDivider({ chat }: { chat: Chat }) {
 function ThreadRowContent({
 	row,
 	chat,
-	group,
 	currentUserId,
 	blocked,
 	active,
@@ -157,7 +155,6 @@ function ThreadRowContent({
 }: {
 	row: ThreadRow
 	chat: Chat
-	group: boolean
 	currentUserId: bigint | undefined
 	blocked: BlockedUsers
 	active: boolean
@@ -176,8 +173,6 @@ function ThreadRowContent({
 			chat={chat}
 			message={row.message}
 			runStart={row.runStart}
-			runEnd={row.runEnd}
-			group={group}
 			currentUserId={currentUserId}
 			blocked={blocked}
 			active={active}
@@ -235,7 +230,6 @@ export interface ThreadListHandle {
 interface ThreadListProps {
 	ref: Ref<ThreadListHandle>
 	chat: Chat
-	group: boolean
 	// The thread header's title, which names the scroller for assistive tech.
 	labelledBy: string
 	// Ascending, as composed for the composer; `rows` is the same list bottom-up.
@@ -263,7 +257,6 @@ interface ThreadListProps {
 function ThreadList({
 	ref,
 	chat,
-	group,
 	labelledBy,
 	messages,
 	rows,
@@ -334,7 +327,7 @@ function ThreadList({
 	const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
 		count: rows.length,
 		getScrollElement: () => scrollRef.current,
-		estimateSize: index => estimateThreadRowSize(rows[index], currentUserId, group, blocked),
+		estimateSize: index => estimateThreadRowSize(rows[index], blocked),
 		overscan: 8,
 		getItemKey,
 		rangeExtractor,
@@ -403,10 +396,10 @@ function ThreadList({
 		}
 	}, [newestKey, affordance.atBottom])
 
-	// The typing bubble sits below the rows inside the scroller, whose scroll origin is the bottom edge, so
+	// The typing line sits below the rows inside the scroller, whose scroll origin is the bottom edge, so
 	// its coming and going would slide everything above it. A reader following the tail sees it push in; one
 	// scrolled up into history keeps their view, the scroll offset absorbing the change. The virtualizer's
-	// offset is off by the bubble's height while it shows, which its overscan covers.
+	// offset is off by the line's height while it shows, which its overscan covers.
 	useEffect(() => {
 		const slot = typingSlotRef.current
 
@@ -650,7 +643,7 @@ function ThreadList({
 		ON_FOCUSED_MESSAGE
 	)
 
-	// Opens the message's menu where the bubble is, as the context-menu key does. preventDefault first: on Windows and
+	// Opens the message's menu over its row, as the context-menu key does. preventDefault first: on Windows and
 	// Linux the browser would otherwise open its own on Shift+F10 too.
 	useAction(
 		"chats.message.menu",
@@ -732,7 +725,6 @@ function ThreadList({
 		<TypingIndicator
 			chatUuid={chat.uuid}
 			currentUserId={currentUserId}
-			group={group}
 		/>
 	)
 
@@ -790,9 +782,8 @@ function ThreadList({
 						/>
 					</div>
 				) : null}
-				{/* Clipped sideways: a bubble's hover bar and time float beside it and may reach past the edge. */}
 				<div
-					className="relative w-full shrink-0 overflow-x-clip"
+					className="relative w-full shrink-0"
 					style={{ height: virtualizer.getTotalSize() }}
 				>
 					{virtualizer
@@ -816,7 +807,6 @@ function ThreadList({
 									<ThreadRowContent
 										row={row}
 										chat={chat}
-										group={group}
 										currentUserId={currentUserId}
 										blocked={blocked}
 										active={row.key === activeKey}
@@ -872,14 +862,15 @@ function ThreadList({
 	)
 }
 
-// Conversation thread (bubble runs): header, the bottom-anchored message list with its typing bubble
+// Conversation thread (message runs): header, the bottom-anchored message list with its typing line
 // (ThreadList) and composer. Scrolling to the top loads one older page via loadOlderChatMessages. The
 // composer routes every send through the outbox; an own send jumps the view back to the bottom. The
-// header's ⋮ trigger hosts the conversation menu (rename/mute/participants/leave/delete + the explicit
+// header's ⋯ trigger hosts the conversation menu (rename/mute/participants/leave/delete + the explicit
 // "mark as read" entry) — one of two places markChatRead is wired (chatMenu.tsx's row context menu is the
 // other): never auto-fired on mount — old-web's explicit-mark model, not mobile's own screen-open trigger.
 export function MessageThread({ chat }: { chat: Chat }) {
-	const { t } = useTranslation("chats")
+	const { t } = useTranslation(["chats", "common"])
+	const isOnline = useIsOnline()
 	const chatUuid = chat.uuid
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
@@ -949,24 +940,41 @@ export function MessageThread({ chat }: { chat: Chat }) {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			{/* Side padding clears the absolute menu button, so a long title truncates before reaching it. */}
-			<header className="relative flex shrink-0 flex-col items-center gap-0.5 px-14 py-1.5 app-region-chrome">
+			<header className="flex h-12 shrink-0 items-center gap-2.5 pr-3 pl-4 app-region-chrome">
 				<UserAvatar
 					src={headerAvatarUrl}
 					name={headerTitle}
-					className="size-9"
+					size="sm"
 				/>
-				<h1
-					id={titleId}
-					className="max-w-full truncate rounded-full bg-muted px-3 py-0.5 text-sm font-medium"
-				>
-					{headerTitle}
-				</h1>
-				{group ? (
-					<p className="text-[11px] leading-3 text-muted-foreground">
-						{t("chatHeaderParticipants", { count: participantCount })}
-					</p>
-				) : null}
+				<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+					<h1
+						id={titleId}
+						className="min-w-0 truncate text-sm font-semibold"
+					>
+						{headerTitle}
+					</h1>
+					{group ? (
+						<p className="shrink-0 text-xs text-muted-foreground">
+							<span aria-hidden="true">· </span>
+							{t("chatHeaderParticipants", { count: participantCount })}
+						</p>
+					) : null}
+				</div>
+				{/* The menu's own participants entry, one click away; gated as that entry is. */}
+				{isChatUndecryptable(chat) ? null : (
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						disabled={!isOnline}
+						aria-label={t(CHAT_ACTION_DEFS.participants.labelKey)}
+						title={isOnline ? t(CHAT_ACTION_DEFS.participants.labelKey) : t("common:offlineActionDisabled")}
+						onClick={() => {
+							dialogHost.openChatDialog("participants", chat)
+						}}
+					>
+						<UsersIcon />
+					</Button>
+				)}
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
@@ -974,7 +982,6 @@ export function MessageThread({ chat }: { chat: Chat }) {
 								variant="ghost"
 								size="icon-sm"
 								aria-label={t("chatItemMenuTrigger")}
-								className="absolute top-1/2 right-3 -translate-y-1/2"
 							>
 								<MoreHorizontalIcon />
 							</Button>
@@ -993,7 +1000,6 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				key={chatUuid}
 				ref={threadListRef}
 				chat={chat}
-				group={group}
 				labelledBy={titleId}
 				messages={messages}
 				rows={rows}

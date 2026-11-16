@@ -8,10 +8,10 @@ import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu
 import { Button } from "@/components/ui/button"
 import { stopRowPropagation } from "@/lib/domEvents"
 
-// Hover action bar floating beside a bubble on its inner side (messageRow.tsx positions it) — a SECOND
+// Hover action bar floating over a message row's top-right corner (messageRow.tsx positions it) — a SECOND
 // renderer of the row's one useMessageActions result the right-click menu also gets, as inline icon
 // buttons plus a ⋯ overflow that opens the identical full menu (MessageDropdownMenuContent). Visible on
-// the bubble column's group-hover / focus-within (that column owns the `group` class); at rest it is
+// the row's group-hover / focus-within (the row owns the `group` class); at rest it is
 // opacity-0 and pointer-events-none so it never intercepts clicks on the rows around it. No new action
 // wiring — this is a presentation of the existing model, not a new one. NO reactions feature (the app has
 // no reaction backend on any platform); the first slot surfaces Reply as the primary action instead. A pointer

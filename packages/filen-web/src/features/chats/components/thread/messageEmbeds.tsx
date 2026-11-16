@@ -3,7 +3,7 @@ import { useChatMessageLinksQuery } from "@/features/chats/queries/chatMessageLi
 import { FilenLinkCard } from "@/features/chats/components/thread/embeds/filenLinkCard"
 
 // Filen public-link cards — one per unique link (embeds.logic.ts's cap + dedup), stacked under the
-// message's bubble on its side (messageRow.tsx mounts this below the bubble and derives `candidates`, empty
+// message's text (messageRow.tsx mounts this below the body and derives `candidates`, empty
 // when the sender disabled embeds). The plain link inline in the text is untouched either way, this
 // component only ever ADDS chrome on top of it, never replaces it, so a failed/disabled/loading embed
 // silently degrades to that plain link.

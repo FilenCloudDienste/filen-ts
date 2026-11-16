@@ -604,10 +604,9 @@ describe("React Compiler coverage", () => {
 		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
 	})
 
-	// Every thread row renders through these, and the typing bubble through the last.
+	// Every thread row renders through these, and the typing line through the last.
 	it.each([
 		["src/features/chats/components/thread/messageRow.tsx", "MessageRow"],
-		["src/features/chats/components/thread/messageRow.tsx", "BubbleTail"],
 		["src/features/chats/components/thread/messageContent.tsx", "MessageContent"],
 		["src/features/chats/components/thread/typingIndicator.tsx", "TypingIndicator"]
 	])("compiles %s's %s", (file, fnName) => {
@@ -692,12 +691,12 @@ describe("React Compiler coverage", () => {
 
 // The transcript list opts out ("use no memo") for its virtualizer; its rows must still compile, or every
 // token landing in the streaming reply would rebuild every visible row.
-it("compiles TranscriptRowContent, which renders every assistant transcript row", () => {
+it("compiles TranscriptRowContent, which renders every assistant transcript row, and its bubbles' tail", () => {
 	const events = compile("src/features/assistant/components/assistantTranscript.tsx")
 
-	expect(
-		events.some(event => event.kind === "CompileSuccess" && event.fnName === "TranscriptRowContent" && (event.memoSlots ?? 0) > 0)
-	).toBe(true)
+	for (const fnName of ["TranscriptRowContent", "BubbleTail"]) {
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	}
 })
 
 // Videos browsing: every card, row and grid host compiles, so a cursor move or a watch-state change re-renders only

@@ -62,7 +62,7 @@ import { testUuid } from "@/tests/support/uuid"
 registerAllActions()
 
 const CLIENT_HEIGHT = 300
-// A run's bubbles measure at their estimate, as they do in a browser.
+// A run's later rows measure at their estimate, as they do in a browser.
 const ROW_HEIGHT = RUN_CONTINUATION_ROW_ESTIMATE
 const geometry = { scrollHeight: 1000 }
 

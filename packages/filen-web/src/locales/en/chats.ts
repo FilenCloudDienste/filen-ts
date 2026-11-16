@@ -70,7 +70,7 @@ export const chats = {
 	chatNewMessagesCount_one: "{{count}} new",
 	/** Thread — visible text on the floating scroll-to-bottom pill (plural) */
 	chatNewMessagesCount_other: "{{count}} new",
-	/** Message — small marker under an edited message's bubble */
+	/** Message — small marker after an edited message's text */
 	chatMessageEdited: "Edited",
 	/** Message — placeholder body for a message that could not be decrypted */
 	chatMessageUndecryptable: "Message could not be decrypted",
@@ -80,7 +80,7 @@ export const chats = {
 	chatMessageFailed: "Not sent",
 	/** Message — prefix on the compact reply-to reference line above a reply */
 	chatReplyingTo: "Replying to {{name}}",
-	/** Message — sender label on the reply reference above a reply's bubble, followed by a snippet of the quoted message */
+	/** Message — sender label on the reply reference above a reply, followed by a snippet of the quoted message */
 	chatReplyReferenceSender: "{{name}}:",
 	/** Message — stands in for the sender's name when the quoted message is your own */
 	chatSenderYou: "You",
@@ -110,8 +110,10 @@ export const chats = {
 	chatTimeHeaderDate: "{{date}} {{time}}",
 
 	// ── Composer ──────────────────────────────────────────────────────────────────
-	/** Composer — textarea placeholder + accessible label */
+	/** Composer — textarea accessible label */
 	chatComposerPlaceholder: "Message",
+	/** Composer — textarea placeholder; {{name}} is the conversation's title */
+	chatComposerPlaceholderChat: "Message {{name}}",
 	/** Composer — accessible label on the send button */
 	chatComposerSend: "Send message",
 	/** Composer — accessible label on the send button while editing a message */

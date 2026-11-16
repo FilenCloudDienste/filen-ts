@@ -15,7 +15,8 @@ import {
 	UNREAD_ROW_ESTIMATE,
 	RUN_START_ROW_ESTIMATE,
 	RUN_CONTINUATION_ROW_ESTIMATE,
-	RUN_START_NAMED_ROW_ESTIMATE,
+	TOMBSTONE_RUN_START_ROW_ESTIMATE,
+	TOMBSTONE_ROW_ESTIMATE,
 	nextAnnouncement,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE,
@@ -64,31 +65,29 @@ function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	}
 }
 
-function runFlags(rows: ThreadRow[]): { key: string; runStart: boolean; runEnd: boolean }[] {
-	return rows
-		.filter((r): r is ThreadMessageRow => r.kind === "message")
-		.map(r => ({ key: r.key, runStart: r.runStart, runEnd: r.runEnd }))
+function runFlags(rows: ThreadRow[]): { key: string; runStart: boolean }[] {
+	return rows.filter((r): r is ThreadMessageRow => r.kind === "message").map(r => ({ key: r.key, runStart: r.runStart }))
 }
 
-describe("buildThreadRows — bubble runs", () => {
-	it("emits a leading time header and a lone message that both opens and closes its run", () => {
+describe("buildThreadRows — message runs", () => {
+	it("emits a leading time header and a lone message that opens its run", () => {
 		const m = mockMessage()
 		const rows = buildThreadRows([m])
 
 		expect(rows[0]?.kind).toBe("time")
-		expect(runFlags(rows)).toEqual([{ key: m.uuid, runStart: true, runEnd: true }])
+		expect(runFlags(rows)).toEqual([{ key: m.uuid, runStart: true }])
 	})
 
-	it("runs consecutive same-sender messages within 2 minutes: the tail only on the newest", () => {
+	it("runs consecutive same-sender messages within 2 minutes: only the oldest opens it", () => {
 		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 1) })
 		const c = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 2) })
 		const rows = buildThreadRows([a, b, c])
 
 		expect(runFlags(rows)).toEqual([
-			{ key: a.uuid, runStart: true, runEnd: false },
-			{ key: b.uuid, runStart: false, runEnd: false },
-			{ key: c.uuid, runStart: false, runEnd: true }
+			{ key: a.uuid, runStart: true },
+			{ key: b.uuid, runStart: false },
+			{ key: c.uuid, runStart: false }
 		])
 	})
 
@@ -98,8 +97,8 @@ describe("buildThreadRows — bubble runs", () => {
 		const rows = buildThreadRows([a, b])
 
 		expect(runFlags(rows)).toEqual([
-			{ key: a.uuid, runStart: true, runEnd: true },
-			{ key: b.uuid, runStart: true, runEnd: true }
+			{ key: a.uuid, runStart: true },
+			{ key: b.uuid, runStart: true }
 		])
 	})
 
@@ -110,8 +109,8 @@ describe("buildThreadRows — bubble runs", () => {
 
 		expect(rows.map(r => r.kind)).toEqual(["time", "message", "message"])
 		expect(runFlags(rows)).toEqual([
-			{ key: a.uuid, runStart: true, runEnd: true },
-			{ key: b.uuid, runStart: true, runEnd: true }
+			{ key: a.uuid, runStart: true },
+			{ key: b.uuid, runStart: true }
 		])
 	})
 
@@ -132,8 +131,8 @@ describe("buildThreadRows — bubble runs", () => {
 
 		expect(rows.map(r => r.kind)).toEqual(["time", "message", "time", "message"])
 		expect(runFlags(rows)).toEqual([
-			{ key: a.uuid, runStart: true, runEnd: true },
-			{ key: b.uuid, runStart: true, runEnd: true }
+			{ key: a.uuid, runStart: true },
+			{ key: b.uuid, runStart: true }
 		])
 	})
 
@@ -153,8 +152,8 @@ describe("buildThreadRows — bubble runs", () => {
 
 		expect(rows.map(r => r.kind)).toEqual(["time", "message", "unread", "message"])
 		expect(runFlags(rows)).toEqual([
-			{ key: a.uuid, runStart: true, runEnd: true },
-			{ key: b.uuid, runStart: true, runEnd: true }
+			{ key: a.uuid, runStart: true },
+			{ key: b.uuid, runStart: true }
 		])
 	})
 })
@@ -164,26 +163,26 @@ describe("estimateThreadRowSize", () => {
 	const other = mockMessage({ senderId: 2 })
 
 	function messageRow(message: ChatMessage, runStart: boolean): ThreadRow {
-		return { kind: "message", key: message.uuid, message, runStart, runEnd: true }
+		return { kind: "message", key: message.uuid, message, runStart }
 	}
 
-	it("sizes headers, the divider and bubbles by kind", () => {
-		expect(estimateThreadRowSize({ kind: "time", key: "t", timestamp: 0n }, 1n, false, EMPTY_BLOCKED_USERS)).toBe(TIME_ROW_ESTIMATE)
-		expect(estimateThreadRowSize({ kind: "unread", key: "unread-divider" }, 1n, false, EMPTY_BLOCKED_USERS)).toBe(UNREAD_ROW_ESTIMATE)
-		expect(estimateThreadRowSize(messageRow(other, true), 1n, false, EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
-		expect(estimateThreadRowSize(messageRow(other, false), 1n, false, EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
+	it("sizes headers, the divider and message rows by kind", () => {
+		expect(estimateThreadRowSize({ kind: "time", key: "t", timestamp: 0n }, EMPTY_BLOCKED_USERS)).toBe(TIME_ROW_ESTIMATE)
+		expect(estimateThreadRowSize({ kind: "unread", key: "unread-divider" }, EMPTY_BLOCKED_USERS)).toBe(UNREAD_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, true), EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, false), EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
 	})
 
-	it("adds the sender name only to the first bubble of someone else's run in a group", () => {
-		expect(estimateThreadRowSize(messageRow(other, true), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_START_NAMED_ROW_ESTIMATE)
-		expect(estimateThreadRowSize(messageRow(own, true), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
-		expect(estimateThreadRowSize(messageRow(other, false), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
+	it("sizes own runs like anyone else's", () => {
+		expect(estimateThreadRowSize(messageRow(own, true), EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(own, false), EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
 	})
 
-	it("sizes a blocked sender's run start as its unnamed tombstone", () => {
+	it("sizes a blocked sender's row as its tombstone", () => {
 		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 2n, email: "a@example.com" })])
 
-		expect(estimateThreadRowSize(messageRow(other, true), 1n, true, blocked)).toBe(RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, true), blocked)).toBe(TOMBSTONE_RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, false), blocked)).toBe(TOMBSTONE_ROW_ESTIMATE)
 	})
 
 	it("treats more than two participants as a group", () => {

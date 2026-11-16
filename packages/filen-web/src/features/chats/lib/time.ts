@@ -24,7 +24,7 @@ export function dayKind(timestamp: bigint, now: number = Date.now()): "today" | 
 	return key === dayNumber(today) ? "yesterday" : "other"
 }
 
-// HH:MM in the viewer's locale — a bubble's hover time, the time-header clock and the compact list-row
+// HH:MM in the viewer's locale — a message line's hover time, the time-header clock and the compact list-row
 // time for a same-day chat.
 export function formatClockTime(timestamp: bigint): string {
 	return new Date(Number(timestamp)).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
@@ -33,4 +33,9 @@ export function formatClockTime(timestamp: bigint): string {
 // Full localized date, used for a time header that is neither today nor yesterday.
 export function formatFullDate(timestamp: bigint): string {
 	return new Date(Number(timestamp)).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
+}
+
+// Numeric localized date, used for a run's header time that is neither today nor yesterday.
+export function formatShortDate(timestamp: bigint): string {
+	return new Date(Number(timestamp)).toLocaleDateString(undefined, { year: "numeric", month: "numeric", day: "numeric" })
 }

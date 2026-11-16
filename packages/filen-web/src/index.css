@@ -203,14 +203,15 @@
     /* Edge of the shell surfaces (sidebar, content card, audio bar). Translucent ink, not --border:
        --border is the canvas gray, so an opaque line vanishes where a surface meets the canvas. */
     --shell-border: oklch(0 0 0 / 12%);
-    /* Chat bubbles: own messages ride the brand blue in both themes (as on mobile); others sit on a neutral gray
-       a step off the white panel. The -strong shades fill code blocks and cards inside a bubble. */
+    /* Chat: the brand blue in both themes (as on mobile) fills the send buttons and the assistant's own bubbles
+       and tints own message rows; the neutral gray a step off the white panel fills code blocks, link cards and
+       the assistant's replies. The -strong shades are their hover and nested fills. */
     --chat-own: oklch(0.623 0.214 259.815);
     --chat-own-foreground: oklch(1 0 0);
     --chat-own-strong: oklch(0.546 0.245 262.881);
     --chat-other: oklch(0.93 0.002 286);
     --chat-other-strong: oklch(0.88 0.003 286);
-    /* Links on the gray bubbles: a blue dark or light enough to keep 4.5:1 on chat-other in each theme. */
+    /* Links in messages: a blue dark or light enough to keep 4.5:1 on chat-other in each theme. */
     --chat-link: oklch(0.488 0.243 264.376);
     /* Transient-degradation notices (e.g. the chat reconnect strip): a tint of --warning behind
        --warning-foreground text. */

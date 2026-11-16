@@ -59,10 +59,8 @@ function renderRow(overrides: Partial<ChatMessage> = {}, blockedUsers: BlockedUs
 		createElement(MessageRow, {
 			chat,
 			message: message(overrides),
+			// A run's first row, so an unhidden row shows its sender's name and avatar.
 			runStart: true,
-			runEnd: true,
-			// A group chat, so an unhidden row shows its sender's name and avatar.
-			group: true,
 			currentUserId: 1n,
 			blocked: blockedUsers,
 			active: false,

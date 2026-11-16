@@ -6,13 +6,12 @@ import { isOwnMessage, isSenderBlocked } from "@/features/chats/lib/sender"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
-// BUBBLE RUNS. Messages ascend (oldest first, newest last — the query cache's own order). Consecutive
+// MESSAGE RUNS. Messages ascend (oldest first, newest last — the query cache's own order). Consecutive
 // messages from the SAME sender, on the same day and within a 2-minute window of each other form one run:
-// bubbles inside a run sit close together, only the run's newest bubble carries the tail (and, in a group
-// chat, the sender's avatar), and only its oldest carries the sender's name. Mirrors old-web's
-// `isTimestampSameMinute` (a 2-minute window, not a literal same-minute) + same-day grouping (`dayNumber`,
-// shared with the time-header label). A time header row opens every day and every stretch after a quiet
-// hour; both always break the run.
+// the run's oldest row opens with the sender's avatar, name and time, and every later row is a bare line
+// indented under the name. Mirrors old-web's `isTimestampSameMinute` (a 2-minute window, not a literal
+// same-minute) + same-day grouping (`dayNumber`, shared with the time-header label). A time header row
+// opens every day and every stretch after a quiet hour; both always break the run.
 
 // Old-web's window: two timestamps group if within 2 minutes of each other.
 const BURST_WINDOW_MS = 120_000
@@ -23,51 +22,37 @@ const TIME_HEADER_GAP_MS = 60 * 60_000
 // A stable key for the (at most one) unread-divider row a chat can render.
 const UNREAD_DIVIDER_KEY = "unread-divider"
 
-// A message row's place in its run: `runStart` = oldest bubble (carries the group-chat name), `runEnd` =
-// newest bubble (carries the tail and the group-chat avatar). A lone message is both.
+// `runStart` = the run's oldest row, which carries the avatar, name and time. A lone message starts its run.
 export interface ThreadMessageRow {
 	kind: "message"
 	key: string
 	message: ChatMessage
 	runStart: boolean
-	runEnd: boolean
 }
 
 export type ThreadRow =
 	{ kind: "time"; key: string; timestamp: bigint } | { kind: "unread"; key: typeof UNREAD_DIVIDER_KEY } | ThreadMessageRow
 
 // Virtualizer estimates: each kind's real one-line height, so most rows measure in without changing the
-// total size (a size change mid-scroll cancels Chromium's animated keyboard scroll). Measured on the row
-// wrappers, identical in Chromium, Firefox and WebKit: time header 32, unread divider 36, run start 42 (a
-// blocked sender's tombstone too), run continuation 34, named group run start 60.
+// total size (a size change mid-scroll cancels Chromium's animated keyboard scroll).
 export const TIME_ROW_ESTIMATE = 32
 export const UNREAD_ROW_ESTIMATE = 36
-// A run's first bubble: the 10px run gap + a 32px one-line bubble.
-export const RUN_START_ROW_ESTIMATE = 42
-// A bubble continuing a run: the 2px in-run gap + the bubble.
-export const RUN_CONTINUATION_ROW_ESTIMATE = 34
-// A group chat's run from someone else opens with the sender's name above its first bubble.
-export const RUN_START_NAMED_ROW_ESTIMATE = 60
+// A run's first row: the 12px run gap + 2px padding each side of the 40px avatar, which sits beside the
+// name line and one body line.
+export const RUN_START_ROW_ESTIMATE = 56
+// A row continuing a run: one 20px body line + 2px padding each side.
+export const RUN_CONTINUATION_ROW_ESTIMATE = 24
+// A blocked sender's tombstone: the 32px dashed pill + the row padding, after the run gap when it opens one.
+export const TOMBSTONE_RUN_START_ROW_ESTIMATE = 48
+export const TOMBSTONE_ROW_ESTIMATE = 36
 
-// A group chat (more than two participants) names and pictures the senders of other people's runs; a 1:1
-// needs neither.
+// A group chat: more than two participants.
 export function isGroupChat(participantCount: number): boolean {
 	return participantCount > 2
 }
 
-// Whether a message row shows its sender's name above the bubble: the oldest bubble of someone else's run
-// in a group chat.
-export function showsSenderName(runStart: boolean, own: boolean, group: boolean): boolean {
-	return group && !own && runStart
-}
-
-// A blocked sender's row estimates as its tombstone, which carries no name: hidden is how it first renders.
-export function estimateThreadRowSize(
-	row: ThreadRow | undefined,
-	currentUserId: bigint | undefined,
-	group: boolean,
-	blocked: BlockedUsers
-): number {
+// A blocked sender's row estimates as its tombstone: hidden is how it first renders.
+export function estimateThreadRowSize(row: ThreadRow | undefined, blocked: BlockedUsers): number {
 	if (row === undefined || row.kind === "time") {
 		return TIME_ROW_ESTIMATE
 	}
@@ -76,13 +61,11 @@ export function estimateThreadRowSize(
 		return UNREAD_ROW_ESTIMATE
 	}
 
-	if (!row.runStart) {
-		return RUN_CONTINUATION_ROW_ESTIMATE
+	if (isSenderBlocked(row.message, blocked)) {
+		return row.runStart ? TOMBSTONE_RUN_START_ROW_ESTIMATE : TOMBSTONE_ROW_ESTIMATE
 	}
 
-	return showsSenderName(true, isOwnMessage(row.message, currentUserId), group) && !isSenderBlocked(row.message, blocked)
-		? RUN_START_NAMED_ROW_ESTIMATE
-		: RUN_START_ROW_ESTIMATE
+	return row.runStart ? RUN_START_ROW_ESTIMATE : RUN_CONTINUATION_ROW_ESTIMATE
 }
 
 // The "New" divider's placement: old-web's NewDivider guard (first message where `sentTimestamp >
@@ -130,13 +113,12 @@ export function buildThreadRows(
 	unread?: { lastFocus: bigint; currentUserId: bigint; blocked?: BlockedUsers }
 ): ThreadRow[] {
 	const rows: ThreadRow[] = []
-	let previousRow: ThreadMessageRow | undefined
+	let previous: ChatMessage | undefined
 	let previousDay: number | undefined
 	let unreadInserted = false
 
 	for (const message of messages) {
 		const day = dayNumber(new Date(Number(message.sentTimestamp)))
-		const previous = previousRow?.message
 		let runStart = previous === undefined || previousDay === undefined || !continuesBurst(previous, previousDay, message, day)
 
 		if (day !== previousDay) {
@@ -155,15 +137,8 @@ export function buildThreadRows(
 			runStart = true
 		}
 
-		// A row's runEnd is settled by the next message: it stays true unless that one continues the run.
-		if (!runStart && previousRow !== undefined) {
-			previousRow.runEnd = false
-		}
-
-		const row: ThreadMessageRow = { kind: "message", key: message.uuid, message, runStart, runEnd: true }
-
-		rows.push(row)
-		previousRow = row
+		rows.push({ kind: "message", key: message.uuid, message, runStart })
+		previous = message
 		previousDay = day
 	}
 

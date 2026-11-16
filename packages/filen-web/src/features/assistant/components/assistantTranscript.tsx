@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { useVirtualizer, type VirtualizerOptions } from "@tanstack/react-virtual"
 import { cn } from "@filen/shared"
 import { AssistantReplyMarkdown } from "@/features/assistant/components/replyMarkdown"
-import { BubbleTail, OTHER_TAIL_CLASS, OWN_TAIL_CLASS } from "@/features/chats/components/thread/messageRow"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { AssistantConfirmationCard } from "@/features/assistant/components/assistantConfirmationCard"
@@ -27,9 +26,27 @@ function estimateRowSize(row: TranscriptRow | undefined): number {
 	}
 }
 
-// Shared with the chat thread's bubbles: same radius, tail and colour tokens, so the panel reads as a
-// conversation the moment it opens.
 const BUBBLE_CLASS = "relative min-w-0 rounded-[18px] px-3 py-1.5 text-sm"
+
+// The tail on a bubble, hooked out of its bottom corner on the speaker's side. Absolute, so it adds no
+// height to the row; the bubble's own corner on that side is squared off for it to attach to. `className`
+// sets its side and its colour (it fills with currentColor).
+function BubbleTail({ className }: { className: string }) {
+	return (
+		<svg
+			aria-hidden="true"
+			viewBox="0 0 14 18"
+			className={cn("pointer-events-none absolute bottom-0 h-[18px] w-3.5 fill-current", className)}
+		>
+			<path d="M8 0C8 9 10 15 14 18C9 18.5 3 17.5 0 14V0Z" />
+		</svg>
+	)
+}
+
+// Tail placement per side: the svg overlaps the bubble's squared corner by 6px and hooks outward; the
+// left-side tail is the right one mirrored.
+const OWN_TAIL_CLASS = "-right-1.5"
+const OTHER_TAIL_CLASS = "-left-1.5 -scale-x-100"
 
 // Rendered by a component the React Compiler does compile (AssistantTranscript opts out because of the
 // virtualizer), so a scroll step or a token landing in the last reply reuses every other row's subtree.

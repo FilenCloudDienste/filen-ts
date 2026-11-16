@@ -28,11 +28,11 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 // External links read their domain trust through a query.
-function content(chat: Chat, text: string, own = false) {
+function content(chat: Chat, text: string) {
 	return createElement(
 		QueryClientProvider,
 		{ client: new QueryClient() },
-		createElement(MessageContent, { participants: chat.participants, segments: segmentMessage(text), own })
+		createElement(MessageContent, { participants: chat.participants, segments: segmentMessage(text) })
 	)
 }
 
@@ -132,9 +132,9 @@ describe("MessageContent — mentions", () => {
 	})
 })
 
-// Colours come from the bubble: an own bubble is brand blue with white text, so links there take the text
-// colour, and blue links would vanish into it.
-describe("MessageContent — bubble side", () => {
+// Every message sits on the pane (own rows only add a faint tint), so links and code blocks take one
+// treatment whoever sent them.
+describe("MessageContent — colours", () => {
 	it("keeps the message text a text node of its own, with no colour of its own", () => {
 		const { container } = render(content(mockChat(), "hello"))
 		const span = container.firstElementChild
@@ -143,25 +143,15 @@ describe("MessageContent — bubble side", () => {
 		expect(span?.className).not.toMatch(/text-(foreground|primary)/)
 	})
 
-	it("underlines links in the bubble's own text colour on an own bubble, in blue on anyone else's", () => {
-		const own = render(content(mockChat(), "see https://example.com/a", true))
+	it("underlines links in the link blue", () => {
+		const { getByRole } = render(content(mockChat(), "see https://example.com/a"))
 
-		expect(own.getByRole("link").className).toContain("text-current")
-		cleanup()
-
-		const other = render(content(mockChat(), "see https://example.com/a"))
-
-		expect(other.getByRole("link").className).toContain("text-chat-link")
+		expect(getByRole("link").className).toContain("text-chat-link")
 	})
 
-	it("fills code blocks with the stronger shade of the bubble's own surface", () => {
-		const own = render(content(mockChat(), "```\nconst a = 1\n```", true))
+	it("fills code blocks with the neutral chat surface", () => {
+		const { container } = render(content(mockChat(), "```\nconst a = 1\n```"))
 
-		expect(own.container.querySelector("code")?.className).toContain("bg-chat-own-strong")
-		cleanup()
-
-		const other = render(content(mockChat(), "```\nconst a = 1\n```"))
-
-		expect(other.container.querySelector("code")?.className).toContain("bg-chat-other-strong")
+		expect(container.querySelector("code")?.className).toContain("bg-chat-other")
 	})
 })

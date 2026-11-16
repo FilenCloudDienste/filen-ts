@@ -34,7 +34,7 @@ export function adjacentUnreadChatUuid<T extends { uuid: string }>(
 	return null
 }
 
-// Matches a message's keyboard focus target in the thread (messageRow.tsx: the bubble column, or a blocked sender's
+// Matches a message's keyboard focus target in the thread (messageRow.tsx: the message row, or a blocked sender's
 // reveal button).
 export const MESSAGE_FOCUS_SELECTOR = "[data-message-focus]"
 

@@ -23,7 +23,7 @@ import { noop } from "@/lib/utils"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
 
-// Cards sit under the bubble on the same neutral surface as other people's bubbles; media sits bare.
+// Cards sit under the message text on the neutral chat surface; media sits bare.
 const CARD_CLASS =
 	"flex max-w-sm min-w-0 items-center gap-2.5 rounded-2xl bg-chat-other px-3 py-2 text-sm focus-ring transition-colors outline-none hover:bg-chat-other-strong"
 
