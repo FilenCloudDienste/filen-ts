@@ -61,6 +61,15 @@ class BoundedLru<T> {
 		this.evictUntil(size)
 	}
 
+	// Removes the entry and hands it over: what it held no longer counts here.
+	public take(key: string): Entry<T> | undefined {
+		const entry = this.entries.get(key)
+
+		this.delete(key)
+
+		return entry
+	}
+
 	public delete(key: string): void {
 		const entry = this.entries.get(key)
 
@@ -127,6 +136,18 @@ export function getPreviewBytes(scope: string | null, uuid: string): Uint8Array 
 	return entry.value
 }
 
+// Takes the bytes of `uuid` out of the cache, crediting the room they held: for a caller about to transfer them to a
+// worker, which would leave a detached view behind. Undefined when they are not cached (or were transferred already).
+export function takePreviewBytes(scope: string | null, uuid: string): Uint8Array | undefined {
+	if (scope === null) {
+		return undefined
+	}
+
+	const entry = loaded.take(bytesKey(scope, uuid))
+
+	return entry !== undefined && entry.value instanceof Uint8Array && entry.value.byteLength === entry.size ? entry.value : undefined
+}
+
 // One whole-buffer load per key at a time, started by a preview or a buffered public Download and joined
 // by whichever comes next. Removed when it settles, so a failure never outlives the attempt that made it.
 const pendingBytes = new Map<string, Promise<Uint8Array>>()
@@ -160,7 +181,7 @@ function cancelledError(): Error {
 // `signal` aborts, the caller starts no load: its cancel token only reaches a download it started, so
 // one begun after it went away could never be cancelled. `store: false` shares a load without keeping
 // it (a public Download's own fetch): nothing reads a Download's bytes back, and the cache would hold
-// them for the rest of the visit.
+// them for the rest of the visit. Such a load makes no room either, since it never joins what is held.
 export function loadPreviewBytes(
 	scope: string | null,
 	uuid: string,
@@ -203,7 +224,9 @@ export function loadPreviewBytes(
 	const loadEpoch = epoch
 	const store = options?.store ?? true
 
-	loaded.reserve(size)
+	if (store) {
+		loaded.reserve(size)
+	}
 
 	const own = load().then(bytes => {
 		if (store && loadEpoch === epoch) {

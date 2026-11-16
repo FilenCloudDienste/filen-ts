@@ -24,7 +24,20 @@ export interface SyncRangeHandle {
 }
 
 // Opens the bridge for `file` under `token` (cancelPreviewDownload(token) aborts it too).
-export async function openSyncRange(file: AnyFile, access: PreviewAccessMode, token: string): Promise<SyncRangeHandle> {
+export function openSyncRange(file: AnyFile, access: PreviewAccessMode, token: string): Promise<SyncRangeHandle> {
+	return openSyncBridge(Number(file.size), (buffer, port, readerLock) =>
+		access === "anon"
+			? sdkApi.openLinkedSyncRangeAnon(buffer, port, file, token, readerLock)
+			: sdkApi.openSyncRange(buffer, port, file, token, readerLock)
+	)
+}
+
+// The page's side of a bridge over `length` bytes: the shared buffer, and the reader lock held for as long as the
+// bridge is wanted. `serve` asks the SDK worker to serve it, the port transferred.
+export async function openSyncBridge(
+	length: number,
+	serve: (buffer: SharedArrayBuffer, port: MessagePort, readerLock: string) => Promise<void>
+): Promise<SyncRangeHandle> {
 	const buffer = createSyncRangeBuffer(syncRangeSlots(), BLOCK_BYTES)
 	const { port1, port2 } = new MessageChannel()
 	const readerLock = `filen-sync-range-${crypto.randomUUID()}`
@@ -50,8 +63,7 @@ export async function openSyncRange(file: AnyFile, access: PreviewAccessMode, to
 	const transferred = Comlink.transfer(port2, [port2])
 
 	try {
-		if (access === "anon") await sdkApi.openLinkedSyncRangeAnon(buffer, transferred, file, token, readerLock)
-		else await sdkApi.openSyncRange(buffer, transferred, file, token, readerLock)
+		await serve(buffer, transferred, readerLock)
 	} catch (error) {
 		done.resolve(undefined)
 		port1.close()
@@ -60,7 +72,7 @@ export async function openSyncRange(file: AnyFile, access: PreviewAccessMode, to
 	}
 
 	return {
-		channel: { buffer, port: port1, length: Number(file.size) },
+		channel: { buffer, port: port1, length },
 		close: () => {
 			done.resolve(undefined)
 			port1.close()

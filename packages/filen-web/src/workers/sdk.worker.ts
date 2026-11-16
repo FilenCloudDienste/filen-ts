@@ -157,6 +157,17 @@ import { asByteStream, imageSniffStream } from "@/lib/media/imageSniff"
 import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { serveFileSyncRange } from "@/lib/media/syncRangeServe"
+import type { AbortableReadRange } from "@/lib/media/blockCache"
+import { originKey, originWhole, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import {
+	clearEntryReaders,
+	entryReader,
+	originFile,
+	originSource,
+	type FileReadClient,
+	type OriginSource,
+	type OriginSourceDeps
+} from "@/workers/originSource"
 import { crc32 } from "@filen/office/core/opc"
 import { savePortReader } from "@filen/shared/savePort"
 import { savePortStream } from "@/lib/media/savePortStream"
@@ -683,14 +694,19 @@ async function readFileRange(
 // One tier of a video's probe through `c`'s range reads. Its progress counts block downloads against the
 // walk's current budget, which the walk raises as it learns the header's size, for
 // cancelPreviewDownloadUnlessFinishing.
-async function probeWith(
+function probeWith(
 	c: Pick<Client, "downloadFileToWriter">,
 	file: AnyFile,
 	tier: ProbeTier,
 	previewToken: string
 ): Promise<VideoProbe | null> {
+	return probeRead(Number(file.size), (start, end, signal) => readFileRange(c, file, start, end, signal), tier, previewToken)
+}
+
+// probeWith over any `size`-byte source's range reads.
+async function probeRead(size: number, read: AbortableReadRange, tier: ProbeTier, previewToken: string): Promise<VideoProbe | null> {
 	const controller = new AbortController()
-	const source = probeSource(Number(file.size), (start, end) => readFileRange(c, file, start, end, controller.signal), tier)
+	const source = probeSource(size, (start, end) => read(start, end, controller.signal), tier)
 	const progress: PreviewProgress = {
 		get received() {
 			return source.blockReads
@@ -726,45 +742,200 @@ function serveRangePort(
 	release?: () => void
 ): void {
 	const controller = new AbortController()
-	let reading = 0
-	const releaseIfDone = () => {
-		if (release !== undefined && reading === 0 && controller.signal.aborted) {
-			release()
-			release = undefined
-		}
-	}
 
-	// Before registering: a token cancelled ahead of this call aborts the controller at once.
 	controller.signal.addEventListener(
 		"abort",
 		() => {
 			if (previewAborts.get(previewToken) === controller) {
 				previewAborts.delete(previewToken)
 			}
-
-			releaseIfDone()
 		},
 		{ once: true }
 	)
 	registerPreviewAbort(previewToken, controller)
+	exposeTrackedRangePort(port, (start, end, signal) => readFileRange(c, file, start, end, signal), controller, release)
+}
+
+// Serves `read` on `port` until `lifetime` aborts. `release` runs once the port has shut down and no read is still
+// running, so a handle is never freed under a call still running on it.
+function exposeTrackedRangePort(port: MessagePort, read: AbortableReadRange, lifetime: AbortController, release?: () => void): void {
+	let reading = 0
+	const releaseIfDone = () => {
+		if (release !== undefined && reading === 0 && lifetime.signal.aborted) {
+			release()
+			release = undefined
+		}
+	}
+
+	lifetime.signal.addEventListener("abort", releaseIfDone, { once: true })
+	// A token cancelled ahead of the call aborted it already.
+	releaseIfDone()
 	exposeRangePort(
 		port,
 		async (start, end, signal) => {
 			// A read arriving after shutdown must not touch a handle that may already be freed.
-			controller.signal.throwIfAborted()
+			lifetime.signal.throwIfAborted()
 			reading++
 
 			try {
-				return await readFileRange(c, file, start, end, signal)
+				return await read(start, end, signal)
 			} finally {
 				reading--
 				releaseIfDone()
 			}
 		},
-		controller,
+		lifetime,
 		// readChecked: the CRC of what is sent, so a presentation save can check the copies it uploads.
 		crc32
 	)
+}
+
+function fileReadClient(c: () => Pick<Client, "downloadFileToWriter">, release?: () => void): FileReadClient {
+	return {
+		readRange: (file, start, end, signal) => readFileRange(c(), file, start, end, signal),
+		release: () => {
+			release?.()
+		}
+	}
+}
+
+// The byte layer's reads (originSource.ts). Before the SDK has archive readers, an entry is read whole through
+// downloadArchiveEntry, which checks its CRC; only the session client can.
+const originDeps: OriginSourceDeps = {
+	session: () => {
+		requireClient()
+
+		// Checked again on every read, so one after sign-out fails at once instead of reaching a freed handle.
+		return fileReadClient(requireClient)
+	},
+	linked: () => {
+		const unauth = linkedUnauthClient()
+
+		return fileReadClient(
+			() => unauth,
+			() => {
+				unauth.free()
+			}
+		)
+	},
+	entryReader,
+	readEntry: async (record, entry, size, signal) => {
+		if (record.anon) {
+			throw new Error("a public link's archive entries need the archive reader")
+		}
+
+		const c = requireClient()
+		const { writer, take } = entryBuffer(size)
+
+		settleEntryReport(
+			await c.downloadArchiveEntry(
+				{
+					archive: record.archive,
+					entry,
+					writer,
+					maxSolidSkip: record.maxSolidSkip(entry),
+					managedFuture: { abortSignal: signal }
+				},
+				archivePassword(record.password)
+			)
+		)
+
+		return take()
+	}
+}
+
+interface SharedOriginSource {
+	readonly source: OriginSource
+	users: number
+}
+
+// The ports and sync bridges served under one preview token. cancelPreviewDownload(token) ends them all, each one's
+// own close ends only itself, and they share one source per origin (an entry's held buffer is read once).
+interface OriginServeGroup {
+	readonly controller: AbortController
+	readonly sources: Map<string, SharedOriginSource>
+	users: number
+}
+
+const originServeGroups = new Map<string, OriginServeGroup>()
+
+function originServeKey(origin: ByteOrigin): string {
+	return `${origin.kind}:${originKey(origin)}`
+}
+
+// One served port's or bridge's share of its token's group: its own lifetime, the shared source, and `done`, to be
+// called once it has shut down and no read runs on it.
+function joinOriginServe(origin: ByteOrigin, previewToken: string): { source: OriginSource; lifetime: AbortController; done: () => void } {
+	const key = originServeKey(origin)
+	const existing = originServeGroups.get(previewToken)
+	const live = existing !== undefined && !existing.controller.signal.aborted ? existing : undefined
+	// Made before anything registers, so an origin that cannot be read leaves nothing behind.
+	const shared = live?.sources.get(key) ?? { source: originSource(origin, originDeps), users: 0 }
+	let group = live
+
+	if (group === undefined) {
+		const controller = new AbortController()
+
+		group = { controller, sources: new Map(), users: 0 }
+		originServeGroups.set(previewToken, group)
+		controller.signal.addEventListener(
+			"abort",
+			() => {
+				if (previewAborts.get(previewToken) === controller) {
+					previewAborts.delete(previewToken)
+				}
+			},
+			{ once: true }
+		)
+		registerPreviewAbort(previewToken, controller)
+	}
+
+	const joined = group
+	const lifetime = new AbortController()
+	const endWithGroup = (): void => {
+		lifetime.abort()
+	}
+	let finished = false
+
+	joined.sources.set(key, shared)
+	shared.users++
+	joined.users++
+	joined.controller.signal.addEventListener("abort", endWithGroup, { once: true })
+
+	if (joined.controller.signal.aborted) {
+		lifetime.abort()
+	}
+
+	return {
+		source: shared.source,
+		lifetime,
+		done: () => {
+			if (finished) {
+				return
+			}
+
+			finished = true
+			joined.controller.signal.removeEventListener("abort", endWithGroup)
+			shared.users--
+
+			if (shared.users === 0) {
+				joined.sources.delete(key)
+				shared.source.release()
+			}
+
+			joined.users--
+
+			if (joined.users === 0) {
+				if (originServeGroups.get(previewToken) === joined) {
+					originServeGroups.delete(previewToken)
+				}
+
+				if (previewAborts.get(previewToken) === joined.controller) {
+					previewAborts.delete(previewToken)
+				}
+			}
+		}
+	}
 }
 
 // Serves `file`'s decrypted blocks into the PDF engine's sync range `buffer` (lib/media/syncRangeServe.ts) through `c`,
@@ -884,6 +1055,8 @@ function detachClient(): Client | null {
 	walkCoordinator.invalidate()
 	videoIndex.reset()
 	videoIndexUnsubscribe = null
+	// Archive readers name archives this session opened.
+	clearEntryReaders()
 	return prev
 }
 
@@ -3033,6 +3206,83 @@ const api = {
 	openSyncRange(buffer: SharedArrayBuffer, port: MessagePort, file: AnyFile, previewToken: string, readerLock: string): void {
 		requireClient()
 		serveSyncRangeFor(buffer, port, requireClient, file, previewToken, readerLock)
+	},
+	// ── Byte origins (lib/sdk/byteOrigin.ts) ─────────────────────────────────
+	// openRangePort for any origin the SDK reads. Ports opened under one token share its cancel and one source per
+	// origin; each lives until its reader closes it.
+	openOriginRangePort(port: MessagePort, origin: ByteOrigin, previewToken: string): void {
+		const { source, lifetime, done } = joinOriginServe(origin, previewToken)
+
+		exposeTrackedRangePort(port, source.read, lifetime, done)
+	},
+	// openSyncRange for an origin read by ranges; a whole one is transferred to the engine instead.
+	openOriginSyncRange(buffer: SharedArrayBuffer, port: MessagePort, origin: ByteOrigin, previewToken: string, readerLock: string): void {
+		if (originWhole(origin)) {
+			throw new Error("an origin read whole has no sync range")
+		}
+
+		const { source, lifetime, done } = joinOriginServe(origin, previewToken)
+
+		serveFileSyncRange(buffer, port, {
+			read: source.read,
+			length: source.size,
+			lifetime,
+			readerLock,
+			release: done,
+			...("locks" in navigator ? { locks: navigator.locks } : {})
+		})
+
+		// Cancelled ahead of the call: nothing was served.
+		if (lifetime.signal.aborted) {
+			done()
+		}
+	},
+	// An origin's whole bytes, at most `cap`, transferred back and never kept here (the page's loadOriginBytes caches
+	// them). Cancelled by its token.
+	async downloadOriginBytes(origin: ByteOrigin, cap: number, previewToken: string): Promise<Uint8Array> {
+		const source = originSource(origin, originDeps)
+		const controller = new AbortController()
+
+		registerPreviewAbort(previewToken, controller)
+		try {
+			const bytes = await source.readWhole(cap, controller.signal)
+
+			return Comlink.transfer(bytes, [bytes.buffer])
+		} finally {
+			if (previewAborts.get(previewToken) === controller) {
+				previewAborts.delete(previewToken)
+			}
+
+			source.release()
+		}
+	},
+	// readVideoProbe for any origin the SDK reads.
+	async readOriginProbe(origin: ByteOrigin, tier: ProbeTier, previewToken: string): Promise<VideoProbe | null> {
+		const source = originSource(origin, originDeps)
+
+		try {
+			return await probeRead(source.size, source.read, tier, previewToken)
+		} finally {
+			source.release()
+		}
+	},
+	// fetchRawPreview for a drive or public-link file origin; the other kinds have no ranged embedded-preview read.
+	fetchOriginRawPreview(origin: ByteOrigin, previewToken: string): Promise<RawPreviewResult> {
+		const ref = originFile(origin)
+
+		if (ref === null) {
+			return Promise.reject(new Error("only a file origin has an embedded preview read"))
+		}
+
+		if (ref.anon) {
+			return withLinkedUnauth(unauth =>
+				writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file: ref.file, ...params }))
+			)
+		}
+
+		const c = requireClient()
+
+		return writeRawPreview(previewToken, params => c.writeEmbeddedPreview({ file: ref.file, ...params }))
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
 	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual

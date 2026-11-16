@@ -1,0 +1,186 @@
+import type { AnyFile, ArchiveEntryId } from "@filen/sdk-rs"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { AbortableReadRange } from "@/lib/media/blockCache"
+import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { raceAbort } from "@/lib/abort"
+
+// The SDK worker's side of the byte layer: the only worker code that knows the origin kinds. A `bytes` origin never
+// gets here; the page reads its Blob itself.
+
+export interface OriginSource {
+	readonly size: number
+	read: AbortableReadRange
+	// The whole origin; rejects above `cap`.
+	readWhole(cap: number, signal: AbortSignal): Promise<Uint8Array>
+	// Frees what the source holds (a client handle, an entry's buffer); reads after it reject.
+	release(): void
+}
+
+// A client's range reads of a file, and the handle's release.
+export interface FileReadClient {
+	readRange(file: AnyFile, start: number, end: number, signal: AbortSignal): Promise<Uint8Array>
+	release(): void
+}
+
+// An archive opened for entry reads: the archive file, the client that may read it and the password it took.
+export interface EntryReaderRecord {
+	readonly anon: boolean
+	readonly archive: AnyFile
+	readonly password: string | undefined
+	// The solid skip the user accepted for this entry (0 for one that skips nothing).
+	maxSolidSkip(entry: ArchiveEntryId): number
+}
+
+export interface OriginSourceDeps {
+	// The session client; throws when signed out.
+	session(): FileReadClient
+	// A public link's client, freed by its release.
+	linked(): FileReadClient
+	entryReader(id: string): EntryReaderRecord | undefined
+	// An entry's whole decoded bytes, its checksum verified, under `signal`.
+	readEntry(record: EntryReaderRecord, entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
+}
+
+// The most an entry is buffered to serve its ranges from: the largest whole-buffer preview.
+export const ENTRY_RANGE_BUFFER_CAP = Number(PREVIEW_MAX_BYTES)
+
+function tooLarge(size: number, cap: number): Error {
+	return new Error(`preview read of ${String(size)} bytes is above its cap of ${String(cap)}`)
+}
+
+function released(): Error {
+	const error = new Error("Cancelled")
+
+	error.name = "Cancelled"
+
+	return error
+}
+
+function fileSource(client: FileReadClient, file: AnyFile): OriginSource {
+	const size = Number(file.size)
+
+	return {
+		size,
+		read: (start, end, signal) => client.readRange(file, start, end, signal),
+		readWhole: (cap, signal) => (size > cap ? Promise.reject(tooLarge(size, cap)) : client.readRange(file, 0, size, signal)),
+		release: () => {
+			client.release()
+		}
+	}
+}
+
+// Until the SDK reads entries by range, an entry's ranges come from one checked whole read, made on the first range
+// read and held for the source's life. Each range is a copy: the reader receives it transferred.
+function entrySource(deps: OriginSourceDeps, record: EntryReaderRecord, entry: ArchiveEntryId, size: number): OriginSource {
+	const lifetime = new AbortController()
+	let held: Promise<Uint8Array> | null = null
+	const whole = (): Promise<Uint8Array> => {
+		if (held === null) {
+			const load =
+				size > ENTRY_RANGE_BUFFER_CAP
+					? Promise.reject(tooLarge(size, ENTRY_RANGE_BUFFER_CAP))
+					: deps.readEntry(record, entry, size, lifetime.signal)
+
+			held = load
+			// A failed load is not kept: the next read tries again.
+			load.catch(() => {
+				if (held === load) {
+					held = null
+				}
+			})
+		}
+
+		return held
+	}
+
+	return {
+		size,
+		read: async (start, end, signal) => {
+			lifetime.signal.throwIfAborted()
+
+			const bytes = await raceAbort(whole(), signal)
+
+			return bytes.slice(start, Math.min(end, bytes.length))
+		},
+		readWhole: (cap, signal) => {
+			if (size > cap) {
+				return Promise.reject(tooLarge(size, cap))
+			}
+
+			if (held !== null) {
+				return raceAbort(held, signal).then(bytes => bytes.slice())
+			}
+
+			return deps.readEntry(record, entry, size, AbortSignal.any([signal, lifetime.signal]))
+		},
+		release: () => {
+			lifetime.abort(released())
+			held = null
+		}
+	}
+}
+
+export function originSource(o: ByteOrigin, deps: OriginSourceDeps): OriginSource {
+	switch (o.kind) {
+		case "file":
+			return fileSource(deps.session(), o.file)
+		case "linkedFile":
+			return fileSource(deps.linked(), o.file)
+		case "entry": {
+			const record = deps.entryReader(o.reader)
+
+			if (record === undefined) {
+				throw new Error("archive reader is closed")
+			}
+
+			// A reader opened on one client is never read through the other.
+			if (record.anon !== o.anon) {
+				throw new Error("archive reader belongs to the other client")
+			}
+
+			return entrySource(deps, record, o.entry, o.size)
+		}
+		case "bytes":
+			throw new Error("a bytes origin is read on the page, never in the SDK worker")
+	}
+}
+
+// The drive file behind an origin, for SDK calls that take a file (a RAW's embedded preview); null for the kinds
+// that have none.
+export function originFile(o: ByteOrigin): { readonly anon: boolean; readonly file: AnyFile } | null {
+	switch (o.kind) {
+		case "file":
+			return { anon: false, file: o.file }
+		case "linkedFile":
+			return { anon: true, file: o.file }
+		case "entry":
+		case "bytes":
+			return null
+	}
+}
+
+// Archives opened for entry reads, by reader id.
+const entryReaders = new Map<string, EntryReaderRecord>()
+
+// Returns the reader's id and its release.
+export function registerEntryReader(record: EntryReaderRecord): { readonly id: string; release(): void } {
+	const id = crypto.randomUUID()
+
+	entryReaders.set(id, record)
+
+	return {
+		id,
+		release: () => {
+			entryReaders.delete(id)
+		}
+	}
+}
+
+export function entryReader(id: string): EntryReaderRecord | undefined {
+	return entryReaders.get(id)
+}
+
+// Sign-out: no reader outlives the session.
+export function clearEntryReaders(): void {
+	entryReaders.clear()
+}

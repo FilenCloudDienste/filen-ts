@@ -139,6 +139,7 @@ import { consumeUnloadAllowance } from "@/lib/unloadGuard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { registerPreviewDisposer } from "@/lib/workers/previewDisposers"
 import { createListingCache, type CachedListing } from "@/features/archive/lib/listingCache"
 import { createEntryStore } from "@/features/archive/lib/entryStore"
 
@@ -254,6 +255,15 @@ describe("performLogout", () => {
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(getPreviewBytes("authed", "file-uuid")).toBeUndefined()
+	})
+
+	it("closes whatever a preview still holds through its registered disposers", async () => {
+		const dispose = vi.fn()
+
+		registerPreviewDisposer("served port", dispose)
+		await expect(performLogout()).resolves.toBe(true)
+
+		expect(dispose).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops every archive listing an open preview holds, and every one its browsers dispose after", async () => {
