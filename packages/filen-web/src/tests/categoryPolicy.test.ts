@@ -183,6 +183,29 @@ function legacyCanOpenEntry(name: string, size: number): boolean {
 	return cap !== null && size <= Number(cap)
 }
 
+// The changes made on purpose since: a PDF opens in ranges up to the device's ceiling, on the drive and on a public
+// link alike, and a public link reads a deck in ranges at any size.
+function withinPdfCeiling(item: DriveItem): boolean {
+	const max = deviceProfile().pdfRangedMax
+
+	return max === null || item.data.size <= max
+}
+
+function expectedCanPreview(item: DriveItem): boolean {
+	return previewType(item) === "pdf" ? withinPdfCeiling(item) : legacyCanPreview(item)
+}
+
+function expectedAnon(item: DriveItem): string {
+	switch (previewType(item)) {
+		case "pdf":
+			return withinPdfCeiling(item) ? "previewable" : "too-large"
+		case "presentation":
+			return "previewable"
+		default:
+			return legacyAnon(item)
+	}
+}
+
 function fileNamed(name: string, size: bigint, mime = "application/octet-stream"): DriveItem {
 	const uuid: UuidStr = testUuid(`${name}:${String(size)}`)
 	const file: File = {
@@ -229,7 +252,8 @@ const NAMES = [
 	"setup.exe"
 ]
 const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
-const SIZES = [0n, ...CAPS.flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
+const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
+const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 const CATEGORIES = Object.keys(CATEGORY_POLICY) as PreviewCategory[]
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -238,8 +262,8 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 		for (const size of SIZES) {
 			const item = fileNamed(name, size)
 
-			expect(canPreview(item), `${name} @ ${String(size)}`).toBe(legacyCanPreview(item))
-			expect(anonPreviewability(item), `${name} @ ${String(size)}`).toBe(legacyAnon(item))
+			expect(canPreview(item), `${name} @ ${String(size)}`).toBe(expectedCanPreview(item))
+			expect(anonPreviewability(item), `${name} @ ${String(size)}`).toBe(expectedAnon(item))
 		}
 	})
 
@@ -285,7 +309,7 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 
 	it("pages every previewable item but audio, as before", () => {
 		const items = NAMES.flatMap(name => SIZES.map(size => fileNamed(name, size)))
-		const legacy = items.filter(item => legacyCanPreview(item) && previewType(item) !== "audio")
+		const legacy = items.filter(item => expectedCanPreview(item) && previewType(item) !== "audio")
 
 		expect(previewableSiblings(items)).toEqual(legacy)
 	})

@@ -321,6 +321,30 @@ describe("openPdf", () => {
 		})
 	})
 
+	it("reports the bytes handed over after every read", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const onLoadedBytes = vi.fn()
+
+		openPdf(
+			pdfjs,
+			{ kind: "ranges", length: 30, read: (_offset, length) => Promise.resolve(new Uint8Array(length)) },
+			{ worker: SCRIPT, onPassword: () => undefined, onLoadedBytes }
+		)
+
+		const transport = only(transports)
+
+		transport.requestDataRange(0, 10)
+		await vi.waitFor(() => {
+			expect(onLoadedBytes).toHaveBeenLastCalledWith(10)
+		})
+
+		transport.requestDataRange(10, 25)
+		await vi.waitFor(() => {
+			expect(onLoadedBytes).toHaveBeenLastCalledWith(25)
+		})
+		expect(onLoadedBytes).toHaveBeenCalledTimes(2)
+	})
+
 	it("fails the open when one of a request's parallel reads fails", async () => {
 		const { pdfjs, transports } = fakePdfJs()
 		const opening = openPdf(

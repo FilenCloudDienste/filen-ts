@@ -132,11 +132,12 @@ describe("sniffAdmits", () => {
 		}
 	})
 
+	// A deck is read in ranges on the drive and a public link, so a `.pot` opens there at any size.
 	it("admits a template up to the larger of its meanings' caps", () => {
 		for (const surface of ["drive", "link", "entry"] as const) {
 			expect(sniffAdmits(fileNamed("graph.dot", PREVIEW_MAX_BYTES), deviceProfile(), surface)).toBe(true)
 			expect(sniffAdmits(fileNamed("graph.dot", PREVIEW_MAX_BYTES + 1n), deviceProfile(), surface)).toBe(false)
-			expect(sniffAdmits(fileNamed("deck.pot", PREVIEW_MAX_BYTES + 1n), deviceProfile(), surface)).toBe(surface === "drive")
+			expect(sniffAdmits(fileNamed("deck.pot", PREVIEW_MAX_BYTES + 1n), deviceProfile(), surface)).toBe(surface !== "entry")
 		}
 	})
 

@@ -41,6 +41,11 @@ describe("the PDF viewer's image guard", () => {
 		expect(maxImageSize * PEAK_BYTES_PER_PIXEL).toBeLessThanOrEqual(0.6 * GIB)
 	})
 
+	it("opens PDFs in ranges up to 8 GiB on a desktop and 2 GiB on a phone, reopening past 256 and 128 MiB read", () => {
+		expect(limitsOn(DESKTOP)).toMatchObject({ rangedMaxBytes: 8 * GIB, residentReopenBytes: 256 * 1024 * 1024 })
+		expect(limitsOn(IPHONE)).toMatchObject({ rangedMaxBytes: 2 * GIB, residentReopenBytes: 128 * 1024 * 1024 })
+	})
+
 	it("scales larger images down to pdf.js's canvas cap rather than holding them whole", () => {
 		expect(limitsOn(DESKTOP).canvasMaxAreaInBytes).toBe(64 * 1024 * 1024)
 		expect(limitsOn(IPHONE).canvasMaxAreaInBytes).toBe(5_242_880 * 4)

@@ -13,6 +13,7 @@ import {
 import {
 	paintMatches,
 	PdfPages,
+	RESIDENT_IDLE_MS,
 	usePdfDocument,
 	usePdfViewer,
 	type PdfDocumentHandle,
@@ -1090,6 +1091,95 @@ describe("usePdfDocument reopen", () => {
 		expect(latest.document?.state).not.toBe(first)
 		expect(opened[0]?.destroy).toHaveBeenCalledTimes(1)
 		expect(opened[1]?.destroy).not.toHaveBeenCalled()
+	})
+})
+
+describe("usePdfDocument resident", () => {
+	const READ = (_offset: number, length: number): Promise<Uint8Array> => Promise.resolve(new Uint8Array(length))
+	const RANGED = { kind: "ranges", length: 100, read: READ } as const
+
+	function Ranged({ pdfjs, residentLimit }: { pdfjs: PdfJsDom; residentLimit?: number }) {
+		latest.document = usePdfDocument(pdfjs, RANGED, {
+			worker: { kind: "script", src: "/worker.mjs" },
+			...(residentLimit === undefined ? {} : { residentLimit })
+		})
+
+		return null
+	}
+
+	function transportOf(opened: Opened[]): { requestDataRange(begin: number, end: number): void } {
+		return Reflect.get(opened[0]?.params as object, "range") as { requestDataRange(begin: number, end: number): void }
+	}
+
+	async function read(opened: Opened[], begin: number, end: number): Promise<void> {
+		transportOf(opened).requestDataRange(begin, end)
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(0)
+		})
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("says so once more than the limit is held and nothing was read for a moment", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([])])
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(
+				<Ranged
+					pdfjs={pdfjs}
+					residentLimit={40}
+				/>
+			)
+		})
+		opened[0]?.resolve()
+		await read(opened, 0, 30)
+		expect(latest.document?.state.status).toBe("ready")
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(RESIDENT_IDLE_MS)
+		})
+		expect(latest.document?.resident).toBe(false)
+
+		await read(opened, 30, 60)
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(RESIDENT_IDLE_MS - 1)
+		})
+		// A read in the meantime starts the wait again.
+		await read(opened, 60, 70)
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(RESIDENT_IDLE_MS - 1)
+		})
+		expect(latest.document?.resident).toBe(false)
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1)
+		})
+		expect(latest.document?.resident).toBe(true)
+	})
+
+	it("never says so without a limit", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([])])
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(<Ranged pdfjs={pdfjs} />)
+		})
+		opened[0]?.resolve()
+		await read(opened, 0, 100)
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(RESIDENT_IDLE_MS)
+		})
+		expect(latest.document?.state.status).toBe("ready")
+		expect(latest.document?.resident).toBe(false)
 	})
 })
 

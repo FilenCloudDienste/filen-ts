@@ -104,7 +104,16 @@ function viewerSetup(): { readonly options: PdfDocumentOptions; readonly limits:
 	if (built === null) {
 		const limits = pdfViewerLimits()
 
-		built = { limits, options: { worker: { kind: "script", src: WORKER_SRC }, assets: { kind: "urls", ...PDFJS_ASSETS }, ...limits } }
+		built = {
+			limits,
+			options: {
+				worker: { kind: "script", src: WORKER_SRC },
+				assets: { kind: "urls", ...PDFJS_ASSETS },
+				maxImageSize: limits.maxImageSize,
+				canvasMaxAreaInBytes: limits.canvasMaxAreaInBytes,
+				residentLimit: limits.residentReopenBytes
+			}
+		}
 	}
 
 	return built
@@ -190,6 +199,8 @@ interface PdfReaderProps {
 	fullyRead: boolean
 	// pdf.js reads the file in ranges (it does not hold all of it).
 	ranged: boolean
+	// pdf.js holds more of a ranged file than the device's resident limit and has read nothing for a moment.
+	resident: boolean
 	onReopen: () => void
 	signatures: PdfSignatures
 }
@@ -200,7 +211,20 @@ type PdfSignatures =
 	| { readonly kind: "current"; readonly verify: PdfSignatureVerify | null; readonly onViewSignedVersion: (byteLength: number) => void }
 	| { readonly kind: "signedVersion"; readonly onBack: () => void }
 
-function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fullyRead, ranged, onReopen, signatures }: PdfReaderProps) {
+function PdfReader({
+	item,
+	notice,
+	document,
+	viewerDocument,
+	edit,
+	alt,
+	size,
+	fullyRead,
+	ranged,
+	resident,
+	onReopen,
+	signatures
+}: PdfReaderProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
@@ -251,6 +275,21 @@ function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fu
 
 		reopen()
 	}, [fullyRead, size, state.find.open, fullRead.holds, fullRead.confirmations])
+
+	// The page of the last reopen for holding too much: a document that reads more without the view moving (pdf.js
+	// reading everything on its own) is not reopened again for it.
+	const residentReopenedAt = useRef<number | null>(null)
+
+	// pdf.js never drops a range it read: once a ranged document holds more than the device's limit and the reads have
+	// settled, it is reopened, keeping page, zoom and scroll, unless a search or a print still uses what it read.
+	useEffect(() => {
+		if (!resident || state.find.open || fullRead.holds > 0 || residentReopenedAt.current === state.page) {
+			return
+		}
+
+		residentReopenedAt.current = state.page
+		reopen()
+	}, [resident, state.find.open, fullRead.holds, state.page])
 	const [outline, setOutline] = useState<readonly PdfOutlineItem[]>([])
 	const [properties, setProperties] = useState(false)
 	const linkGate = useTrustedLinkGate()
@@ -697,7 +736,11 @@ function loadFailedKey(kind: PdfErrorKind): "previewPdfReadFailed" | "previewPdf
 
 function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signatures }: PdfDocumentProps) {
 	const { t } = useTranslation("preview")
-	const { state, password, retry, fullyRead, reopen, acceptedPassword, release } = usePdfDocument(PDFJS, source, viewerSetup().options)
+	const { state, password, retry, fullyRead, resident, reopen, acceptedPassword, release } = usePdfDocument(
+		PDFJS,
+		source,
+		viewerSetup().options
+	)
 	const failed = state.status === "error"
 	const ready = state.status === "ready" ? state.document : null
 	const swap = edit?.swap ?? null
@@ -771,6 +814,7 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 			alt={alt}
 			size={size}
 			fullyRead={fullyRead}
+			resident={resident && !editing}
 			ranged={source.kind === "ranges" && !fullyRead}
 			onReopen={reopen}
 			signatures={signatures}
@@ -1016,6 +1060,7 @@ function PdfDraftDocument({
 					alt={name}
 					size={draft.size}
 					fullyRead={false}
+					resident={false}
 					ranged
 					onReopen={NO_SIGNED_VERSION}
 					signatures={{ kind: "current", verify: null, onViewSignedVersion: NO_SIGNED_VERSION }}

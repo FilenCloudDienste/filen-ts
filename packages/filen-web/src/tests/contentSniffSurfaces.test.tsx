@@ -80,8 +80,9 @@ describe("an ambiguous extension whose usual meaning is no kind", () => {
 		expect(canOpenAsText(item)).toBe(true)
 	})
 
+	// A PDF opens in ranges up to the device's ranged ceiling (8 GiB on a desktop).
 	it("is refused where none of its meanings opens at its size", () => {
-		const huge = linkedFileItem("scan.zzz", { uuid: "e2000000-0000-0000-0000-000000000000", size: 300n * 1024n * 1024n })
+		const huge = linkedFileItem("scan.zzz", { uuid: "e2000000-0000-0000-0000-000000000000", size: 9n * 1024n * 1024n * 1024n })
 
 		expect(canPreview(huge)).toBe(false)
 		expect(anonPreviewability(huge)).toBe("too-large")

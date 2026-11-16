@@ -1,5 +1,5 @@
 import { isAppleMobile } from "@/lib/appleMobile"
-import { pdfMemoryConstrained } from "@/features/preview/lib/pdfLimits"
+import { pdfMemoryConstrained, pdfViewerLimits } from "@/features/preview/lib/pdfLimits"
 
 // What this device can do, as the preview gates need it. Read once at first use; a capability probe that resolves
 // later refines it. Gates read the current value on every call, so nothing caches a stale answer.
@@ -34,7 +34,7 @@ export function deviceProfile(): DeviceProfile {
 		jxlNative: "unknown",
 		appleMobile: isAppleMobile(),
 		mobile: pdfMemoryConstrained(),
-		pdfRangedMax: null
+		pdfRangedMax: BigInt(pdfViewerLimits().rangedMaxBytes)
 	}
 
 	return current

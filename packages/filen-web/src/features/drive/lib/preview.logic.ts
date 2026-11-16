@@ -99,8 +99,10 @@ function buildExtensionCategories(
 export interface CategoryPolicy {
 	// Streams through the service worker's inline route at open.
 	streamed: boolean
-	// The viewer reads ranges, so any drive size opens.
+	// The viewer reads ranges, so any drive size opens, up to `rangedMax`.
 	ranged: boolean
+	// Largest file the viewer reads in ranges; absent for no limit.
+	rangedMax?: ProfileCap
 	// Largest file held whole in memory (a fallback, a public link, an archive entry); null for none.
 	bufferCap: ProfileCap
 	// What opens above the cap.
@@ -127,7 +129,8 @@ export interface CategoryPolicy {
 // registration) its cap does not gate at open, since the worker's availability is unknown then; video and audio fall
 // back to MediaSource fed by the remux worker, never a whole buffer. A RAW is never in JS memory (the SDK reads the
 // ranges it needs inside wasm), nor is an archive (the SDK lists it in the worker), so neither has a cap; a deck is read
-// in ranges by the presentation worker. HEIC/HEIF are "image" but stream only where the browser decodes them
+// in ranges by the presentation worker, and a PDF by pdf.js up to the device's ranged ceiling (pdfLimits.ts), on the
+// drive and on a public link alike. HEIC/HEIF are "image" but stream only where the browser decodes them
 // (streamsNatively); elsewhere the image cap applies.
 export const CATEGORY_POLICY = {
 	image: {
@@ -189,11 +192,12 @@ export const CATEGORY_POLICY = {
 	},
 	pdf: {
 		streamed: false,
-		ranged: false,
+		ranged: true,
+		rangedMax: profile => profile.pdfRangedMax,
 		bufferCap: PREVIEW_MAX_BYTES,
 		aboveCap: "refuse",
 		entry: "whole",
-		anon: "buffer",
+		anon: "ranged",
 		textFamily: false,
 		editsAsText: false,
 		photo: false,
@@ -235,7 +239,7 @@ export const CATEGORY_POLICY = {
 		bufferCap: PREVIEW_MAX_BYTES,
 		aboveCap: "refuse",
 		entry: "whole",
-		anon: "buffer",
+		anon: "ranged",
 		textFamily: false,
 		editsAsText: false,
 		photo: false,
@@ -510,7 +514,7 @@ function driveAdmits(category: PreviewCategory, extension: string, size: bigint,
 	}
 
 	if (policy.ranged) {
-		return true
+		return rangedFits(policy, size, profile)
 	}
 
 	const cap = ownCap ?? bufferedSizeCap(category, profile)
@@ -518,15 +522,25 @@ function driveAdmits(category: PreviewCategory, extension: string, size: bigint,
 	return cap === null || size <= cap || policy.aboveCap === "largeText"
 }
 
+// Whether a file of `size` is within what the category's viewer reads in ranges.
+function rangedFits(policy: CategoryPolicy, size: bigint, profile: DeviceProfile): boolean {
+	const max = policy.rangedMax === undefined ? null : capFor(policy.rangedMax, profile)
+
+	return max === null || size <= max
+}
+
 // A public link's inline preview (anonPreviewability): an archive is browsed apart, never previewed inline.
-function linkAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
-	switch (CATEGORY_POLICY[category].anon) {
+export function linkAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
+	const policy: CategoryPolicy = CATEGORY_POLICY[category]
+
+	switch (policy.anon) {
 		case "none":
 		case "archive":
 			return false
 		case "stream":
-		case "ranged":
 			return true
+		case "ranged":
+			return rangedFits(policy, size, profile)
 		case "buffer": {
 			const cap = bufferedSizeCap(category, profile)
 

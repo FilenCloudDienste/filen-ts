@@ -63,6 +63,8 @@ export interface PdfOpenOptions {
 	// Every byte of a ranged source has been handed to pdf.js (it asks for each range once), which then holds the
 	// whole file for the document's life. Called once.
 	readonly onFullyRead?: () => void
+	// A ranged read was handed to pdf.js: `loaded` is every byte handed over so far, all of which pdf.js keeps.
+	readonly onLoadedBytes?: (loaded: number) => void
 }
 
 export interface PdfOpening<S = unknown> {
@@ -204,6 +206,7 @@ export function openPdf<S>(pdfjs: PdfJs<S>, source: PdfSource, options: PdfOpenO
 
 		const inFlight = Math.max(1, source.readsInFlight ?? DEFAULT_READS_IN_FLIGHT)
 		const onFullyRead = options.onFullyRead
+		const onLoadedBytes = options.onLoadedBytes
 		let loaded = 0
 
 		transport.requestDataRange = (begin: number, end: number): void => {
@@ -216,6 +219,7 @@ export function openPdf<S>(pdfjs: PdfJs<S>, source: PdfSource, options: PdfOpenO
 
 					loaded += bytes.length
 					transport.onDataRange(begin, bytes)
+					onLoadedBytes?.(loaded)
 
 					if (onFullyRead !== undefined && before < source.length && loaded >= source.length) onFullyRead()
 				})

@@ -11,5 +11,5 @@ export {
 	type PdfPagesProps
 } from "./PdfPages"
 export type { PdfDomDocument, PdfJsDom, PdfTextLayer, PdfTextLayerParams } from "./types"
-export { usePdfDocument, type PdfDocumentHandle, type PdfDocumentOptions, type PdfDocumentState } from "./usePdfDocument"
+export { RESIDENT_IDLE_MS, usePdfDocument, type PdfDocumentHandle, type PdfDocumentOptions, type PdfDocumentState } from "./usePdfDocument"
 export { usePdfViewer, type PdfViewer } from "./usePdfViewer"

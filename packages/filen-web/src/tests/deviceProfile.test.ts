@@ -29,8 +29,8 @@ function heicFile(size: bigint, mime: string) {
 
 // Runs in file order: the profile is module state, refined step by step.
 describe("deviceProfile", () => {
-	it("starts with every probe unknown and no ranged PDF limit", () => {
-		expect(deviceProfile()).toMatchObject({ heicNative: "unknown", jxlNative: "unknown", pdfRangedMax: null })
+	it("starts with every probe unknown and the desktop's ranged PDF ceiling", () => {
+		expect(deviceProfile()).toMatchObject({ heicNative: "unknown", jxlNative: "unknown", pdfRangedMax: 8192n * MIB })
 		expect(deviceProfile()).toBe(deviceProfile())
 	})
 

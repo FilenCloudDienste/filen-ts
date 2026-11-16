@@ -5,6 +5,7 @@ import {
 	needsContentSniff,
 	previewType,
 	canPreview,
+	canPreviewWith,
 	needsImageTransform,
 	canOpenAsText,
 	fileTypeExtension,
@@ -552,11 +553,28 @@ describe("canPreview", () => {
 	})
 
 	it("is false for a whole-buffer-only category over the size cap", () => {
-		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
+		expect(canPreview(fileNamed("report.docx", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
 	})
 
 	it("is true for a whole-buffer-only category exactly at the size cap", () => {
-		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES }))).toBe(true)
+		expect(canPreview(fileNamed("report.docx", { size: PREVIEW_MAX_BYTES }))).toBe(true)
+	})
+
+	it("opens a PDF in ranges above the buffer cap, up to the device's ranged ceiling", () => {
+		const GIB = 1024n * 1024n * 1024n
+		const desktop = { ...deviceProfile(), mobile: false, pdfRangedMax: 8n * GIB }
+		const phone = { ...deviceProfile(), mobile: true, pdfRangedMax: 2n * GIB }
+
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }), phone)).toBe(true)
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: 2n * GIB }), phone)).toBe(true)
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: 2n * GIB + 1n }), phone)).toBe(false)
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: 2n * GIB + 1n }), desktop)).toBe(true)
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: 8n * GIB }), desktop)).toBe(true)
+		expect(canPreviewWith(fileNamed("doc.pdf", { size: 8n * GIB + 1n }), desktop)).toBe(false)
+	})
+
+	it("opens a deck at any size", () => {
+		expect(canPreview(fileNamed("deck.pptx", { size: 50n * 1024n * 1024n * 1024n }))).toBe(true)
 	})
 
 	// text/code/markdown are whole-buffer categories with their own, lower cap: a 32 MiB+1 log file must

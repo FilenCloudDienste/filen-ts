@@ -19,7 +19,10 @@ export type PdfDocumentState =
 	| { readonly status: "ready"; readonly document: PdfDomDocument }
 	| { readonly status: "error"; readonly kind: PdfErrorKind }
 
-export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError" | "onFullyRead">
+export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError" | "onFullyRead" | "onLoadedBytes"> & {
+	// Bytes of a ranged source pdf.js may hold before the handle reports `resident`. Unset: never.
+	readonly residentLimit?: number
+}
 
 export interface PdfDocumentHandle {
 	readonly state: PdfDocumentState
@@ -29,6 +32,9 @@ export interface PdfDocumentHandle {
 	// pdf.js has read every byte of a ranged source and holds the whole file (a search of every page, printing, its
 	// read-everything fallback for a damaged file).
 	readonly fullyRead: boolean
+	// pdf.js holds more than `residentLimit` bytes of a ranged source and has read nothing for a moment: a reopen would
+	// drop what it read away from the view.
+	readonly resident: boolean
 	// Opens the same source again in the background, answering a password with the one accepted before, and swaps
 	// the new document in once it is ready: the old one keeps showing meanwhile, and its memory goes with it.
 	readonly reopen: () => void
@@ -41,6 +47,10 @@ export interface PdfDocumentHandle {
 }
 
 const LOADING = { status: "loading" } as const
+
+// How long pdf.js must have read nothing before a document over its resident limit says so: the reads of a scroll
+// or a render have settled.
+export const RESIDENT_IDLE_MS = 1000
 
 function sameSource(a: PdfSource, b: PdfSource): boolean {
 	if (a === b) return true
@@ -70,7 +80,8 @@ function sameOptions(a: PdfDocumentOptions, b: PdfDocumentOptions): boolean {
 			(a.worker.kind === "inThread" || (b.worker.kind === "script" && a.worker.src === b.worker.src)) &&
 			sameAssets(a.assets, b.assets) &&
 			a.maxImageSize === b.maxImageSize &&
-			a.canvasMaxAreaInBytes === b.canvasMaxAreaInBytes)
+			a.canvasMaxAreaInBytes === b.canvasMaxAreaInBytes &&
+			a.residentLimit === b.residentLimit)
 	)
 }
 
@@ -90,6 +101,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 		readonly attempt: number
 		readonly state: PdfDocumentState
 		readonly fullyRead: boolean
+		readonly resident: boolean
 	} | null>(null)
 	const openingRef = useRef<PdfOpening<ReadableStream> | null>(null)
 	// The password last answered, and the one pdf.js accepted: a reopen answers with it (memory only, never kept
@@ -112,9 +124,13 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 	useEffect(() => {
 		let live = true
 		let ready: PdfDomDocument | null = null
+		let fullyRead = false
+		let resident = false
+		let idle: ReturnType<typeof setTimeout> | undefined
 		const reopening = retiringRef.current !== null
-		const set = (next: PdfDocumentState, fullyRead: boolean): void => {
-			if (live) setEntry({ source: current, attempt, state: next, fullyRead })
+		const { residentLimit, ...openOptions } = currentOptions
+		const set = (next: PdfDocumentState): void => {
+			if (live) setEntry({ source: current, attempt, state: next, fullyRead, resident })
 		}
 
 		if (!reopening) {
@@ -123,19 +139,31 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 		}
 
 		const opening = openPdf(pdfjs, current, {
-			...currentOptions,
+			...openOptions,
 			onPassword: reason => {
 				const accepted = acceptedRef.current
 
 				if (reopening && reason === "required" && accepted !== null && opening.password(accepted)) return
 
-				set({ status: "password", reason }, false)
+				set({ status: "password", reason })
 			},
 			onReadError: () => {
-				set({ status: "error", kind: "transportFailed" }, false)
+				set({ status: "error", kind: "transportFailed" })
 			},
 			onFullyRead: () => {
-				if (ready !== null) set({ status: "ready", document: ready }, true)
+				fullyRead = true
+
+				if (ready !== null) set({ status: "ready", document: ready })
+			},
+			onLoadedBytes: loaded => {
+				if (residentLimit === undefined || loaded <= residentLimit || resident) return
+
+				clearTimeout(idle)
+				idle = setTimeout(() => {
+					resident = true
+
+					if (ready !== null) set({ status: "ready", document: ready })
+				}, RESIDENT_IDLE_MS)
 			}
 		})
 
@@ -144,7 +172,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 			document => {
 				ready = document
 				acceptedRef.current = triedRef.current ?? acceptedRef.current
-				set({ status: "ready", document }, false)
+				set({ status: "ready", document })
 			},
 			(error: unknown) => {
 				const failure = classifyPdfError(error)
@@ -153,8 +181,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 					set(
 						failure.type === "password"
 							? { status: "password", reason: failure.reason }
-							: { status: "error", kind: failure.kind },
-						false
+							: { status: "error", kind: failure.kind }
 					)
 				}
 			}
@@ -162,6 +189,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 
 		return () => {
 			live = false
+			clearTimeout(idle)
 			openingRef.current = null
 
 			if (reopeningRef.current && ready !== null) retiringRef.current = { opening, document: ready }
@@ -194,11 +222,12 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 	return {
 		state,
 		fullyRead: tagged?.fullyRead ?? false,
+		resident: tagged?.resident ?? false,
 		password: password => {
 			triedRef.current = password
 
 			if (openingRef.current?.password(password) === true) {
-				setEntry({ source: current, attempt, state: LOADING, fullyRead: false })
+				setEntry({ source: current, attempt, state: LOADING, fullyRead: false, resident: false })
 			}
 		},
 		retry: () => {

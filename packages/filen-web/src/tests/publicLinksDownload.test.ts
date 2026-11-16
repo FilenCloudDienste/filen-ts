@@ -61,6 +61,16 @@ describe("anonPreviewability", () => {
 		expect(anonPreviewability(linkedFileItem("shot.NEF", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("previewable")
 	})
 
+	it("reads a PDF and a deck in ranges above the buffer cap, a PDF up to the device's ranged ceiling", () => {
+		expect(anonPreviewability(linkedFileItem("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("previewable")
+		expect(anonPreviewability(linkedFileItem("deck.pptx", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("previewable")
+		expect(anonPreviewability(linkedFileItem("doc.pdf", { size: 8n * 1024n * 1024n * 1024n + 1n }))).toBe("too-large")
+	})
+
+	it("caps a whole-buffer document", () => {
+		expect(anonPreviewability(linkedFileItem("report.docx", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("too-large")
+	})
+
 	it("marks an unknown-category file unpreviewable", () => {
 		expect(anonPreviewability(linkedFileItem("setup.exe", { size: 1024n }))).toBe("unpreviewable")
 	})
