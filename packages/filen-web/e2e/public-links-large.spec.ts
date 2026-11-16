@@ -12,10 +12,11 @@ import { LINK_IMAGE_BYTES, MIB, writeLargeLinkImage } from "./fixtures/largeFile
 import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
 import { preview } from "@/locales/en/preview"
 
-// A public link's image above the image buffer cap (300 MiB, fixtures/largeFiles.ts) is never loaded whole: with a service
-// worker controlling the page it streams through the worker's inline route; on a first visit with none it waits for
-// one, and where none ever controls the page it shows the unsupported card with Download. A write-lane spec of its own,
-// apart from public-links.spec.ts: it uploads the file and creates the link (premium), where that one only reads.
+// A public link's image above the image buffer cap (300 MiB, fixtures/largeFiles.ts) is never loaded whole: with a
+// service worker controlling the page it streams through the worker's inline route; on a first visit it streams once
+// one takes control, however late, and where none ever controls the page it shows the unsupported card with Download.
+// A write-lane spec of its own, apart from public-links.spec.ts: it uploads the file and creates the link (premium),
+// where that one only reads.
 //
 // The visitor legs need a signed-out context of their own, which WebKit cannot boot (its OPFS lives only in the
 // persistent context the fixture opens, e2e/fixtures.ts): there only the signed-in tab's leg runs.
@@ -24,6 +25,8 @@ import { preview } from "@/locales/en/preview"
 const NOT_LOADED_BYTES = 16 * MIB
 // A streamed image's first pixels need its first bytes through the service worker; the rest may still be arriving.
 const STREAM_PAINT_TIMEOUT_MS = 300_000
+// How long a first visit's worker may take to control the page (it installs, then claims the page).
+const FIRST_VISIT_CONTROL_TIMEOUT_MS = 60_000
 
 function linkImage(page: Page, name: string): Locator {
 	return page.getByRole("img", { name, exact: true })
@@ -71,8 +74,8 @@ test.describe("a public link's image above its buffer cap", () => {
 		baseURL
 	}) => {
 		// The write lane's 900s holds the scratch directory's brackets; a 300 MiB upload has its own budget on top, and the
-		// streamed legs theirs.
-		test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + 2 * STREAM_PAINT_TIMEOUT_MS)
+		// streamed legs and the first visit's wait for its worker theirs.
+		test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + 2 * STREAM_PAINT_TIMEOUT_MS + FIRST_VISIT_CONTROL_TIMEOUT_MS)
 
 		const cspViolations = trackCspViolations(page)
 		const dir = mkdtempSync(join(tmpdir(), "filen-e2e-link-image-"))
@@ -112,21 +115,36 @@ test.describe("a public link's image above its buffer cap", () => {
 						}
 
 						// ---- first visit with a service worker: nothing controls the page until it installs, so the preview
-						// waits for it (a few seconds at most), then streams, or else shows the card: never the file whole ----
+						// waits for it, and streams once it takes control, however late (the card it may show meanwhile goes
+						// then). Chromium's worker always claims the page. Firefox's claim cannot finish while the SDK's wasm
+						// threads block (sw.ts), so the outcome follows the page's controller: streamed once it has one, the
+						// card and nothing of the file read while it has none. Never the file whole either way ----
 						const first = await visit(browser, baseURL, "allow")
 						const firstEgest = observeEgest(first.page.context())
 
 						try {
 							await first.page.goto(url)
-							await expect(linkImage(first.page, name).or(tooLargeCard(first.page))).toBeVisible({
-								timeout: BOOT_SETTLE_TIMEOUT_MS
+
+							const controlled = await first.page
+								.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+									timeout: FIRST_VISIT_CONTROL_TIMEOUT_MS
+								})
+								.then(
+									() => true,
+									() => false
+								)
+
+							test.info().annotations.push({
+								type: "first-visit",
+								description: controlled ? "controlled: streamed" : "never controlled: the card"
 							})
 
-							if (await tooLargeCard(first.page).isVisible()) {
-								test.info().annotations.push({ type: "first-visit", description: "no controller in time: the card" })
-								expect(await firstEgest.bytes()).toBeLessThan(NOT_LOADED_BYTES)
-							} else {
+							if (controlled || browserName === "chromium") {
 								await expectStreamed(first.page, name)
+							} else {
+								await expect(tooLargeCard(first.page)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+								await expect(linkImage(first.page, name)).toHaveCount(0)
+								expect(await firstEgest.bytes()).toBeLessThan(NOT_LOADED_BYTES)
 							}
 						} finally {
 							await first.close()

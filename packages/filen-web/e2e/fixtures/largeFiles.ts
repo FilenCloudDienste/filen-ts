@@ -1,35 +1,16 @@
 import { closeSync, ftruncateSync, openSync, writeSync } from "node:fs"
 import { JPEG_BYTES } from "../helpers/fixtureBytes"
-import { scenarioModule } from "./scenarios"
 
-// The large-file previews' fixtures: a 100 MiB PDF in the shared tree whose thumbnail needs only page 1, and the two
-// big files the write-lane specs upload into their own scratch directories (a 300 MiB image for a public link, a
-// ranged PDF that reads past the viewer's resident limit). Every one of them is mostly zeros, laid out so no zero is
-// ever held in memory on the way to disk: a file is written sparse (its bytes, then a truncate up to its length).
+// The large-file previews' fixtures, each uploaded by a write-lane spec into its own scratch directory (never into the
+// shared tree, whose upload budget they would spend): a 100 MiB PDF whose thumbnail needs only page 1, a 300 MiB image
+// for a public link, and a ranged PDF that reads past the viewer's resident limit. Every one of them is mostly zeros,
+// laid out so no zero is ever held in memory on the way to disk: a file is written sparse (its bytes, then a truncate
+// up to its length).
 
 export const MIB = 1024 * 1024
 
 // One file's bytes in order: written bytes, or a run of that many zero bytes.
 type LayoutPart = Uint8Array | number
-
-function layoutLength(parts: readonly LayoutPart[]): number {
-	return parts.reduce<number>((sum, part) => sum + (typeof part === "number" ? part : part.length), 0)
-}
-
-function layoutBuffer(parts: readonly LayoutPart[]): Buffer {
-	const buffer = Buffer.alloc(layoutLength(parts))
-	let at = 0
-
-	for (const part of parts) {
-		if (typeof part !== "number") {
-			buffer.set(part, at)
-		}
-
-		at += typeof part === "number" ? part : part.length
-	}
-
-	return buffer
-}
 
 // Writes the layout to `path` as a sparse file; returns its length.
 function writeLayout(path: string, parts: readonly LayoutPart[]): number {
@@ -117,7 +98,7 @@ function pageText(label: string): string {
 	return `BT /F1 28 Tf 72 700 Td (${label}) Tj ET`
 }
 
-// ---- the shared tree: a 100 MiB PDF whose page 1 sits in its first block ----------------------------------------
+// ---- a 100 MiB PDF whose page 1 sits in its first block --------------------------------------------------------
 
 export const PDF_THUMB_LARGE_BYTES = 100 * MIB
 // Room left for everything but the filler, so the file stays within its 100 blocks.
@@ -125,8 +106,8 @@ const PDF_THUMB_SYNTAX_BYTES = 4096
 
 // Catalog, page tree, font, page 1 and its text in the first block, then an object nothing references (zeros, to
 // just under 100 MiB), then the cross-reference table in the last block: a reader drawing page 1 reads the first and
-// the last block and nothing between.
-function largeThumbPdf(): Buffer {
+// the last block and nothing between. Returns the file's length.
+export function writeLargeThumbPdf(path: string): number {
 	const objects: SparseObject[] = [
 		{ dict: "<< /Type /Catalog /Pages 2 0 R >>" },
 		{ dict: "<< /Type /Pages /Kids [4 0 R] /Count 1 >>" },
@@ -138,20 +119,10 @@ function largeThumbPdf(): Buffer {
 		{ dict: "<< >>", zeros: PDF_THUMB_LARGE_BYTES - PDF_THUMB_SYNTAX_BYTES }
 	]
 
-	return layoutBuffer(pdfLayout(objects).parts)
+	return writeLayout(path, pdfLayout(objects).parts)
 }
 
-export const LARGE_FILE_SCENARIOS = scenarioModule(
-	{
-		// Synthesized on disk (100 MiB), so it is a scenario of its own.
-		"pdf-thumb-large": ["pdf-thumb-large.pdf"]
-	},
-	() => ({
-		"pdf-thumb-large.pdf": { generate: largeThumbPdf }
-	})
-)
-
-// ---- uploaded by the write-lane specs ---------------------------------------------------------------------------
+// ---- a 300 MiB image and a resident PDF ---------------------------------------------------------------------------
 
 // Above the image buffer cap (256 MiB), so a preview never holds it whole.
 export const LINK_IMAGE_BYTES = 300 * MIB
