@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
-import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import {
 	RESTORE_TIMEOUT_MS,
 	backingSize,
@@ -331,18 +331,15 @@ export function CanvasViewerShell<Status = never, Notice = never>({
 				) : null}
 				{state === "failed" ? (
 					<div className="absolute inset-0 bg-background">
-						<PreviewErrorState
+						<PreviewUnsupportedState
 							message={t("previewRichShellContextFailed")}
-							action={
-								<div className="flex flex-wrap justify-center gap-2">
-									<PreviewDownloadButton />
-									<Button
-										variant="outline"
-										onClick={onReload}
-									>
-										{t("previewRichShellReload")}
-									</Button>
-								</div>
+							secondary={
+								<Button
+									variant="outline"
+									onClick={onReload}
+								>
+									{t("previewRichShellReload")}
+								</Button>
 							}
 						/>
 					</div>

@@ -5,7 +5,7 @@ import { driveItemName } from "@filen/shared"
 import { layerKeyFor } from "@filen/office/core/sheet"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
-import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { DocxPasswordGate } from "@/features/preview/components/docxPasswordPrompt"
 import { docxRefusalKey } from "@/features/preview/components/docxViewer.logic"
 import { uploadXlsxCopy } from "@/features/spreadsheet/lib/saveAsXlsx"
@@ -85,12 +85,7 @@ function SheetViewerBody({
 			)
 		// A protected workbook is refused, or asked its password, in the words a Word document is.
 		case "refused":
-			return (
-				<PreviewErrorState
-					message={t(docxRefusalKey(state.reason))}
-					action={<PreviewDownloadButton />}
-				/>
-			)
+			return <PreviewUnsupportedState message={t(docxRefusalKey(state.reason))} />
 		case "locked":
 			return (
 				<DocxPasswordGate

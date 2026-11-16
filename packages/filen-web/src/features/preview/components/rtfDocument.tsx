@@ -6,7 +6,7 @@ import type { DocxRtfDocument } from "@filen/office/dom/docx/rtf"
 import type { DocxEditingBackend } from "@/features/preview/lib/docxEditing"
 import { docxOdt, docxRtf } from "@/features/preview/lib/docxEngine"
 import { rtfEditingBackend } from "@/features/preview/lib/rtfEditing"
-import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { log } from "@/lib/log"
 
 // An RTF file in the docx viewer (or an OpenDocument text file opened for editing): read in the docx worker into the
@@ -138,12 +138,7 @@ export function RtfDocument({
 		case "reading":
 			return <PreviewLoading />
 		case "failed":
-			return (
-				<PreviewErrorState
-					message={t("previewDocxLoadFailed")}
-					action={<PreviewDownloadButton />}
-				/>
-			)
+			return <PreviewUnsupportedState message={t("previewDocxLoadFailed")} />
 		case "unopened":
 			return unopened?.() ?? null
 		case "ready":

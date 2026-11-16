@@ -55,6 +55,26 @@ export function PreviewDownloadButton({ variant, size }: Pick<ComponentProps<typ
 	)
 }
 
+// The one state for a file the preview cannot show (unsupported, too large, unreadable): the message, the host's
+// Download and at most one other action, centered.
+export function PreviewUnsupportedState({ message, secondary }: { message: string; secondary?: ReactNode }) {
+	return (
+		<PreviewErrorState
+			message={message}
+			action={
+				secondary === undefined ? (
+					<PreviewDownloadButton />
+				) : (
+					<div className="flex flex-wrap justify-center gap-2">
+						<PreviewDownloadButton />
+						{secondary}
+					</div>
+				)
+			}
+		/>
+	)
+}
+
 // The viewer-sized spinner, inheriting the overlay's foreground color.
 export function PreviewLoading() {
 	return (

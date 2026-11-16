@@ -11,7 +11,7 @@ import { mediaFailureDTO } from "@/lib/media/mediaFailure"
 import { usePreviewAccessMode, usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { runContentSniff } from "@/features/preview/lib/contentSniff"
-import { PreviewDownloadButton, PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 
 // A read this gate ran found a text kind too large to load whole (a `.ts` that is TypeScript after all).
 function sniffedTooLarge(item: DriveItem, verdict: FileVerdict | undefined): boolean {
@@ -80,14 +80,7 @@ export function ContentSniffGate({ item, asText, render }: { item: DriveItem; as
 	}, [waiting, sniff, uuid, name, mime, size, access, attempt])
 
 	if (!waiting) {
-		return sniffedTooLarge(item, verdict) ? (
-			<PreviewErrorState
-				message={t("previewTextTooLarge")}
-				action={<PreviewDownloadButton />}
-			/>
-		) : (
-			render()
-		)
+		return sniffedTooLarge(item, verdict) ? <PreviewUnsupportedState message={t("previewTextTooLarge")} /> : render()
 	}
 
 	if (failedAttempt === attempt) {

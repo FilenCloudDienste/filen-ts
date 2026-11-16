@@ -13,7 +13,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { PreviewByteOriginProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
-import { PreviewDownloadButton, PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
 import { entryOrigin, isArchivePasswordError, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
@@ -51,12 +51,7 @@ function EntryBody({ item, category, alt }: { item: DriveItem; category: Preview
 	const shown = category ?? sniffedEntryCategory(item)
 
 	if (shown === null) {
-		return (
-			<PreviewErrorState
-				message={t("previewUnsupportedType")}
-				action={<PreviewDownloadButton />}
-			/>
-		)
+		return <PreviewUnsupportedState message={t("previewUnsupportedType")} />
 	}
 
 	return (
