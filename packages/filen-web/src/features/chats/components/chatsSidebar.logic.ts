@@ -99,6 +99,27 @@ export interface ChatList {
 	headerIndexes: number[]
 }
 
+// Whether a section shows its rows: every section does while searching, else the ones not collapsed. The selection
+// is held to these sections' conversations (chatsSidebar.tsx), so no bulk action or key acts on a row folded away.
+export function isChatSectionExpanded(
+	section: ChatSection,
+	collapsed: Readonly<Record<ChatSection, boolean>>,
+	searching: boolean
+): boolean {
+	return searching || !collapsed[section]
+}
+
+// The conversations a selection may hold: those in a section that shows its rows. The search term itself does not
+// narrow it (a match filter, as in the notes list), but searching unfolds every section, so ending a search folds
+// the collapsed ones away again with whatever was selected in them.
+export function chatsInExpandedSections(
+	chats: readonly Chat[],
+	collapsed: Readonly<Record<ChatSection, boolean>>,
+	searching: boolean
+): Chat[] {
+	return chats.filter(chat => isChatSectionExpanded(chatSection(chat), collapsed, searching))
+}
+
 // Splits the sorted, filtered rows into their sections, each keeping that order (most recent activity
 // first), and drops a collapsed section's rows. An empty section gets no header. While searching every
 // section shows expanded, so no match is hidden behind a collapsed header.
@@ -120,7 +141,7 @@ export function buildChatList(rows: readonly Chat[], collapsed: Readonly<Record<
 			continue
 		}
 
-		const expanded = searching || !collapsed[section]
+		const expanded = isChatSectionExpanded(section, collapsed, searching)
 
 		headerIndexes.push(items.length)
 		items.push({ kind: "header", key: `section-${section}`, section, expanded })

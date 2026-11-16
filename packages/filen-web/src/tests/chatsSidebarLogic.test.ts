@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import {
 	buildChatList,
+	chatsInExpandedSections,
 	chatsWithoutBlockedOneOnOne,
 	filterChats,
 	staleChatSelectionUuids
@@ -327,5 +328,38 @@ describe("buildChatList", () => {
 	it("gives an empty section no header", () => {
 		expect(shape(buildChatList([group], expanded, false).items)).toEqual(["groups:true", group.uuid])
 		expect(buildChatList([], expanded, false)).toEqual({ items: [], chats: [], headerIndexes: [] })
+	})
+})
+
+describe("chatsInExpandedSections", () => {
+	const dm = mockChat("dm", { participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n })] })
+	const group = mockChat("group", {
+		participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n }), mockParticipant({ userId: 3n })]
+	})
+	const directCollapsed = { direct: true, groups: false }
+
+	function stale(selected: readonly Chat[], selectable: readonly Chat[]): string[] {
+		return staleChatSelectionUuids(
+			selected,
+			selectable.map(chat => chat.uuid)
+		)
+	}
+
+	it("leaves a collapsed section's conversations out", () => {
+		expect(chatsInExpandedSections([dm, group], directCollapsed, false)).toEqual([group])
+		expect(chatsInExpandedSections([dm, group], { direct: false, groups: false }, false)).toEqual([dm, group])
+	})
+
+	it("holds every section while searching, and drops a collapsed one's selection once the search ends", () => {
+		// Selected during a search, which unfolds the collapsed direct section.
+		expect(stale([dm, group], chatsInExpandedSections([dm, group], directCollapsed, true))).toEqual([])
+		// The search ends: the direct section folds away again, and its conversation with it.
+		expect(stale([dm, group], chatsInExpandedSections([dm, group], directCollapsed, false))).toEqual([dm.uuid])
+	})
+
+	it("drops a selected conversation that moves into a collapsed section", () => {
+		const shrunk = { ...group, participants: group.participants.slice(0, 2) }
+
+		expect(stale([group], chatsInExpandedSections([shrunk], { direct: true, groups: false }, false))).toEqual([group.uuid])
 	})
 })

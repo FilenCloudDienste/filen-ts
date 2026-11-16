@@ -11,7 +11,7 @@ import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import {
 	buildChatList,
-	chatSection,
+	chatsInExpandedSections,
 	chatsWithoutBlockedOneOnOne,
 	filterChats,
 	selectedChatUuidFromPath,
@@ -93,9 +93,12 @@ export function ChatsSidebar() {
 	const list = buildChatList(rows, collapsed, searching)
 	const listChats = list.chats
 
+	// The conversations a selection may hold: listed, and in a section that shows its rows.
+	const selectableChats = chatsInExpandedSections(visibleChats, collapsed, searching)
+
 	// Everything derived from visibleChats is built before the hooks below: the React Compiler drops the
 	// memo scope of a value that is still mutable across a hook call.
-	const chatsByUuid = new Map(visibleChats.map(chat => [chat.uuid, chat]))
+	const chatsByUuid = new Map(selectableChats.map(chat => [chat.uuid, chat]))
 	// Active ghost-selection purge (the effect below): the chats list is PUSH-FED (a conversationDeleted/
 	// conversationParticipantLeft socket event, or another tab's delete/leave, can drop a chat with no
 	// navigation involved), so the STORE itself — not just this render's liveSelectedChats view — must
@@ -104,17 +107,20 @@ export function ChatsSidebar() {
 	// uuid-content signature (stable across unrelated re-renders, since `visibleChats` can be a new
 	// array with unchanged content), not `visibleChats` itself, and the uuids are read back out of that
 	// key rather than off the array — so the effect depends on exactly what it uses. The signature is
-	// over the VISIBLE set, so blocking someone drops their 1:1 from an active selection too — list
-	// membership can change with no chat being deleted.
-	const visibleChatUuidsSignature = visibleChats
+	// over the SELECTABLE set, so whatever takes a conversation out of it drops it from an active selection
+	// too, with no chat being deleted: blocking someone (their 1:1 leaves the list), collapsing a section, ending
+	// a search over a collapsed one, or a conversation moving into a collapsed section (a group down to one other
+	// participant).
+	const selectableChatUuidsSignature = selectableChats
 		.map(chat => chat.uuid)
 		.sort()
 		.join(",")
 
 	const rawSelectedChats = useChatsSelectionStore(useShallow(state => state.selectedChats))
-	// LIVE (ghost-purged) selection: re-derived from the current chats query every render, so a
-	// conversation removed from the account (elsewhere, or by another tab) between selection and
-	// dispatch is never targeted or counted towards the bulk bar's "2+ selected" threshold.
+	// LIVE (ghost-purged) selection: re-derived from the selectable conversations every render, so a
+	// conversation removed from the account (elsewhere, or by another tab) or folded out of sight between
+	// selection and dispatch is never targeted or counted towards the bulk bar's "2+ selected" threshold,
+	// even for the render before the purge below lands.
 	const liveSelectedChats: Chat[] = []
 	for (const selected of rawSelectedChats) {
 		const live = chatsByUuid.get(selected.uuid)
@@ -131,12 +137,12 @@ export function ChatsSidebar() {
 	const selection = useChatsListSelection({ chats: listChats, selectionCount: liveSelectedChats.length })
 
 	useEffect(() => {
-		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChatUuidsSignature.split(","))
+		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, selectableChatUuidsSignature.split(","))
 
 		if (toRemove.length > 0) {
 			useChatsSelectionStore.getState().removeFromSelection(toRemove)
 		}
-	}, [visibleChatUuidsSignature])
+	}, [selectableChatUuidsSignature])
 
 	// Def in features/chats/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the row selection. Scoped to the
@@ -347,20 +353,6 @@ export function ChatsSidebar() {
 		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
 	)
 
-	// Folding a section away drops its conversations from the selection: a bulk action or key must never act on
-	// rows the reader can no longer see.
-	function handleToggleSection(section: ChatSection): void {
-		if (!collapsed[section]) {
-			const hidden = liveSelectedChats.filter(chat => chatSection(chat) === section).map(chat => chat.uuid)
-
-			if (hidden.length > 0) {
-				useChatsSelectionStore.getState().removeFromSelection(hidden)
-			}
-		}
-
-		toggleChatSection(section)
-	}
-
 	// Null while listing; ChatsVirtualList renders the rows then.
 	function renderFallback(): ReactNode {
 		if (chatsQuery.isPending) {
@@ -452,7 +444,7 @@ export function ChatsSidebar() {
 						fallback={renderFallback()}
 						label={t("chatsListLabel")}
 						sectionLabels={{ direct: t(SECTION_LABEL_KEY.direct), groups: t(SECTION_LABEL_KEY.groups) }}
-						onToggleSection={handleToggleSection}
+						onToggleSection={toggleChatSection}
 						selectedUuid={selectedUuid}
 						liveSelectedUuids={liveSelectedUuids}
 						currentUserId={currentUserId}
@@ -481,7 +473,7 @@ export function ChatsSidebar() {
 	)
 }
 
-interface ChatsVirtualListProps {
+export interface ChatsVirtualListProps {
 	items: ChatListItem[]
 	headerIndexes: number[]
 	// Every section shows expanded while searching, so its header cannot fold it.
@@ -501,7 +493,8 @@ interface ChatsVirtualListProps {
 	onToggleSelect: ListPointerSelection["toggleAt"]
 }
 
-// A section's disclosure: a plain <button> with its own aria-expanded, controlling the section's listbox.
+// A section's disclosure: a plain <button> with its own aria-expanded, controlling the section's listbox while
+// there is one.
 // The label is its own element so the listbox is named by the section alone.
 function ChatSectionHeader({
 	label,
@@ -513,7 +506,8 @@ function ChatSectionHeader({
 }: {
 	label: string
 	labelId: string
-	listboxId: string
+	// The section's listbox, while it is rendered.
+	listboxId: string | undefined
 	expanded: boolean
 	disabled: boolean
 	onToggle: () => void
@@ -548,7 +542,7 @@ function ChatSectionHeader({
 // One virtualizer over the flat item list, rendered as a listbox per section: each listbox is a static box,
 // so its absolutely positioned options still lay out against the shared list container. Headers stay
 // mounted however far the list scrolls, as each names its listbox.
-function ChatsVirtualList({
+export function ChatsVirtualList({
 	items,
 	headerIndexes,
 	searching,
@@ -598,7 +592,7 @@ function ChatsVirtualList({
 	function renderSection(section: ChatSection): ReactNode {
 		const listboxId = `${baseId}-${section}`
 		const labelId = `${listboxId}-label`
-		let header: ReactNode = null
+		let headerRow: { virtualRow: VirtualItem; expanded: boolean } | null = null
 		const options: ReactNode[] = []
 
 		for (const virtualRow of virtualItems) {
@@ -609,24 +603,7 @@ function ChatsVirtualList({
 			}
 
 			if (item.kind === "header") {
-				header = (
-					<div
-						key={virtualRow.key}
-						className="absolute top-0 left-0 w-full"
-						style={positionStyle(virtualRow, SECTION_HEADER_HEIGHT)}
-					>
-						<ChatSectionHeader
-							label={sectionLabels[section]}
-							labelId={labelId}
-							listboxId={listboxId}
-							expanded={item.expanded}
-							disabled={searching}
-							onToggle={() => {
-								onToggleSection(section)
-							}}
-						/>
-					</div>
-				)
+				headerRow = { virtualRow, expanded: item.expanded }
 
 				continue
 			}
@@ -660,21 +637,41 @@ function ChatsVirtualList({
 			)
 		}
 
-		if (header === null) {
+		if (headerRow === null) {
 			return null
 		}
 
+		// A listbox only while it has options: a collapsed section's (or one whose rows are all scrolled out of the
+		// window) would be an empty listbox, so the header then controls nothing.
+		const listbox = options.length > 0
+
 		return (
 			<Fragment key={section}>
-				{header}
 				<div
-					id={listboxId}
-					role="listbox"
-					aria-multiselectable="true"
-					aria-labelledby={labelId}
+					className="absolute top-0 left-0 w-full"
+					style={positionStyle(headerRow.virtualRow, SECTION_HEADER_HEIGHT)}
 				>
-					{options}
+					<ChatSectionHeader
+						label={sectionLabels[section]}
+						labelId={labelId}
+						listboxId={listbox ? listboxId : undefined}
+						expanded={headerRow.expanded}
+						disabled={searching}
+						onToggle={() => {
+							onToggleSection(section)
+						}}
+					/>
 				</div>
+				{listbox ? (
+					<div
+						id={listboxId}
+						role="listbox"
+						aria-multiselectable="true"
+						aria-labelledby={labelId}
+					>
+						{options}
+					</div>
+				) : null}
 			</Fragment>
 		)
 	}
