@@ -1,7 +1,7 @@
 import type { Browser, Locator, Page } from "@playwright/test"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, settleLeases } from "./fixtures"
-import { escapeRegExp, leadingNamePattern, namePattern, openRowMenu, pickDestination, waitForCompressDialog } from "./helpers/archive"
+import { escapeRegExp, leadingNamePattern, namePattern, pickDestination, waitForCompressDialog } from "./helpers/archive"
 import { plainTreeZip } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { expectJobCard, hideJobCards, stopAllJobs } from "./helpers/jobs"
@@ -19,7 +19,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS,
 	type ListingHandle
 } from "./helpers/listing"
-import { menuItemName } from "./helpers/menu"
+import { closeLinkDialog, createLink, openLinkDialog, setLinkDownloads } from "./helpers/publicLinks"
 
 // Archives on the surfaces beside the drive (b6-design.md): a public file link, a public directory link
 // (with and without a password), a chat's link card, Shared with me. Every success path needs a public
@@ -31,51 +31,11 @@ import { menuItemName } from "./helpers/menu"
 const NOT_ALLOWED_NOTE = "The link's owner doesn't allow downloads, so nothing can be extracted from it."
 const LINK_PASSWORD = "e2e-link-password"
 
-// The item's "Public link" dialog, opened from its row menu.
-async function openLinkDialog(page: Page, listbox: Locator, name: string): Promise<Locator> {
-	await openRowMenu(page, listbox, name)
-	await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
-
-	const dialog = page.getByRole("dialog", { name: "Public link", exact: true })
-
-	await expect(dialog).toBeVisible()
-
-	return dialog
-}
-
-// Creates the item's link and returns its URL (built on the app's own origin).
-async function createLink(dialog: Locator): Promise<string> {
-	await dialog.getByRole("button", { name: "Create public link", exact: true }).click()
-
-	const url = dialog.getByLabel("Link", { exact: true })
-
-	await expect(url).toHaveValue(/\/[fd]\/[0-9a-f-]+#/, { timeout: LIVE_WRITE_TIMEOUT_MS })
-
-	return url.inputValue()
-}
-
-// Each change is a write the switch waits out (disabled while pending).
-async function setLinkDownloads(dialog: Locator, on: boolean): Promise<void> {
-	const allow = dialog.getByRole("switch", { name: "Allow downloads", exact: true })
-
-	if ((await allow.getAttribute("aria-checked")) !== String(on)) {
-		await allow.click()
-	}
-
-	await expect(allow).toHaveAttribute("aria-checked", String(on), { timeout: LIVE_WRITE_TIMEOUT_MS })
-	await expect(allow).toBeEnabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
-}
-
 async function setLinkPassword(dialog: Locator, password: string): Promise<void> {
 	await dialog.getByRole("button", { name: "Set password", exact: true }).click()
 	await dialog.getByPlaceholder("No password", { exact: true }).fill(password)
 	await dialog.getByRole("button", { name: "Save", exact: true }).click()
 	await expect(dialog.getByText("Password set", { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-}
-
-async function closeLinkDialog(page: Page, dialog: Locator): Promise<void> {
-	await page.keyboard.press("Escape")
-	await expect(dialog).toHaveCount(0)
 }
 
 // A link page from the signed-in tab. The link was just written, so the lease is let go first.

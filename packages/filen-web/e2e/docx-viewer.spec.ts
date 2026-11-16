@@ -1,6 +1,6 @@
 import type { Browser, Locator, Page, Worker } from "@playwright/test"
 import { test, expect, settleLeases } from "./fixtures"
-import { archiveBrowser, openRowMenu, previewOverlay } from "./helpers/archive"
+import { archiveBrowser, previewOverlay } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import {
 	DOCX_MIME,
@@ -15,17 +15,10 @@ import {
 	docxViewerBytes
 } from "./helpers/docxFixtures"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
-import {
-	BOOT_SETTLE_TIMEOUT_MS,
-	LAZY_VIEWER_TIMEOUT_MS,
-	LIVE_WRITE_TIMEOUT_MS,
-	bootTo,
-	uploadFiles,
-	withScratchDirectory
-} from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, LAZY_VIEWER_TIMEOUT_MS, bootTo, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
-import { menuItemName } from "./helpers/menu"
+import { createLink, openLinkDialog, setLinkDownloads } from "./helpers/publicLinks"
 
 // The DOCX viewer in a real browser against the real backend, at each place a document opens read-only: an
 // archive's entry (zip and 7z), a public link (signed out, and with downloads off) and a chat's link card. Per
@@ -348,33 +341,6 @@ test("archive viewer documents: comments, an embedded font, links and 300 pages 
 
 // ---- public links and chat cards: success needs a link the account owns, which is premium ---------------
 
-async function createLink(page: Page, listbox: Locator, name: string): Promise<{ dialog: Locator; url: string }> {
-	await openRowMenu(page, listbox, name)
-	await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
-
-	const dialog = page.getByRole("dialog", { name: "Public link", exact: true })
-
-	await expect(dialog).toBeVisible()
-	await dialog.getByRole("button", { name: "Create public link", exact: true }).click()
-
-	const field = dialog.getByLabel("Link", { exact: true })
-
-	await expect(field).toHaveValue(/\/[fd]\/[0-9a-f-]+#/, { timeout: LIVE_WRITE_TIMEOUT_MS })
-
-	return { dialog, url: await field.inputValue() }
-}
-
-async function setLinkDownloads(dialog: Locator, on: boolean): Promise<void> {
-	const allow = dialog.getByRole("switch", { name: "Allow downloads", exact: true })
-
-	if ((await allow.getAttribute("aria-checked")) !== String(on)) {
-		await allow.click()
-	}
-
-	await expect(allow).toHaveAttribute("aria-checked", String(on), { timeout: LIVE_WRITE_TIMEOUT_MS })
-	await expect(allow).toBeEnabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
-}
-
 // A visitor with no session; WebKit keeps one OPFS per origin for the whole machine (e2e/fixtures.ts), so
 // there the signed-in tab visits instead.
 async function visitLink(page: Page, browser: Browser, browserName: string, baseURL: string | undefined, url: string): Promise<Page> {
@@ -407,7 +373,8 @@ test.describe("public link and chat card", () => {
 		await withScratchDirectory(page, "docx-viewer-link", async ({ listbox, scratchName }) => {
 			await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: docxViewerBytes(name) }], listbox)
 
-			const { dialog, url } = await createLink(page, listbox, name)
+			const dialog = await openLinkDialog(page, listbox, name)
+			const url = await createLink(dialog)
 
 			for (const downloads of [true, false]) {
 				await setLinkDownloads(dialog, downloads)
@@ -443,9 +410,7 @@ test.describe("public link and chat card", () => {
 					await expect(page.getByRole("listbox").first()).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 					await page.getByRole("option", { name: scratchName }).dblclick()
 					await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-					await openRowMenu(page, listbox, name)
-					await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
-					await expect(dialog).toBeVisible()
+					await openLinkDialog(page, listbox, name)
 				}
 			}
 		})
