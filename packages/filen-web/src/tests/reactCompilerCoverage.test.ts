@@ -392,7 +392,7 @@ describe("React Compiler coverage", () => {
 		[
 			"src/features/chats/components/chatsSidebar.tsx",
 			"ChatsSidebar",
-			["chatsWithoutBlockedOneOnOne(", "filterChats(", "new Map(", ".sort()", "new Set("]
+			["chatsWithoutBlockedOneOnOne(", "filterChats(", "buildChatList(", "new Map(", ".sort()", "new Set("]
 		]
 	])("compiles %s, leaving only its list child to the virtualizer", (file, fnName, derivations) => {
 		const { events, code } = compileWithCode(file)

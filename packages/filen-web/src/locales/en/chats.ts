@@ -11,8 +11,12 @@ export const chats = {
 	chatsSidebarTitle: "Chats",
 	/** Chats sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
 	chatsSidebarResize: "Resize sidebar",
-	/** Chats sidebar — accessible name for the conversation list itself (ARIA listbox) */
+	/** Chats sidebar — accessible name for the conversation list itself (the group of its section listboxes) */
 	chatsListLabel: "Conversations",
+	/** Chats sidebar — collapsible section header over one-to-one conversations */
+	chatsSectionDirect: "Direct messages",
+	/** Chats sidebar — collapsible section header over group conversations */
+	chatsSectionGroups: "Groups",
 	/** Chats sidebar — search box placeholder and accessible label (filters by name/participant) */
 	chatsSearch: "Search conversations",
 	/** Chats sidebar — title shown when the list is empty on a fresh account */
@@ -29,6 +33,8 @@ export const chats = {
 	// ── Conversation row ─────────────────────────────────────────────────────────
 	/** Conversation row — preview-line fallback when a conversation has no readable last message */
 	chatNoMessages: "No messages yet",
+	/** Conversation row — preview line prefixed with its sender ("You" for own messages, the sender's name in a group) */
+	chatPreviewWithSender: "{{name}}: {{message}}",
 	/** Conversation row — accessible label on the muted indicator */
 	chatMuted: "Muted",
 	/** Conversation row — accessible label on the numeric unread badge (singular) */

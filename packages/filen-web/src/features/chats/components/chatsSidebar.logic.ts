@@ -2,6 +2,7 @@ import type { Chat } from "@filen/sdk-rs"
 import { chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
 import { compareChats, isListedChat, isOneOnOneWithBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
+import { isGroupChat } from "@/features/chats/components/thread/thread.logic"
 
 // The URL owns the selected conversation: /chats/<uuid> is a selection key. The sidebar renders in the app
 // shell (outside the chats route match), so it reads the raw pathname rather than route params. Empty at
@@ -71,6 +72,78 @@ export function chatsWithoutBlockedOneOnOne(
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): Chat[] {
 	return chats.filter(chat => !isOneOnOneWithBlocked(chat, currentUserId, blocked))
+}
+
+// The list's sections, in order: one-to-one conversations (and a conversation with nobody else left), then
+// group conversations.
+export type ChatSection = "direct" | "groups"
+
+export const CHAT_SECTIONS: readonly ChatSection[] = ["direct", "groups"]
+
+export function chatSection(chat: Chat): ChatSection {
+	return isGroupChat(chat.participants.length) ? "groups" : "direct"
+}
+
+// One virtualized list item: a section header, or a conversation with its position in its section's listbox
+// and its `index` in `chats`, the order selection ranges and the next/previous keys walk.
+export type ChatListItem =
+	| { kind: "header"; key: string; section: ChatSection; expanded: boolean }
+	| { kind: "chat"; key: string; section: ChatSection; chat: Chat; index: number; posInSet: number; setSize: number }
+
+export interface ChatList {
+	items: ChatListItem[]
+	// The conversations on screen, in list order: every section's, less the collapsed ones'.
+	chats: Chat[]
+	// Where the headers sit in `items`, so the virtualizer can keep them mounted: a section's listbox is
+	// labelled by its header.
+	headerIndexes: number[]
+}
+
+// Splits the sorted, filtered rows into their sections, each keeping that order (most recent activity
+// first), and drops a collapsed section's rows. An empty section gets no header. While searching every
+// section shows expanded, so no match is hidden behind a collapsed header.
+export function buildChatList(rows: readonly Chat[], collapsed: Readonly<Record<ChatSection, boolean>>, searching: boolean): ChatList {
+	const bySection: Record<ChatSection, Chat[]> = { direct: [], groups: [] }
+
+	for (const chat of rows) {
+		bySection[chatSection(chat)].push(chat)
+	}
+
+	const items: ChatListItem[] = []
+	const chats: Chat[] = []
+	const headerIndexes: number[] = []
+
+	for (const section of CHAT_SECTIONS) {
+		const members = bySection[section]
+
+		if (members.length === 0) {
+			continue
+		}
+
+		const expanded = searching || !collapsed[section]
+
+		headerIndexes.push(items.length)
+		items.push({ kind: "header", key: `section-${section}`, section, expanded })
+
+		if (!expanded) {
+			continue
+		}
+
+		members.forEach((chat, position) => {
+			items.push({
+				kind: "chat",
+				key: chat.uuid,
+				section,
+				chat,
+				index: chats.length,
+				posInSet: position + 1,
+				setSize: members.length
+			})
+			chats.push(chat)
+		})
+	}
+
+	return { items, chats, headerIndexes }
 }
 
 // Uuids of currently-selected chats no longer present in a live chat set — chatsSidebar.tsx's own

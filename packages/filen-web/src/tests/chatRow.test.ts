@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 import "@/lib/i18n"
 
@@ -38,15 +38,27 @@ const chat: Chat = {
 	lastFocus: 0n
 }
 
-function renderRow(
-	overrides: { selected?: boolean; beforeSelected?: boolean } & Partial<Pick<ChatRowProps, "onPointerSelect" | "onLongPress">> = {}
-) {
+function lastMessage(senderId: number, senderEmail: string): ChatMessage {
+	return {
+		uuid: testUuid("msg"),
+		senderId,
+		senderEmail,
+		senderNickName: undefined,
+		message: "hi",
+		chat: chat.uuid,
+		embedDisabled: false,
+		edited: false,
+		editedTimestamp: 0n,
+		sentTimestamp: 1_000n
+	}
+}
+
+function renderRow(overrides: { selected?: boolean; chat?: Chat } & Partial<Pick<ChatRowProps, "onPointerSelect" | "onLongPress">> = {}) {
 	return render(
 		createElement(ChatRow, {
-			chat,
+			chat: overrides.chat ?? chat,
 			selected: overrides.selected ?? false,
 			multiSelected: false,
-			beforeSelected: overrides.beforeSelected ?? false,
 			posInSet: 1,
 			setSize: 1,
 			currentUserId: 1n,
@@ -65,38 +77,58 @@ afterEach(() => {
 })
 
 describe("ChatRow", () => {
-	it("announces the unread count on the dot instead of a numeric badge", () => {
+	it("shows the unread count in a pill, announced in words, and bolds the name", () => {
 		unreadCount.value = 3
 		renderRow()
 
-		expect(screen.getByRole("img", { name: "3 unread messages" })).toBeTruthy()
-		expect(screen.queryByText("3")).toBeNull()
+		expect(screen.getByText("3").getAttribute("aria-hidden")).toBe("true")
+		expect(screen.getByText("3 unread messages").className).toContain("sr-only")
+		expect(screen.getByText("zoe@example.com").className).toContain("font-semibold")
 	})
 
-	it("reserves the dot's space without announcing it when read", () => {
-		const { container } = renderRow()
+	it("caps the pill's count", () => {
+		unreadCount.value = 120
+		renderRow()
 
-		expect(screen.queryByRole("img", { name: /unread/ })).toBeNull()
-		expect(container.querySelector('[aria-hidden="true"].size-2\\.5')).toBeTruthy()
+		expect(screen.getByText("99+")).toBeTruthy()
+		expect(screen.getByText("120 unread messages")).toBeTruthy()
 	})
 
-	it("fills the routed row and drops the separators around it", () => {
+	it("shows no pill when read", () => {
+		renderRow()
+
+		expect(screen.queryByText(/unread/)).toBeNull()
+		expect(screen.getByText("zoe@example.com").className).not.toContain("font-semibold")
+	})
+
+	it("fills the routed row", () => {
 		const selected = renderRow({ selected: true })
-		const option = selected.getByRole("option")
 
-		expect(option.className).toContain("bg-chat-own")
-		expect(option.className).toContain("after:hidden")
+		expect(selected.getByRole("option").classList).toContain("bg-sidebar-accent")
 		expect(selected.getByRole("link").getAttribute("aria-current")).toBe("page")
 		selected.unmount()
 
-		expect(renderRow({ beforeSelected: true }).getByRole("option").className).toContain("after:hidden")
+		expect(renderRow().getByRole("option").classList).not.toContain("bg-sidebar-accent")
 	})
 
-	it("keeps the separator on an ordinary row", () => {
-		const option = renderRow().getByRole("option")
+	it("prefixes the preview with You on own messages, never with the other person in a 1:1", () => {
+		renderRow({ chat: { ...chat, lastMessage: lastMessage(1, "me@example.com") } })
+		expect(screen.getByText("You: hi")).toBeTruthy()
+		cleanup()
 
-		expect(option.className).not.toContain("after:hidden")
-		expect(option.className).not.toContain("bg-chat-own")
+		renderRow({ chat: { ...chat, lastMessage: lastMessage(2, "zoe@example.com") } })
+		expect(screen.getByText("hi")).toBeTruthy()
+	})
+
+	it("prefixes the preview with its sender in a group", () => {
+		const group: Chat = {
+			...chat,
+			participants: [...chat.participants, mockParticipant(3n, "max@example.com")],
+			lastMessage: lastMessage(3, "max@example.com")
+		}
+
+		renderRow({ chat: group })
+		expect(screen.getByText("max@example.com: hi")).toBeTruthy()
 	})
 })
 

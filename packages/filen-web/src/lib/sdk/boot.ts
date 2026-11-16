@@ -35,6 +35,7 @@ import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMa
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
+import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -175,7 +176,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadDocxFormattingMarks(),
 		loadSidebarHidden(),
 		loadOcrLanguages(),
-		loadPdfPagesRailOpen()
+		loadPdfPagesRailOpen(),
+		loadCollapsedChatSections()
 	]).then(() => undefined)
 }
 

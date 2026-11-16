@@ -1,20 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import type { Options } from "react-hotkeys-hook"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { defaultRangeExtractor, useVirtualizer, type Range, type VirtualItem } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
-import { SearchIcon, MessagesSquareIcon, PlusIcon } from "lucide-react"
+import { SearchIcon, MessagesSquareIcon, SquarePenIcon, ChevronDownIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
-import type { BlockedUsers } from "@filen/shared"
+import { cn, type BlockedUsers } from "@filen/shared"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import {
+	buildChatList,
+	chatSection,
 	chatsWithoutBlockedOneOnOne,
 	filterChats,
 	selectedChatUuidFromPath,
-	staleChatSelectionUuids
+	staleChatSelectionUuids,
+	CHAT_SECTIONS,
+	type ChatListItem,
+	type ChatSection
 } from "@/features/chats/components/chatsSidebar.logic"
+import { toggleChatSection, useCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
@@ -43,14 +49,17 @@ import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 // Next/previous conversation also work in the message field (Slack's Alt+↑/↓): a chord the textarea has no use for.
 const IN_COMPOSER: Options = { ...OUTSIDE_OVERLAYS, enableOnFormTags: ["option", "textarea"] }
 
-// Fixed row height — the single virtualizer needs no measureElement pass (the name line and the two-line
-// preview clamp are pinned to a known height), same as notesSidebar's constant-height rows.
-const CHAT_ROW_HEIGHT = 72
+// Fixed heights — the single virtualizer needs no measureElement pass (a row's name and one-line preview
+// are pinned to a known height), same as notesSidebar's constant-height rows.
+const CHAT_ROW_HEIGHT = 48
+const SECTION_HEADER_HEIGHT = 32
+
+const SECTION_LABEL_KEY = { direct: "chatsSectionDirect", groups: "chatsSectionGroups" } as const
 
 // Contextual conversation list — the shell's sidebar slot when on /chats*. Same panel geometry as
-// NotesSidebar/DriveSidebar (w-52, rounded-xl, borderless). A virtualized list + client-side search, a
-// "New chat" button opening the contact picker (createChatDialog.tsx via useChatDialogHost), and per-row
-// menus (chatRow.tsx's own context/dropdown menu).
+// NotesSidebar/DriveSidebar (w-52, rounded-xl, borderless). A virtualized list in collapsible sections
+// (direct messages, then groups) + client-side search, a "New chat" button opening the contact picker
+// (createChatDialog.tsx via useChatDialogHost), and per-row menus (chatRow.tsx's own context/dropdown menu).
 export function ChatsSidebar() {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
@@ -67,6 +76,7 @@ export function ChatsSidebar() {
 	// renders the rows.
 	const blocked = useBlockedUsers(true)
 	const dialogHost = useChatDialogHost()
+	const collapsed = useCollapsedChatSections()
 
 	const [search, setSearch] = useState("")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
@@ -78,6 +88,10 @@ export function ChatsSidebar() {
 	const visibleChats = chatsWithoutBlockedOneOnOne(allChats, currentUserId, blocked)
 	const rows = filterChats(visibleChats, search, currentUserId, t("chatJustYou"), blocked)
 	const searching = search.trim().length > 0
+	// The sectioned list, and the conversations on screen in its order: selection ranges, select all and the
+	// next/previous keys all walk these, never a collapsed section's.
+	const list = buildChatList(rows, collapsed, searching)
+	const listChats = list.chats
 
 	// Everything derived from visibleChats is built before the hooks below: the React Compiler drops the
 	// memo scope of a value that is still mutable across a hook call.
@@ -110,10 +124,11 @@ export function ChatsSidebar() {
 		}
 	}
 	const liveSelectedUuids = new Set(liveSelectedChats.map(chat => chat.uuid))
-	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered) —
+	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered, collapsed
+	// sections left out) —
 	// mirrors notesSidebar's own selection wiring. Clears on mount/unmount (see the hook's own doc
 	// comment) rather than a resetKey, since chats has no secondary view mode to key a reset off.
-	const selection = useChatsListSelection({ chats: rows, selectionCount: liveSelectedChats.length })
+	const selection = useChatsListSelection({ chats: listChats, selectionCount: liveSelectedChats.length })
 
 	useEffect(() => {
 		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChatUuidsSignature.split(","))
@@ -126,8 +141,9 @@ export function ChatsSidebar() {
 	// Def in features/chats/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the row selection. Scoped to the
 	// conversation list (the returned ref): in the thread, Mod+A is the page's own text select-all. Stands
-	// down under any open dialog or menu (OUTSIDE_OVERLAYS). Targets `rows` (already search-filtered) minus
-	// undecryptable ones — mirrors drive.selectAll/notes.selectAll exactly. Both actions below are
+	// down under any open dialog or menu (OUTSIDE_OVERLAYS). Targets the conversations on screen (search-
+	// filtered, collapsed sections left out) minus undecryptable ones — mirrors drive.selectAll/
+	// notes.selectAll exactly. Both actions below are
 	// additionally OFF while the panel is out of sight (drawer closed below the layout breakpoint): rows,
 	// count and bulk bar all live inside this panel, so firing them there would swallow the browser's own
 	// select-all and leave an invisible selection behind.
@@ -135,10 +151,10 @@ export function ChatsSidebar() {
 		"chats.selectAll",
 		event => {
 			event.preventDefault()
-			useChatsSelectionStore.getState().setSelectedChats(selectableChatsForSelectAll(rows))
+			useChatsSelectionStore.getState().setSelectedChats(selectableChatsForSelectAll(listChats))
 		},
 		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
-		[rows]
+		[listChats]
 	)
 
 	// Def in features/chats/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser
@@ -245,20 +261,20 @@ export function ChatsSidebar() {
 		"chats.nextChat",
 		event => {
 			event.preventDefault()
-			openAdjacent(adjacentChatUuid(rows, selectedUuid, 1))
+			openAdjacent(adjacentChatUuid(listChats, selectedUuid, 1))
 		},
 		IN_COMPOSER,
-		[rows, selectedUuid]
+		[listChats, selectedUuid]
 	)
 
 	useAction(
 		"chats.previousChat",
 		event => {
 			event.preventDefault()
-			openAdjacent(adjacentChatUuid(rows, selectedUuid, -1))
+			openAdjacent(adjacentChatUuid(listChats, selectedUuid, -1))
 		},
 		IN_COMPOSER,
-		[rows, selectedUuid]
+		[listChats, selectedUuid]
 	)
 
 	// Unread is derived on the key press only, never per render.
@@ -266,20 +282,20 @@ export function ChatsSidebar() {
 		"chats.nextUnread",
 		event => {
 			event.preventDefault()
-			openAdjacent(adjacentUnreadChatUuid(rows, selectedUuid, 1, hasUnread))
+			openAdjacent(adjacentUnreadChatUuid(listChats, selectedUuid, 1, hasUnread))
 		},
 		IN_COMPOSER,
-		[rows, selectedUuid, currentUserId, blocked]
+		[listChats, selectedUuid, currentUserId, blocked]
 	)
 
 	useAction(
 		"chats.previousUnread",
 		event => {
 			event.preventDefault()
-			openAdjacent(adjacentUnreadChatUuid(rows, selectedUuid, -1, hasUnread))
+			openAdjacent(adjacentUnreadChatUuid(listChats, selectedUuid, -1, hasUnread))
 		},
 		IN_COMPOSER,
-		[rows, selectedUuid, currentUserId, blocked]
+		[listChats, selectedUuid, currentUserId, blocked]
 	)
 
 	useAction(
@@ -331,6 +347,20 @@ export function ChatsSidebar() {
 		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
 	)
 
+	// Folding a section away drops its conversations from the selection: a bulk action or key must never act on
+	// rows the reader can no longer see.
+	function handleToggleSection(section: ChatSection): void {
+		if (!collapsed[section]) {
+			const hidden = liveSelectedChats.filter(chat => chatSection(chat) === section).map(chat => chat.uuid)
+
+			if (hidden.length > 0) {
+				useChatsSelectionStore.getState().removeFromSelection(hidden)
+			}
+		}
+
+		toggleChatSection(section)
+	}
+
 	// Null while listing; ChatsVirtualList renders the rows then.
 	function renderFallback(): ReactNode {
 		if (chatsQuery.isPending) {
@@ -373,32 +403,29 @@ export function ChatsSidebar() {
 		>
 			<div
 				ref={headerRef}
-				className="flex flex-col gap-2 p-3"
+				className="flex items-center gap-1.5 p-3"
 			>
-				<div className="flex items-center justify-between gap-2">
-					<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						disabled={!isOnline}
-						aria-label={t("chatsSidebarNewChat")}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-						className="app-region-no-drag"
-						onClick={() => {
-							dialogHost.openCreateChatDialog()
-						}}
-					>
-						<PlusIcon />
-					</Button>
-				</div>
-
+				<h2 className="sr-only">{t("chatsSidebarTitle")}</h2>
 				<ListFilterInput
 					value={search}
 					onChange={setSearch}
 					placeholder={t("chatsSearch")}
 					ariaLabel={t("chatsSearch")}
-					wrapperClassName="app-region-no-drag"
+					wrapperClassName="min-w-0 flex-1 app-region-no-drag"
 				/>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					disabled={!isOnline}
+					aria-label={t("chatsSidebarNewChat")}
+					title={!isOnline ? t("common:offlineActionDisabled") : t("chatsSidebarNewChat")}
+					className="app-region-no-drag"
+					onClick={() => {
+						dialogHost.openCreateChatDialog()
+					}}
+				>
+					<SquarePenIcon />
+				</Button>
 			</div>
 
 			<div
@@ -418,10 +445,14 @@ export function ChatsSidebar() {
 					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
 				>
 					<ChatsVirtualList
-						rows={rows}
+						items={list.items}
+						headerIndexes={list.headerIndexes}
+						searching={searching}
 						scrollElement={scrollElement}
 						fallback={renderFallback()}
 						label={t("chatsListLabel")}
+						sectionLabels={{ direct: t(SECTION_LABEL_KEY.direct), groups: t(SECTION_LABEL_KEY.groups) }}
+						onToggleSection={handleToggleSection}
 						selectedUuid={selectedUuid}
 						liveSelectedUuids={liveSelectedUuids}
 						currentUserId={currentUserId}
@@ -451,11 +482,16 @@ export function ChatsSidebar() {
 }
 
 interface ChatsVirtualListProps {
-	rows: Chat[]
+	items: ChatListItem[]
+	headerIndexes: number[]
+	// Every section shows expanded while searching, so its header cannot fold it.
+	searching: boolean
 	scrollElement: HTMLDivElement | null
 	// Rendered instead of the list (loading, error, empty) while non-null.
 	fallback: ReactNode
 	label: string
+	sectionLabels: Readonly<Record<ChatSection, string>>
+	onToggleSection: (section: ChatSection) => void
 	selectedUuid: string
 	liveSelectedUuids: ReadonlySet<string>
 	currentUserId: bigint | undefined
@@ -465,14 +501,62 @@ interface ChatsVirtualListProps {
 	onToggleSelect: ListPointerSelection["toggleAt"]
 }
 
+// A section's disclosure: a plain <button> with its own aria-expanded, controlling the section's listbox.
+// The label is its own element so the listbox is named by the section alone.
+function ChatSectionHeader({
+	label,
+	labelId,
+	listboxId,
+	expanded,
+	disabled,
+	onToggle
+}: {
+	label: string
+	labelId: string
+	listboxId: string
+	expanded: boolean
+	disabled: boolean
+	onToggle: () => void
+}) {
+	return (
+		<button
+			type="button"
+			aria-expanded={expanded}
+			aria-controls={listboxId}
+			disabled={disabled}
+			onClick={onToggle}
+			className="flex h-full w-full items-end gap-1 rounded-md px-1 pb-1.5 text-left text-[11px] leading-4 font-semibold tracking-wide text-muted-foreground uppercase focus-ring-row transition-colors outline-none app-region-no-drag enabled:hover:text-foreground"
+		>
+			<ChevronDownIcon
+				aria-hidden="true"
+				className={cn("mb-px size-3.5 shrink-0 transition-transform", !expanded && "-rotate-90")}
+			/>
+			<span
+				id={labelId}
+				className="min-w-0 truncate"
+			>
+				{label}
+			</span>
+		</button>
+	)
+}
+
 // Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
 // change while scrolling; split out so ChatsSidebar itself compiles and those renders stay here. Mounted in
 // every state, so the virtualizer lives exactly as long as the sidebar.
+//
+// One virtualizer over the flat item list, rendered as a listbox per section: each listbox is a static box,
+// so its absolutely positioned options still lay out against the shared list container. Headers stay
+// mounted however far the list scrolls, as each names its listbox.
 function ChatsVirtualList({
-	rows,
+	items,
+	headerIndexes,
+	searching,
 	scrollElement,
 	fallback,
 	label,
+	sectionLabels,
+	onToggleSection,
 	selectedUuid,
 	liveSelectedUuids,
 	currentUserId,
@@ -481,61 +565,132 @@ function ChatsVirtualList({
 	onPointerSelect,
 	onToggleSelect
 }: ChatsVirtualListProps) {
+	const baseId = useId()
+
+	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
+	// recomputes its window whenever the extractor changes.
+	const rangeExtractor = useCallback(
+		(range: Range) => {
+			const indexes = defaultRangeExtractor(range)
+			const missing = headerIndexes.filter(index => !indexes.includes(index))
+
+			return missing.length === 0 ? indexes : [...missing, ...indexes].sort((a, b) => a - b)
+		},
+		[headerIndexes]
+	)
+
 	const virtualizer = useVirtualizer({
-		count: rows.length,
+		count: items.length,
 		getScrollElement: () => scrollElement,
 		observeElementOffset: observeElementOffsetFromAttach,
-		estimateSize: () => CHAT_ROW_HEIGHT,
+		estimateSize: index => (items[index]?.kind === "header" ? SECTION_HEADER_HEIGHT : CHAT_ROW_HEIGHT),
 		overscan: 10,
-		getItemKey: index => rows[index]?.uuid ?? index
+		getItemKey: index => items[index]?.key ?? index,
+		rangeExtractor
 	})
 
 	if (fallback !== null) {
 		return fallback
 	}
 
-	return (
-		<div
-			role="listbox"
-			aria-multiselectable="true"
-			aria-label={label}
-			className="relative w-full"
-			style={{ height: virtualizer.getTotalSize() }}
-		>
-			{virtualizer.getVirtualItems().map(virtualRow => {
-				const chat = rows[virtualRow.index]
+	const virtualItems = virtualizer.getVirtualItems()
 
-				if (chat === undefined) {
-					return null
-				}
+	function renderSection(section: ChatSection): ReactNode {
+		const listboxId = `${baseId}-${section}`
+		const labelId = `${listboxId}-label`
+		let header: ReactNode = null
+		const options: ReactNode[] = []
 
-				return (
-					// Presentational: this wrapper only positions the row, and a generic container between
-					// listbox and option breaks the owned-element relationship.
+		for (const virtualRow of virtualItems) {
+			const item = items[virtualRow.index]
+
+			if (item?.section !== section) {
+				continue
+			}
+
+			if (item.kind === "header") {
+				header = (
 					<div
 						key={virtualRow.key}
-						role="presentation"
 						className="absolute top-0 left-0 w-full"
-						style={{ height: CHAT_ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
+						style={positionStyle(virtualRow, SECTION_HEADER_HEIGHT)}
 					>
-						<ChatRow
-							chat={chat}
-							selected={chat.uuid === selectedUuid}
-							multiSelected={liveSelectedUuids.has(chat.uuid)}
-							beforeSelected={rows[virtualRow.index + 1]?.uuid === selectedUuid}
-							posInSet={virtualRow.index + 1}
-							setSize={rows.length}
-							currentUserId={currentUserId}
-							blocked={blocked}
-							onAction={onAction}
-							onPointerSelect={(event, pointerType) => onPointerSelect(virtualRow.index, event, pointerType)}
-							onLongPress={() => {
-								onToggleSelect(virtualRow.index)
+						<ChatSectionHeader
+							label={sectionLabels[section]}
+							labelId={labelId}
+							listboxId={listboxId}
+							expanded={item.expanded}
+							disabled={searching}
+							onToggle={() => {
+								onToggleSection(section)
 							}}
 						/>
 					</div>
 				)
-			})}
+
+				continue
+			}
+
+			const { chat, index } = item
+
+			options.push(
+				// Presentational: this wrapper only positions the row, and a generic container between
+				// listbox and option breaks the owned-element relationship.
+				<div
+					key={virtualRow.key}
+					role="presentation"
+					className="absolute top-0 left-0 w-full"
+					style={positionStyle(virtualRow, CHAT_ROW_HEIGHT)}
+				>
+					<ChatRow
+						chat={chat}
+						selected={chat.uuid === selectedUuid}
+						multiSelected={liveSelectedUuids.has(chat.uuid)}
+						posInSet={item.posInSet}
+						setSize={item.setSize}
+						currentUserId={currentUserId}
+						blocked={blocked}
+						onAction={onAction}
+						onPointerSelect={(event, pointerType) => onPointerSelect(index, event, pointerType)}
+						onLongPress={() => {
+							onToggleSelect(index)
+						}}
+					/>
+				</div>
+			)
+		}
+
+		if (header === null) {
+			return null
+		}
+
+		return (
+			<Fragment key={section}>
+				{header}
+				<div
+					id={listboxId}
+					role="listbox"
+					aria-multiselectable="true"
+					aria-labelledby={labelId}
+				>
+					{options}
+				</div>
+			</Fragment>
+		)
+	}
+
+	return (
+		<div
+			role="group"
+			aria-label={label}
+			className="relative w-full"
+			style={{ height: virtualizer.getTotalSize() }}
+		>
+			{CHAT_SECTIONS.map(renderSection)}
 		</div>
 	)
+}
+
+function positionStyle(virtualRow: VirtualItem, height: number): CSSProperties {
+	return { height, transform: `translateY(${String(virtualRow.start)}px)` }
 }

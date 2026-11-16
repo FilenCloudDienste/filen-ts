@@ -482,8 +482,12 @@ test.describe("chats", () => {
 
 		// The sidebar's a11y contract, asserted where a conversation row is guaranteed to exist (every
 		// test above this one runs before the shared chat is created).
-		await expect(page.getByRole("complementary").getByRole("listbox", { name: "Conversations" })).toBeVisible()
-		await expect(page.getByRole("complementary").getByRole("option").first()).toBeVisible()
+		// The shared chat has no other participant, so it lists under direct messages.
+		const conversations = page.getByRole("complementary").getByRole("group", { name: "Conversations" })
+
+		await expect(conversations).toBeVisible()
+		await expect(conversations.getByRole("button", { name: "Direct messages" })).toHaveAttribute("aria-expanded", "true")
+		await expect(conversations.getByRole("listbox", { name: "Direct messages" }).getByRole("option").first()).toBeVisible()
 
 		// Enqueue while OFFLINE: the send can't fire, so the durable persist is observable on its own.
 		await waitForE2eHooks(page)

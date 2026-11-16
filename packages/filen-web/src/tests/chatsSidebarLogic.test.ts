@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import { chatsWithoutBlockedOneOnOne, filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
+import {
+	buildChatList,
+	chatsWithoutBlockedOneOnOne,
+	filterChats,
+	staleChatSelectionUuids
+} from "@/features/chats/components/chatsSidebar.logic"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
@@ -274,5 +279,53 @@ describe("staleChatSelectionUuids", () => {
 		const chatA = mockChat("a")
 
 		expect(staleChatSelectionUuids([chatA], "".split(","))).toEqual([chatA.uuid])
+	})
+})
+
+describe("buildChatList", () => {
+	const dm = mockChat("dm", { participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n })] })
+	const solo = mockChat("solo")
+	const group = mockChat("group", {
+		participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n }), mockParticipant({ userId: 3n })]
+	})
+	const expanded = { direct: false, groups: false }
+
+	function shape(items: ReturnType<typeof buildChatList>["items"]): string[] {
+		return items.map(item => (item.kind === "header" ? `${item.section}:${String(item.expanded)}` : item.chat.uuid))
+	}
+
+	it("sorts conversations into direct messages then groups, each keeping the incoming order", () => {
+		const list = buildChatList([group, dm, solo], expanded, false)
+
+		expect(shape(list.items)).toEqual(["direct:true", dm.uuid, solo.uuid, "groups:true", group.uuid])
+		expect(list.chats).toEqual([dm, solo, group])
+		expect(list.headerIndexes).toEqual([0, 3])
+	})
+
+	it("numbers each conversation within its section and within the on-screen order", () => {
+		const items = buildChatList([group, dm, solo], expanded, false).items.filter(item => item.kind === "chat")
+
+		expect(items.map(item => [item.index, item.posInSet, item.setSize])).toEqual([
+			[0, 1, 2],
+			[1, 2, 2],
+			[2, 1, 1]
+		])
+	})
+
+	it("drops a collapsed section's conversations but keeps its header", () => {
+		const list = buildChatList([group, dm], { direct: true, groups: false }, false)
+
+		expect(shape(list.items)).toEqual(["direct:false", "groups:true", group.uuid])
+		expect(list.chats).toEqual([group])
+		expect(list.headerIndexes).toEqual([0, 1])
+	})
+
+	it("shows every section expanded while searching", () => {
+		expect(buildChatList([group, dm], { direct: true, groups: true }, true).chats).toEqual([dm, group])
+	})
+
+	it("gives an empty section no header", () => {
+		expect(shape(buildChatList([group], expanded, false).items)).toEqual(["groups:true", group.uuid])
+		expect(buildChatList([], expanded, false)).toEqual({ items: [], chats: [], headerIndexes: [] })
 	})
 })
