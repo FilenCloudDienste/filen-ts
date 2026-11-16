@@ -12,42 +12,8 @@ import {
 	setTallListingViewport,
 	waitForListingSettled
 } from "../helpers/listing"
-import { FIXTURE_SCENARIOS, FIXTURE_FILES, type FixtureFileName, type FixtureScenario } from "../helpers/fixtures"
-import { DOCX_MIME, docxFixtureBytes, docxViewerBytes, largePictureBytes, svgPictureBytes, webpPictureBytes } from "../helpers/docxFixtures"
-import {
-	BMP_BYTES,
-	CODE_BYTES,
-	DOCX_BYTES,
-	DOWNLOAD_CANCEL_BYTES,
-	DOWNLOAD_FSA_TEXT,
-	DOWNLOAD_SW_TEXT,
-	DOWNLOAD_ZIP_A_TEXT,
-	DOWNLOAD_ZIP_B_TEXT,
-	HEIC_BYTES,
-	MP3_BYTES,
-	MP4_BYTES,
-	PDF_BYTES,
-	PDF_LINKS_BYTES,
-	PDF_PASSWORD_BYTES,
-	PNG_BYTES
-} from "../helpers/fixtureBytes"
-import {
-	bulkZip,
-	corruptTarGz,
-	dialogZip,
-	emptyZip,
-	garbageZip,
-	gateBigTarGz,
-	gateNextZip,
-	hostileZip,
-	hundredKZip,
-	linksTar,
-	lockedZip,
-	manyLinksZip,
-	noteTxtGz,
-	smallTarGz,
-	treeZip
-} from "../helpers/archiveFixtures"
+import { FIXTURE_SCENARIOS, FIXTURE_FILES, fixturePayloads, type FixtureFileName, type FixtureScenario } from "../fixtures/registry"
+import type { DiskFixture, FixturePayload, InlineFixture } from "../fixtures/scenarios"
 
 // Builds the ONE shared, read-only fixture tree every non-mutating spec reads from (helpers/fixtures.ts
 // explains what it is and why it exists). Runs once per suite, after cleanup-setup, in a single browser
@@ -61,110 +27,10 @@ import {
 // the test instead, where it costs one directory rather than twenty-six uploads.
 setup.describe.configure({ retries: 0 })
 
-// Inline bytes, or a file synthesized on disk: a size to fill, or a generator. The disk forms exist for
-// the big files: Playwright reads a path-based file input straight off local disk into the browser, so a
-// 24 MiB payload never has to serialize through the Playwright<->driver bridge as a call argument (the
-// same trick downloads.spec.ts used for the same file before this setup took the upload over). A
-// generator also runs only here, when its scenario uploads, never at import.
-interface InlineFixture {
-	readonly buffer: Buffer
-	readonly mimeType: string
-}
-
-interface FilledFixture {
-	readonly filledBytes: number
-}
-
-interface GeneratedFixture {
-	readonly generate: () => Buffer
-}
-
-type DiskFixture = FilledFixture | GeneratedFixture
-
-type FixturePayload = InlineFixture | DiskFixture
-
 interface FixtureEntry<TPayload extends FixturePayload> {
 	readonly name: FixtureFileName
 	readonly payload: TPayload
 }
-
-// One entry per name in FIXTURE_FILES — `satisfies Record<FixtureFileName, …>` is what makes that a
-// compile error rather than a mid-run "row never appeared" if the two ever drift.
-const PAYLOADS = {
-	"marquee-0.txt": { buffer: Buffer.from("marquee probe 0"), mimeType: "text/plain" },
-	"marquee-1.txt": { buffer: Buffer.from("marquee probe 1"), mimeType: "text/plain" },
-	"marquee-2.txt": { buffer: Buffer.from("marquee probe 2"), mimeType: "text/plain" },
-	"marquee-3.txt": { buffer: Buffer.from("marquee probe 3"), mimeType: "text/plain" },
-	"marquee-4.txt": { buffer: Buffer.from("marquee probe 4"), mimeType: "text/plain" },
-	"marquee-5.txt": { buffer: Buffer.from("marquee probe 5"), mimeType: "text/plain" },
-	"preview-image-a.png": { buffer: PNG_BYTES, mimeType: "image/png" },
-	"preview-image-b.png": { buffer: PNG_BYTES, mimeType: "image/png" },
-	"preview-heic.heic": { buffer: HEIC_BYTES, mimeType: "image/heic" },
-	"preview-pdf.pdf": { buffer: PDF_BYTES, mimeType: "application/pdf" },
-	"preview-pdf-links.pdf": { buffer: PDF_LINKS_BYTES, mimeType: "application/pdf" },
-	"preview-pdf-locked.pdf": { buffer: PDF_PASSWORD_BYTES, mimeType: "application/pdf" },
-	"preview-media.mp3": { buffer: MP3_BYTES, mimeType: "audio/mpeg" },
-	"preview-media.mp4": { buffer: MP4_BYTES, mimeType: "video/mp4" },
-	"preview-media.png": { buffer: PNG_BYTES, mimeType: "image/png" },
-	"preview-docx.docx": {
-		buffer: DOCX_BYTES,
-		mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	},
-	// video/mp2t is what a browser reports for a .ts file — kept verbatim so the code-preview leg still
-	// proves the app routes by EXTENSION and not by the picker's own content-type guess.
-	"preview-code.ts": { buffer: CODE_BYTES, mimeType: "video/mp2t" },
-	"thumbnails.png": { buffer: PNG_BYTES, mimeType: "image/png" },
-	"thumbnails.bmp": { buffer: BMP_BYTES, mimeType: "image/bmp" },
-	"thumbnails.txt": { buffer: Buffer.from("not an image", "utf8"), mimeType: "text/plain" },
-	"thumbnails.svg": {
-		buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>', "utf8"),
-		mimeType: "image/svg+xml"
-	},
-	"download-fsa.txt": { buffer: Buffer.from(DOWNLOAD_FSA_TEXT, "utf8"), mimeType: "text/plain" },
-	"download-zip-a.txt": { buffer: Buffer.from(DOWNLOAD_ZIP_A_TEXT, "utf8"), mimeType: "text/plain" },
-	"download-zip-b.txt": { buffer: Buffer.from(DOWNLOAD_ZIP_B_TEXT, "utf8"), mimeType: "text/plain" },
-	"download-sw.txt": { buffer: Buffer.from(DOWNLOAD_SW_TEXT, "utf8"), mimeType: "text/plain" },
-	"download-cancel.bin": { filledBytes: DOWNLOAD_CANCEL_BYTES },
-	"e2e-arc-corrupt.tar.gz": { buffer: corruptTarGz(), mimeType: "application/gzip" },
-	"e2e-arc-empty.zip": { buffer: emptyZip(), mimeType: "application/zip" },
-	"e2e-arc-garbage.zip": { buffer: garbageZip(), mimeType: "application/zip" },
-	"e2e-arc-hostile.zip": { buffer: hostileZip(), mimeType: "application/zip" },
-	"e2e-arc-links.tar": { buffer: linksTar(), mimeType: "application/x-tar" },
-	"e2e-arc-locked.zip": { buffer: lockedZip(), mimeType: "application/zip" },
-	"e2e-arc-note.txt.gz": { buffer: noteTxtGz(), mimeType: "application/gzip" },
-	"e2e-arc-small.tar.gz": { buffer: smallTarGz(), mimeType: "application/gzip" },
-	"e2e-arc-tree.zip": { buffer: treeZip(), mimeType: "application/zip" },
-	// 8.5 MiB and 9 MB: off disk, like download-cancel.bin.
-	"e2e-arc-gate-big.tar.gz": { generate: gateBigTarGz },
-	"e2e-arc-gate-next.zip": { generate: gateNextZip },
-	"e2e-arc-many-links.zip": { buffer: manyLinksZip(), mimeType: "application/zip" },
-	"e2e-arc-100k.zip": { generate: hundredKZip },
-	"e2e-bulk-a.zip": { buffer: bulkZip("a"), mimeType: "application/zip" },
-	"e2e-bulk-b.zip": { buffer: bulkZip("b"), mimeType: "application/zip" },
-	"e2e-bulk-c.zip": { buffer: bulkZip("c"), mimeType: "application/zip" },
-	"dialog-a.txt": { buffer: Buffer.from("dialog probe a", "utf8"), mimeType: "text/plain" },
-	"dialog-b.txt": { buffer: Buffer.from("dialog probe b", "utf8"), mimeType: "text/plain" },
-	"dialog-c.zip": { buffer: dialogZip(), mimeType: "application/zip" },
-	"w3-comments.docx": { buffer: docxFixtureBytes("w3-comments.docx"), mimeType: DOCX_MIME },
-	"w3-equations.docx": { buffer: docxFixtureBytes("w3-equations.docx"), mimeType: DOCX_MIME },
-	"w3-forms.docx": { buffer: docxFixtureBytes("w3-forms.docx"), mimeType: DOCX_MIME },
-	"w3-headers.docx": { buffer: docxFixtureBytes("w3-headers.docx"), mimeType: DOCX_MIME },
-	"w3-rtl-table.docx": { buffer: docxFixtureBytes("w3-rtl-table.docx"), mimeType: DOCX_MIME },
-	"w3-tables.docx": { buffer: docxFixtureBytes("w3-tables.docx"), mimeType: DOCX_MIME },
-	"w3-toc.docx": { buffer: docxFixtureBytes("w3-toc.docx"), mimeType: DOCX_MIME },
-	"w3-tracked.docx": { buffer: docxFixtureBytes("w3-tracked.docx"), mimeType: DOCX_MIME },
-	// ~27 MB: off disk, like download-cancel.bin (so the scenario's other pictures are too).
-	"w3-picture-large.png": { generate: largePictureBytes },
-	"w3-picture.svg": { generate: svgPictureBytes },
-	"w3-picture.webp": { generate: webpPictureBytes },
-	"notes.docx": { buffer: docxFixtureBytes("notes.docx"), mimeType: DOCX_MIME },
-	"described-picture.docx": { buffer: docxFixtureBytes("described-picture.docx"), mimeType: DOCX_MIME },
-	"viewer-archive.7z": { buffer: docxViewerBytes("viewer-archive.7z"), mimeType: "application/x-7z-compressed" },
-	"viewer-archive.zip": { buffer: docxViewerBytes("viewer-archive.zip"), mimeType: "application/zip" },
-	"viewer-encrypted.docx": { buffer: docxViewerBytes("viewer-encrypted.docx"), mimeType: DOCX_MIME },
-	"viewer-legacy.docx": { buffer: docxViewerBytes("viewer-legacy.docx"), mimeType: DOCX_MIME },
-	"viewer-malformed.docx": { buffer: docxViewerBytes("viewer-malformed.docx"), mimeType: DOCX_MIME }
-} satisfies Record<FixtureFileName, FixturePayload>
 
 // ONE wall clock for the whole build, the shape cleanup-setup's SWEEP_BUDGET_MS already uses. Each row
 // wait below used to carry a generous pin of its OWN, which across 26 files declared several times the
@@ -191,11 +57,17 @@ const budgetExhausted = (name: FixtureFileName): string => `fixtures-setup: uplo
 // setInputFiles takes EITHER an array of on-disk paths or an array of in-memory payloads, never a mix,
 // so a scenario that needs a synthesized file must be entirely on disk. Nothing mixes today; the throw
 // makes a future scenario that does fail here instead of silently uploading half its files.
-async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDir: string, deadline: number): Promise<void> {
+async function uploadScenarioFiles(
+	page: Page,
+	scenario: FixtureScenario,
+	payloads: Readonly<Record<FixtureFileName, FixturePayload>>,
+	workDir: string,
+	deadline: number
+): Promise<void> {
 	const names: readonly FixtureFileName[] = FIXTURE_FILES[scenario]
 	// Name and payload carried together rather than as two index-aligned arrays — the two filters below
 	// each drop entries, and an index into the original names would then be pointing at the wrong file.
-	const entries: FixtureEntry<FixturePayload>[] = names.map(name => ({ name, payload: PAYLOADS[name] }))
+	const entries: FixtureEntry<FixturePayload>[] = names.map(name => ({ name, payload: payloads[name] }))
 	const onDisk = entries.filter((entry): entry is FixtureEntry<DiskFixture> => !("buffer" in entry.payload))
 	const inline = entries.filter((entry): entry is FixtureEntry<InlineFixture> => "buffer" in entry.payload)
 
@@ -303,6 +175,7 @@ async function createFixtureRoot(page: Page): Promise<FixtureManifest> {
 }
 
 setup("build the shared read-only fixture tree", async ({ page }) => {
+	const payloads = fixturePayloads()
 	const manifest = await createFixtureRoot(page)
 	const listbox = directoryListbox(page)
 
@@ -326,7 +199,7 @@ setup("build the shared read-only fixture tree", async ({ page }) => {
 		for (const scenario of FIXTURE_SCENARIOS) {
 			await createDirectoryViaDialog(page, scenario, listbox)
 			await descendInto(page, listbox, scenario)
-			await uploadScenarioFiles(page, scenario, workDir, uploadDeadline)
+			await uploadScenarioFiles(page, scenario, payloads, workDir, uploadDeadline)
 
 			// Back up through the breadcrumb ancestor link rather than page.goBack(): a client-side Link
 			// navigation, so the SDK worker/OPFS session this setup depends on stays alive, and it is
