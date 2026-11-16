@@ -1098,8 +1098,29 @@ describe("usePdfDocument resident", () => {
 	const READ = (_offset: number, length: number): Promise<Uint8Array> => Promise.resolve(new Uint8Array(length))
 	const RANGED = { kind: "ranges", length: 100, read: READ } as const
 
-	function Ranged({ pdfjs, residentLimit }: { pdfjs: PdfJsDom; residentLimit?: number }) {
-		latest.document = usePdfDocument(pdfjs, RANGED, {
+	// Reads answered only when the test says so.
+	const held: (() => void)[] = []
+	const HELD = {
+		kind: "ranges",
+		length: 100,
+		read: (_offset: number, length: number) =>
+			new Promise<Uint8Array>(resolve => {
+				held.push(() => {
+					resolve(new Uint8Array(length))
+				})
+			})
+	} as const
+
+	function Ranged({
+		pdfjs,
+		residentLimit,
+		source = RANGED
+	}: {
+		pdfjs: PdfJsDom
+		residentLimit?: number
+		source?: typeof RANGED | typeof HELD
+	}) {
+		latest.document = usePdfDocument(pdfjs, source, {
 			worker: { kind: "script", src: "/worker.mjs" },
 			...(residentLimit === undefined ? {} : { residentLimit })
 		})
@@ -1108,7 +1129,13 @@ describe("usePdfDocument resident", () => {
 	}
 
 	function transportOf(opened: Opened[]): { requestDataRange(begin: number, end: number): void } {
-		return Reflect.get(opened[0]?.params as object, "range") as { requestDataRange(begin: number, end: number): void }
+		return Reflect.get(opened.at(-1)?.params as object, "range") as { requestDataRange(begin: number, end: number): void }
+	}
+
+	async function idle(ms: number): Promise<void> {
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(ms)
+		})
 	}
 
 	async function read(opened: Opened[], begin: number, end: number): Promise<void> {
@@ -1162,6 +1189,78 @@ describe("usePdfDocument resident", () => {
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(1)
 		})
+		expect(latest.document?.resident).toBe(true)
+	})
+
+	it("waits while a read is pending, however long it takes", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([])])
+		const root = createRoot(host)
+
+		held.length = 0
+		roots.push(root)
+		act(() => {
+			root.render(
+				<Ranged
+					pdfjs={pdfjs}
+					residentLimit={40}
+					source={HELD}
+				/>
+			)
+		})
+		opened[0]?.resolve()
+		transportOf(opened).requestDataRange(0, 50)
+		held.shift()?.()
+		await idle(0)
+		// A slow read starts before the idle wait ends and is still pending long after it.
+		await idle(RESIDENT_IDLE_MS - 1)
+		transportOf(opened).requestDataRange(50, 60)
+		await idle(RESIDENT_IDLE_MS * 3)
+		expect(latest.document?.resident).toBe(false)
+
+		held.shift()?.()
+		await idle(RESIDENT_IDLE_MS - 1)
+		expect(latest.document?.resident).toBe(false)
+		await idle(1)
+		expect(latest.document?.resident).toBe(true)
+	})
+
+	it("counts only what a reopened document read after its first reads settled", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([])])
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(
+				<Ranged
+					pdfjs={pdfjs}
+					residentLimit={40}
+				/>
+			)
+		})
+		opened[0]?.resolve()
+		await read(opened, 0, 50)
+		await idle(RESIDENT_IDLE_MS)
+		expect(latest.document?.resident).toBe(true)
+
+		act(() => {
+			latest.document?.reopen()
+		})
+		await idle(0)
+		expect(opened).toHaveLength(2)
+		opened[1]?.resolve()
+		await idle(0)
+
+		// The view's working set is over the limit by itself: another reopen would read it all again.
+		await read(opened, 0, 50)
+		await idle(RESIDENT_IDLE_MS * 2)
+		expect(latest.document?.resident).toBe(false)
+
+		await read(opened, 50, 90)
+		await idle(RESIDENT_IDLE_MS)
+		expect(latest.document?.resident).toBe(false)
+
+		await read(opened, 90, 91)
+		await idle(RESIDENT_IDLE_MS)
 		expect(latest.document?.resident).toBe(true)
 	})
 

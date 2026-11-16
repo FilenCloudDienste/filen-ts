@@ -159,11 +159,12 @@ interface PdfReaderProps {
 	edit: PdfEditView | null
 	alt: string
 	size: number
-	// pdf.js holds every byte of the file (it read them all); a reopen of the document drops them.
+	// pdf.js holds every byte of the file (it read them all); a reopen of the document drops them. Both this and
+	// `resident` stay false while the editor starts from or holds the document, so nothing reopens it then.
 	fullyRead: boolean
 	// pdf.js reads the file in ranges (it does not hold all of it).
 	ranged: boolean
-	// pdf.js holds more of a ranged file than the device's resident limit and has read nothing for a moment.
+	// pdf.js holds more of a ranged file than the device's resident limit and has had no read pending for a moment.
 	resident: boolean
 	onReopen: () => void
 	signatures: PdfSignatures
@@ -709,6 +710,8 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 	const ready = state.status === "ready" ? state.document : null
 	const swap = edit?.swap ?? null
 	const editing = edit?.phase.kind === "editing"
+	// The editor starting from this document (it reads its facts) or holding it: nothing reopens it meanwhile.
+	const editorHolds = editing || edit?.phase.kind === "starting"
 
 	// The editor takes the view from this document (and the password pdf.js accepted for it, memory only).
 	useEffect(() => {
@@ -777,8 +780,8 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 			edit={edit}
 			alt={alt}
 			size={size}
-			fullyRead={fullyRead}
-			resident={resident && !editing}
+			fullyRead={fullyRead && !editorHolds}
+			resident={resident && !editorHolds}
 			ranged={source.kind === "ranges" && !fullyRead}
 			onReopen={reopen}
 			signatures={signatures}

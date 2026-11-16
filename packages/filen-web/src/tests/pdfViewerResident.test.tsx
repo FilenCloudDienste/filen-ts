@@ -10,7 +10,8 @@ import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClie
 
 // The preview's PDF viewer reopening a ranged document that holds more than the device's resident limit once its
 // reads settle, against a stand-in pdf.js whose range transport the test drives: the page in view is kept, an open
-// search holds the reopen off, and the same page is not reopened twice for it.
+// search, a pending read or an editor starting holds the reopen off, and a reopened document that needs more than the
+// limit for its view is not reopened again for it.
 
 // Bytes a document may hold before it counts as resident: the device's limit, scaled down so a test reads a few bytes
 // (the pdfLimits mock below says the same; vi.mock factories cannot read module constants).
@@ -26,15 +27,52 @@ interface Opened {
 	readonly destroy: ReturnType<typeof vi.fn>
 }
 
-const { opened, rangeSource } = vi.hoisted(() => {
+const { opened, rangeSource, slow, editor } = vi.hoisted(() => {
+	// Reads answered only when the test says so, while `held` is on.
+	const slow = { held: false, answers: [] as (() => void)[] }
 	// Never read to its end, so nothing reads as a full read.
 	const rangeSource = {
 		kind: "ranges",
 		length: 10_000,
-		read: (_offset: number, length: number) => Promise.resolve(new Uint8Array(length))
+		read: (_offset: number, length: number) =>
+			slow.held
+				? new Promise<Uint8Array>(resolve => {
+						slow.answers.push(() => {
+							resolve(new Uint8Array(length))
+						})
+					})
+				: Promise.resolve(new Uint8Array(length))
 	} as const
 
-	return { opened: [] as Opened[], rangeSource }
+	return { opened: [] as Opened[], rangeSource, slow, editor: { warm: (): void => undefined } }
+})
+
+// The editor never finishes starting: it stays in its starting phase, reading the viewer document's facts.
+vi.mock("@/features/pdf/session/engineWorker", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/pdf/session/engineWorker")>()),
+	openPdfEngine: () => new Promise(() => undefined)
+}))
+
+vi.mock("@filen/office/react/pdfedit", async importOriginal => ({
+	...(await importOriginal<typeof import("@filen/office/react/pdfedit")>()),
+	readPdfDocumentFacts: () => new Promise(() => undefined)
+}))
+
+vi.mock("@/features/pdf/session/usePdfEdit", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/pdf/session/usePdfEdit")>()
+
+	return {
+		...actual,
+		usePdfEdit: (...args: Parameters<typeof actual.usePdfEdit>) => {
+			const view = actual.usePdfEdit(...args)
+
+			editor.warm = () => {
+				view.swap.warm()
+			}
+
+			return view
+		}
+	}
 })
 
 vi.mock("@/lib/storage/adapter", () => ({
@@ -230,11 +268,14 @@ async function idle(ms: number): Promise<void> {
 	})
 }
 
-async function mount(): Promise<void> {
+const HOST = { writable: true, onDirtyChange: () => undefined, saveRef: { current: null }, onSave: () => false }
+
+async function mount(editable = false): Promise<void> {
 	render(
 		<PdfViewer
 			item={item}
 			alt="big.pdf"
+			{...(editable ? { editing: HOST } : {})}
 		/>,
 		{ wrapper: queryClientWrapper(createTestQueryClient()) }
 	)
@@ -249,6 +290,8 @@ async function mount(): Promise<void> {
 beforeEach(() => {
 	observers.length = 0
 	opened.length = 0
+	slow.held = false
+	slow.answers.length = 0
 	vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver)
 	Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: () => undefined })
 })
@@ -280,20 +323,57 @@ describe("PdfViewer resident reopen", () => {
 		expect(screen.getByText("Page 2 of 3")).toBeTruthy()
 	})
 
-	it("reopens again only once the view moved to another page", async () => {
+	it("never reopens a reopened document for what its view needs, only for the limit read past it", async () => {
 		await mount()
 		await read(0, RESIDENT_LIMIT + 1)
 		await idle(RESIDENT_IDLE_MS)
 		expect(opened).toHaveLength(2)
 
-		// The new document reads past the limit with the view where it was: pdf.js reading on its own.
+		// The new document needs more than the limit for the view where it was: another reopen would read it all again.
 		await read(0, RESIDENT_LIMIT + 1)
 		await idle(RESIDENT_IDLE_MS)
 		expect(opened).toHaveLength(2)
 
+		// Moving the view reads nothing new: nothing reopens.
 		await show(3)
+		await show(2)
+		await idle(RESIDENT_IDLE_MS)
+		expect(opened).toHaveLength(2)
+
+		// More than the limit read past what the view needed, on another page: reopened.
+		await show(3)
+		await read(RESIDENT_LIMIT + 1, 2 * RESIDENT_LIMIT + 2)
+		await idle(RESIDENT_IDLE_MS)
 		expect(opened).toHaveLength(3)
 		expect(opened[1]?.destroy).toHaveBeenCalledTimes(1)
+	})
+
+	it("waits while a read is still pending, however long it takes", async () => {
+		await mount()
+		await read(0, RESIDENT_LIMIT + 1)
+		slow.held = true
+		await idle(RESIDENT_IDLE_MS - 1)
+		await read(RESIDENT_LIMIT + 1, RESIDENT_LIMIT + 2)
+		await idle(RESIDENT_IDLE_MS * 3)
+		expect(opened).toHaveLength(1)
+
+		await act(async () => {
+			slow.answers.shift()?.()
+			await vi.advanceTimersByTimeAsync(RESIDENT_IDLE_MS)
+		})
+		expect(opened).toHaveLength(2)
+	})
+
+	it("never reopens while the editor starts from the document", async () => {
+		await mount(true)
+		act(() => {
+			editor.warm()
+		})
+
+		await read(0, RESIDENT_LIMIT + 1)
+		await idle(RESIDENT_IDLE_MS * 2)
+		expect(opened).toHaveLength(1)
+		expect(opened[0]?.destroy).not.toHaveBeenCalled()
 	})
 
 	it("holds the reopen while a search is open, and reopens once it closes", async () => {

@@ -20,7 +20,7 @@ export type PdfDocumentState =
 	| { readonly status: "ready"; readonly document: PdfDomDocument }
 	| { readonly status: "error"; readonly kind: PdfErrorKind }
 
-export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError" | "onFullyRead" | "onLoadedBytes"> & {
+export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError" | "onFullyRead" | "onRangeReads"> & {
 	// Bytes of a ranged source pdf.js may hold before the handle reports `resident`. Unset: never.
 	readonly residentLimit?: number
 }
@@ -33,8 +33,9 @@ export interface PdfDocumentHandle {
 	// pdf.js has read every byte of a ranged source and holds the whole file (a search of every page, printing, its
 	// read-everything fallback for a damaged file).
 	readonly fullyRead: boolean
-	// pdf.js holds more than `residentLimit` bytes of a ranged source and has read nothing for a moment: a reopen would
-	// drop what it read away from the view.
+	// pdf.js holds more than `residentLimit` bytes of a ranged source and has had no read pending for a moment: a reopen
+	// would drop what it read away from the view. A document a reopen made counts only what it read after its first
+	// reads settled (what the view needed, which another reopen would read again).
 	readonly resident: boolean
 	// Opens the same source again in the background, answering a password with the one accepted before, and swaps
 	// the new document in once it is ready: the old one keeps showing meanwhile, and its memory goes with it.
@@ -49,8 +50,8 @@ export interface PdfDocumentHandle {
 
 const LOADING = { status: "loading" } as const
 
-// How long pdf.js must have read nothing before a document over its resident limit says so: the reads of a scroll
-// or a render have settled.
+// How long pdf.js must have had no read pending before a document over its resident limit says so: the reads of a
+// scroll or a render have settled.
 export const RESIDENT_IDLE_MS = 1000
 
 function sameSource(a: PdfSource, b: PdfSource): boolean {
@@ -138,6 +139,8 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 		let fullyRead = false
 		let resident = false
 		let idle: ReturnType<typeof setTimeout> | undefined
+		// A reopened document's bytes at its first settle: the view's working set, which a reopen reads again.
+		let settled: number | null = null
 		const reopening = retiringRef.current !== null
 		const { residentLimit, ...openOptions } = currentOptions
 		const set = (next: PdfDocumentState): void => {
@@ -166,11 +169,16 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 
 				if (ready !== null) set({ status: "ready", document: ready })
 			},
-			onLoadedBytes: loaded => {
-				if (residentLimit === undefined || loaded <= residentLimit || resident) return
-
+			onRangeReads: (loaded, pending) => {
 				clearTimeout(idle)
+
+				if (residentLimit === undefined || resident || pending > 0) return
+
 				idle = setTimeout(() => {
+					if (reopening && settled === null) settled = loaded
+
+					if (loaded - (settled ?? 0) <= residentLimit) return
+
 					resident = true
 
 					if (ready !== null) set({ status: "ready", document: ready })

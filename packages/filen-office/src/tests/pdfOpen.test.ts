@@ -331,28 +331,60 @@ describe("openPdf", () => {
 		})
 	})
 
-	it("reports the bytes handed over after every read", async () => {
+	it("reports the bytes handed over and the reads pending as each read starts and settles", async () => {
 		const { pdfjs, transports } = fakePdfJs()
-		const onLoadedBytes = vi.fn()
+		const onRangeReads = vi.fn()
+		const answers: (() => void)[] = []
 
 		openPdf(
 			pdfjs,
-			{ kind: "ranges", length: 30, read: (_offset, length) => Promise.resolve(new Uint8Array(length)) },
-			{ worker: SCRIPT, onPassword: () => undefined, onLoadedBytes }
+			{
+				kind: "ranges",
+				length: 30,
+				read: (_offset, length) =>
+					new Promise<Uint8Array>(resolve => {
+						answers.push(() => {
+							resolve(new Uint8Array(length))
+						})
+					})
+			},
+			{ worker: SCRIPT, onPassword: () => undefined, onRangeReads }
 		)
 
 		const transport = only(transports)
 
 		transport.requestDataRange(0, 10)
+		transport.requestDataRange(10, 25)
+		expect(onRangeReads.mock.calls).toEqual([
+			[0, 1],
+			[0, 2]
+		])
+
+		answers[0]?.()
 		await vi.waitFor(() => {
-			expect(onLoadedBytes).toHaveBeenLastCalledWith(10)
+			expect(onRangeReads).toHaveBeenLastCalledWith(10, 1)
 		})
 
-		transport.requestDataRange(10, 25)
+		answers[1]?.()
 		await vi.waitFor(() => {
-			expect(onLoadedBytes).toHaveBeenLastCalledWith(25)
+			expect(onRangeReads).toHaveBeenLastCalledWith(25, 0)
 		})
-		expect(onLoadedBytes).toHaveBeenCalledTimes(2)
+		expect(onRangeReads).toHaveBeenCalledTimes(4)
+	})
+
+	it("counts a failed read as settled", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const onRangeReads = vi.fn()
+
+		const opening = openPdf(
+			pdfjs,
+			{ kind: "ranges", length: 30, read: () => Promise.reject(new Error("offline")) },
+			{ worker: SCRIPT, onPassword: () => undefined, onRangeReads }
+		)
+
+		only(transports).requestDataRange(0, 10)
+		await expect(opening.promise).rejects.toThrow()
+		expect(onRangeReads).toHaveBeenLastCalledWith(0, 0)
 	})
 
 	it("fails the open when one of a request's parallel reads fails", async () => {
