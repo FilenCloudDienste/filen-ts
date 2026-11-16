@@ -1,13 +1,13 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { itemFileKind, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, itemFileKind, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 
 // Mobile parity (features/photos/utils.ts's own isPhotoGridItem): keep only file-kind items with
 // decrypted metadata whose preview category is image, rawImage or video — directories and
 // undecryptable items are dropped. Deliberately reuses WEB's own preview-type classifier (previewType, the SAME category
 // resolution the drive grid's video badge and the preview overlay itself use) rather than porting
 // mobile's EXPO_IMAGE_SUPPORTED_EXTENSIONS allowlist, which is an expo-image capability set with no
-// meaning on the web platform — previewType's own IMAGE_EXTENSIONS/HEIC_EXTENSIONS sets are already
+// meaning on the web platform — previewType's own image tier (IMAGE_FORMATS) is already
 // web's equivalent gate for what counts as a displayable image here. Videos pass unconditionally,
 // exactly like mobile's own predicate.
 //
@@ -32,7 +32,7 @@ export function isPhotoItem(item: DriveItem, verdict?: FileVerdict | null): bool
 // thumbnail-driven — the SDK produces those for RAW (usually straight off the embedded preview), so a RAW row
 // renders exactly like every other photo, and the viewer shows its embedded preview.
 export function isPhotoCategory(category: PreviewCategory | null): boolean {
-	return category === "image" || category === "rawImage" || category === "video"
+	return category !== null && CATEGORY_POLICY[category].photo
 }
 
 // Whether the item is a photo by its name and MIME type alone, or a `.ts`/`.mts` a probe could still find to be

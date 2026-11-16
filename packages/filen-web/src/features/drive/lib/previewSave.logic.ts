@@ -4,7 +4,8 @@ import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/prese
 import { savePortAnnounced } from "@filen/shared/savePort"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, extensionOf, itemTypeExtension, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { IMAGE_FORMATS } from "@/features/preview/lib/imageFormat"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
 import { isEditablePresentationExtension } from "@/features/presentation/lib/fileKind"
@@ -113,7 +114,7 @@ export function canEditImage(item: DriveItem, variant: DriveVariant): boolean {
 		return false
 	}
 
-	return extensionOf(driveItemName(base)) !== "svg" && base.data.decryptedMeta?.mime !== "image/svg+xml"
+	return IMAGE_FORMATS.get(itemTypeExtension(item))?.editable === true && base.data.decryptedMeta?.mime !== "image/svg+xml"
 }
 
 // Whether the PDF tools may change this file: a decryptable PDF in the user's own drive no larger than `maxBytes`
@@ -162,7 +163,7 @@ export function canEditVideo(item: DriveItem, variant: DriveVariant): boolean {
 
 // Whether the preview is text an editor holds as a string (a line diff can compare two versions of it).
 export function isTextCategory(category: PreviewCategory): boolean {
-	return category === "text" || category === "code" || category === "markdown"
+	return CATEGORY_POLICY[category].editsAsText
 }
 
 // Injected collaborators so a save attempt is unit-testable without a worker or a query client —

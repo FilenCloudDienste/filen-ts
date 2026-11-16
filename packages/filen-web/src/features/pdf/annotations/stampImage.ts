@@ -1,6 +1,7 @@
 import { PDF_STAMP_MAX_BYTES } from "@filen/office/dom/pdfedit"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, HEIC_EXTENSIONS, itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { extensionOf, itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { decodeHeicRgba } from "@/features/preview/lib/heicTransform"
 
 // A picture for an image stamp, as the editor takes it: PNG or JPEG bytes no wider or taller than STAMP_MAX_SIDE and

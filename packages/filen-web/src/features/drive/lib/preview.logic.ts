@@ -3,9 +3,12 @@ import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
-import { CODE_FILE_EXTENSIONS, extensionStart, resolveFileKind, type FileVerdict, type FileKind } from "@filen/shared"
+import { AUDIO_FORMATS, CODE_FILE_EXTENSIONS, extensionStart, resolveFileKind, type FileVerdict, type FileKind } from "@filen/shared"
 import { codeLanguageExtensions, codeLanguageForExtension, type CodeLanguageId } from "@filen/office/core/code"
 import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
+import { IMAGE_FORMATS, streamsNatively } from "@/features/preview/lib/imageFormat"
+import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
+import type { DriveKey } from "@/lib/i18n"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -24,18 +27,9 @@ export type PreviewCategory =
 	| "archive"
 	| "other"
 
-// Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx (and text,
-// under its own lower cap below) download fully into RAM before rendering, so an oversize file is excluded from canPreview
-// rather than risking a tab-crashing allocation. video/audio/image stream via the service worker's
-// inline Range route instead and are never bounded by this; video and audio fall back to MediaSource fed
-// by the remux worker (never a whole buffer) — image ALSO keeps a whole-buffer fallback
-// (dev / SW absent / stream registration failure) that this cap does not gate either, since the SW's
-// own availability isn't known at gating time; an oversize image on that fallback path is an accepted,
-// deliberate tradeoff of joining the streamed set, not a regression this cap is meant to catch.
-// rawImage is exempt for a different reason again: nothing on the JS side ever holds a RAW file's
-// bytes — the SDK reads the ranges it needs itself (an embedded-preview probe first, at worst a
-// whole-file stream inside wasm), so a 90 MB NEF costs this heap nothing and has no reason to be
-// gated by a JS-memory ceiling.
+// Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
+// downloads fully into RAM before rendering, so an oversize one is refused rather than risking a tab-crashing allocation.
+// Which categories it bounds is CATEGORY_POLICY's.
 export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 // A grid holds every cell's view in memory, several times the file's own size (an .xlsx is zipped), so
 // spreadsheets stop well below the other whole-buffer previews.
@@ -44,14 +38,6 @@ export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 // and real text files are far smaller, so text, code, markdown and open-as-text stop lower still.
 export const TEXT_MAX_BYTES = 33_554_432n // 32 MiB
 
-const TEXT_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["text", "code", "markdown"])
-
-// HEIC/HEIF resolve to the "image" category below like every other image extension, but browsers
-// cannot decode them inline — needsImageTransform/canPreview single them out to route through the
-// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
-// streamed route every other image extension uses. "hif" is Fujifilm's extension for the same container,
-// written 10-bit 4:2:2; libheif decodes high-bit-depth HEVC and hands back 8-bit RGBA like any other HEIC.
-export const HEIC_EXTENSIONS = new Set(["heic", "heif", "hif"])
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
 // them. Their own category ("rawImage") rather than "image": no browser decodes a RAW container, so
@@ -80,7 +66,9 @@ export const RAW_IMAGE_EXTENSIONS = new Set([
 	"srw",
 	"x3f"
 ])
-function buildExtensionCategories(entries: [Iterable<string>, PreviewCategory][]): ReadonlyMap<string, PreviewCategory> {
+function buildExtensionCategories(
+	entries: readonly (readonly [Iterable<string>, PreviewCategory])[]
+): ReadonlyMap<string, PreviewCategory> {
 	const map = new Map<string, PreviewCategory>()
 
 	for (const [extensions, category] of entries) {
@@ -94,24 +82,242 @@ function buildExtensionCategories(entries: [Iterable<string>, PreviewCategory][]
 	return map
 }
 
-// The single extension -> category table (icon.logic routes through it too, so a file's type icon and
-// its preview category can never disagree). First listing wins; image/heic come BEFORE rawImage on
-// purpose: the sets are disjoint today, but if a RAW family ever gained a browser-decodable sibling
-// extension the browser-decodable answer must win — "image" renders the full picture, "rawImage" only
-// the camera's embedded preview.
-const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensionCategories([
-	[["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"], "image"],
-	[HEIC_EXTENSIONS, "image"],
+// How each category previews: one row per category, which every gate, label and set below reads.
+export interface CategoryPolicy {
+	// Streams through the service worker's inline route at open.
+	streamed: boolean
+	// The viewer reads ranges, so any drive size opens.
+	ranged: boolean
+	// Largest file held whole in memory (a fallback, a public link, an archive entry); null for none.
+	bufferCap: ProfileCap
+	// What opens above the cap.
+	aboveCap: "refuse" | "largeText"
+	// How an archive entry opens.
+	entry: "whole" | "ranged" | "none"
+	// How a public link previews it.
+	anon: "stream" | "ranged" | "archive" | "buffer" | "none"
+	// Viewed as a decoded string.
+	textFamily: boolean
+	// Saved back through the text path.
+	editsAsText: boolean
+	// Shown in Photos.
+	photo: boolean
+	// The preview pager steps onto it.
+	pager: boolean
+	// The info dialog's "Kind" value.
+	labelKey: DriveKey | null
+	// The assistant's file kind.
+	assistantKind: "image" | "video" | "audio" | "document" | null
+}
+
+// Media and images stream at any size. An image keeps a whole-buffer fallback (no service worker, a failed
+// registration) its cap does not gate at open, since the worker's availability is unknown then; video and audio fall
+// back to MediaSource fed by the remux worker, never a whole buffer. A RAW is never in JS memory (the SDK reads the
+// ranges it needs inside wasm), nor is an archive (the SDK lists it in the worker), so neither has a cap; a deck is read
+// in ranges by the presentation worker. HEIC/HEIF are "image" but stream only where the browser decodes them
+// (streamsNatively); elsewhere the image cap applies.
+export const CATEGORY_POLICY = {
+	image: {
+		streamed: true,
+		ranged: false,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: true,
+		pager: true,
+		labelKey: "drivePreviewKindImage",
+		assistantKind: "image"
+	},
+	rawImage: {
+		streamed: false,
+		ranged: true,
+		bufferCap: null,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: true,
+		pager: true,
+		labelKey: "drivePreviewKindRawImage",
+		assistantKind: "image"
+	},
+	video: {
+		streamed: true,
+		ranged: false,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "stream",
+		textFamily: false,
+		editsAsText: false,
+		photo: true,
+		pager: true,
+		labelKey: "drivePreviewKindVideo",
+		assistantKind: "video"
+	},
+	// A drive audio file hands off to the persistent player, so the pager skips it.
+	audio: {
+		streamed: true,
+		ranged: false,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "stream",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: false,
+		labelKey: "drivePreviewKindAudio",
+		assistantKind: "audio"
+	},
+	pdf: {
+		streamed: false,
+		ranged: false,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindPdf",
+		assistantKind: "document"
+	},
+	docx: {
+		streamed: false,
+		ranged: false,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindDocx",
+		assistantKind: "document"
+	},
+	spreadsheet: {
+		streamed: false,
+		ranged: false,
+		bufferCap: SPREADSHEET_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindSpreadsheet",
+		assistantKind: "document"
+	},
+	presentation: {
+		streamed: false,
+		ranged: true,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindPresentation",
+		assistantKind: null
+	},
+	text: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindText",
+		assistantKind: "document"
+	},
+	code: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindCode",
+		assistantKind: null
+	},
+	markdown: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindMarkdown",
+		assistantKind: "document"
+	},
+	archive: {
+		streamed: false,
+		ranged: true,
+		bufferCap: null,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "archive",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindArchive",
+		assistantKind: null
+	},
+	// The download-only fallback: no viewer, ever.
+	other: {
+		streamed: false,
+		ranged: false,
+		bufferCap: null,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "none",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: false,
+		labelKey: null,
+		assistantKind: null
+	}
+} as const satisfies Record<PreviewCategory, CategoryPolicy>
+
+export type StreamedCategory = {
+	[K in PreviewCategory]: (typeof CATEGORY_POLICY)[K]["streamed"] extends true ? K : never
+}[PreviewCategory]
+
+// The extension -> category tiers, in precedence order: the first tier listing an extension wins. icon.logic routes
+// through the same table, so a file's type icon and its preview category never disagree. Images come before rawImage
+// on purpose: if a RAW family ever gained a browser-decodable sibling extension, "image" renders the full picture,
+// "rawImage" only the camera's embedded preview.
+export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCategory])[] = [
+	[[...IMAGE_FORMATS.keys()], "image"],
 	[RAW_IMAGE_EXTENSIONS, "rawImage"],
 	// MKV and transport streams play through the remux worker. A `.ts`/`.mts` reads as one only once a read
 	// of its content said so (resolveFileKind hands such a file over as "m2ts").
 	[["mp4", "webm", "mkv", "mov", "m4v", "m2ts"], "video"],
-	// AIFF and CAF play natively in Safari (through the service worker's route); elsewhere they fail.
-	// Matroska audio and bare AC-3, E-AC-3 and DTS streams play decoded in the remux worker.
-	[
-		["mp3", "m4a", "m4b", "aac", "wav", "ogg", "oga", "weba", "flac", "opus", "aiff", "aif", "caf", "mka", "ac3", "eac3", "ec3", "dts"],
-		"audio"
-	],
+	[[...AUDIO_FORMATS.keys()], "audio"],
 	[["pdf"], "pdf"],
 	// Macro-enabled documents and templates open (and edit) as documents; macros are never run. Word 97–2003 documents
 	// and templates open from their conversion, view-only; OpenDocument text (and its templates) translated, editable.
@@ -126,7 +332,9 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 	[CODE_FILE_EXTENSIONS, "code"],
 	// TypeScript ES-module and CommonJS sources.
 	[["mts", "cts"], "code"]
-])
+]
+
+const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensionCategories(EXTENSION_TIERS)
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
 // ".gitignore", where the only "." is the leading one — not a real extension). The name's own extension,
@@ -207,37 +415,31 @@ export function previewType(item: DriveItem, verdict?: FileVerdict | null): Prev
 	return itemFileKind(item, verdict)?.kind ?? "other"
 }
 
-// image joins video/audio here: all three prefer the SW's inline Range route
-// (features/preview/lib/previewStream.ts). Only image falls whole-buffer as a capability fallback (SW absent /
-// registration failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts; video
-// and audio stream through MediaSource instead. HEIC/HEIF are
-// the one "image" exception: needsImageTransform below excludes them from ever attempting the
-// streamed route at all — canPreview applies the whole-buffer cap to them instead, same as pdf/docx.
-// rawImage is deliberately NOT a member: no browser decodes a RAW container, so handing one to the
-// SW's inline route would serve bytes nothing can render (mediaType.ts refuses it independently).
-const STREAMED_CATEGORIES = ["video", "audio", "image"] as const satisfies readonly PreviewCategory[]
-const STREAMED_CATEGORY_SET: ReadonlySet<PreviewCategory> = new Set(STREAMED_CATEGORIES)
-
-export type StreamedCategory = (typeof STREAMED_CATEGORIES)[number]
-
 export function isStreamedCategory(category: PreviewCategory): category is StreamedCategory {
-	return STREAMED_CATEGORY_SET.has(category)
+	return CATEGORY_POLICY[category].streamed
 }
 
-// True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
-// inline. imageViewer.tsx checks this before ever considering the SW route, routing these through the
-// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Keyed on
-// the same type extension as previewType, so a HEIC-named file always routes here whatever its mime says
-// (mediaType.ts independently excludes it from the streamed route too, defense-in-depth).
-export function needsImageTransform(item: DriveItem): boolean {
-	return HEIC_EXTENSIONS.has(itemTypeExtension(item))
+// An "image"-category item this browser cannot show from the service worker's stream (HEIC/HEIF without a native
+// decoder): imageViewer.tsx routes it through the buffered download and a client-side transform
+// (features/preview/lib/heicTransform.ts) instead. Keyed on the same type extension as previewType, so a HEIC-named
+// file always routes here whatever its mime says (mediaType.ts refuses it the inline route through this too).
+export function needsImageTransform(item: DriveItem, profile: DeviceProfile = deviceProfile()): boolean {
+	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
+
+	return format !== undefined && !streamsNatively(format, profile)
 }
 
-// Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a
-// whole-buffer-only category — under the memory cap (a streamed category is never capped here, except
-// HEIC/HEIF: needsImageTransform pulls those back under the cap despite being category "image"). Trash
-// is NOT excluded — a trashed file still previews, read-only, mirroring mobile.
-export function canPreview(item: DriveItem): boolean {
+// The format's own cap, ahead of its category's: an image or audio row's.
+function formatCap(extension: string, profile: DeviceProfile): bigint | null {
+	const cap = IMAGE_FORMATS.get(extension)?.cap ?? AUDIO_FORMATS.get(extension)?.cap
+
+	return cap === undefined ? null : capFor(cap, profile)
+}
+
+// Gate for opening a preview: a file, decryptable, resolves to a real category, and fits the limits its format and
+// category set for this device. A streamed category the browser shows from the stream, and a ranged one, open at any
+// size. Trash is NOT excluded — a trashed file still previews, read-only, mirroring mobile.
+export function canPreviewWith(item: DriveItem, profile: DeviceProfile): boolean {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {
@@ -249,24 +451,41 @@ export function canPreview(item: DriveItem): boolean {
 		return true
 	}
 
-	const category = previewType(item)
+	const kind = itemFileKind(item)
+	const category = kind?.kind ?? "other"
 
-	if (category === "other") {
+	if (category === "other" || kind === null) {
 		return false
 	}
 
-	if (isStreamedCategory(category) && !needsImageTransform(item)) {
+	const policy: CategoryPolicy = CATEGORY_POLICY[category]
+	const size = base.data.size
+	const ownCap = formatCap(kind.extension, profile)
+
+	if (ownCap !== null && size > ownCap) {
+		return false
+	}
+
+	if (policy.streamed) {
+		const image = category === "image" ? IMAGE_FORMATS.get(kind.extension) : undefined
+
+		if (category !== "image" || (image !== undefined && streamsNatively(image, profile))) {
+			return true
+		}
+	}
+
+	if (policy.ranged) {
 		return true
 	}
 
-	// A drive deck is read in ranges by the presentation worker (bounded block cache), never whole: any size opens.
-	if (category === "presentation") {
-		return true
-	}
+	const cap = ownCap ?? bufferedSizeCap(category, profile)
 
-	const cap = bufferedSizeCap(category)
+	return cap === null || size <= cap || policy.aboveCap === "largeText"
+}
 
-	return cap === null || base.data.size <= cap
+// The gate with this device's current profile.
+export function canPreview(item: DriveItem): boolean {
+	return canPreviewWith(item, deviceProfile())
 }
 
 // "Open as text": a file nothing recognises, small enough to load whole, may still be text (a config file
@@ -277,20 +496,9 @@ export function canOpenAsText(item: DriveItem): boolean {
 	return base.type === "file" && !base.data.undecryptable && previewType(item) === "other" && base.data.size <= TEXT_MAX_BYTES
 }
 
-// The JS-memory ceiling for a category previewed from a whole buffer. null for rawImage: it is not
-// streamed to the page at all — the SDK reads whatever ranges it needs inside wasm and hands back only
-// a small decoded result, so the file never enters JS memory and there is nothing to protect. null for
-// archive too: the SDK lists it in the worker and the page only ever holds the entry list.
-export function bufferedSizeCap(category: PreviewCategory): bigint | null {
-	if (category === "rawImage" || category === "archive") {
-		return null
-	}
-
-	if (category === "spreadsheet") {
-		return SPREADSHEET_MAX_BYTES
-	}
-
-	return TEXT_CATEGORIES.has(category) ? TEXT_MAX_BYTES : PREVIEW_MAX_BYTES
+// The JS-memory ceiling for a category previewed from a whole buffer; null for none (see CATEGORY_POLICY).
+export function bufferedSizeCap(category: PreviewCategory, profile: DeviceProfile): bigint | null {
+	return capFor(CATEGORY_POLICY[category].bufferCap, profile)
 }
 
 // Decision for a streamed image's POST-resolution failure (network drop, an SW-side decrypt abort, a
@@ -306,14 +514,16 @@ export function streamFailureAction(item: DriveItem): "buffer" | "error" {
 	return asDirectoryOrFile(item).data.size <= PREVIEW_MAX_BYTES ? "buffer" : "error"
 }
 
-// The pager's candidate list — every previewable item in a listing EXCEPT audio, in the listing's own
-// sorted order (no re-sort of its own; the caller's array is already in display order). Audio is
+// The pager's candidate list — every previewable item in a listing whose category pages (not audio), in the listing's
+// own sorted order (no re-sort of its own; the caller's array is already in display order). Audio is
 // deliberately excluded: a drive-hosted audio file hands off to the persistent player instead of the
 // preview overlay (see directoryListing's open handler), so the overlay never renders or pages to it —
 // stepping through a mixed folder skips audio and the pager's count reflects that. The public-link page
 // keeps its own audio surface, which does not route through this helper.
 export function previewableSiblings(items: DriveItem[]): DriveItem[] {
-	return items.filter(item => canPreview(item) && previewType(item) !== "audio")
+	const profile = deviceProfile()
+
+	return items.filter(item => canPreviewWith(item, profile) && CATEGORY_POLICY[previewType(item)].pager)
 }
 
 // Resolves the sibling one step (no wrap) from whichever sibling currently carries `currentUuid` — a

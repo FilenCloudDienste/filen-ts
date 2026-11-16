@@ -1,3 +1,5 @@
+import { AUDIO_FORMATS } from "@filen/shared"
+
 // How an audio file reaches an <audio> element: as it is, through the service worker's range route
 // ("direct"), or decoded in the remux worker into a WAV stream the same route serves ("transcode"). Either
 // way the element plays a URL, so background playback, the lock screen, prefetch and gapless switching work
@@ -5,9 +7,10 @@
 
 export type AudioRoute = "direct" | "transcode"
 
-// Files no browser plays as they are: Matroska audio (MKV is never played direct), and bare AC-3, E-AC-3
-// and DTS streams.
-const TRANSCODED_EXTENSIONS: ReadonlySet<string> = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
+// Files no browser plays as they are (AUDIO_FORMATS marks them).
+const TRANSCODED_EXTENSIONS: ReadonlySet<string> = new Set(
+	[...AUDIO_FORMATS].filter(([, format]) => format.decoded === true || format.synth !== undefined).map(([extension]) => extension)
+)
 
 // `extension` is the file's type extension (an `.mkv` holding only audio reads as `mka`); `contentType` its
 // allowlisted inline type, null when it has none the route may serve it as; `demoted` once the browser

@@ -27,6 +27,7 @@ import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { isEditable } from "@/features/drive/lib/previewSave.logic"
 import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
+import { deviceProfile } from "@/lib/deviceProfile"
 
 // Local fixtures mirror bulkActionBar.test.ts's own per-file convention.
 function mockFile(overrides: Partial<File> = {}): File {
@@ -376,7 +377,7 @@ describe("archive category", () => {
 
 	// The archive never enters the JS heap: the worker lists it and the page holds only the entries.
 	it("has no buffered size cap, so an archive of any size opens", () => {
-		expect(bufferedSizeCap("archive")).toBeNull()
+		expect(bufferedSizeCap("archive", deviceProfile())).toBeNull()
 		expect(canPreview(fileNamed("disk.tar", { size: 50n * 1024n ** 3n }))).toBe(true)
 		expect(canPreview(fileNamed("bundle.zip", { undecryptable: true }))).toBe(false)
 	})
@@ -530,10 +531,10 @@ describe("canPreview", () => {
 	})
 
 	it("caps text below the other whole-buffer categories", () => {
-		expect(bufferedSizeCap("text")).toBe(TEXT_MAX_BYTES)
-		expect(bufferedSizeCap("code")).toBe(TEXT_MAX_BYTES)
-		expect(bufferedSizeCap("markdown")).toBe(TEXT_MAX_BYTES)
-		expect(bufferedSizeCap("pdf")).toBe(PREVIEW_MAX_BYTES)
+		expect(bufferedSizeCap("text", deviceProfile())).toBe(TEXT_MAX_BYTES)
+		expect(bufferedSizeCap("code", deviceProfile())).toBe(TEXT_MAX_BYTES)
+		expect(bufferedSizeCap("markdown", deviceProfile())).toBe(TEXT_MAX_BYTES)
+		expect(bufferedSizeCap("pdf", deviceProfile())).toBe(PREVIEW_MAX_BYTES)
 	})
 
 	it("is true for a streamed category (video/audio/image) even past the whole-buffer size cap — uncapped", () => {
@@ -542,7 +543,7 @@ describe("canPreview", () => {
 		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(true)
 	})
 
-	// HEIC/HEIF are category "image" (a STREAMED_CATEGORIES member) but never actually stream
+	// HEIC/HEIF are category "image" (a streamed category) but do not stream without a native decoder
 	// (needsImageTransform) — canPreview must apply the whole-buffer cap to them like pdf/docx, not the
 	// uncapped rule above.
 	it("is false for a HEIC file over the size cap — buffered, not streamed, despite being 'image'", () => {

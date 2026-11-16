@@ -99,7 +99,7 @@ function BufferedPreviewBytes({ bytes, mime, render }: { bytes: Uint8Array; mime
 
 // Buffered mode: a whole-file download played back from a blob URL, minted/revoked by useObjectUrl so
 // the blob never outlives it. Unlike the streamed path this is not size-capped at the open gate
-// (STREAMED_CATEGORIES, preview.logic.ts) — an accepted tradeoff of the SW-absent fallback for images.
+// (CATEGORY_POLICY, preview.logic.ts) — an accepted tradeoff of the SW-absent fallback for images.
 function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>

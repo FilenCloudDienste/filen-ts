@@ -1,6 +1,7 @@
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, sniffImage, type DocxEditorCommand, type DocxImageInfo } from "@filen/office/core/docx/edit"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import type { PreviewKey } from "@/lib/i18n"
 
 // A picture on its way into a DOCX document, from any source (this device, the drive, the clipboard, a drop):
@@ -170,7 +171,6 @@ const PICTURE_EXTENSIONS: ReadonlySet<string> = new Set([
 	"wmf",
 	"webp"
 ])
-const HEIC_EXTENSIONS: ReadonlySet<string> = new Set(["heic", "heif", "hif"])
 
 // What a source is by its name and type alone (before a byte is read): HEIC or AVIF (refused without reading),
 // a picture, something else, or unknown (no extension, no type).

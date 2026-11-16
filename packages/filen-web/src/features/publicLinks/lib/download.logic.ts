@@ -1,5 +1,6 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { bufferedSizeCap, previewType, unprobedTransportStream } from "@/features/drive/lib/preview.logic"
+import { bufferedSizeCap, CATEGORY_POLICY, previewType, unprobedTransportStream } from "@/features/drive/lib/preview.logic"
+import { deviceProfile } from "@/lib/deviceProfile"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
 // every cap and branch is directly unit-testable. FSA streams to disk when the browser has it; otherwise the
@@ -60,21 +61,20 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 
 	const category = previewType(item)
 
-	if (category === "other") {
-		return "unpreviewable"
+	switch (CATEGORY_POLICY[category].anon) {
+		case "none":
+			return "unpreviewable"
+		case "archive":
+			return "archive"
+		case "stream":
+		case "ranged":
+			return "previewable"
+		case "buffer": {
+			const cap = bufferedSizeCap(category, deviceProfile())
+
+			return cap === null || base.data.size <= cap ? "previewable" : "too-large"
+		}
 	}
-
-	if (category === "archive") {
-		return "archive"
-	}
-
-	if (category === "video" || category === "audio") {
-		return "previewable"
-	}
-
-	const cap = bufferedSizeCap(category)
-
-	return cap === null || base.data.size <= cap ? "previewable" : "too-large"
 }
 
 // The in-memory sink for a zip download with neither FSA nor the service worker route: the SDK streams the archive into `writable`, chunks

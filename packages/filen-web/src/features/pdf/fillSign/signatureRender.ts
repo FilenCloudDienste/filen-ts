@@ -1,7 +1,8 @@
 import { OFFICE_FONT_URLS } from "virtual:office-fonts"
 import type { PdfSignatureImage } from "@filen/office/core/pdfedit/visualSignature"
 import { PDF_SIGNATURE_MAX_PNG_BYTES } from "@filen/shared/pdfSignatures"
-import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
+import { extensionOf } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
 import {
 	needsSignatureFallback,

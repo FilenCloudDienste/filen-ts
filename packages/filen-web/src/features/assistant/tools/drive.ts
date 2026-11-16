@@ -20,14 +20,7 @@ import {
 	type DirectorySizeItem
 } from "@/features/drive/queries/drive"
 import { asDirectoryOrFile, driveItemMime, isDirectoryItem, lastModifiedOf, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import {
-	decodeUtf8,
-	extensionOf,
-	itemTypeExtension,
-	looksBinary,
-	previewType,
-	type PreviewCategory
-} from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, decodeUtf8, extensionOf, itemTypeExtension, looksBinary, previewType } from "@/features/drive/lib/preview.logic"
 import { defaultRevealDeps, resolveContainingDirectoryTarget } from "@/features/drive/lib/reveal"
 import { searchDriveOnce, type DriveSearchOnceResult } from "@/features/drive/lib/searchQuery"
 import { WATCHDOG_MS } from "@/features/drive/lib/searchStatus.logic"
@@ -89,15 +82,6 @@ const ENGINE_WORDS = 3
 export const TEXT_FILE_MAX_BYTES = 1_048_576n
 export const TEXT_FILE_MAX_CHARS = 4_000
 
-const TEXT_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["text", "code", "markdown"])
-
-const KIND_CATEGORIES: Record<string, ReadonlySet<PreviewCategory>> = {
-	image: new Set(["image", "rawImage"]),
-	video: new Set(["video"]),
-	audio: new Set(["audio"]),
-	document: new Set(["pdf", "docx", "spreadsheet", "text", "markdown"])
-}
-
 export const DRIVE_DATE_FIELDS = ["modified", "uploaded", "created"] as const
 
 export function matchesKind(item: DriveItem, kind: string | undefined): boolean {
@@ -115,7 +99,7 @@ export function matchesKind(item: DriveItem, kind: string | undefined): boolean 
 
 	// Office files the app has no viewer for preview as "other": a document is one by its extension too.
 	return (
-		(KIND_CATEGORIES[kind]?.has(previewType(item)) ?? false) ||
+		CATEGORY_POLICY[previewType(item)].assistantKind === kind ||
 		(kind === "document" &&
 			(ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS.has(extensionOf(driveItemName(item))) ||
 				ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS.has(itemTypeExtension(item))))
@@ -652,7 +636,7 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 	const csv = spreadsheetFileKind(extensionOf(name).toLowerCase())
 
 	// CSV and TSV preview as spreadsheets but are text.
-	if (!TEXT_CATEGORIES.has(previewType(item)) && csv !== "csv" && csv !== "tsv") {
+	if (!CATEGORY_POLICY[previewType(item)].textFamily && csv !== "csv" && csv !== "tsv") {
 		throw new AssistantToolError(`"${name}" is not a text file`)
 	}
 

@@ -1,6 +1,7 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, HEIC_EXTENSIONS, needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { extensionOf, needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { decodeHeicRgba } from "@/features/preview/lib/heicTransform"

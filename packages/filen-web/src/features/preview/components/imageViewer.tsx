@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { transformHeicBytes } from "@/features/preview/lib/heicTransform"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
@@ -392,11 +393,13 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 	)
 }
 
-// Top-level dispatch, hook-free so needsImageTransform can short-circuit before StreamablePreview's own
-// useState runs — HEIC/HEIF never reach the streamed branch at all (mediaType.ts independently
+// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs, and is read
+// again when a probe refines the device profile — HEIC/HEIF never reach the streamed branch at all (mediaType.ts independently
 // excludes them too, defense-in-depth), every other image extension is unaffected.
 export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
-	if (needsImageTransform(item)) {
+	const profile = useDeviceProfile()
+
+	if (needsImageTransform(item, profile)) {
 		return (
 			<TransformedImage
 				item={item}

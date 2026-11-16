@@ -1,7 +1,8 @@
 import { type, type Type } from "arktype"
 import { extensionStart, Semaphore } from "@filen/shared"
 import { kvPreference } from "@/lib/storage/preference"
-import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
+import { extensionOf } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
 import { log } from "@/lib/log"
 
