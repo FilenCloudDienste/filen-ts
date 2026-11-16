@@ -32,6 +32,26 @@ function utf32(points: number[], littleEndian: boolean): Uint8Array {
 	return out
 }
 
+// 64 little-endian units, high bytes zero: the UTF-16 sniff fires, but the units are no text.
+function alternatingZeros(edit: (units: Uint16Array) => void): Uint8Array {
+	const units = Uint16Array.from({ length: 64 }, (_, i) => 0x41 + (i % 20))
+
+	edit(units)
+
+	return new Uint8Array(units.buffer)
+}
+
+// A lone high surrogate: no strict UTF-16 decode.
+const UNPAIRED_SURROGATE = alternatingZeros(units => {
+	units[10] = 0xd800
+})
+// Three NUL units (both bytes zero, under the sniff's 5% bound): a strict decode, but no text holds NUL.
+const NUL_UNITS = alternatingZeros(units => {
+	units[0] = 0
+	units[25] = 0
+	units[50] = 0
+})
+
 describe("decodeTextBytes", () => {
 	it("decodes strict UTF-8 as writable, with or without a BOM", () => {
 		expect(decodeTextBytes(enc.encode("héllo ✓"))).toEqual({
@@ -61,6 +81,12 @@ describe("decodeTextBytes", () => {
 		const text = "plain ascii text that is long enough\n"
 
 		expect(decodeTextBytes(utf16(text, true, false))).toMatchObject({ text, encoding: "utf-16le", bom: false, confident: true })
+	})
+
+	it("never reads sniffed UTF-16 that fails a strict decode, or holds NUL, as confident or editable", () => {
+		for (const bytes of [UNPAIRED_SURROGATE, NUL_UNITS]) {
+			expect(decodeTextBytes(bytes)).toMatchObject({ encoding: "utf-16le", confident: false, writable: "convert", lossy: true })
+		}
 	})
 
 	it("marks malformed UTF-16 as convert", () => {
@@ -178,6 +204,12 @@ describe("looksLikeText", () => {
 		expect(looksLikeText(utf16("plain ascii text that is long enough", false, false))).toBe(true)
 		expect(looksLikeText(utf32([0x68, 0x69], true))).toBe(true)
 		expect(looksLikeText(utf32([0x68, 0x69], false))).toBe(true)
+	})
+
+	it("keeps a binary with alternating zeros binary unless it decodes strictly as UTF-16 text", () => {
+		expect(looksLikeText(UNPAIRED_SURROGATE)).toBe(false)
+		expect(looksLikeText(NUL_UNITS)).toBe(false)
+		expect(looksLikeText(alternatingZeros(() => undefined))).toBe(true)
 	})
 })
 

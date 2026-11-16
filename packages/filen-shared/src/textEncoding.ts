@@ -236,6 +236,14 @@ function sniffUtf16(bytes: Uint8Array): "utf-16le" | "utf-16be" | null {
 	return null
 }
 
+// UTF-16 that is text for certain: a strict decode (no unpaired surrogate; a cut last unit only in a prefix) holding no
+// NUL, which text never does. Null otherwise: what the sniff took for UTF-16 may be a binary with alternating zeros.
+function strictUtf16(label: string, bytes: Uint8Array, prefix: boolean): { text: string; encoding: string } | null {
+	const strict = decodeWith(label, bytes, true, prefix)
+
+	return strict === null || strict.text.includes("\0") ? null : strict
+}
+
 const UTF32_CHUNK = 1 << 16
 
 // The platform has no UTF-32 decoder: code points become UTF-16 units, decoded by the platform per chunk.
@@ -358,6 +366,7 @@ function unicode(text: string, encoding: string, bom: boolean, strict: boolean):
 type Unicode = { decoded: DecodedText } | { body: Uint8Array; bom: boolean }
 
 // BOM, then the UTF-16 sniff, then strict UTF-8, then UTF-8 with a few errors. Otherwise the body for a legacy codepage.
+// Sniffed UTF-16 that is not text for certain (strictUtf16) still reads as UTF-16, but lossy: never editable as is.
 function decodeUnicode(bytes: Uint8Array, prefix: boolean): Unicode {
 	const bom = readBom(bytes)
 	const body = bom === null ? bytes : bytes.subarray(bom.length)
@@ -383,7 +392,7 @@ function decodeUnicode(bytes: Uint8Array, prefix: boolean): Unicode {
 	const utf16 = bom === null ? sniffUtf16(bytes) : null
 
 	if (utf16 !== null) {
-		const strict = decodeWith(utf16, bytes, true, prefix)
+		const strict = strictUtf16(utf16, bytes, prefix)
 
 		return {
 			decoded:
@@ -450,13 +459,21 @@ export function needsLegacyGuess(bytes: Uint8Array, options?: { prefix?: boolean
 	return !("decoded" in decodeUnicode(bytes, options?.prefix === true))
 }
 
-// A NUL byte near the start marks a binary file, unless a BOM or the UTF-16 sniff says the zeros are Unicode.
+// A NUL byte near the start marks a binary file, unless a BOM or the UTF-16 sniff (confirmed by a strict decode of the
+// same bytes) says the zeros are Unicode.
 const BINARY_PROBE_BYTES = 8192
 
 export function looksLikeText(bytes: Uint8Array): boolean {
 	const bom = readBom(bytes)
 
-	if ((bom !== null && bom.label !== "utf-8") || sniffUtf16(bytes) !== null) {
+	if (bom !== null && bom.label !== "utf-8") {
+		return true
+	}
+
+	const head = bytes.subarray(0, BINARY_PROBE_BYTES)
+	const utf16 = sniffUtf16(head)
+
+	if (utf16 !== null && strictUtf16(utf16, head, true) !== null) {
 		return true
 	}
 
