@@ -174,6 +174,18 @@ describe("dismissBootSplash", () => {
 		expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
 	})
 
+	it("marks the shell once, with or without the node", async () => {
+		document.body.innerHTML = ""
+		performance.clearMarks()
+
+		const { dismissBootSplash, SHELL_MARK } = await load()
+
+		dismissBootSplash()
+		dismissBootSplash()
+
+		expect(performance.getEntriesByName(SHELL_MARK, "mark")).toHaveLength(1)
+	})
+
 	it("is a no-op without the node", async () => {
 		document.body.innerHTML = ""
 

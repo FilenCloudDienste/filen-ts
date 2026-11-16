@@ -784,7 +784,30 @@ async function launchWebkitContext(
 
 // Opt-in only: reproduces CI's slower runners locally by slowing every Chromium renderer in the
 // context by this factor. Anything but a number above 1 (unset, garbage, 1) leaves the run untouched.
-const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
+export const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
+
+// Slows `page`, and every later page of its context, by CPU_THROTTLE_RATE. CDP is chromium-only, so firefox/webkit
+// run at full speed whatever the variable says.
+export async function throttleCpu(context: BrowserContext, page: Page, browserName: string): Promise<void> {
+	if (browserName !== "chromium" || !(CPU_THROTTLE_RATE > 1)) {
+		return
+	}
+
+	const throttle = async (target: Page) => {
+		const cdp = await context.newCDPSession(target)
+
+		await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE })
+	}
+
+	// Second pages a spec opens itself (notes, storage, auth) carry their own renderer.
+	// Catches: a page closed before its CDP session attaches rejects, and an unhandled rejection
+	// here fails the run.
+	context.on("page", opened => {
+		void throttle(opened).catch(() => undefined)
+	})
+
+	await throttle(page)
+}
 
 // Seeds the saved session blob into every test's page by default: sessionStorage before the app loads
 // on every navigation (page context — the worker-owned sqlite cannot be written from an init script;
@@ -801,6 +824,18 @@ const NEUTRAL_REMOTE_CONFIG = JSON.stringify({
 	announcements: [],
 	pricing: { lifetimeEnabled: false, saleEnabled: false, plans: [] }
 })
+
+// The live remote config would let an announcement strip or a maintenance notice change any page under test.
+export async function neutralizeRemoteConfig(context: BrowserContext): Promise<void> {
+	await context.route(REMOTE_CONFIG_ROUTE, route =>
+		route.fulfill({
+			status: 200,
+			contentType: "application/json",
+			headers: { "access-control-allow-origin": "*" },
+			body: NEUTRAL_REMOTE_CONFIG
+		})
+	)
+}
 
 export const test = base.extend<{
 	injectSession: boolean
@@ -964,17 +999,8 @@ export const test = base.extend<{
 		},
 		{ auto: true }
 	],
-	// CDP is chromium-only, so firefox/webkit run at full speed whatever the variable says.
 	page: async ({ page, context, browserName }, use, testInfo) => {
-		// The live remote config would let an announcement strip or a maintenance notice change any page under test.
-		await context.route(REMOTE_CONFIG_ROUTE, route =>
-			route.fulfill({
-				status: 200,
-				contentType: "application/json",
-				headers: { "access-control-allow-origin": "*" },
-				body: NEUTRAL_REMOTE_CONFIG
-			})
-		)
+		await neutralizeRemoteConfig(context)
 
 		// Read lanes share the read-only fixture tree: a DOCX edited there never saves on its own (E2E builds read
 		// this key, features/office/lib/officeAutosave.ts E2E_AUTOSAVE_OFF; the spreadsheet editor reads it too).
@@ -984,22 +1010,7 @@ export const test = base.extend<{
 			}, "filen-e2e-docx-autosave")
 		}
 
-		if (browserName === "chromium" && CPU_THROTTLE_RATE > 1) {
-			const throttle = async (target: Page) => {
-				const cdp = await context.newCDPSession(target)
-
-				await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE })
-			}
-
-			// Second pages a spec opens itself (notes, storage, auth) carry their own renderer.
-			// Catches: a page closed before its CDP session attaches rejects, and an unhandled rejection
-			// here fails the run.
-			context.on("page", opened => {
-				void throttle(opened).catch(() => undefined)
-			})
-
-			await throttle(page)
-		}
+		await throttleCpu(context, page, browserName)
 
 		await use(page)
 	},

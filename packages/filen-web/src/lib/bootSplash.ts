@@ -57,6 +57,9 @@ export function advanceBootSplash(phase: BootSplashPhase): void {
 	render(splash, target)
 }
 
+// The first real screen's commit, read by the boot-cost harness (e2e/perf/bootCost.spec.ts).
+export const SHELL_MARK = "filen:shell"
+
 // Idempotent. Fades over the screen that just committed beneath it, or goes at once under reduced motion.
 export function dismissBootSplash(): void {
 	if (dismissed) {
@@ -64,6 +67,7 @@ export function dismissBootSplash(): void {
 	}
 
 	dismissed = true
+	performance.mark(SHELL_MARK)
 
 	const splash = splashNode()
 
