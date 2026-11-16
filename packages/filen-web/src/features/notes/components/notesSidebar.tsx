@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { useTranslation } from "react-i18next"
@@ -20,14 +20,14 @@ import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, toggleInSet, type NoteTagsSortBy } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
-import { useNotesViewModeQuery, useNoteTagsSortByQuery, useDefaultNoteTypeQuery } from "@/features/notes/queries/preferences"
+import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import {
 	setNotesViewMode,
 	DEFAULT_NOTES_VIEW_MODE,
-	DEFAULT_NOTE_TYPE,
 	setNoteTagsSortBy,
+	useDefaultNoteType,
 	type NotesViewMode
 } from "@/features/notes/lib/preferences"
 import { tagDisplayName, isNoteUndecryptable } from "@/features/notes/lib/sort"
@@ -43,6 +43,8 @@ import {
 	notesRowKeyTarget,
 	headerRowIndices,
 	activeHeaderIndex,
+	nextHeaderIndex,
+	pinnedHeaderPush,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
@@ -60,7 +62,7 @@ import { useNowMinute } from "@/lib/useNowMinute"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { ON_FOCUSED_ROW, rowNoteUuid } from "@/features/notes/lib/rowKeys"
 import { hasCommandModifier } from "@/lib/rowKeys"
-import { isNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { isNoteInflight, useInflightNoteUuids } from "@/features/notes/store/useNotesInflight"
 import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { availableNoteAction, type NoteActionId } from "@/features/notes/components/noteMenu.logic"
 import { canBulkDeleteNotes } from "@/features/notes/components/notesBulkActionBar.logic"
@@ -95,7 +97,10 @@ import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 // mount (same shape as messageThread.tsx's mixed message/day rows).
 const NOTE_ROW_ESTIMATE = 52
 const TAG_ROW_ESTIMATE = 40
-const HEADER_ROW_ESTIMATE = 32
+// A section header's own height (pt-3 + leading-4 + pb-1): the band the pinned one covers at the list's top, which
+// keyboard focus and scrollToIndex keep clear (the scroller's scroll-padding-top, the virtualizer's scrollPaddingStart)
+// so a focused row is never left beneath it.
+const HEADER_ROW_HEIGHT = 32
 
 // A notes-view section header: a small uppercase label. A plain label: the flat row model puts it beside the
 // rows it introduces rather than around them, so it claims no ownership of them. Opaque, since the one for
@@ -275,14 +280,17 @@ export function NotesSidebar() {
 	const viewModeQuery = useNotesViewModeQuery()
 	const viewMode = viewModeQuery.data ?? DEFAULT_NOTES_VIEW_MODE
 	const tagsSortByQuery = useNoteTagsSortByQuery()
-	// Read once here and handed to every row: notes of this type carry no type mark.
-	const defaultNoteType = useDefaultNoteTypeQuery().data ?? DEFAULT_NOTE_TYPE
+	// Read once here and handed to every row: notes of this type carry no type mark. Held since boot, so the first
+	// render already marks the right notes.
+	const defaultNoteType = useDefaultNoteType()
 	const tagsSortBy = tagsSortByQuery.data ?? DEFAULT_NOTE_TAGS_SORT_BY
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
 	// Always warm (unlike drive's sharedIn-only gate): every note in this single flat list could be owned
 	// by anyone, not just a sharedIn subtree, so the blocked cross-reference applies unconditionally.
 	const blocked = useBlockedUsers(true)
+	// One subscription for every row's pin and favorite toggles, which wait for a note's queued edits as its menu does.
+	const inflightUuids = useInflightNoteUuids()
 
 	const [search, setSearch] = useState("")
 	// Collapse state is in-memory only — a tag uuid present here is expanded.
@@ -869,6 +877,7 @@ export function NotesSidebar() {
 				<div
 					ref={setScrollElement}
 					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
+					style={headerIndices.length > 0 ? { scrollPaddingTop: HEADER_ROW_HEIGHT } : undefined}
 				>
 					<NotesSidebarList
 						rows={rows}
@@ -883,6 +892,7 @@ export function NotesSidebar() {
 						currentUserId={currentUserId}
 						now={now}
 						isOnline={isOnline}
+						inflightUuids={inflightUuids}
 						defaultNoteType={defaultNoteType}
 						selectableIndexByRowKey={selectableIndexByRowKey}
 						onToggleTag={toggleTag}
@@ -926,6 +936,7 @@ interface NotesSidebarListProps {
 	currentUserId: bigint | undefined
 	now: number
 	isOnline: boolean
+	inflightUuids: ReadonlySet<string>
 	defaultNoteType: NoteType
 	selectableIndexByRowKey: ReadonlyMap<string, number>
 	onToggleTag: (uuid: string) => void
@@ -952,6 +963,7 @@ function NotesSidebarList({
 	currentUserId,
 	now,
 	isOnline,
+	inflightUuids,
 	defaultNoteType,
 	selectableIndexByRowKey,
 	onToggleTag,
@@ -980,9 +992,10 @@ function NotesSidebarList({
 		estimateSize: index => {
 			const kind = rows[index]?.kind
 
-			return kind === "tag" ? TAG_ROW_ESTIMATE : kind === "header" ? HEADER_ROW_ESTIMATE : NOTE_ROW_ESTIMATE
+			return kind === "tag" ? TAG_ROW_ESTIMATE : kind === "header" ? HEADER_ROW_HEIGHT : NOTE_ROW_ESTIMATE
 		},
 		overscan: 10,
+		scrollPaddingStart: headerIndices.length > 0 ? HEADER_ROW_HEIGHT : 0,
 		getItemKey: index => {
 			const row = rows[index]
 
@@ -990,6 +1003,45 @@ function NotesSidebarList({
 		},
 		rangeExtractor
 	})
+
+	// The pinned header's <li>, set by its ref below.
+	const pinnedRef = useRef<HTMLLIElement | null>(null)
+
+	// The pinned header gives way to the next one (pinnedHeaderPush). Written straight to its element on every scroll,
+	// since the list re-renders only when its range changes, and after every render, which may pin another header.
+	// Reads the virtualizer's measurements and offset only, never the layout.
+	const pushPinnedHeader = useCallback(() => {
+		const pinned = pinnedRef.current
+
+		if (pinned === null) {
+			return
+		}
+
+		const index = Number(pinned.dataset["index"])
+		const next = nextHeaderIndex(headerIndices, index)
+		const push = pinnedHeaderPush(
+			virtualizer.measurementsCache[index]?.size ?? HEADER_ROW_HEIGHT,
+			next !== undefined ? virtualizer.measurementsCache[next]?.start : undefined,
+			virtualizer.scrollOffset ?? 0
+		)
+
+		pinned.style.transform = push > 0 ? `translateY(${String(-push)}px)` : ""
+	}, [headerIndices, virtualizer])
+
+	useLayoutEffect(pushPinnedHeader)
+
+	// Registered after the virtualizer's own scroll listener (a layout effect), so its offset is already current here.
+	useEffect(() => {
+		if (scrollElement === null) {
+			return
+		}
+
+		scrollElement.addEventListener("scroll", pushPinnedHeader, { passive: true })
+
+		return () => {
+			scrollElement.removeEventListener("scroll", pushPinnedHeader)
+		}
+	}, [scrollElement, pushPinnedHeader])
 
 	// The focus stop (note link, tag button) of the row at `index`, once the virtualizer has it mounted.
 	function rowStop(list: Element, index: number): HTMLElement | null {
@@ -1088,6 +1140,12 @@ function NotesSidebarList({
 						aria-setsize={rows.length}
 						ref={element => {
 							virtualizer.measureElement(element)
+
+							if (sticky) {
+								pinnedRef.current = element
+							} else if (pinnedRef.current === element) {
+								pinnedRef.current = null
+							}
 						}}
 						className={sticky ? "sticky top-0 z-10 w-full" : "absolute top-0 left-0 w-full"}
 						style={sticky ? undefined : { transform: `translateY(${String(virtualRow.start)}px)` }}
@@ -1115,6 +1173,7 @@ function NotesSidebarList({
 								currentUserId={currentUserId}
 								now={now}
 								isOnline={isOnline}
+								inflight={inflightUuids.has(row.note.uuid)}
 								defaultNoteType={defaultNoteType}
 								onAction={onNoteAction}
 								onDuplicated={duplicated => {

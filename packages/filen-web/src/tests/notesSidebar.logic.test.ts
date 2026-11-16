@@ -12,6 +12,8 @@ import {
 	selectableRowIndexByKey,
 	headerRowIndices,
 	activeHeaderIndex,
+	nextHeaderIndex,
+	pinnedHeaderPush,
 	isUntaggedTagUuid,
 	UNTAGGED_TAG_UUID,
 	type NotesSidebarRow
@@ -530,5 +532,27 @@ describe("pinned section header", () => {
 		expect(activeHeaderIndex(headers, 4)).toBe(3)
 		expect(activeHeaderIndex(headers, -1)).toBe(-1)
 		expect(activeHeaderIndex([], 5)).toBe(-1)
+	})
+})
+
+describe("pinned header hand-off", () => {
+	it("finds the header after the pinned one", () => {
+		expect(nextHeaderIndex([0, 3, 7], 0)).toBe(3)
+		expect(nextHeaderIndex([0, 3, 7], 3)).toBe(7)
+		expect(nextHeaderIndex([0, 3, 7], 7)).toBeUndefined()
+		expect(nextHeaderIndex([], 0)).toBeUndefined()
+	})
+
+	it("pushes the pinned header up by as far as the next one has entered its band", () => {
+		// A 32px header pinned at scroll offset 100: the next one at 200 is still clear of it.
+		expect(pinnedHeaderPush(32, 200, 100)).toBe(0)
+		expect(pinnedHeaderPush(32, 132, 100)).toBe(0)
+		// 12px into the band: pushed up 12px, so the two never overlap.
+		expect(pinnedHeaderPush(32, 120, 100)).toBe(12)
+		// Fully arrived: the pinned one is all the way out, never further.
+		expect(pinnedHeaderPush(32, 100, 100)).toBe(32)
+		expect(pinnedHeaderPush(32, 90, 100)).toBe(32)
+		// The last section's header stays put.
+		expect(pinnedHeaderPush(32, undefined, 100)).toBe(0)
 	})
 })

@@ -80,6 +80,22 @@ function isInflightIn(state: NotesInflightStore, uuid: string): boolean {
 	return (state.inflightContent[uuid] ?? []).length > 0
 }
 
+// Every note with a queued edit, for a list whose rows each need the answer above: one subscription for the whole
+// list instead of one per row. The selector returns a key (the sorted uuids, comma-joined), so the list re-renders
+// only when a note joins or leaves the queue, never on a keystroke that grows an entry list.
+export function useInflightNoteUuids(): ReadonlySet<string> {
+	const key = useNotesInflightStore(inflightNoteUuidsKey)
+
+	return new Set(key.length > 0 ? key.split(",") : [])
+}
+
+function inflightNoteUuidsKey(state: NotesInflightStore): string {
+	return Object.keys(state.inflightContent)
+		.filter(uuid => isInflightIn(state, uuid))
+		.sort()
+		.join(",")
+}
+
 // The same answer read once, for a keyboard shortcut deciding at keypress time.
 export function isNoteInflight(uuid: string): boolean {
 	return isInflightIn(useNotesInflightStore.getState(), uuid)

@@ -401,6 +401,22 @@ export function activeHeaderIndex(headerIndices: readonly number[], firstVisible
 	return found
 }
 
+// The first section header after the one at `index`, or undefined when it is the last.
+export function nextHeaderIndex(headerIndices: readonly number[], index: number): number | undefined {
+	return headerIndices.find(header => header > index)
+}
+
+// How far the pinned header gives way to the next one: by as much as that header has entered the band the pinned
+// one covers at the top, so the incoming header pushes it up instead of sliding beneath it. 0 while the next one
+// (if any) is still below that band.
+export function pinnedHeaderPush(pinnedSize: number, nextHeaderStart: number | undefined, scrollOffset: number): number {
+	if (nextHeaderStart === undefined) {
+		return 0
+	}
+
+	return Math.min(pinnedSize, Math.max(0, pinnedSize - (nextHeaderStart - scrollOffset)))
+}
+
 function stopFrom(rows: readonly NotesSidebarRow[], start: number, step: 1 | -1): number {
 	for (let index = start; index >= 0 && index < rows.length; index += step) {
 		if (rows[index]?.kind !== "header") {

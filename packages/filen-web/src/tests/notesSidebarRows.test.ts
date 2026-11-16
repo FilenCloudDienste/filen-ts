@@ -30,7 +30,9 @@ function renderNoteRow(
 	selected: boolean,
 	multiSelected: boolean,
 	note: Note = mockNote(),
-	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "nested" | "defaultNoteType">> = {}
+	handlers: Partial<
+		Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "inflight" | "nested" | "defaultNoteType">
+	> = {}
 ) {
 	return render(
 		createElement(NoteRow, {
@@ -41,6 +43,7 @@ function renderNoteRow(
 			currentUserId: 1n,
 			now: NOW,
 			isOnline: true,
+			inflight: false,
 			defaultNoteType: "text",
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
@@ -148,6 +151,7 @@ describe("note row — calm layout", () => {
 				currentUserId: 1n,
 				now: NOW + 2 * DAY_MS,
 				isOnline: true,
+				inflight: false,
 				defaultNoteType: "text",
 				onAction: () => undefined,
 				onDuplicated: () => undefined,
@@ -236,6 +240,50 @@ describe("note row — calm layout", () => {
 		expect(pin?.hasAttribute("disabled")).toBe(true)
 		// Siblings of the link, never inside it.
 		expect(container.querySelector("a [aria-pressed]")).toBeNull()
+	})
+
+	it("holds pin and favorite while the note's edits are queued, saying why as the menu does", () => {
+		const { container } = renderNoteRow(false, false, mockNote({ pinned: true }), { inflight: true })
+		const pin = rowOf(container).querySelector('[aria-label="Pinned"]')
+		const favorite = rowOf(container).querySelector('[aria-label="Favorite"]')
+
+		expect(pin?.hasAttribute("disabled")).toBe(true)
+		expect(favorite?.hasAttribute("disabled")).toBe(true)
+		expect(pin?.getAttribute("title")).toBe("Saving…")
+
+		cleanup()
+
+		const idle = renderNoteRow(false, false, mockNote({ pinned: true }))
+
+		expect(rowOf(idle.container).querySelector('[aria-label="Pinned"]')?.hasAttribute("disabled")).toBe(false)
+	})
+
+	it("keeps clicks, presses and right-clicks on a row's tooltip from reaching the row", () => {
+		const onPointerSelect = vi.fn(() => false)
+		const tags = ["a", "b", "c", "d"].map(name => mockNoteTag({ uuid: testUuid(name), name }))
+		renderNoteRow(false, false, mockNote({ tags }), { onPointerSelect })
+
+		fireEvent.pointerEnter(screen.getByText("+2"))
+
+		const popup = document.querySelector("[data-slot='tooltip-content']")
+
+		expect(popup).not.toBeNull()
+
+		if (popup === null) {
+			return
+		}
+
+		fireEvent.pointerDown(popup)
+		fireEvent.click(popup)
+		fireEvent.contextMenu(popup)
+
+		expect(onPointerSelect).not.toHaveBeenCalled()
+		expect(screen.queryByRole("menu")).toBeNull()
+
+		// The row's own link still takes its clicks.
+		fireEvent.click(screen.getByText("+2"))
+
+		expect(onPointerSelect).toHaveBeenCalledOnce()
 	})
 
 	it("keeps a trashed note's pin as a plain mark, since its menu offers no pin", () => {

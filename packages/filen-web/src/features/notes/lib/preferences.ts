@@ -1,7 +1,9 @@
+import { useSyncExternalStore } from "react"
 import { type, type Type } from "arktype"
 import type { NoteType } from "@filen/sdk-rs"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { kvPreference } from "@/lib/storage/preference"
+import { preloadedPreference } from "@/lib/storage/preloadedPreference"
 import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValue.logic"
 import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
 
@@ -92,11 +94,22 @@ const noteTypeSchema: Type<NoteType> = type.enumerated(...NOTE_TYPES)
 
 export const DEFAULT_NOTE_TYPE_KV_KEY = "notes.defaultType.v1"
 
-export const { get: getDefaultNoteType, set: setDefaultNoteType } = kvPreference({
+// Kept on this device and read during boot (lib/sdk/boot.ts), so the sidebar's first render already knows which
+// notes carry no type mark, and a create reads the held value instead of the store.
+const defaultNoteTypePreference = preloadedPreference<NoteType>({
 	key: DEFAULT_NOTE_TYPE_KV_KEY,
 	schema: noteTypeSchema,
-	fallback: DEFAULT_NOTE_TYPE
+	fallback: DEFAULT_NOTE_TYPE,
+	scope: "notes",
+	same: (a, b) => a === b
 })
 
-// Shared by the Appearance select and createNote, so a create reads the held value instead of the store.
-export const DEFAULT_NOTE_TYPE_QUERY_KEY = ["notes", "defaultType"] as const
+export const loadDefaultNoteType = defaultNoteTypePreference.load
+
+export const getDefaultNoteType = defaultNoteTypePreference.get
+
+export const setDefaultNoteType = defaultNoteTypePreference.set
+
+export function useDefaultNoteType(): NoteType {
+	return useSyncExternalStore(defaultNoteTypePreference.subscribe, defaultNoteTypePreference.get, defaultNoteTypePreference.get)
+}

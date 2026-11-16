@@ -11,7 +11,7 @@ import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { isNoteOwner } from "@/features/notes/lib/sort"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { attemptOp, runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
-import { DEFAULT_NOTE_TYPE, DEFAULT_NOTE_TYPE_QUERY_KEY, getDefaultNoteType } from "@/features/notes/lib/preferences"
+import { getDefaultNoteType } from "@/features/notes/lib/preferences"
 import { log } from "@/lib/log"
 
 export type { ActionOutcome, VoidActionOutcome }
@@ -32,12 +32,9 @@ function ownerGateError(): ActionOutcome<Note> {
 // both mobile and old-web. A different default type (Appearance → Notes) retypes it right away; when that retype
 // fails the text note stands (it exists either way) and the user can change its type from the note.
 export async function createNote(): Promise<ActionOutcome<Note>> {
-	const [outcome, noteType] = await Promise.all([
-		attemptOp(sdkApi.createNote()),
-		queryClient
-			.query({ queryKey: DEFAULT_NOTE_TYPE_QUERY_KEY, queryFn: getDefaultNoteType, staleTime: "static" })
-			.catch(() => DEFAULT_NOTE_TYPE)
-	])
+	// Read before the round trip: the type the user had chosen when they asked for the note.
+	const noteType = getDefaultNoteType()
+	const outcome = await attemptOp(sdkApi.createNote())
 
 	if (outcome.status !== "success") {
 		return outcome

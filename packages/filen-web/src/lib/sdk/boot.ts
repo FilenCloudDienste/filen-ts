@@ -36,6 +36,7 @@ import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
+import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -254,6 +255,9 @@ export async function bootSdk(): Promise<void> {
 		// it injects is built with). Never after a sign-out this boot could not finish. A dead session it finds is its
 		// own business, not a sign-out.
 		let injected = readSignOutPending() ? false : await withSessionCheckHeld(() => runLegacyWebMigration())
+		// The default note type (the notes sidebar's type marks, a new note's type) once the migration above may have
+		// imported the previous app's, so the value held for this session is the one it stored.
+		const defaultNoteType = loadDefaultNoteType()
 		// E2E only: the harness serves the session through a page binding rather than the login form.
 		// Persisting it before the resume below makes the very first load already authed, so the route
 		// guards never see an unauthed state and no navigation is needed to correct one.
@@ -264,7 +268,7 @@ export async function bootSdk(): Promise<void> {
 				injected = false
 			}
 		}
-		await devicePreferences
+		await Promise.all([devicePreferences, defaultNoteType])
 		if (await resumeAndOpen(injected)) {
 			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}

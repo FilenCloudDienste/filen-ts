@@ -19,7 +19,6 @@ import {
 import { NoteContextMenuContent, NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { availableNoteAction, noteOffersPinAndFavorite, type NoteActionDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
-import { isNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -43,6 +42,9 @@ export interface NoteRowProps {
 	// The shared minute tick (useNowMinute), owned by the sidebar so rows do not each subscribe.
 	now: number
 	isOnline: boolean
+	// Whether this note's edits are still queued: its menu's actions wait for them, and so do the pin and favorite
+	// toggles. Read once by the sidebar for every row (useInflightNoteUuids).
+	inflight: boolean
 	// The user's default note type (Appearance → Notes): its notes carry no type mark.
 	defaultNoteType: NoteType
 	// Threaded straight through to the row's own menu (noteMenu.tsx's onAction/onDuplicated) — the
@@ -74,7 +76,7 @@ function RowFlagToggle({
 	label: string
 	icon: LucideIcon
 	pressedClass: string
-	// Set while offline: the toggle is disabled and says why.
+	// Set while offline or while the note's edits are queued: the toggle is disabled and says why.
 	disabledTitle: string | undefined
 	onToggle: () => void
 }) {
@@ -120,6 +122,7 @@ export function NoteRow({
 	currentUserId,
 	now,
 	isOnline,
+	inflight,
 	defaultNoteType,
 	onAction,
 	onDuplicated,
@@ -146,12 +149,13 @@ export function NoteRow({
 	const hiddenTags = tags.length > NOTE_ROW_MAX_TAGS ? tags.slice(NOTE_ROW_MAX_TAGS) : null
 	const hiddenTagNames = hiddenTags !== null ? hiddenTags.map(tagDisplayName).join(", ") : ""
 	const offersFlags = noteOffersPinAndFavorite(note)
-	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
+	// The menu's own reasons, in its order (noteMenu.tsx).
+	const flagsDisabledTitle = inflight ? t("noteSyncing") : isOnline ? undefined : t("common:offlineActionDisabled")
 	const press = useTouchLongPress<HTMLDivElement>({ onLongPress })
 
-	// The menu's own gate and dispatch, read at click time (an edit still queued for this note blocks it).
+	// The menu's own gate and dispatch (an edit still queued for this note blocks it).
 	function toggleFlag(id: "pin" | "favorite"): void {
-		if (availableNoteAction(note, id, currentUserId, isOnline, isNoteInflight(note.uuid)) === undefined) {
+		if (availableNoteAction(note, id, currentUserId, isOnline, inflight) === undefined) {
 			return
 		}
 
@@ -252,7 +256,7 @@ export function NoteRow({
 										label={t("notePinned")}
 										icon={PinIcon}
 										pressedClass="text-foreground"
-										disabledTitle={offlineTitle}
+										disabledTitle={flagsDisabledTitle}
 										onToggle={() => {
 											toggleFlag("pin")
 										}}
@@ -262,7 +266,7 @@ export function NoteRow({
 										label={t("noteFavorite")}
 										icon={HeartIcon}
 										pressedClass="text-red-500 hover:text-red-500"
-										disabledTitle={offlineTitle}
+										disabledTitle={flagsDisabledTitle}
 										onToggle={() => {
 											toggleFlag("favorite")
 										}}
