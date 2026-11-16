@@ -1,5 +1,13 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { CATEGORY_POLICY, linkAdmits, needsContentSniff, previewType, sniffAdmits } from "@/features/drive/lib/preview.logic"
+import {
+	bufferedSizeCap,
+	CATEGORY_POLICY,
+	linkAdmits,
+	needsContentSniff,
+	previewType,
+	sniffAdmits
+} from "@/features/drive/lib/preview.logic"
+import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { deviceProfile } from "@/lib/deviceProfile"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
@@ -40,13 +48,12 @@ export function chooseDownloadStrategy(input: {
 
 export type AnonPreviewability = "previewable" | "too-large" | "archive" | "unpreviewable"
 
-// Whether the file-view auto-loads an inline preview, by the category's `anon` policy. Video and audio stream at any
-// size (the service worker's range route fed by an unauthenticated range port, or MediaSource); a PDF or a deck is read
-// in ranges. UNLIKE the authed drive gate (canPreview), an image is NOT exempt from the size cap here: an anon image is
-// always buffered (only video and audio take the port-fed route), so an oversized one is capped the same as text — the
-// view then offers download instead. A non-file / undecryptable / unknown-category item is simply not previewable. An
-// archive is never previewed inline: a signed-in visitor may browse it on request, through the authed client, at any
-// size (its listing is not a buffered read).
+// Whether the file-view auto-loads an inline preview, by the category's `anon` policy. Video, audio and images stream at
+// any size (the service worker's range route fed by an unauthenticated range port; video and audio fall back to
+// MediaSource); a PDF or a deck is read in ranges. An image the inline route cannot serve (no allowed content type) is
+// only ever held whole, so above its cap it is too large — the view then offers download instead. A non-file /
+// undecryptable / unknown-category item is simply not previewable. An archive is never previewed inline: a signed-in
+// visitor may browse it on request, through the authed client, at any size (its listing is not a buffered read).
 export function anonPreviewability(item: DriveItem): AnonPreviewability {
 	const base = asDirectoryOrFile(item)
 
@@ -68,6 +75,13 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 		case "archive":
 			return "archive"
 		case "stream":
+			if (category === "image" && allowedMediaContentType(item) === null) {
+				const cap = bufferedSizeCap(category, deviceProfile())
+
+				return cap === null || base.data.size <= cap ? "previewable" : "too-large"
+			}
+
+			return "previewable"
 		case "ranged":
 		case "buffer":
 			return linkAdmits(category, base.data.size, deviceProfile()) ? "previewable" : "too-large"

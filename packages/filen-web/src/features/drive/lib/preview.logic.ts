@@ -125,9 +125,10 @@ export interface CategoryPolicy {
 	assistantKind: "image" | "video" | "audio" | "document" | null
 }
 
-// Media and images stream at any size. An image keeps a whole-buffer fallback (no service worker, a failed
-// registration) its cap does not gate at open, since the worker's availability is unknown then; video and audio fall
-// back to MediaSource fed by the remux worker, never a whole buffer. A RAW is never in JS memory (the SDK reads the
+// Media and images stream at any size, on the drive and on a public link. An image keeps a whole-buffer fallback (no
+// service worker, a failed registration, no type the inline route may serve it as) only up to its cap: above it the
+// viewer waits for a service worker or says the file is too large (StreamablePreview); video and audio fall back to
+// MediaSource fed by the remux worker, never a whole buffer. A RAW is never in JS memory (the SDK reads the
 // ranges it needs inside wasm), nor is an archive (the SDK lists it in the worker), so neither has a cap; a deck is read
 // in ranges by the presentation worker, and a PDF by pdf.js up to the device's ranged ceiling (pdfLimits.ts), on the
 // drive and on a public link alike. HEIC/HEIF are "image" but stream only where the browser decodes them
@@ -139,7 +140,7 @@ export const CATEGORY_POLICY = {
 		bufferCap: PREVIEW_MAX_BYTES,
 		aboveCap: "refuse",
 		entry: "whole",
-		anon: "buffer",
+		anon: "stream",
 		textFamily: false,
 		editsAsText: false,
 		photo: true,

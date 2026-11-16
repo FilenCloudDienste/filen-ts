@@ -2,16 +2,29 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import type { File } from "@filen/sdk-rs"
 
 // An image whose bytes the preview already holds (a buffered slot revisited, an edited image just saved) shows from
-// memory rather than streaming the file again.
+// memory rather than streaming the file again; one too large to load whole is never loaded whole.
 
-const { streamUrl } = vi.hoisted(() => ({ streamUrl: vi.fn(() => ({ status: "pending" as const, refetch: vi.fn() })) }))
+interface StreamState {
+	available: boolean
+	later: Promise<boolean>
+	contentType: string | null
+}
 
-vi.mock("@/features/preview/lib/previewStream", () => ({ isMediaStreamAvailable: () => true }))
-vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: () => "image/jpeg" }))
+const { streamUrl, stream, bytesRead } = vi.hoisted(() => {
+	const state: StreamState = { available: true, later: Promise.resolve(true), contentType: "image/jpeg" }
+
+	return { streamUrl: vi.fn(() => ({ status: "pending" as const, refetch: vi.fn() })), stream: state, bytesRead: vi.fn() }
+})
+
+vi.mock("@/features/preview/lib/previewStream", () => ({
+	isMediaStreamAvailable: () => stream.available,
+	waitForMediaStream: () => stream.later
+}))
+vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: () => stream.contentType }))
 vi.mock("@/features/preview/hooks/usePreviewStreamUrl", () => ({ usePreviewStreamUrl: streamUrl }))
 vi.mock("@/lib/useObjectUrl", () => ({ useObjectUrl: () => "blob:held" }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -24,6 +37,8 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", async () => {
 
 	return {
 		usePreviewBytes: (item: { data: { uuid: string } }) => {
+			bytesRead(item.data.uuid)
+
 			const bytes = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
 
 			return bytes === undefined ? { status: "pending" } : { status: "success", bytes, refetch: vi.fn() }
@@ -37,14 +52,15 @@ import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/prev
 import { PreviewAccessModeProvider, PreviewByteOriginProvider, previewCacheScope } from "@/features/preview/lib/accessMode"
 import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { narrowItem } from "@/features/drive/lib/item"
+import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import { testUuid } from "@/tests/support/uuid"
 
-function photo(label: string) {
+function photo(label: string, size = 3n) {
 	const file: File = {
 		uuid: testUuid(label),
 		stableUUID: undefined,
 		parent: testUuid("parent"),
-		size: 3n,
+		size,
 		favorited: false,
 		region: "de-1",
 		bucket: "filen-1",
@@ -57,16 +73,16 @@ function photo(label: string) {
 	return narrowItem(file)
 }
 
-function preview(label: string) {
+function preview(label: string, size?: bigint) {
 	return createElement(StreamablePreview, {
-		item: photo(label),
+		item: photo(label, size),
 		render: (url: string, onError: (() => void) | undefined) =>
 			createElement("img", { alt: onError === undefined ? "buffered" : "streamed", src: url })
 	})
 }
 
-function show(label: string): void {
-	render(preview(label))
+function show(label: string, size?: bigint): void {
+	render(preview(label, size))
 }
 
 function entry(access: EntryAccessKind): ByteOrigin {
@@ -76,6 +92,10 @@ function entry(access: EntryAccessKind): ByteOrigin {
 beforeEach(() => {
 	clearPreviewCache()
 	streamUrl.mockClear()
+	bytesRead.mockClear()
+	stream.available = true
+	stream.later = Promise.resolve(true)
+	stream.contentType = "image/jpeg"
 })
 
 afterEach(() => {
@@ -104,10 +124,52 @@ describe("StreamablePreview", () => {
 		expect(streamUrl).not.toHaveBeenCalled()
 	})
 
-	it("never streams a public link's image", () => {
-		render(createElement(PreviewAccessModeProvider, { mode: "anon", children: preview("linked") }))
+	it("streams a public link's image", () => {
+		render(createElement(PreviewAccessModeProvider, { mode: "anon", children: preview("linked", PREVIEW_MAX_BYTES + 1n) }))
 
-		expect(streamUrl).not.toHaveBeenCalled()
+		expect(streamUrl).toHaveBeenCalled()
+		expect(bytesRead).not.toHaveBeenCalled()
+	})
+
+	describe("above the buffer cap", () => {
+		const big = PREVIEW_MAX_BYTES + 1n
+
+		it("waits for a service worker to control the page, then streams", async () => {
+			stream.available = false
+			render(createElement(PreviewAccessModeProvider, { mode: "anon", children: preview("waits", big) }))
+
+			expect(streamUrl).not.toHaveBeenCalled()
+			await waitFor(() => {
+				expect(streamUrl).toHaveBeenCalled()
+			})
+			expect(bytesRead).not.toHaveBeenCalled()
+		})
+
+		it("says it is too large when no service worker takes control", async () => {
+			stream.available = false
+			stream.later = Promise.resolve(false)
+			show("noWorker", big)
+
+			expect(await screen.findByText("This file is too large to show here.")).toBeTruthy()
+			expect(streamUrl).not.toHaveBeenCalled()
+			expect(bytesRead).not.toHaveBeenCalled()
+		})
+
+		it("says it is too large at once when the inline route cannot serve it", () => {
+			stream.contentType = null
+			show("noType", big)
+
+			expect(screen.getByText("This file is too large to show here.")).toBeTruthy()
+			expect(streamUrl).not.toHaveBeenCalled()
+			expect(bytesRead).not.toHaveBeenCalled()
+		})
+
+		it("still buffers at the cap", () => {
+			stream.contentType = null
+			show("atCap", PREVIEW_MAX_BYTES)
+
+			expect(bytesRead).toHaveBeenCalled()
+		})
 	})
 
 	it("streams a file whose bytes it does not hold", () => {

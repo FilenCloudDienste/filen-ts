@@ -1,17 +1,18 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
-import { streamFailureAction } from "@/features/drive/lib/preview.logic"
+import { isMediaStreamAvailable, waitForMediaStream } from "@/features/preview/lib/previewStream"
+import { bufferedSizeCap, previewType, streamFailureAction } from "@/features/drive/lib/preview.logic"
+import { deviceProfile } from "@/lib/deviceProfile"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { originRanged } from "@/lib/sdk/byteOrigin"
 import { useObjectUrl } from "@/lib/useObjectUrl"
-import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 
 // Renders the image for a resolved URL. `onError` is set only on the streamed path — the buffered blob
 // path has nowhere further to fall back to, so it keeps the browser's own native error state. Video and
@@ -99,8 +100,8 @@ function BufferedPreviewBytes({ bytes, mime, render }: { bytes: Uint8Array; mime
 }
 
 // Buffered mode: a whole-file download played back from a blob URL, minted/revoked by useObjectUrl so
-// the blob never outlives it. Unlike the streamed path this is not size-capped at the open gate
-// (CATEGORY_POLICY, preview.logic.ts) — an accepted tradeoff of the SW-absent fallback for images.
+// the blob never outlives it. The open gate does not cap a streamed image (CATEGORY_POLICY, preview.logic.ts), so
+// StreamablePreview mounts this only at or below the category's buffer cap.
 function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
@@ -115,23 +116,67 @@ function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPrev
 	)
 }
 
+// A file too large to load whole that could stream once a service worker controls the page (the ordinary state for a
+// moment after an install or update): streams if one takes control, else says the file is too large to show here.
+function AwaitStream({ item, onStream }: { item: DriveItem; onStream: () => void }) {
+	const { t } = useTranslation("preview")
+	const [unavailable, setUnavailable] = useState(false)
+	const stream = useEffectEvent(onStream)
+
+	useEffect(() => {
+		let live = true
+
+		void waitForMediaStream().then(available => {
+			if (!live) {
+				return
+			}
+
+			if (available) {
+				stream()
+			} else {
+				setUnavailable(true)
+			}
+		})
+
+		return () => {
+			live = false
+		}
+	}, [])
+
+	if (unavailable) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewTooLargeToShowHere")}
+			/>
+		)
+	}
+
+	return <PreviewLoading />
+}
+
 // Picks the SW's inline-preview route (streamed, seekable, no whole-buffer download) when a service
 // worker is controlling the tab AND this item's mime passes the inline allowlist, else falls back to
 // the buffered whole-file blob path (dev / SW absent / a failed stream registration) — see
 // previewStream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path is
-// also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
+// also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands, but never above the
+// category's buffer cap: such a file waits for a service worker when it could stream, else says it is too large.
 export function StreamablePreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
+	const { t } = useTranslation("preview")
 	const contentType = allowedMediaContentType(item)
-	// A drive file streams through the service worker's own session read, and an archive's entry read by range
-	// through the SDK worker's port. A public link's file never streams an image (the service worker's wasm bundle
-	// has no UnauthClient, so the buffered path serves a logged-out visitor), nor do bytes read whole.
+	// A drive file streams through the service worker's own session read, a public link's file through the SDK
+	// worker's unauthenticated range port, and an archive's entry read by range through the SDK worker's port. Bytes
+	// read whole never stream.
 	const origin = usePreviewOrigin(item)
 	const cacheScope = usePreviewCacheScope()
-	const streamable =
-		contentType !== null && isMediaStreamAvailable() && (origin.kind === "file" || (origin.kind === "entry" && originRanged(origin)))
+	const canStream =
+		contentType !== null &&
+		(origin.kind === "file" || origin.kind === "linkedFile" || (origin.kind === "entry" && originRanged(origin)))
 	// Bytes already held (a revisited buffered slot, an edited image just saved) show from memory: streaming them
 	// would download the file again.
-	const [useBuffered, setUseBuffered] = useState(() => !streamable || getPreviewBytes(cacheScope, item.data.uuid) !== undefined)
+	const held = getPreviewBytes(cacheScope, item.data.uuid) !== undefined
+	const [useBuffered, setUseBuffered] = useState(() => !canStream || !isMediaStreamAvailable() || held)
+	const cap = bufferedSizeCap(previewType(item), deviceProfile())
 
 	if (!useBuffered && contentType !== null) {
 		return (
@@ -142,6 +187,22 @@ export function StreamablePreview({ item, render }: { item: DriveItem; render: R
 					setUseBuffered(true)
 				}}
 				render={render}
+			/>
+		)
+	}
+
+	if (!held && cap !== null && item.data.size > cap) {
+		return canStream ? (
+			<AwaitStream
+				item={item}
+				onStream={() => {
+					setUseBuffered(false)
+				}}
+			/>
+		) : (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewTooLargeToShowHere")}
 			/>
 		)
 	}

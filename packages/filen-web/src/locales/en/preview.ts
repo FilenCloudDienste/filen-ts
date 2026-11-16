@@ -123,6 +123,8 @@ export const preview = {
 	previewShowAnyway: "Show anyway (read-only)",
 	/** Preview overlay body — a streamed image/video/audio failed mid-playback and the file is too large to safely retry buffered */
 	previewStreamFailed: "This preview failed and the file is too large to retry.",
+	/** Preview overlay body — a large image this browser cannot stream right now (no inline type it may be served as, or the page has no service worker yet), and too large to load whole */
+	previewTooLargeToShowHere: "This file is too large to show here.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */
 	previewTransformFailed: "This image couldn't be converted for preview.",
 	/** Preview overlay body — a camera RAW file (.cr2, .nef, .arw, .dng…) embeds no preview image large enough to show, and no thumbnail could be made for it either */

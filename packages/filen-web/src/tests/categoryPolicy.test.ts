@@ -26,6 +26,7 @@ import {
 	type StreamedCategory
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
+import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { legacyUnprobedTransportStream } from "@/tests/support/legacySniff"
 import { canOpenEntry } from "@/features/archive/lib/entryAccess.logic"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
@@ -184,7 +185,7 @@ function legacyCanOpenEntry(name: string, size: number): boolean {
 }
 
 // The changes made on purpose since: a PDF opens in ranges up to the device's ceiling, on the drive and on a public
-// link alike, and a public link reads a deck in ranges at any size.
+// link alike, a public link reads a deck in ranges at any size, and streams an image the inline route can serve.
 function withinPdfCeiling(item: DriveItem): boolean {
 	const max = deviceProfile().pdfRangedMax
 
@@ -201,6 +202,8 @@ function expectedAnon(item: DriveItem): string {
 			return withinPdfCeiling(item) ? "previewable" : "too-large"
 		case "presentation":
 			return "previewable"
+		case "image":
+			return allowedMediaContentType(item) === null ? legacyAnon(item) : "previewable"
 		default:
 			return legacyAnon(item)
 	}
