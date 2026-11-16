@@ -13,6 +13,7 @@ import { ocrAssets } from "./vite/ocr-assets-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
 import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
+import { filenHostFamily } from "./vite/filenHosts"
 import { isAllowedModelOrigin } from "./src/features/assistant/runtime/manifest"
 
 // Vite's header options only reach the responses it serves with a body: the 304 Not Modified that
@@ -121,13 +122,6 @@ function arkTypeJitless(): Plugin {
 // keeps its unconditional no-unsafe-inline floor). A moving set of sha256 hashes was rejected as too
 // brittle (the hashes shift when either source's literal changes). Replacing (1) with a predefined
 // toggled class was tried and does NOT suffice on its own — (2) still requires 'unsafe-inline'.
-// One Filen host family: its .filen.io host plus the .filen.net and .filen-1.net … .filen-6.net failovers.
-function filenHostFamily(subdomain: string): string[] {
-	return ["filen.io", "filen.net", "filen-1.net", "filen-2.net", "filen-3.net", "filen-4.net", "filen-5.net", "filen-6.net"].map(
-		domain => `https://${subdomain}.${domain}`
-	)
-}
-
 // The assistant's model host (features/assistant/runtime): the default, cdn.filen.io, is already inside
 // https://*.filen.io below; a build pointed elsewhere with VITE_ASSISTANT_MODEL_BASE_URL gets exactly that
 // origin added, and nothing else.

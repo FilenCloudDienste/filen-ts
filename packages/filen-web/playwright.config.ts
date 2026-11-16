@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import { defineConfig, devices, type Project } from "@playwright/test"
+import { e2eBaseUrl } from "./e2e/baseUrl"
 
 // Playwright does not auto-load .env; load the local credentials file explicitly. Node >= 24 ships
 // process.loadEnvFile, which throws when the file is missing — tolerated here because CI supplies the
@@ -17,9 +18,7 @@ try {
 // are keyed by it, so two runs at once never read or delete each other's.
 process.env["E2E_RUN_ID"] ??= randomUUID()
 
-// E2E_PORT serves a second build beside one already on the default port (a reused server is the one there).
-const PORT = Number(process.env["E2E_PORT"] ?? "4173")
-const BASE_URL = `http://localhost:${String(PORT)}`
+const BASE_URL = e2eBaseUrl()
 
 // Lane membership is decided by ONE question: does the spec take the account-wide `drive-write` lock?
 // (Verified per file by grepping for withScratchDirectory / enterScratchDirectory / uploadFiles /

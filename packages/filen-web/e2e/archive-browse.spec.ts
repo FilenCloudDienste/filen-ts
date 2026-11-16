@@ -5,7 +5,8 @@ import { archivePasswordPrompt, expectRows, expectRowSize, openArchive, openRowM
 import { HOSTILE_MISLEADING_NAME, NOTE_TEXT, TREE_FILES, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
-import { holdChunks, observeEgest } from "./helpers/jobs"
+import { holdChunks } from "./helpers/jobs"
+import { observeEgest } from "./helpers/requests"
 import { bootTo } from "./helpers/listing"
 import { menuItemName } from "./helpers/menu"
 import { resolveModKey } from "./helpers/modkey"
@@ -343,7 +344,7 @@ test.describe("archive browser", () => {
 
 	test("a big tarball waits behind its gate, lists on Browse, and comes back from the cache", async ({ page }) => {
 		const cspViolations = trackCspViolations(page)
-		const egest = observeEgest(page)
+		const egest = observeEgest(page.context())
 
 		await bootTo(page)
 
@@ -354,14 +355,14 @@ test.describe("archive browser", () => {
 
 		await expectRows(browser.list, ["next.txt"])
 
-		const beforeGate = egest.count()
+		const beforeGate = egest.requests()
 
 		await previous.click()
 		await expect(browser.gate.body).toBeVisible()
 		await expect(browser.gate.browse).toBeVisible()
 		await expect(browser.gate.extractAll).toBeVisible()
 		// Stepping onto a gated archive reads none of it.
-		expect(egest.count()).toBe(beforeGate)
+		expect(egest.requests()).toBe(beforeGate)
 
 		await browser.gate.browse.click()
 		await expect(browser.row("e2e-arc-gate-big")).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
@@ -378,17 +379,17 @@ test.describe("archive browser", () => {
 		await expectRows(browser.list, ["e2e-arc-gate-big"])
 
 		// The positive control for the zero above: the context sees the SDK worker's chunk requests.
-		expect(egest.count()).toBeGreaterThan(beforeGate)
+		expect(egest.requests()).toBeGreaterThan(beforeGate)
 
 		await next.click()
 		await expectRows(browser.list, ["next.txt"])
 
-		const beforeReturn = egest.count()
+		const beforeReturn = egest.requests()
 
 		await previous.click()
 		await expect(browser.row("e2e-arc-gate-big")).toBeVisible()
 		await expect(browser.gate.body).toHaveCount(0)
-		expect(egest.count()).toBe(beforeReturn)
+		expect(egest.requests()).toBe(beforeReturn)
 
 		await browser.close()
 		expect(cspViolations).toEqual([])

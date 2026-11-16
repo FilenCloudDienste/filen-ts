@@ -1,4 +1,4 @@
-import type { Locator, Page, Request, Route } from "@playwright/test"
+import type { Locator, Page, Route } from "@playwright/test"
 import { expect } from "../fixtures"
 import { escapeRegExp } from "./archive"
 import { trackCspViolations } from "./csp"
@@ -319,25 +319,6 @@ export async function holdChunks(
 				.catch(() => undefined)
 		}
 	}
-}
-
-// Counts download chunk requests: the positive control for "nothing was downloaded". All three engines
-// report the SDK worker's requests to the context (observed on Playwright 1.63).
-export function observeEgest(page: Page): { count: () => number } {
-	let count = 0
-	const listener = (request: Request): void => {
-		try {
-			if (new URL(request.url()).hostname.startsWith("egest.filen")) {
-				count++
-			}
-		} catch {
-			// an unparsable URL is no chunk
-		}
-	}
-
-	page.context().on("request", listener)
-
-	return { count: () => count }
 }
 
 export type ExtractPasswordTitle = "Password required" | "Wrong password"

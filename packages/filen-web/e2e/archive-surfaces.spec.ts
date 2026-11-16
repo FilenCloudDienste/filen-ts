@@ -4,7 +4,8 @@ import { test, expect, settleLeases } from "./fixtures"
 import { escapeRegExp, leadingNamePattern, namePattern, openRowMenu, pickDestination, waitForCompressDialog } from "./helpers/archive"
 import { plainTreeZip } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
-import { expectJobCard, hideJobCards, observeEgest, stopAllJobs } from "./helpers/jobs"
+import { expectJobCard, hideJobCards, stopAllJobs } from "./helpers/jobs"
+import { observeEgest } from "./helpers/requests"
 import {
 	bootTo,
 	createDirectoryViaDialog,
@@ -153,7 +154,7 @@ test.describe("archives on links, chats and shares", () => {
 		baseURL
 	}) => {
 		const cspViolations = trackCspViolations(page)
-		const egest = observeEgest(page)
+		const egest = observeEgest(page.context())
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-arc-link-${runId}`
 		const destName = `dest-${runId}`
@@ -182,16 +183,16 @@ test.describe("archives on links, chats and shares", () => {
 			await expect(browse).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 			await expect(extractToDrive).toBeVisible()
 
-			const beforeBrowse = egest.count()
+			const beforeBrowse = egest.requests()
 
 			// The hero card shows the archive's name and actions; none of it read the archive.
 			await expect(page.getByRole("button", { name: "Download", exact: true })).toBeVisible()
-			expect(egest.count()).toBe(beforeBrowse)
+			expect(egest.requests()).toBe(beforeBrowse)
 
 			await browse.click()
 			await expectTreeRoot(linkBrowser.list)
 			// Positive control: the listing did read the archive's index.
-			expect(egest.count()).toBeGreaterThan(beforeBrowse)
+			expect(egest.requests()).toBeGreaterThan(beforeBrowse)
 			await page.getByRole("button", { name: "Hide contents", exact: true }).click()
 			await expect(linkBrowser.list).toHaveCount(0)
 

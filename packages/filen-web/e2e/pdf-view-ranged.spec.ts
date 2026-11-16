@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
-import { observeEgest } from "./helpers/jobs"
+import { observeEgest } from "./helpers/requests"
 import { latinDocument } from "../scripts/pdf-fixtures/view/documents"
 
 // The PDF viewer reads a drive file on demand: a large file shows page 1 after downloading only part of it (counted
@@ -101,7 +101,7 @@ test("a large PDF shows its first page after reading part of the file", async ({
 
 		// Counted from before the upload: the new row's thumbnail is drawn from the uploaded file, so a listing that
 		// downloaded the file for it instead would count every chunk.
-		const egest = observeEgest(page)
+		const egest = observeEgest(page.context())
 		let atPaint = -1
 		// Diagnostic: each chunk request's path in order, with the milliseconds since the row was opened (negative:
 		// before), to tell a second reader from a read-ahead.
@@ -118,7 +118,7 @@ test("a large PDF shows its first page after reading part of the file", async ({
 
 		// Counted the moment page 1's canvas has its bitmap (the pages beside it start reading only then).
 		await page.exposeFunction("pdfPagePainted", () => {
-			if (atPaint < 0) atPaint = egest.count()
+			if (atPaint < 0) atPaint = egest.requests()
 		})
 		await page.evaluate(() => {
 			const report = Reflect.get(window, "pdfPagePainted") as () => void
