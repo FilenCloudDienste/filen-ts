@@ -67,6 +67,8 @@ export interface SheetClipboardPurifier {
 		dirty: string,
 		config: { ALLOWED_TAGS: string[]; ALLOWED_ATTR: string[]; ALLOW_DATA_ATTR: boolean; WHOLE_DOCUMENT: boolean }
 	): string
+	// What the last run removed: it holds that run's parsed document until cleared.
+	removed: unknown[]
 }
 
 // A style element's content as Excel writes it, inside an HTML comment (for browsers without CSS): DOMPurify drops an
@@ -82,12 +84,17 @@ function uncommentStyles(html: string): string {
 }
 
 export function createSheetClipboardSanitizer(purifier: SheetClipboardPurifier): (html: string) => string {
-	return html =>
-		purifier.sanitize(uncommentStyles(html), {
-			ALLOWED_TAGS: [...SHEET_CLIPBOARD_ALLOWED_TAGS],
-			ALLOWED_ATTR: [...SHEET_CLIPBOARD_ALLOWED_ATTR],
-			ALLOW_DATA_ATTR: true,
-			// The head's style element holds Excel's cell formats.
-			WHOLE_DOCUMENT: true
-		})
+	return html => {
+		try {
+			return purifier.sanitize(uncommentStyles(html), {
+				ALLOWED_TAGS: [...SHEET_CLIPBOARD_ALLOWED_TAGS],
+				ALLOWED_ATTR: [...SHEET_CLIPBOARD_ALLOWED_ATTR],
+				ALLOW_DATA_ATTR: true,
+				// The head's style element holds Excel's cell formats.
+				WHOLE_DOCUMENT: true
+			})
+		} finally {
+			purifier.removed.length = 0
+		}
+	}
 }

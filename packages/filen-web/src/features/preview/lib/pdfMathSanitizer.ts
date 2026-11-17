@@ -5,6 +5,15 @@ import DOMPurify from "dompurify"
 const purifier = DOMPurify(window)
 
 export function sanitizePdfMathML(markup: string): Node | null {
+	try {
+		return mathFragment(markup)
+	} finally {
+		// What the run removed holds its parsed document until the next run.
+		purifier.removed.length = 0
+	}
+}
+
+function mathFragment(markup: string): Node | null {
 	const fragment = purifier.sanitize(markup, {
 		USE_PROFILES: { mathMl: true },
 		// Reading a formula needs none of these: an id could shadow the structure tree's own (aria-owns targets) or the

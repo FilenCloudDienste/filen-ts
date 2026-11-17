@@ -9,6 +9,7 @@ function fakePurifier() {
 	const hooks: ((node: Element) => void)[] = []
 	const configs: { ALLOWED_TAGS: string[]; ALLOWED_ATTR: string[] }[] = []
 	const purifier: RichTextPurifier = {
+		removed: [],
 		addHook: (_entryPoint, hook) => {
 			hooks.push(hook)
 		},
@@ -24,6 +25,9 @@ function fakePurifier() {
 					hook(element)
 				}
 			}
+
+			// As DOMPurify records what it removed, holding the run's document.
+			purifier.removed.push({ element: template })
 
 			return template.innerHTML
 		}
@@ -65,17 +69,32 @@ describe("createRichTextSanitizer", () => {
 	it("strips positioning and viewport-sized declarations, keeping the rest", () => {
 		const sanitize = createRichTextSanitizer(fakePurifier().purifier)
 
-		expect(sanitize("<p style=\"position:fixed;top:0;inset:0;z-index:9;width:100vw;color:red\">x</p>")).toBe("<p style=\"color: red\">x</p>")
+		expect(sanitize("<p style=\"position:fixed;top:0;inset:0;z-index:9;width:100vw;color:red\">x</p>")).toBe(
+			"<p style=\"color: red\">x</p>"
+		)
 		expect(sanitize("<p style=\"position:fixed;height:100vh\">x</p>")).toBe("<p>x</p>")
 	})
 
 	it("keeps only Quill's content formatting classes", () => {
 		const sanitize = createRichTextSanitizer(fakePurifier().purifier)
 
-		expect(sanitize("<p class=\"fixed inset-0 z-50 ql-align-center ql-tooltip ql-indent-2\">x</p>")).toBe("<p class=\"ql-align-center ql-indent-2\">x</p>")
+		expect(sanitize("<p class=\"fixed inset-0 z-50 ql-align-center ql-tooltip ql-indent-2\">x</p>")).toBe(
+			"<p class=\"ql-align-center ql-indent-2\">x</p>"
+		)
 		expect(sanitize("<span class=\"ql-container ql-editor\">x</span>")).toBe("<span>x</span>")
 		expect(sanitize("<div class=\"ql-code-block-container\"><div class=\"ql-code-block\">c</div></div>")).toBe(
 			"<div class=\"ql-code-block-container\"><div class=\"ql-code-block\">c</div></div>"
 		)
+	})
+})
+
+describe("createRichTextSanitizer — memory", () => {
+	// DOMPurify's `removed` holds the last run's parsed document until its next run.
+	it("lets go of what the run removed", () => {
+		const { purifier } = fakePurifier()
+
+		createRichTextSanitizer(purifier)("<p>x</p>")
+
+		expect(purifier.removed).toEqual([])
 	})
 })

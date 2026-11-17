@@ -35,6 +35,8 @@ export const RICH_TEXT_ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "c
 export interface RichTextPurifier {
 	addHook(entryPoint: "afterSanitizeAttributes", hook: (node: Element) => void): void
 	sanitize(dirty: string, config: { ALLOWED_TAGS: string[]; ALLOWED_ATTR: string[] }): string
+	// What the last run removed: it holds that run's parsed document until cleared.
+	removed: unknown[]
 }
 
 // `style` stays on the allowlist (rich formatting emits inline styles like text-align/color), but DOMPurify
@@ -126,9 +128,14 @@ export function createRichTextSanitizer(purifier: RichTextPurifier): (html: stri
 		hooked.add(purifier)
 	}
 
-	return html =>
-		purifier.sanitize(html, {
-			ALLOWED_TAGS: [...RICH_TEXT_ALLOWED_TAGS],
-			ALLOWED_ATTR: [...RICH_TEXT_ALLOWED_ATTR]
-		})
+	return html => {
+		try {
+			return purifier.sanitize(html, {
+				ALLOWED_TAGS: [...RICH_TEXT_ALLOWED_TAGS],
+				ALLOWED_ATTR: [...RICH_TEXT_ALLOWED_ATTR]
+			})
+		} finally {
+			purifier.removed.length = 0
+		}
+	}
 }
