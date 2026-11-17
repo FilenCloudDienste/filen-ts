@@ -594,3 +594,44 @@ test("on a phone, a native image past 50 MP is sized from its head and shown onl
 	expect(egest.requests()).toBe(1)
 	await page.keyboard.press("Escape")
 })
+
+test("a multi-page TIFF prints every page through the print root", async ({ page }) => {
+	await page.addInitScript(() => {
+		const record: { snapshots: { pages: number; shown: number }[] } = { snapshots: [] }
+
+		Reflect.set(window, "__tiffPrint", record)
+		window.print = () => {
+			record.snapshots.push({
+				pages: document.querySelectorAll(".fo-print-root > .fo-print-page").length,
+				// Pictures decoded (Chromium, WebKit), or canvases Firefox draws while printing.
+				shown:
+					[...document.querySelectorAll<HTMLImageElement>(".fo-print-root img")].filter(
+						image => image.complete && image.naturalWidth > 0
+					).length + document.querySelectorAll(".fo-print-root canvas").length
+			})
+			window.dispatchEvent(new Event("afterprint"))
+		}
+	})
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-tiff")
+
+	await itemRow(listbox, TIFF_PAGES).dblclick()
+	await expect(page.getByText("Page 1 of 3", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	await page.getByRole("button", { name: "File", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Print…") }).click()
+
+	const dialog = page.getByRole("dialog", { name: "Print" })
+
+	await expect(dialog).toBeVisible()
+	await expect(dialog.getByRole("radio", { name: "All" })).toBeChecked()
+	await dialog.getByRole("button", { name: "Print…" }).click()
+	await expect(dialog).toBeHidden({ timeout: 60_000 })
+
+	expect(await page.evaluate(() => (Reflect.get(window, "__tiffPrint") as { snapshots: unknown[] }).snapshots)).toEqual([
+		{ pages: 3, shown: 3 }
+	])
+	await expect(page.locator(".fo-print-root")).toHaveCount(0)
+})
