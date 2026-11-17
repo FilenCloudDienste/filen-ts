@@ -105,9 +105,9 @@ export const probeRecordSchema = type({
 export type ProbeRecord = typeof probeRecordSchema.infer
 
 // The probe as it reads now. Revision 2: transport streams, and Matroska's landscape cover. Revision 3: Ogg, AVI, FLV,
-// ASF and MPEG program streams, and the 3GPP codecs (H.263, AMR). A record from before keeps answering unless it is one
+// ASF and MPEG program streams, and the 3GPP codecs (H.263, AMR). Revision 4: MPEG audio layers I and II (MP1, MP2). A record from before keeps answering unless it is one
 // this probe would read differently (outdatedRecord).
-export const PROBE_REVISION = 3
+export const PROBE_REVISION = 4
 
 const TRANSPORT_STREAM_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "m2ts", "m2t"])
 
@@ -122,7 +122,8 @@ function extensionOfName(name: string | null): string | null {
 
 // A record a probe now would answer otherwise, by the revision that changed the answer: before 2, no container for a
 // transport stream's name, or a Matroska cover read that never looked for the landscape one; before 3, no container
-// for a name the new walkers read, or an MP4/QuickTime track whose codec the 3GPP sample entries now name.
+// for a name the new walkers read, or an MP4/QuickTime track whose codec the 3GPP sample entries now name; before 4,
+// a transport stream's audio track with no codec, which MP1 or MP2 now names.
 function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => string | null): boolean {
 	const revision = record.rev ?? 1
 	const probe = record.probe
@@ -140,14 +141,22 @@ function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => stri
 
 		const walker = VIDEO_CONTAINERS.get(extension)?.probe
 
-		return (revision < 2 && TRANSPORT_STREAM_EXTENSIONS.has(extension)) || (walker !== undefined && REVISION_3_CONTAINERS.has(walker))
+		return (
+			(revision < 2 && TRANSPORT_STREAM_EXTENSIONS.has(extension)) ||
+			(revision < 3 && walker !== undefined && REVISION_3_CONTAINERS.has(walker))
+		)
 	}
 
 	if (revision < 2 && tier !== "card" && outdatedCover(record)) {
 		return true
 	}
 
+	if (probe.container === "ts") {
+		return probe.audio.some(audio => audio.codec === null)
+	}
+
 	return (
+		revision < 3 &&
 		(probe.container === "mp4" || probe.container === "mov") &&
 		(probe.video?.codec === null || probe.audio.some(audio => audio.codec === null))
 	)

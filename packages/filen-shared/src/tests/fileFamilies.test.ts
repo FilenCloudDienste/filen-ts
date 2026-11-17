@@ -22,14 +22,15 @@ describe("AUDIO_FORMATS", () => {
 			"ac3",
 			"eac3",
 			"ec3",
-			"dts"
+			"dts",
+			"wma"
 		])
 	})
 
 	it("marks only the formats no browser plays as they are as decoded", () => {
 		const decoded = [...AUDIO_FORMATS].filter(([, format]) => format.decoded === true).map(([extension]) => extension)
 
-		expect(decoded).toEqual(["mka", "ac3", "eac3", "ec3", "dts"])
+		expect(decoded).toEqual(["mka", "ac3", "eac3", "ec3", "dts", "wma"])
 	})
 
 	it("has no synthesized formats and no format caps yet", () => {
@@ -52,6 +53,21 @@ describe("SUBTITLE_FILE_EXTENSIONS", () => {
 
 describe("ZIP_PACKAGE_EXTENSIONS", () => {
 	it("lists the zip-based packages, none of them a format the apps read otherwise", () => {
-		expect([...ZIP_PACKAGE_EXTENSIONS]).toEqual(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "crx", "whl", "nupkg", "vsix", "appx", "msix"])
+		expect([...ZIP_PACKAGE_EXTENSIONS]).toEqual([
+			"apk",
+			"aab",
+			"aar",
+			"ipa",
+			"jar",
+			"war",
+			"ear",
+			"xpi",
+			"crx",
+			"whl",
+			"nupkg",
+			"vsix",
+			"appx",
+			"msix"
+		])
 	})
 })

@@ -116,6 +116,7 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["audio/aiff", "aif", "fromExt"],
 	["audio/x-aiff", "aiff", "toExt"],
 	["audio/amr", "amr", "both"],
+	["audio/x-ms-wma", "wma", "both"],
 	["audio/x-caf", "caf", "both"],
 	["application/zip", "zip", "both"],
 	["application/x-zip-compressed", "zip", "toExt"],

@@ -64,8 +64,11 @@ export function videoFourccCodec(fourcc: string): MediaCodec | null {
 	return VIDEO_FOURCCS[fourcc.toUpperCase()] ?? null
 }
 
-// WAVE_FORMAT_* tags (mmreg.h). MPEG layer I/II (0x0050) is left unnamed like the probe's other MPEG audio.
+// WAVE_FORMAT_* tags (mmreg.h). WAVE_FORMAT_MPEG (0x0050) is layer I or II; layer II is what it holds in practice,
+// and the MP2 decoder reads either.
 const FORMAT_TAGS: Readonly<Record<number, MediaCodec>> = {
+	0x0050: "mp2",
+	0x0160: "wma",
 	0x0001: "pcm",
 	0x0003: "pcm",
 	0x0002: "adpcm",
@@ -372,7 +375,8 @@ export async function walkAvi(source: BlockSource, result: ParsedContainer): Pro
 			result.tracks.push({
 				kind: "audio",
 				enabled: true,
-				audio: { id: index, ...stream.audio, lang: null, name: stream.name, def: firstAudio, forced: false, commentary: false }
+				audio: { id: index, ...stream.audio, lang: null, name: stream.name, def: firstAudio, forced: false, commentary: false },
+				config: stream.strf
 			})
 			firstAudio = false
 		}

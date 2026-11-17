@@ -2,10 +2,11 @@ import { AudioSample, CustomAudioDecoder, type AudioCodec, type EncodedPacket } 
 import WORKER_SOURCE from "@/vendor/ffmpeg-decoders/decoders.worker.js?raw"
 import { browserEngine, type BrowserEngine } from "@/lib/media/mseController.logic"
 
-// AC-3, E-AC-3, DTS and TrueHD, which no browser decodes, ALAC, which only Safari does, and FLAC where the
-// browser's own decoder fails, through FFmpeg's decoders built to WebAssembly
+// AC-3, E-AC-3, DTS, TrueHD, WMA, MP1/MP2, AMR and ADPCM, which no browser decodes, ALAC, which only Safari does,
+// and FLAC where the browser's own decoder fails, through FFmpeg's decoders built to WebAssembly
 // (scripts/codecs/build-ffmpeg-decoders.sh). AC-3, E-AC-3, DTS and FLAC reach them through mediabunny's
-// decoder registry; ALAC, which mediabunny does not know, and TrueHD, which it has no decoder for, through
+// decoder registry; the codecs mediabunny does not know (ALAC, WMA, MP1/MP2, AMR, ADPCM) and TrueHD, which it has
+// no decoder for, through
 // ffmpegSampleReader (batched: TrueHD units are tiny). The module runs in a worker of its own, nested in the
 // remux worker, so decoding overlaps the remux worker's own work; the protocol is described in
 // scripts/codecs/decoder-worker.js. The module is bundled into the remux worker and compiled only when a
@@ -17,9 +18,38 @@ export function ffmpegDecodedCodecs(engine: BrowserEngine): readonly AudioCodec[
 	return engine === "webkit" ? ["ac3", "eac3", "dts", "flac"] : ["ac3", "eac3", "dts"]
 }
 
-export type FfmpegCodec = "ac3" | "eac3" | "dts" | "truehd" | "alac" | "flac"
+const FFMPEG_CODEC_NAMES = [
+	"ac3",
+	"eac3",
+	"dts",
+	"truehd",
+	"alac",
+	"flac",
+	"wmav1",
+	"wmav2",
+	"wmapro",
+	"wmalossless",
+	"mp1",
+	"mp2",
+	"amrnb",
+	"amrwb",
+	"adpcm_ms",
+	"adpcm_ima_wav"
+] as const
 
-const FFMPEG_CODECS: ReadonlySet<string> = new Set<FfmpegCodec>(["ac3", "eac3", "dts", "truehd", "alac", "flac"])
+export type FfmpegCodec = (typeof FFMPEG_CODEC_NAMES)[number]
+
+const FFMPEG_CODECS: ReadonlySet<string> = new Set<FfmpegCodec>(FFMPEG_CODEC_NAMES)
+
+// A stream's WAVEFORMATEX fields, for the decoders that read no header of their own: WMA and ADPCM need the block
+// size, WMA the bit rate, ADPCM the bits per sample.
+export interface FfmpegStream {
+	blockAlign: number
+	bitRate: number
+	sampleRate: number
+	channels: number
+	bitsPerSample: number
+}
 
 export function isFfmpegCodec(codec: string | null): codec is FfmpegCodec {
 	return codec !== null && FFMPEG_CODECS.has(codec)
@@ -38,8 +68,9 @@ export interface DecodedFrame {
 }
 
 export type DecoderRequest =
-	// `extradata`: the codec configuration (ALAC's magic cookie in its 36-byte atom form, FLAC's STREAMINFO).
-	| { type: "open"; codec: FfmpegCodec; extradata?: ArrayBuffer }
+	// `extradata`: the codec configuration (ALAC's magic cookie in its 36-byte atom form, FLAC's STREAMINFO, the extra
+	// bytes of a WAVEFORMATEX).
+	| { type: "open"; codec: FfmpegCodec; extradata?: ArrayBuffer; stream?: FfmpegStream }
 	| { type: "decode"; handle: number; data: ArrayBuffer; timestampUs: number }
 	| { type: "flush"; handle: number }
 	| { type: "close"; handle: number }
@@ -75,7 +106,7 @@ export class DecoderWorker {
 	}
 
 	// Every open, failed or not, is balanced by exactly one release.
-	public async open(codec: FfmpegCodec, extradata?: Uint8Array): Promise<DecoderLease> {
+	public async open(codec: FfmpegCodec, extradata?: Uint8Array, stream?: FfmpegStream): Promise<DecoderLease> {
 		this.users++
 
 		const worker = this.worker ?? this.start()
@@ -83,7 +114,7 @@ export class DecoderWorker {
 		const config = extradata === undefined || extradata.length === 0 ? undefined : extradata.slice().buffer
 		const { handle } = await this.post(
 			worker,
-			config === undefined ? { type: "open", codec } : { type: "open", codec, extradata: config },
+			{ type: "open", codec, ...(config === undefined ? {} : { extradata: config }), ...(stream === undefined ? {} : { stream }) },
 			config === undefined ? [] : [config]
 		)
 

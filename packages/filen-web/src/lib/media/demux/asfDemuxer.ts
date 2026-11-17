@@ -566,7 +566,7 @@ async function openAsf(input: Input): Promise<ContainerReader> {
 				number: stream.number,
 				stream,
 				frame,
-				mpegAudio: stream.audio.codec === "mp3",
+				mpegAudio: stream.audio.codec === "mp3" || stream.audio.codec === "mp2" || stream.audio.codec === "mp1",
 				avc: null,
 				parameterSets: null,
 				demux: audioTrack(stream, firstAudio)

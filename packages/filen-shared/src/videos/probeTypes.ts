@@ -173,8 +173,8 @@ export interface CuesLocation {
 
 export type ParsedTrack =
 	| { kind: "video"; enabled: boolean; video: ProbeVideo; decode?: VideoDecodeInfo }
-	// `config`: the decoder configuration no browser decoder takes from elsewhere (ALAC's magic cookie);
-	// never part of a stored probe.
+	// `config`: the decoder configuration no browser decoder takes from elsewhere (ALAC's magic cookie, the
+	// WAVEFORMATEX of an AVI or ASF stream); never part of a stored probe.
 	| { kind: "audio"; enabled: boolean; audio: ProbeAudio; config?: Uint8Array | null }
 	// `frames`: how a Matroska track's frames are compressed (zlib = algorithm 0, header stripping = 3).
 	| {

@@ -342,7 +342,7 @@ describe("probeVideo — MPEG-PS", () => {
 			video: { codec: "mpeg2", w: 720, h: 576 }
 		})
 		expect(record?.audio.map(({ codec, rate }) => ({ codec, rate }))).toEqual([
-			{ codec: null, rate: 44100 },
+			{ codec: "mp2", rate: 44100 },
 			{ codec: "ac3", rate: 48000 }
 		])
 	})

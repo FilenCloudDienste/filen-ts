@@ -213,7 +213,8 @@ export async function walkAsf(source: BlockSource, result: ParsedContainer): Pro
 			result.tracks.push({
 				kind: "audio",
 				enabled: true,
-				audio: { id: stream.number, ...stream.audio, lang: null, name: null, def: firstAudio, forced: false, commentary: false }
+				audio: { id: stream.number, ...stream.audio, lang: null, name: null, def: firstAudio, forced: false, commentary: false },
+				config: stream.specific
 			})
 			firstAudio = false
 		}

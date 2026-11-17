@@ -75,3 +75,9 @@ export function isTranscodableAudio(codec: AudioCodec | null): codec is AudioCod
 export function isFfmpegReaderAudio(codec: AudioCodec | null): boolean {
 	return codec === null || codec === "truehd"
 }
+
+// Whether a track mediabunny names `codec` may be one the walk decodes through FFmpeg instead: one for FFmpeg's own
+// reader, and MPEG audio, which mediabunny calls MP3 whatever its layer (an MP1 or MP2 stream).
+export function walkDecides(codec: AudioCodec | null): boolean {
+	return isFfmpegReaderAudio(codec) || codec === "mp3"
+}

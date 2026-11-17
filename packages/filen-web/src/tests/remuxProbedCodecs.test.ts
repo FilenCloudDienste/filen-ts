@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { ALL_FORMATS, BufferSource, Input } from "mediabunny"
 import { BlockCache } from "@/lib/media/blockCache"
-import { probedCodecFor, probedCodecs } from "@/workers/remux/audioInput"
+import { probedCodecFor, probedCodecs, waveProbedCodec } from "@/workers/remux/audioInput"
 import {
 	FTYP,
 	audioEntry,
@@ -120,5 +120,62 @@ describe("probedCodecs — container track IDs that are not mediabunny's track i
 		expect(probedCodecFor(probed, 2, "truehd")?.codec).toBe("truehd")
 		expect(probedCodecFor(probed, 2, null)?.codec).toBe("truehd")
 		expect(probedCodecFor(probed, 1, null)).toBeNull()
+	})
+
+	it("takes the walk's MP1 or MP2 over the MP3 mediabunny calls any MPEG audio, and no other codec over MP3", () => {
+		const probed = new Map([
+			[1, { codec: "mp2" as const }],
+			[2, { codec: "wmav2" as const }]
+		])
+
+		expect(probedCodecFor(probed, 1, "mp3")?.codec).toBe("mp2")
+		expect(probedCodecFor(probed, 2, "mp3")).toBeNull()
+	})
+})
+
+// A WAVEFORMATEX: tag, channels, rate, bytes per second, block size, bits per sample, then its extra bytes.
+function waveFormat(
+	tag: number,
+	channels: number,
+	rate: number,
+	bytesPerSecond: number,
+	blockAlign: number,
+	bits: number,
+	extra: number[]
+): Uint8Array {
+	const out = new Uint8Array(18 + extra.length)
+	const view = new DataView(out.buffer)
+
+	view.setUint16(0, tag, true)
+	view.setUint16(2, channels, true)
+	view.setUint32(4, rate, true)
+	view.setUint32(8, bytesPerSecond, true)
+	view.setUint16(12, blockAlign, true)
+	view.setUint16(14, bits, true)
+	view.setUint16(16, extra.length, true)
+	out.set(extra, 18)
+
+	return out
+}
+
+describe("waveProbedCodec", () => {
+	it("picks WMA's and ADPCM's decoder by the format tag, with the format's fields and extra bytes", () => {
+		expect(waveProbedCodec("wma", waveFormat(0x0161, 2, 44_100, 16_000, 2973, 16, [0, 0, 0, 0, 1, 0]), null, null)).toEqual({
+			codec: "wmav2",
+			extradata: Uint8Array.from([0, 0, 0, 0, 1, 0]),
+			stream: { blockAlign: 2973, bitRate: 128_000, sampleRate: 44_100, channels: 2, bitsPerSample: 16 }
+		})
+		expect(waveProbedCodec("wma", waveFormat(0x0160, 1, 22_050, 4000, 742, 16, []), null, null)?.codec).toBe("wmav1")
+		expect(waveProbedCodec("adpcm", waveFormat(0x0002, 1, 22_050, 11_100, 512, 4, [0xf4, 0x01]), null, null)?.codec).toBe("adpcm_ms")
+		expect(waveProbedCodec("adpcm", waveFormat(0x0011, 1, 22_050, 11_100, 512, 4, [0xf9, 0x01]), null, null)?.codec).toBe(
+			"adpcm_ima_wav"
+		)
+	})
+
+	it("names the decoders that need no format, from the walk's rate and channels, and nothing else", () => {
+		expect(waveProbedCodec("amr", null, 8000, 1)).toMatchObject({ codec: "amrnb", stream: { sampleRate: 8000, channels: 1 } })
+		expect(waveProbedCodec("mp2", null, 48_000, 2)?.codec).toBe("mp2")
+		expect(waveProbedCodec("aac", null, 48_000, 2)).toBeNull()
+		expect(waveProbedCodec("wma", Uint8Array.of(1, 2), null, null)).toMatchObject({ codec: "wmav2", stream: { blockAlign: 0 } })
 	})
 })

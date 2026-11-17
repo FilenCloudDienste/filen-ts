@@ -777,7 +777,7 @@ async function openAvi(input: Input): Promise<ContainerReader> {
 			track.video = videoTrack(stream, index, track.avc, avcC)
 		} else if (stream.kind === "auds" && stream.audio !== null) {
 			track.audio = audioTrack(stream, index, firstAudio)
-			track.mpegAudio = stream.audio.codec === "mp3"
+			track.mpegAudio = stream.audio.codec === "mp3" || stream.audio.codec === "mp2" || stream.audio.codec === "mp1"
 			firstAudio = false
 		}
 

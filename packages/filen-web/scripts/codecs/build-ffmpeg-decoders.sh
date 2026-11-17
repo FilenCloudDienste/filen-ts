@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Builds the AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC and FLAC audio decoders the remux worker uses (no browser
-# decodes the first four, only Safari ALAC, and WebKit's own FLAC decoder fails on Matroska's) from a pinned
+# Builds the audio decoders the remux worker uses: AC-3, E-AC-3, DTS, TrueHD/MLP, WMA (1, 2, Pro, Lossless), MPEG
+# layers I and II, AMR (narrowband and wideband) and Microsoft/IMA ADPCM, which no browser decodes, ALAC, which only
+# Safari does, and FLAC, whose WebKit decoder fails on Matroska's, from a pinned
 # FFmpeg release, as one WebAssembly module with its JavaScript glue and worker loop in a single file, and
 # writes it with a manifest and the licenses of what Emscripten links in to src/vendor/ffmpeg-decoders/. All
 # of it is committed; re-run this only to change the FFmpeg release, the flags or the sources beside this
@@ -53,7 +54,7 @@ CONFIGURE_FLAGS=(
 	# either way.
 	--enable-small
 	--enable-avcodec
-	--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac
+	--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav
 )
 OPT_FLAGS=(-Oz -flto -msimd128 -DNDEBUG)
 EXPORTS="_decoder_log_level,_decoder_extradata,_decoder_open,_decoder_packet,_decoder_send,_decoder_drain,_decoder_receive,_decoder_reset,_decoder_format,_decoder_channels,_decoder_channel_mask,_decoder_sample_rate,_decoder_frames,_decoder_plane,_decoder_timestamp,_decoder_close"
@@ -192,7 +193,7 @@ json_array() {
 
 cat > "${OUT_DIR}/manifest.json" << EOF
 {
-	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC and FLAC decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
+	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR and ADPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
 	"ffmpeg": {
 		"tag": "${FFMPEG_TAG}",
 		"tarball": "${FFMPEG_URL}",

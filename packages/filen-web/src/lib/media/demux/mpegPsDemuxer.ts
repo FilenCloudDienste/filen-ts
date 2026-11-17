@@ -152,7 +152,15 @@ interface Track {
 	avc: AvcParameters | null
 }
 
-const FRAME_KINDS: Partial<Record<string, FrameKind>> = { mp3: "mpeg-audio", ac3: "dolby", eac3: "dolby", dts: "dts", aac: "adts" }
+const FRAME_KINDS: Partial<Record<string, FrameKind>> = {
+	mp1: "mpeg-audio",
+	mp2: "mpeg-audio",
+	mp3: "mpeg-audio",
+	ac3: "dolby",
+	eac3: "dolby",
+	dts: "dts",
+	aac: "adts"
+}
 
 function videoCodec(stream: MpegPsStream): VideoCodec | null {
 	return stream.codecString === null ? null : stream.codec === "h264" ? "avc" : stream.codec === "hevc" ? "hevc" : null

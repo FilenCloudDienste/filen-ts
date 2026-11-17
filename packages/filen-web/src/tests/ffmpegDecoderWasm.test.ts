@@ -1,12 +1,18 @@
 import { readFileSync } from "node:fs"
 import { runInThisContext } from "node:vm"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { BufferSource, EncodedPacketSink, Input } from "mediabunny"
+import { mpegAudioHeader, parseAsfHeader } from "@filen/shared/videos"
 import WORKER_SOURCE from "@/vendor/ffmpeg-decoders/decoders.worker.js?raw"
+import { ASF } from "@/lib/media/demux/asfDemuxer"
+import { waveProbedCodec, type ProbedCodec } from "@/workers/remux/audioInput"
 import type { DecodedFrame } from "@/workers/remux/ffmpegDecoder"
 
 // The shipped module itself, run in Node behind a stand-in for its worker scope: the bridge and the worker
 // loop exercised on real AC-3, E-AC-3 and DTS frames (synthetic tones, three 1536-sample AC-3 frames, three
-// E-AC-3, two 512-sample DTS, all 5.1).
+// E-AC-3, two 512-sample DTS, all 5.1), and on ffmpeg-encoded tones of the codecs that need the container's format
+// fields: half a second of mono 22.05 kHz WMA 2 in ASF, Microsoft and IMA ADPCM in WAVE, and a quarter second of
+// stereo 48 kHz MP2.
 
 interface Answer {
 	id: number
@@ -24,6 +30,14 @@ const MASK_5_1 = 0x60f
 
 function fixture(name: string): Uint8Array {
 	return new Uint8Array(readFileSync(new URL(`./fixtures/ffmpeg-decoders/${name}`, import.meta.url)))
+}
+
+function defined<T>(value: T | null | undefined): T {
+	if (value === null || value === undefined) {
+		throw new Error("missing")
+	}
+
+	return value
 }
 
 function frames(bytes: Uint8Array, size: number): Uint8Array[] {
@@ -149,6 +163,143 @@ describe("FFmpeg decoders module", () => {
 		expect((await worker.decode(eac3, eac3Frame ?? new Uint8Array())).frames).toHaveLength(1)
 		expect((await worker.decode(dts, new Uint8Array(DTS_FRAME).fill(0x55))).frames).toEqual([])
 		expect((await worker.decode(dts, dtsFrame ?? new Uint8Array())).frames).toHaveLength(1)
+	})
+
+	// The decoded frames' sample count and their loudest sample, which a tone (ffmpeg's sine, at 1/8 of full scale)
+	// puts well above silence.
+	async function decodeAll(
+		probed: ProbedCodec,
+		packets: Uint8Array[]
+	): Promise<{ frames: DecodedFrame[]; samples: number; peak: number }> {
+		const worker = startWorker()
+		const { handle, error } = await worker.request({
+			type: "open",
+			codec: probed.codec,
+			...(probed.extradata === undefined ? {} : { extradata: probed.extradata.slice().buffer }),
+			...(probed.stream === undefined ? {} : { stream: probed.stream })
+		})
+
+		expect(error).toBeUndefined()
+
+		const decoded: DecodedFrame[] = []
+
+		for (const [index, packet] of packets.entries()) {
+			decoded.push(...((await worker.decode(handle, packet, index * 1000)).frames ?? []))
+		}
+
+		decoded.push(...((await worker.request({ type: "flush", handle })).frames ?? []))
+
+		let peak = 0
+
+		for (const frame of decoded) {
+			// The first plane: float samples, or 16-bit ones for the fixed-point decoders.
+			const plane = frame.format.startsWith("f32")
+				? Array.from(new Float32Array(frame.data, 0, frame.frames), Math.abs)
+				: Array.from(new Int16Array(frame.data, 0, frame.frames), value => Math.abs(value) / 32768)
+
+			peak = Math.max(peak, ...plane)
+		}
+
+		return { frames: decoded, samples: decoded.reduce((sum, frame) => sum + frame.frames, 0), peak }
+	}
+
+	// A WAVE file's fmt chunk and its data cut into blocks of `blockAlign` bytes.
+	function wave(bytes: Uint8Array): { format: Uint8Array; blocks: Uint8Array[] } {
+		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+		let format: Uint8Array = new Uint8Array()
+		let data: Uint8Array = new Uint8Array()
+
+		for (let at = 12; at + 8 <= bytes.length; at += 8 + view.getUint32(at + 4, true) + (view.getUint32(at + 4, true) & 1)) {
+			const id = String.fromCharCode(...bytes.subarray(at, at + 4))
+			const body = bytes.subarray(at + 8, at + 8 + view.getUint32(at + 4, true))
+
+			if (id === "fmt ") {
+				format = body
+			} else if (id === "data") {
+				data = body
+			}
+		}
+
+		const blockAlign = new DataView(format.buffer, format.byteOffset, format.byteLength).getUint16(12, true)
+
+		return { format, blocks: frames(data.subarray(0, data.length - (data.length % blockAlign)), blockAlign) }
+	}
+
+	it.each([
+		["adpcm-ms-mono.wav", "adpcm_ms"],
+		["adpcm-ima-mono.wav", "adpcm_ima_wav"]
+	] as const)("decodes %s with the block size and bits per sample its format states", async (file, codec) => {
+		const { format, blocks } = wave(fixture(file))
+		const probed = waveProbedCodec("adpcm", format, null, null)
+
+		expect(probed?.codec).toBe(codec)
+
+		const result = await decodeAll(defined(probed), blocks)
+
+		expect(result.frames.every(frame => frame.sampleRate === 22_050 && frame.channels === 1)).toBe(true)
+		expect(Math.abs(result.samples - 11_025)).toBeLessThan(2048)
+		expect(result.peak).toBeGreaterThan(0.05)
+	})
+
+	it("decodes WMA 2 from its ASF stream's format: block size, bit rate and extra data", async () => {
+		const bytes = fixture("wmav2-mono.asf")
+		const stream = parseAsfHeader(bytes).streams.find(entry => "audio" in entry)
+		const probed = stream === undefined ? null : waveProbedCodec("wma", stream.specific, 22_050, 1)
+		const input = new Input({ formats: [ASF], source: new BufferSource(bytes) })
+		const track = await input.getPrimaryAudioTrack()
+		const packets: Uint8Array[] = []
+
+		for await (const packet of new EncodedPacketSink(defined(track)).packets()) {
+			packets.push(packet.data)
+		}
+
+		expect(probed).toMatchObject({ codec: "wmav2", stream: { bitRate: 32_000, sampleRate: 22_050, channels: 1 } })
+		expect(probed?.stream?.blockAlign).toBeGreaterThan(0)
+
+		const result = await decodeAll(defined(probed), packets)
+
+		expect(result.frames.every(frame => frame.sampleRate === 22_050 && frame.channels === 1)).toBe(true)
+		expect(Math.abs(result.samples - 11_025)).toBeLessThan(4096)
+		expect(result.peak).toBeGreaterThan(0.05)
+	})
+
+	it("decodes MP2 frame by frame", async () => {
+		const bytes = fixture("mp2-stereo.mp2")
+		const packets: Uint8Array[] = []
+
+		for (let at = 0; at + 4 <= bytes.length;) {
+			const header = mpegAudioHeader(bytes, at)
+			const size = header?.frameBytes ?? null
+
+			if (size === null) {
+				break
+			}
+
+			packets.push(bytes.slice(at, at + size))
+			at += size
+		}
+
+		const result = await decodeAll({ codec: "mp2" }, packets)
+
+		expect(packets.length).toBeGreaterThan(5)
+		expect(result.frames.every(frame => frame.sampleRate === 48_000 && frame.channels === 2)).toBe(true)
+		expect(result.samples).toBe(packets.length * 1152)
+		expect(result.peak).toBeGreaterThan(0.05)
+	})
+
+	it("opens the decoders no fixture here encodes, given their format fields", async () => {
+		const worker = startWorker()
+
+		for (const [codec, stream] of [
+			["mp1", undefined],
+			["amrnb", { blockAlign: 0, bitRate: 0, sampleRate: 8000, channels: 1, bitsPerSample: 0 }],
+			["amrwb", { blockAlign: 0, bitRate: 0, sampleRate: 16_000, channels: 1, bitsPerSample: 0 }]
+		] as const) {
+			const answer = await worker.request({ type: "open", codec, ...(stream === undefined ? {} : { stream }) })
+
+			expect(answer.error, codec).toBeUndefined()
+			expect(answer.handle, codec).toEqual(expect.any(Number))
+		}
 	})
 
 	it("refuses an unknown codec without opening a decoder", async () => {

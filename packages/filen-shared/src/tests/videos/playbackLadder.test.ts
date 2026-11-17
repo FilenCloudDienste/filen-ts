@@ -426,6 +426,15 @@ describe("rung C: remux + audio transcode", () => {
 		expect(truehd.reasons).toContain("audio-not-transcodable")
 	})
 
+	it("transcodes what FFmpeg decodes in the remux worker: WMA, MP1/MP2, AMR and ADPCM", () => {
+		for (const codec of ["wma", "wmapro", "wmalossless", "mp1", "mp2", "amr", "amrwb", "adpcm"]) {
+			const audio: LadderAudio = { codec, codecString: null, channels: 2 }
+
+			expect(isAudioDecodable(codec), codec).toBe(true)
+			expect(decidePlayback(probe("ts", H264, audio), sel(), caps({ mse, encoders: ["aac"] })).path, codec).toBe("remux+transcode")
+		}
+	})
+
 	it("transcodes FLAC (never to FLAC) when not copyable", () => {
 		const decision = decidePlayback(probe("mkv", H264, FLAC), sel(), caps({ mse, encoders: ["aac", "opus"] }))
 

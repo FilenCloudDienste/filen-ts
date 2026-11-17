@@ -2,7 +2,7 @@
 // build-ffmpeg-decoders.sh (--extern-post-js). One worker serves every open decoder; requests are answered
 // in the order they arrive.
 //
-//   { id, type: "open", codec, extradata? }                      -> { id, handle }   (codec: a CODECS key)
+//   { id, type: "open", codec, extradata?, stream? }             -> { id, handle }   (codec: a CODECS key)
 //   { id, type: "decode", handle, data, timestampUs }           -> { id, frames }
 //   { id, type: "flush", handle }                                -> { id, frames }
 //   { id, type: "close", handle }                                -> { id }
@@ -17,7 +17,24 @@
 ;(() => {
 	"use strict"
 
-	const CODECS = { ac3: 0, eac3: 1, dts: 2, truehd: 3, alac: 4, flac: 5 }
+	const CODECS = {
+		ac3: 0,
+		eac3: 1,
+		dts: 2,
+		truehd: 3,
+		alac: 4,
+		flac: 5,
+		wmav1: 6,
+		wmav2: 7,
+		wmapro: 8,
+		wmalossless: 9,
+		mp1: 10,
+		mp2: 11,
+		amrnb: 12,
+		amrwb: 13,
+		adpcm_ms: 14,
+		adpcm_ima_wav: 15
+	}
 	// Indexed by AVSampleFormat: [AudioSampleFormat, bytes per sample, planar]. Doubles and 64-bit integers
 	// have no AudioSampleFormat, and none of these decoders produces them.
 	const FORMATS = [
@@ -104,8 +121,8 @@
 					throw new Error(`no FFmpeg decoder for ${String(request.codec)}`)
 				}
 
-				// The codec configuration (ALAC's magic cookie), copied into a buffer the decoder then owns; an empty
-				// one is none.
+				// The codec configuration (ALAC's magic cookie, a WAVEFORMATEX's extra bytes), copied into a buffer the
+				// decoder then owns; an empty one is none.
 				const config = request.extradata === undefined || request.extradata.byteLength === 0 ? null : new Uint8Array(request.extradata)
 				const extradata = config === null ? 0 : module._decoder_extradata(config.length)
 
@@ -117,7 +134,19 @@
 					module.HEAPU8.set(config, extradata)
 				}
 
-				const handle = module._decoder_open(CODECS[request.codec], extradata, config === null ? 0 : config.length)
+				// The stream's WAVEFORMATEX fields: { blockAlign, bitRate, sampleRate, channels, bitsPerSample }, 0 for none.
+				const stream = request.stream ?? {}
+				const field = value => (Number.isInteger(value) && value > 0 && value < 0x7fffffff ? value : 0)
+				const handle = module._decoder_open(
+					CODECS[request.codec],
+					extradata,
+					config === null ? 0 : config.length,
+					field(stream.blockAlign),
+					field(stream.bitRate),
+					field(stream.sampleRate),
+					field(stream.channels),
+					field(stream.bitsPerSample)
+				)
 
 				if (handle === 0) {
 					throw new Error(`cannot open an FFmpeg ${request.codec} decoder`)
@@ -193,7 +222,11 @@
 
 				// A trap or an Emscripten abort leaves the module's memory in any state; a module that failed to
 				// compile or link never works.
-				if (error instanceof WebAssembly.RuntimeError || error instanceof WebAssembly.CompileError || error instanceof WebAssembly.LinkError) {
+				if (
+					error instanceof WebAssembly.RuntimeError ||
+					error instanceof WebAssembly.CompileError ||
+					error instanceof WebAssembly.LinkError
+				) {
 					dead = true
 					self.postMessage({ id: request.id, fatal: message })
 					self.close()

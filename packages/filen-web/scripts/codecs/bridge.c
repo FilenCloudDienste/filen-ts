@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include "libavcodec/avcodec.h"
+#include "libavutil/channel_layout.h"
 #include "libavutil/log.h"
 #include "libavutil/mem.h"
 
@@ -17,7 +18,24 @@ typedef struct {
 	AVFrame *frame;
 } Decoder;
 
-enum { CODEC_AC3 = 0, CODEC_EAC3 = 1, CODEC_DTS = 2, CODEC_TRUEHD = 3, CODEC_ALAC = 4, CODEC_FLAC = 5 };
+enum {
+	CODEC_AC3 = 0,
+	CODEC_EAC3 = 1,
+	CODEC_DTS = 2,
+	CODEC_TRUEHD = 3,
+	CODEC_ALAC = 4,
+	CODEC_FLAC = 5,
+	CODEC_WMAV1 = 6,
+	CODEC_WMAV2 = 7,
+	CODEC_WMAPRO = 8,
+	CODEC_WMALOSSLESS = 9,
+	CODEC_MP1 = 10,
+	CODEC_MP2 = 11,
+	CODEC_AMRNB = 12,
+	CODEC_AMRWB = 13,
+	CODEC_ADPCM_MS = 14,
+	CODEC_ADPCM_IMA_WAV = 15
+};
 
 static enum AVCodecID codec_id_of(int codec) {
 	switch (codec) {
@@ -33,6 +51,26 @@ static enum AVCodecID codec_id_of(int codec) {
 		return AV_CODEC_ID_ALAC;
 	case CODEC_FLAC:
 		return AV_CODEC_ID_FLAC;
+	case CODEC_WMAV1:
+		return AV_CODEC_ID_WMAV1;
+	case CODEC_WMAV2:
+		return AV_CODEC_ID_WMAV2;
+	case CODEC_WMAPRO:
+		return AV_CODEC_ID_WMAPRO;
+	case CODEC_WMALOSSLESS:
+		return AV_CODEC_ID_WMALOSSLESS;
+	case CODEC_MP1:
+		return AV_CODEC_ID_MP1;
+	case CODEC_MP2:
+		return AV_CODEC_ID_MP2;
+	case CODEC_AMRNB:
+		return AV_CODEC_ID_AMR_NB;
+	case CODEC_AMRWB:
+		return AV_CODEC_ID_AMR_WB;
+	case CODEC_ADPCM_MS:
+		return AV_CODEC_ID_ADPCM_MS;
+	case CODEC_ADPCM_IMA_WAV:
+		return AV_CODEC_ID_ADPCM_IMA_WAV;
 	default:
 		return AV_CODEC_ID_NONE;
 	}
@@ -73,9 +111,12 @@ uint8_t *decoder_extradata(int size) {
 	return size <= 0 ? NULL : av_mallocz((size_t)size + AV_INPUT_BUFFER_PADDING_SIZE);
 }
 
-// `extradata` (from decoder_extradata, or NULL) is the decoder's from here on, freed with it or here on failure.
+// `extradata` (from decoder_extradata, or NULL) is the decoder's from here on, freed with it or here on failure. The
+// stream's WAVEFORMATEX fields (0 where the container has none): WMA and ADPCM need the block size, WMA the bit rate,
+// ADPCM the bits per sample, and the decoders that read no header of their own the rate and channels.
 EMSCRIPTEN_KEEPALIVE
-Decoder *decoder_open(int codec_id, uint8_t *extradata, int extradata_size) {
+Decoder *decoder_open(int codec_id, uint8_t *extradata, int extradata_size, int block_align, int bit_rate, int sample_rate,
+	int channels, int bits_per_sample) {
 	const AVCodec *codec = avcodec_find_decoder(codec_id_of(codec_id));
 	Decoder *decoder = calloc(1, sizeof(Decoder));
 
@@ -104,6 +145,14 @@ Decoder *decoder_open(int codec_id, uint8_t *extradata, int extradata_size) {
 
 	// Timestamps travel in microseconds and come back unchanged on the frames they belong to.
 	decoder->codec->pkt_timebase = (AVRational){1, 1000000};
+	decoder->codec->block_align = block_align > 0 ? block_align : 0;
+	decoder->codec->bit_rate = bit_rate > 0 ? bit_rate : 0;
+	decoder->codec->sample_rate = sample_rate > 0 ? sample_rate : 0;
+	decoder->codec->bits_per_coded_sample = bits_per_sample > 0 ? bits_per_sample : 0;
+
+	if (channels > 0) {
+		av_channel_layout_default(&decoder->codec->ch_layout, channels);
+	}
 
 	if (avcodec_open2(decoder->codec, codec, NULL) < 0) {
 		decoder_free(decoder);

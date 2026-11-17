@@ -205,7 +205,7 @@ describe("MPEG-TS probe", () => {
 		])
 	})
 
-	it("names MPEG audio MP3 only for layer III", async () => {
+	it("names MPEG audio by layer, with a codec string for MP3 only", async () => {
 		const layer2 = [0xff, 0xfd, 0x84, 0x04]
 		const layer3 = [0xff, 0xfb, 0x90, 0xc4]
 		const { record } = await probe(
@@ -220,7 +220,7 @@ describe("MPEG-TS probe", () => {
 
 		expect(record?.video).toBeNull()
 		expect(record?.audio.map(track => [track.codec, track.codecString, track.ch, track.rate])).toEqual([
-			[null, null, 2, 48000],
+			["mp2", null, 2, 48000],
 			["mp3", "mp4a.6B", 1, 44100]
 		])
 	})

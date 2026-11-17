@@ -192,6 +192,34 @@ describe("probe records", () => {
 		expect(recordSatisfies(withRev({ ...amr, container: "mkv" }, 2), "card")).toBe(true)
 	})
 
+	it("probes again at revision 4 a transport stream's unnamed audio, which MP1/MP2 now names, and nothing else", () => {
+		const unnamed = {
+			id: 2,
+			codec: null,
+			codecString: null,
+			ch: 2,
+			rate: 48_000,
+			lang: null,
+			name: null,
+			def: true,
+			forced: false,
+			commentary: false
+		}
+		const ts = probe({ container: "ts", index: "none", audio: [unnamed] })
+		const at = (record: VideoProbe | null, rev: number) => ({
+			probe: record,
+			tiers: { card: true, full: true, cover: true },
+			at: 1,
+			rev
+		})
+
+		expect(recordSatisfies(at(ts, 3), "card")).toBe(false)
+		expect(recordSatisfies(at(ts, 4), "card")).toBe(true)
+		expect(recordSatisfies(at(probe({ container: "ts", index: "none" }), 3), "card")).toBe(true)
+		expect(recordSatisfies(at(probe({ container: "avi", index: "idx", audio: [unnamed] }), 3), "card")).toBe(true)
+		expect(recordSatisfies(at(null, 3), "card", () => "film.avi")).toBe(true)
+	})
+
 	it("folds a new read into an older record without keeping what it read differently", () => {
 		const oldMkv = {
 			probe: withoutLandscapeCover(probe({ container: "mkv", cover: COVER })),

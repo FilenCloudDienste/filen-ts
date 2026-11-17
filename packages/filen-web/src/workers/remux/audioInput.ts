@@ -17,8 +17,8 @@ import { AUDIO_UNSUPPORTED_ERROR, type RemuxStats } from "@/lib/media/remuxTypes
 import { sampleReader, type SampleItem, type SampleReader } from "@/workers/remux/audioTranscode"
 import { estimateFrameStreamDuration, ID3V2_HEADER_BYTES, id3v2Bytes } from "@/workers/remux/audioDuration.logic"
 import { ac3Layout, dtsLayout, type Speaker } from "@/workers/remux/channelLayout.logic"
-import { isTranscodableAudio } from "@/workers/remux/codecs.logic"
-import { decodedSamples, ffmpegDecoders, type DecoderLease, type FfmpegCodec } from "@/workers/remux/ffmpegDecoder"
+import { isTranscodableAudio, walkDecides } from "@/workers/remux/codecs.logic"
+import { decodedSamples, ffmpegDecoders, type DecoderLease, type FfmpegCodec, type FfmpegStream } from "@/workers/remux/ffmpegDecoder"
 import {
 	MAX_UNIT_BYTES,
 	measureRawStream,
@@ -117,6 +117,7 @@ export function alacExtradata(config: Uint8Array): Uint8Array | null {
 export function ffmpegSampleReader<P>(params: {
 	codec: FfmpegCodec
 	extradata?: Uint8Array
+	stream?: FfmpegStream
 	packets: PacketCursor<P>
 	stats: RemuxStats
 }): SampleReader {
@@ -134,7 +135,7 @@ export function ffmpegSampleReader<P>(params: {
 	const isClosed = (): boolean => closed
 
 	const open = (): Promise<DecoderLease> => {
-		opening ??= ffmpegDecoders.open(codec, params.extradata).then(opened => {
+		opening ??= ffmpegDecoders.open(codec, params.extradata, params.stream).then(opened => {
 			lease = opened
 
 			return opened
@@ -513,10 +514,68 @@ function openRaw(source: BlockInput, raw: { info: RawStreamInfo; header: Speaker
 export interface ProbedCodec {
 	codec: FfmpegCodec
 	extradata?: Uint8Array
+	stream?: FfmpegStream
 }
 
-// Audio tracks mediabunny cannot name but our own container walk can (TrueHD, ALAC), with ALAC's cookie, keyed by
-// the track's 1-based place among the file's audio tracks. The walk knows a track by the container's own ID,
+// The FFmpeg decoder for a walked codec its WAVEFORMATEX (`format`) holds the rest of: WMA by version, ADPCM by
+// flavour, with the format's block size, bit rate and extra bytes. Null for a codec FFmpeg does not decode here.
+export function waveProbedCodec(
+	codec: string,
+	format: Uint8Array | null,
+	rate: number | null,
+	channels: number | null
+): ProbedCodec | null {
+	const view = format === null || format.length < 16 ? null : new DataView(format.buffer, format.byteOffset, format.byteLength)
+	const tag = view?.getUint16(0, true) ?? 0
+	const extraLength = view === null || format === null || format.length < 18 ? 0 : Math.min(view.getUint16(16, true), format.length - 18)
+	const stream: FfmpegStream = {
+		blockAlign: view?.getUint16(12, true) ?? 0,
+		bitRate: (view?.getUint32(8, true) ?? 0) * 8,
+		sampleRate: rate ?? view?.getUint32(4, true) ?? 0,
+		channels: channels ?? view?.getUint16(2, true) ?? 0,
+		bitsPerSample: view?.getUint16(14, true) ?? 0
+	}
+	const ffmpeg =
+		WALKED_CODECS[
+			codec === "wma"
+				? tag === 0x0160
+					? "wmav1"
+					: "wmav2"
+				: codec === "adpcm"
+					? tag === 0x0011
+						? "adpcm_ima_wav"
+						: "adpcm_ms"
+					: codec
+		]
+
+	if (ffmpeg === undefined) {
+		return null
+	}
+
+	return {
+		codec: ffmpeg,
+		stream,
+		...(format !== null && extraLength > 0 ? { extradata: format.slice(18, 18 + extraLength) } : {})
+	}
+}
+
+// The walk's codec names (by WAVEFORMATEX flavour for WMA and ADPCM) of the decoders FFmpeg runs for them.
+const WALKED_CODECS: Readonly<Record<string, FfmpegCodec>> = {
+	wmav1: "wmav1",
+	wmav2: "wmav2",
+	wmapro: "wmapro",
+	wmalossless: "wmalossless",
+	mp1: "mp1",
+	mp2: "mp2",
+	amr: "amrnb",
+	amrwb: "amrwb",
+	adpcm_ms: "adpcm_ms",
+	adpcm_ima_wav: "adpcm_ima_wav"
+}
+
+// Audio tracks mediabunny cannot name but our own container walk can (TrueHD, ALAC, WMA, MP1/MP2, AMR, ADPCM), with
+// what each decoder needs from the container (ALAC's cookie, a WAVEFORMATEX's fields), keyed by the track's 1-based
+// place among the file's audio tracks. The walk knows a track by the container's own ID,
 // mediabunny by its index in getTracks(); the order of the audio tracks is what both read the same.
 export async function probedCodecs(cache: BlockCache): Promise<Map<number, ProbedCodec>> {
 	const found = new Map<number, ProbedCodec>()
@@ -533,13 +592,21 @@ export async function probedCodecs(cache: BlockCache): Promise<Map<number, Probe
 
 			number++
 
-			if (track.audio.codec === "truehd") {
+			const { codec } = track.audio
+
+			if (codec === "truehd") {
 				found.set(number, { codec: "truehd" })
-			} else if (track.audio.codec === "alac") {
+			} else if (codec === "alac") {
 				const extradata = track.config === undefined || track.config === null ? null : alacExtradata(track.config)
 
 				if (extradata !== null) {
 					found.set(number, { codec: "alac", extradata })
+				}
+			} else if (codec !== null) {
+				const decoder = waveProbedCodec(codec, track.config ?? null, track.audio.rate, track.audio.ch)
+
+				if (decoder !== null) {
+					found.set(number, decoder)
 				}
 			}
 		}
@@ -551,11 +618,16 @@ export async function probedCodecs(cache: BlockCache): Promise<Map<number, Probe
 }
 
 // The walk's codec for one of mediabunny's audio tracks (`number` is InputAudioTrack.number). A codec mediabunny
-// names itself must agree, so a track only one side lists cannot shift a walked codec onto another stream.
+// names itself must agree, so a track only one side lists cannot shift a walked codec onto another stream; the one
+// exception is MPEG audio, which mediabunny calls MP3 whatever its layer, where the walk's MP1 or MP2 wins.
 export function probedCodecFor(probed: Map<number, ProbedCodec>, number: number, codec: string | null): ProbedCodec | null {
 	const known = probed.get(number)
 
-	return known !== undefined && (codec === null || codec === known.codec) ? known : null
+	if (known === undefined) {
+		return null
+	}
+
+	return codec === null || codec === known.codec || (codec === "mp3" && (known.codec === "mp1" || known.codec === "mp2")) ? known : null
 }
 
 // An MP3 or ADTS stream's duration, which no header gives: its size over the byte rate of its first frames,
@@ -625,18 +697,21 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 	for (const track of ordered) {
 		const codec = await track.getCodec()
 
-		if (isTranscodableAudio(codec)) {
-			chosen = { track, codec, ffmpeg: null }
-			break
+		// A codec mediabunny does not know, or MPEG audio it calls MP3 that the walk finds to be MP1/MP2: perhaps one
+		// only FFmpeg decodes.
+		if (walkDecides(codec)) {
+			probed ??= await probedCodecs(cache)
+
+			const known = probedCodecFor(probed, track.number, codec)
+
+			if (known !== null) {
+				chosen = { track, codec: known.codec, ffmpeg: known }
+				break
+			}
 		}
 
-		// Not a codec mediabunny knows: perhaps one only FFmpeg decodes.
-		probed ??= await probedCodecs(cache)
-
-		const known = probedCodecFor(probed, track.number, codec)
-
-		if (known !== null) {
-			chosen = { track, codec: known.codec, ffmpeg: known }
+		if (isTranscodableAudio(codec)) {
+			chosen = { track, codec, ffmpeg: null }
 			break
 		}
 	}
@@ -671,6 +746,7 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 				: ffmpegSampleReader({
 						codec: ffmpeg.codec,
 						...(ffmpeg.extradata === undefined ? {} : { extradata: ffmpeg.extradata }),
+						...(ffmpeg.stream === undefined ? {} : { stream: ffmpeg.stream }),
 						packets: containerPackets(track),
 						stats
 					}),

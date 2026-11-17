@@ -27,7 +27,7 @@ export interface PlaybackCapabilities {
 	decodingInfoMediaSource: Readonly<Record<string, DecodingVerdict>>
 	// Targets whose `AudioEncoder.isConfigSupported` passed (wasm AAC only after native failed).
 	audioEncoders: readonly AudioTarget[]
-	// Codec names the browser can decode for transcoding; defaults to `isAudioDecodable`. AC-3, E-AC-3 and DTS always have wasm decoders.
+	// Codec names the browser can decode for transcoding; defaults to `isAudioDecodable`. AC-3, E-AC-3, DTS, WMA, MP1/MP2, AMR and ADPCM always have wasm decoders.
 	audioDecoders?: readonly string[]
 }
 
@@ -108,7 +108,20 @@ const REMUX_CONTAINERS: ReadonlySet<string> = new Set(["mkv", "webm", "mp4", "m4
 
 // WebCodecs-decodable by name (Mediabunny's vocabulary); PCM variants (pcm-s16, pcm-f32be, ...), u-law and a-law are handled in code.
 const WEBCODECS_AUDIO_DECODERS: ReadonlySet<string> = new Set(["aac", "mp3", "opus", "flac", "vorbis"])
-const WASM_AUDIO_DECODERS: ReadonlySet<string> = new Set(["ac3", "eac3", "dts"])
+// Decoded by FFmpeg built to WebAssembly in the remux worker.
+const WASM_AUDIO_DECODERS: ReadonlySet<string> = new Set([
+	"ac3",
+	"eac3",
+	"dts",
+	"wma",
+	"wmapro",
+	"wmalossless",
+	"mp1",
+	"mp2",
+	"amr",
+	"amrwb",
+	"adpcm"
+])
 const TARGET_BITRATE = 128_000
 
 const TARGET_MIMES: Readonly<Record<AudioTarget, { mime: string; codecString: string }>> = {

@@ -51,18 +51,12 @@ import {
 	probedCodecFor,
 	probedCodecs,
 	rawPackets,
-	rawStreamOf
+	rawStreamOf,
+	type ProbedCodec
 } from "@/workers/remux/audioInput"
 import type { RawStreamInfo } from "@/workers/remux/rawAudio.logic"
-import type { FfmpegCodec } from "@/workers/remux/ffmpegDecoder"
 import { ac3Layout, dtsLayout, layoutFor, type Speaker } from "@/workers/remux/channelLayout.logic"
-import {
-	copyCodecString,
-	isCopyableAudio,
-	isFfmpegReaderAudio,
-	isTranscodableAudio,
-	outputVideoCodecString
-} from "@/workers/remux/codecs.logic"
+import { copyCodecString, isCopyableAudio, isTranscodableAudio, walkDecides, outputVideoCodecString } from "@/workers/remux/codecs.logic"
 import { hevcKeyIsIdr, hevcLengthSize, IDR_REACH_KEYS, idrReachSeconds } from "@/workers/remux/hevc.logic"
 import { KeyIndex, seekReach } from "@/workers/remux/keyIndex"
 import { FragmentedTrackOutput, FragmentTooLargeError } from "@/workers/remux/output"
@@ -127,8 +121,7 @@ function bytesOf(source: AllowSharedBufferSource | undefined): Uint8Array | null
 // A track the demuxer reads, with FFmpeg's decoder where mediabunny has none for its codec (TrueHD, ALAC);
 // or a bare AC-3/E-AC-3/DTS stream, which no demuxer reads.
 type AudioSource =
-	| { kind: "track"; track: InputAudioTrack; codec: AudioCodec | null; ffmpeg: { codec: FfmpegCodec; extradata?: Uint8Array } | null }
-	| { kind: "raw"; info: RawStreamInfo }
+	{ kind: "track"; track: InputAudioTrack; codec: AudioCodec | null; ffmpeg: ProbedCodec | null } | { kind: "raw"; info: RawStreamInfo }
 
 // The one track id a bare stream is opened under.
 const RAW_TRACK_ID = 1
@@ -315,7 +308,7 @@ export class RemuxEngine {
 		])
 
 		// A codec mediabunny does not know (or TrueHD) may be one FFmpeg decodes, which the container walk names.
-		const ffmpeg = isFfmpegReaderAudio(codec) ? probedCodecFor(await this.probedCodecs(), track.number, codec) : null
+		const ffmpeg = walkDecides(codec) ? probedCodecFor(await this.probedCodecs(), track.number, codec) : null
 
 		// Audio tracks go by their place among the file's audio tracks, which the probe's audio list (container order)
 		// gives too: InputTrack.id counts every track, and is not the container's own ID either.
@@ -843,6 +836,7 @@ export class RemuxEngine {
 			return ffmpegSampleReader({
 				codec: source.ffmpeg.codec,
 				...(source.ffmpeg.extradata === undefined ? {} : { extradata: source.ffmpeg.extradata }),
+				...(source.ffmpeg.stream === undefined ? {} : { stream: source.ffmpeg.stream }),
 				packets: containerPackets(source.track),
 				stats: this.stats
 			})

@@ -205,7 +205,7 @@ export function dolbyFormat(bytes: Uint8Array, at: number): AudioFormat | null {
 	return { ch: (AC3_CHANNELS[(packed >> 1) & 0x07] ?? 2) + (packed & 1), rate }
 }
 
-// MPEG audio as a probe names it: layer III is MP3; layers I and II are no codec named yet.
+// MPEG audio as a probe names it by layer: MP1, MP2 or MP3. Only MP3 has a codec string a browser plays.
 export function mpegAudioFormat(bytes: Uint8Array, at: number): AudioFormat | null {
 	const header = mpegAudioHeader(bytes, at)
 
@@ -218,7 +218,7 @@ export function mpegAudioFormat(bytes: Uint8Array, at: number): AudioFormat | nu
 	return {
 		ch: header.channels,
 		rate: header.rate,
-		codec: mp3 ? "mp3" : null,
+		codec: mp3 ? "mp3" : header.layer === 2 ? "mp2" : "mp1",
 		codecString: mp3 ? simpleAudioCodecString("mp3") : null
 	}
 }
