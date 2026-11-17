@@ -289,7 +289,8 @@ export class PacketDemuxer implements Demuxer {
 
 		const first = this.runAt(reader.dataStart)
 
-		while (first.packets.length === 0 && !first.done) {
+		// As far as a track's first packet is looked for: data that yields none counts from 0.
+		while (first.packets.length === 0 && !first.done && first.next - reader.dataStart <= FIRST_PACKET_BYTES) {
 			await this.advance(reader, first)
 		}
 
@@ -382,9 +383,14 @@ export class PacketDemuxer implements Demuxer {
 		}
 
 		// One run alone past the budget: its oldest packets go, down to half of them or the latest read's, which the
-		// reader reads again if asked.
+		// reader reads again if asked. The cut falls between units: the run starts at a unit it holds whole, so a packet
+		// of an earlier unit is looked for in a read of its own rather than missed in this run.
 		if (overBudget(keptCost(this.runs))) {
-			const drop = Math.min(Math.ceil(keep.packets.length / 2), keep.packets.length - keep.fresh)
+			let drop = Math.min(Math.ceil(keep.packets.length / 2), keep.packets.length - keep.fresh)
+
+			while (drop > 0 && keep.packets[drop]?.unit === keep.packets[drop - 1]?.unit) {
+				drop--
+			}
 
 			if (drop > 0) {
 				keep.start = keep.packets[drop]?.unit ?? keep.next
@@ -404,17 +410,26 @@ export class PacketDemuxer implements Demuxer {
 	}
 
 	// The first packet in `run` after `sequence` that `wanted` accepts, reading on while the run reaches no further than
-	// `limit`. Looked up by sequence after every read, since eviction may drop the run's oldest packets meanwhile.
+	// `limit`. Looked up by sequence after every read, since eviction may drop the run's oldest packets meanwhile: once
+	// it dropped any past the cursor (the run now starts after the cursor's unit), the search goes on in a run read
+	// again from there, so a lagging track skips nothing.
 	private async following(
 		reader: ContainerReader,
-		run: Run,
+		start: Run,
 		sequence: number,
 		wanted: (packet: DemuxPacket) => boolean,
 		limit: number
 	): Promise<DemuxPacket | null> {
 		let cursor = sequence
+		let run = start
 
 		for (;;) {
+			const unit = cursor < 0 ? reader.dataStart : Math.floor(cursor / MAX_PARTS)
+
+			if (run.start > unit) {
+				run = this.runAt(unit)
+			}
+
 			for (let index = PacketDemuxer.firstAfter(run, cursor); index < run.packets.length; index++) {
 				const packet = run.packets[index]
 

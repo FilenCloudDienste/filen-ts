@@ -115,3 +115,109 @@ describe("PacketDemuxer", () => {
 		expect(reads.length).toBeGreaterThan(before)
 	})
 })
+
+// Two audio tracks whose packets share their units: 16-byte units, each holding one packet of either track, read
+// in windows of 64 units. Packets carry no payload of their own, so only the record budget evicts.
+const SMALL_UNIT = 16
+const WINDOW_UNITS = 64
+
+function audioTrack(number: number) {
+	return {
+		type: "audio" as const,
+		number,
+		name: null,
+		language: "und",
+		isDefault: number === 1,
+		internalCodecId: null,
+		codec: "pcm-s16" as const,
+		channels: 1,
+		sampleRate: 48000,
+		decoderConfig: { codec: "pcm-s16", numberOfChannels: 1, sampleRate: 48000 }
+	}
+}
+
+function sharedUnits(units: number, tracks: number[]): ContainerReader {
+	return {
+		tracks: [audioTrack(1), audioTrack(2)],
+		duration: units * 0.01,
+		dataStart: 0,
+		readPackets: pos => {
+			const start = pos / SMALL_UNIT
+
+			if (start >= units) {
+				return Promise.resolve(null)
+			}
+
+			const packets: DemuxPacket[] = []
+			const end = Math.min(units, start + WINDOW_UNITS)
+
+			for (let unit = start; unit < end; unit++) {
+				tracks.forEach((track, part) => {
+					packets.push({
+						track,
+						pts: unit * 0.01,
+						duration: 0.01,
+						key: true,
+						unit: unit * SMALL_UNIT,
+						part,
+						pos: unit * SMALL_UNIT,
+						size: 1
+					})
+				})
+			}
+
+			return Promise.resolve({ packets, next: end * SMALL_UNIT })
+		},
+		resync: pos => Promise.resolve(Math.ceil(pos / SMALL_UNIT) * SMALL_UNIT)
+	}
+}
+
+function inputOver(reader: ContainerReader, size: number): Input {
+	return new Input({ formats: [new FakeFormat(reader)], source: new BufferSource(new Uint8Array(size)) })
+}
+
+describe("PacketDemuxer eviction", () => {
+	it("never ends a track mid-way when the run it reads from is cut, however far one track lags the other", async () => {
+		const UNITS = 6000
+
+		for (let lag = 1200; lag <= 1500; lag += 37) {
+			const input = inputOver(sharedUnits(UNITS, [1, 2]), UNITS * SMALL_UNIT)
+			const [lead, behind] = await input.getAudioTracks()
+			const ahead = new EncodedPacketSink(lead ?? expect.unreachable())
+			const after = new EncodedPacketSink(behind ?? expect.unreachable())
+			let a = await ahead.getFirstPacket()
+			let b = await after.getFirstPacket()
+			let readA = 1
+			let readB = 1
+
+			while (a !== null || b !== null) {
+				if (a !== null && (readA - readB < lag || b === null)) {
+					a = await ahead.getNextPacket(a)
+					readA += a === null ? 0 : 1
+				} else if (b !== null) {
+					b = await after.getNextPacket(b)
+					readB += b === null ? 0 : 1
+				}
+			}
+
+			expect([lag, readA, readB]).toEqual([lag, UNITS, UNITS])
+		}
+	})
+
+	it("stops looking for the first packet where no listed track's packets come", async () => {
+		const reads: number[] = []
+		const silent = sharedUnits(1_000_000, [7, 8])
+		const reader: ContainerReader = {
+			...silent,
+			readPackets: pos => {
+				reads.push(pos)
+
+				return silent.readPackets(pos)
+			}
+		}
+		const input = inputOver(reader, 1_000_000 * SMALL_UNIT)
+
+		expect(await new EncodedPacketSink((await input.getAudioTracks())[0] ?? expect.unreachable()).getFirstPacket()).toBeNull()
+		expect(Math.max(...reads)).toBeLessThanOrEqual(17 * 1024 * 1024)
+	})
+})
