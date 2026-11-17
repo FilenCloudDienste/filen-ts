@@ -6,6 +6,7 @@
 // via the per-file pragma while the rest of the suite stays on vitest.config.ts's global "node"
 // environment (no other unit test needs a DOM).
 
+import DOMPurify from "dompurify"
 import { describe, expect, it } from "vitest"
 import { sanitizeRichTextHtml, RICH_TEXT_ALLOWED_TAGS, RICH_TEXT_ALLOWED_ATTR } from "@/features/notes/lib/sanitizeRichText"
 
@@ -246,5 +247,31 @@ describe("sanitizeRichTextHtml — afterSanitizeAttributes link-hardening hook",
 
 		expect(out).not.toContain("target=")
 		expect(out).not.toContain("rel=")
+	})
+})
+
+// Hooks belong to a DOMPurify instance. Notes have one of their own, so a hook another sanitizer adds to the default
+// instance never changes a note, and the note's class and style filter never reaches anyone else's output.
+describe("sanitizeRichTextHtml — its own DOMPurify instance", () => {
+	const NOTE = '<p class="ql-align-center fixed">Hi <a href="https://example.com">there</a></p>'
+
+	it("leaves the default instance without the note's filters", () => {
+		sanitizeRichTextHtml(NOTE)
+
+		expect(DOMPurify.sanitize('<p class="fixed">x</p>')).toBe('<p class="fixed">x</p>')
+	})
+
+	it("renders a note the same after another sanitizer hooks the default instance", () => {
+		const before = sanitizeRichTextHtml(NOTE)
+
+		DOMPurify.addHook("afterSanitizeAttributes", node => {
+			node.setAttribute("data-other", "1")
+		})
+
+		try {
+			expect(sanitizeRichTextHtml(NOTE)).toBe(before)
+		} finally {
+			DOMPurify.removeHooks("afterSanitizeAttributes")
+		}
 	})
 })
