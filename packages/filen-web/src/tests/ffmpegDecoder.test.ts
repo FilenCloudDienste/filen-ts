@@ -132,6 +132,35 @@ describe("FfmpegAudioDecoder", () => {
 		expect(supported("webkit")).toEqual(["ac3", "eac3", "dts", "flac"])
 	})
 
+	it("stops the worker at once when closed during an open that never answers", async () => {
+		const h = harness()
+		const init = h.decoder.init()
+		const worker = h.worker()
+
+		void h.decoder.close()
+		// The only user went with the close: the worker stops, though its open never answered.
+		expect(worker.terminated).toBe(true)
+		await init
+	})
+
+	it("closes a decoder whose open lands after the decoder was closed", async () => {
+		const h = harness()
+		const keep = h.makeDecoder()
+
+		await opened(h, 9, keep)
+
+		const worker = h.worker()
+		const init = h.decoder.init()
+		const open = worker.last()
+
+		void h.decoder.close()
+		worker.answer({ id: open.id, handle: 3 })
+		await init
+		await expect.poll(() => worker.posted.some(entry => entry.message.type === "close" && entry.message.handle === 3)).toBe(true)
+		// The other decoder's hold keeps the worker.
+		expect(worker.terminated).toBe(false)
+	})
+
 	it("opens a decoder for the track's codec in one shared worker", async () => {
 		const h = harness()
 

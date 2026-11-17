@@ -100,9 +100,20 @@ export class DecoderWorker {
 	}
 
 	// Every open that resolves is balanced by exactly one release of its lease; one that fails releases its worker
-	// itself.
-	public async open(codec: FfmpegCodec, extradata?: Uint8Array, stream?: FfmpegStream): Promise<DecoderLease> {
+	// itself. Aborted while under way, it releases the worker at once (which may stop it) rather than when it settles,
+	// and a decoder it opened after all is closed.
+	public async open(codec: FfmpegCodec, extradata?: Uint8Array, stream?: FfmpegStream, signal?: AbortSignal): Promise<DecoderLease> {
 		const worker = this.nested.acquire()
+		// Set by an abort, which lands while the open awaits.
+		const state = { released: false }
+		const release = (): void => {
+			if (!state.released) {
+				state.released = true
+				this.nested.release(worker)
+			}
+		}
+
+		signal?.addEventListener("abort", release, { once: true })
 
 		try {
 			// An empty configuration is none.
@@ -122,11 +133,21 @@ export class DecoderWorker {
 				throw new Error("the audio decoder worker returned no decoder")
 			}
 
+			if (state.released) {
+				if (this.nested.current(worker)) {
+					this.nested.request(worker, { type: "close", handle }).catch(() => undefined)
+				}
+
+				throw new DOMException("the decoder was closed while it opened", "AbortError")
+			}
+
 			return { handle, worker }
 		} catch (error) {
-			this.nested.release(worker)
+			release()
 
 			throw error
+		} finally {
+			signal?.removeEventListener("abort", release)
 		}
 	}
 
@@ -192,6 +213,8 @@ export function ffmpegAudioDecoder(worker: DecoderWorker, codecs: readonly Audio
 	return class FfmpegAudioDecoder extends CustomAudioDecoder {
 		private lease: DecoderLease | null = null
 		private opening: Promise<DecoderLease> | null = null
+		// Aborts an open still under way when the decoder closes.
+		private readonly closing = new AbortController()
 		// Where the next sample starts when FFmpeg gives one no timestamp.
 		private nextTimestamp = 0
 
@@ -219,7 +242,9 @@ export function ffmpegAudioDecoder(worker: DecoderWorker, codecs: readonly Audio
 					? undefined
 					: ArrayBuffer.isView(description)
 						? new Uint8Array(description.buffer, description.byteOffset, description.byteLength)
-						: new Uint8Array(description)
+						: new Uint8Array(description),
+				undefined,
+				this.closing.signal
 			)
 
 			try {
@@ -259,7 +284,8 @@ export function ffmpegAudioDecoder(worker: DecoderWorker, codecs: readonly Audio
 			const opening = this.opening
 
 			if (opening !== null) {
-				// An open still under way is released once it lands; a failed one released its worker itself.
+				// An open still under way is aborted, releasing its worker now; one that landed is released.
+				this.closing.abort()
 				opening.then(
 					lease => {
 						worker.release(lease)

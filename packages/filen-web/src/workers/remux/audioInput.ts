@@ -125,6 +125,8 @@ export function ffmpegSampleReader<P>(params: {
 	const { codec, packets, stats } = params
 	let lease: DecoderLease | null = null
 	let opening: Promise<DecoderLease> | null = null
+	// Aborts an open still under way on close.
+	const closing = new AbortController()
 	let last: P | null = null
 	let done = false
 	// Set by close(), which a pull still waiting on a read or a decode outlives: nothing is opened or queued
@@ -136,7 +138,7 @@ export function ffmpegSampleReader<P>(params: {
 	const isClosed = (): boolean => closed
 
 	const open = (): Promise<DecoderLease> => {
-		opening ??= ffmpegDecoders.open(codec, params.extradata, params.stream).then(opened => {
+		opening ??= ffmpegDecoders.open(codec, params.extradata, params.stream, closing.signal).then(opened => {
 			lease = opened
 
 			return opened
@@ -258,8 +260,9 @@ export function ffmpegSampleReader<P>(params: {
 
 				opening = null
 				lease = null
+				// One still under way releases its worker now; a failed or aborted one released it itself.
+				closing.abort()
 
-				// A failed open released its worker itself.
 				const held = await pending.catch(() => null)
 
 				if (held !== null) {
