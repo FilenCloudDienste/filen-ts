@@ -4,6 +4,23 @@ import { externalLinkDomain, shouldInterceptLinkClick } from "@/lib/trustedLinks
 import { trustDomain } from "@/lib/trustedLinks/trustedDomains"
 import { useTrustedDomainsQuery } from "@/lib/trustedLinks/trustedDomainsQuery"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { isSafeAbsoluteHref } from "@/lib/safeUrl"
+
+// The part of a DOM node linkHrefOf reads, whichever window it belongs to.
+interface LinkNode {
+	readonly nodeType: number
+	readonly parentElement: LinkNode | null
+	closest?(selectors: string): { getAttribute(name: string): string | null } | null
+}
+
+// The href of the link an event landed in (an `a` or image-map `area` with an href: the target or an ancestor), from
+// any realm: a frame's nodes are not this window's Element, so it reads the node type, never instanceof.
+export function linkHrefOf(target: EventTarget | null): string | null {
+	const node = target as unknown as LinkNode | null
+	const element = node === null ? null : node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+
+	return element?.closest?.("a[href], area[href]")?.getAttribute("href") ?? null
+}
 
 export interface TrustedLinkGate {
 	// True when `href` leads to a domain not trusted yet: the confirmation is shown and the caller must not
@@ -18,6 +35,9 @@ export interface TrustedLinkGate {
 	// The confirmation is open; cancel() closes it without opening the link (its surface went away).
 	readonly pending: boolean
 	cancel: () => void
+	// Opens `href` in a new tab as a link click would: through the confirmation for an untrusted domain, never for a
+	// scheme the link policy refuses. For links the caller intercepted itself (in a frame whose own navigation is off).
+	requestOpen: (href: string) => void
 }
 
 // The one-time-per-domain confirmation before an external link opens (chat messages, documents, markdown,
@@ -89,6 +109,11 @@ export function useTrustedLinkGate(): TrustedLinkGate {
 		pending: pending !== null,
 		cancel: () => {
 			setPending(null)
+		},
+		requestOpen: href => {
+			if (isSafeAbsoluteHref(href) && !intercept(href)) {
+				window.open(href, "_blank", "noopener,noreferrer")
+			}
 		}
 	}
 }
