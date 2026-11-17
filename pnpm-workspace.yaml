@@ -183,6 +183,10 @@ patchedDependencies:
   # on, when its list unmounted or lost focus to another element: it closed a menu opening at that moment.
   # Restores only when focus is lost. Drop once upstream does the same.
   sonner@2.0.8: patches/sonner@2.0.8.patch
+  # The MIDI parse refuses a chunk longer than the file, clamps an event's data to its track, and stops past
+  # BasicMIDI.maxEvents, so a song's parse cost is bounded by its bytes and the cap the MIDI worker sets. Re-author on
+  # every bump; propose upstream.
+  spessasynth_core@4.4.10: patches/spessasynth_core@4.4.10.patch
   # The 3D viewer parses untrusted 3MF files: ThreeMFLoader takes an `unzip` the caller supplies, so the app unpacks the
   # package with its own capped zip reader instead of three's unzipSync (which trusts a trailing end record and
   # inflates without limit). Re-author on every bump.

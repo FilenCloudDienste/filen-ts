@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { BasicMIDI, SoundBankLoader, SpessaSynthProcessor, SpessaSynthSequencer, type BasicSoundBank } from "spessasynth_core"
-import { midiEventCount } from "@filen/shared"
+import { MIDI_MAX_EVENTS, midiEventCount } from "@filen/shared"
 import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
 
 // MIDI songs rendered by spessasynth with the bundled SoundFont, started by the remux worker for MIDI playback and
@@ -9,8 +9,6 @@ import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type S
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
 
-// Events a song may hold: its parse costs about 200 bytes each.
-const MIDI_MAX_EVENTS = 250_000
 // Decoded sample data each synthesizer keeps, in bytes.
 const DECODED_SAMPLE_BUDGET = 32 * 1024 * 1024
 const VOICE_CAP = 128
@@ -39,6 +37,9 @@ const renderers = new Map<number, Renderer>()
 let nextHandle = 1
 let bank: Promise<BasicSoundBank> | null = null
 let bankUrl: string | null = null
+
+// The parse itself stops at the cap too, so no file gets past it whatever the count above makes of it.
+BasicMIDI.maxEvents = MIDI_MAX_EVENTS
 
 class Unsupported extends Error {}
 class SourceLost extends Error {}
@@ -71,7 +72,7 @@ function load(key: string, data: ArrayBuffer): void {
 	const events = midiEventCount(bytes, MIDI_MAX_EVENTS)
 
 	if (events === null) {
-		throw new Unsupported("not a MIDI file")
+		throw new Unsupported("not a MIDI file this player reads")
 	}
 
 	if (events > MIDI_MAX_EVENTS) {
