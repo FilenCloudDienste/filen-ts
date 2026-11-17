@@ -74,12 +74,14 @@ const VIDEO: Record<string, { codec: MediaCodec; codecString: string }> = {
 	h264: { codec: "h264", codecString: "avc1.64001f" },
 	hevc: { codec: "hevc", codecString: "hvc1.1.6.L93.B0" },
 	vp9: { codec: "vp9", codecString: "vp09.00.10.08" },
-	mpeg4: { codec: "mpeg4", codecString: "mp4v.20.9" }
+	mpeg4: { codec: "mpeg4", codecString: "mp4v.20.9" },
+	theora: { codec: "theora", codecString: "theora" }
 }
 const AUDIO: Record<string, { codec: MediaCodec; codecString: string }> = {
 	aac: { codec: "aac", codecString: "mp4a.40.2" },
 	ac3: { codec: "ac3", codecString: "ac-3" },
 	opus: { codec: "opus", codecString: "opus" },
+	vorbis: { codec: "vorbis", codecString: "vorbis" },
 	truehd: { codec: "truehd", codecString: "mlpa" }
 }
 
@@ -180,6 +182,19 @@ describe("ladder decision -> session", () => {
 		["chrome", CHROME, file("mp4", "mpeg4", "aac"), FIRST, { kind: "none" }]
 	])("%s: %#", (_name, fake, probe, selection, expected) => {
 		expect(plan(fake, probe, selection)).toEqual(expected)
+	})
+
+	it("plays Ogg Theora from a plain src where the browser does, and nowhere else", () => {
+		const ogg = file("ogg", "theora", "vorbis")
+
+		const firefox = { ...FIREFOX, direct: [...FIREFOX.direct, "theora", "vorbis"], decode: [...FIREFOX.decode, "theora", "vorbis"] }
+
+		expect(plan(firefox, ogg)).toEqual({
+			kind: "direct",
+			contentType: "video/ogg",
+			audioIndex: 0
+		})
+		expect(plan(CHROME, ogg)).toEqual({ kind: "none" })
 	})
 
 	it("switches audio in place only within one pipeline", () => {

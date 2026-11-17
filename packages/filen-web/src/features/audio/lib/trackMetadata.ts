@@ -7,7 +7,7 @@ import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { capacityForVisibleSlots, createThumbnailUrlCache, type ThumbnailUrlCache } from "@/features/drive/lib/thumbnailUrlCache"
 import { JobQueue, type QueuedJob } from "@/features/audio/lib/trackMetadata.logic"
-import { COVER_THUMBNAIL_TYPE, type TrackTagRecord } from "@/features/audio/lib/trackTags.logic"
+import { COVER_THUMBNAIL_TYPE, isOggTrack, type TrackTagRecord } from "@/features/audio/lib/trackTags.logic"
 import {
 	adoptPersistedTrackTags,
 	getTrackTags,
@@ -82,6 +82,8 @@ export class TrackMetadataService {
 	// Tracks already re-read this session for a missing gain; separate from the cover guard, so neither
 	// refresh uses up the other.
 	private readonly gainRefreshed = new Set<string>()
+	// Ogg tracks re-read this session because their record predates the picture-stream check.
+	private readonly oggRescanned = new Set<string>()
 	private readonly readTokens = new Set<string>()
 	private readonly coverUrls: ThumbnailUrlCache
 	private readonly coverReads = new InFlight<string, string | null>()
@@ -209,14 +211,21 @@ export class TrackMetadataService {
 	private async read(track: QueueTrack, options: TrackMetadataRequestOptions, epoch: number): Promise<TrackMetadataOutcome> {
 		await hydrateTrackTags()
 
-		// A record without gain, re-read for it alone; any other record is the answer as it is.
+		// A record without gain, or an Ogg record from before the picture-stream check, is re-read without the cover;
+		// any other record is the answer as it is.
 		let stale: TrackTagRecord | null = null
 
 		if (options.refresh !== true) {
 			const known = getTrackTags(track.uuid) ?? (await adoptPersistedTrackTags(track.uuid))
+			const needsGain = known !== null && options.refreshGain === true && known.parsed && known.gain === undefined
+			const needsOggScan = known !== null && known.oggVideo === undefined && isOggTrack(track) && !this.oggRescanned.has(track.uuid)
 
-			if (known !== null && options.refreshGain === true && known.parsed && known.gain === undefined) {
+			if (needsGain || needsOggScan) {
 				stale = known
+
+				if (needsOggScan) {
+					this.oggRescanned.add(track.uuid)
+				}
 			} else if (known !== null) {
 				return { type: "ready", record: known, thumbnail: null }
 			}
@@ -259,11 +268,16 @@ export class TrackMetadataService {
 			// stays, since a gain-only read never touches the thumbnail cache.
 			const current = getTrackTags(track.uuid) ?? stale
 
-			if (result.type !== "parsed") {
+			if (result.type !== "parsed" && !isOggTrack(track)) {
 				return { type: "ready", record: current, thumbnail: null }
 			}
 
-			const record: TrackTagRecord = { ...current, gain: result.gain, at: this.deps.now() }
+			const record: TrackTagRecord = {
+				...current,
+				...(result.type === "parsed" ? { gain: result.gain } : {}),
+				...oggVideoOf(track, result),
+				at: this.deps.now()
+			}
 
 			putTrackTags(track.uuid, record)
 
@@ -278,6 +292,7 @@ export class TrackMetadataService {
 				durationSec: null,
 				cover: false,
 				parsed: false,
+				...oggVideoOf(track, result),
 				at: this.deps.now()
 			}
 
@@ -288,7 +303,14 @@ export class TrackMetadataService {
 
 		const thumbnail =
 			result.thumbnail !== null ? new Blob([result.thumbnail as Uint8Array<ArrayBuffer>], { type: COVER_THUMBNAIL_TYPE }) : null
-		const record: TrackTagRecord = { ...result.tags, cover: thumbnail !== null, parsed: true, gain: result.gain, at: this.deps.now() }
+		const record: TrackTagRecord = {
+			...result.tags,
+			cover: thumbnail !== null,
+			parsed: true,
+			gain: result.gain,
+			...oggVideoOf(track, result),
+			at: this.deps.now()
+		}
 
 		putTrackTags(track.uuid, record)
 
@@ -394,10 +416,16 @@ export class TrackMetadataService {
 		this.failures.clear()
 		this.refreshed.clear()
 		this.gainRefreshed.clear()
+		this.oggRescanned.clear()
 
 		this.coverUrls.clear()
 		resetTrackTags()
 	}
+}
+
+// The record's `oggVideo` for an Ogg track: the facts the read found, null when it found none. Nothing for any other.
+function oggVideoOf(track: QueueTrack, result: Exclude<AudioMetadataResult, { type: "readFailed" }>): Pick<TrackTagRecord, "oggVideo"> {
+	return isOggTrack(track) ? { oggVideo: result.video ?? null } : {}
 }
 
 function firstInLine(): number {

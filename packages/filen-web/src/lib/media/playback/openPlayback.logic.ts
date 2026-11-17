@@ -24,6 +24,8 @@ function directContentType(container: string): string | null {
 			return "video/mp4"
 		case "webm":
 			return "video/webm"
+		case "ogg":
+			return "video/ogg"
 		default:
 			return null
 	}

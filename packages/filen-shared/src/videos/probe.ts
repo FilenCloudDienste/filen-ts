@@ -3,6 +3,7 @@ import { MalformedError, UnsupportedContainerError, ascii, readBytes, uint32 } f
 import { walkIsobmff } from "./probeIsobmff"
 import { walkMatroska } from "./probeMatroska"
 import { walkMpegTs } from "./probeMpegts"
+import { walkOgg } from "./probeOgg"
 import { EBML_ID, LEADING_BOXES, TS_SNIFF_BYTES, sniffTransportStream, type TsLayout } from "./transportStreamHead"
 import type { ParsedContainer, ParsedTrack, ProbeTier, ProbeVideo, VideoProbe } from "./probeTypes"
 
@@ -52,14 +53,15 @@ export async function walkContainer(source: BlockSource, tier: ProbeTier, option
 	const head = await readBytes(source, 0, Math.min(16, source.size))
 	const matroska = uint32(head, 0) === EBML_ID
 	const isobmff = !matroska && LEADING_BOXES.has(ascii(head, 4, 8))
-	const transport = matroska || isobmff ? null : await transportStream(source, head)
+	const ogg = !matroska && !isobmff && ascii(head, 0, 4) === "OggS"
+	const transport = matroska || isobmff || ogg ? null : await transportStream(source, head)
 
-	if (!matroska && !isobmff && transport === null) {
+	if (!matroska && !isobmff && !ogg && transport === null) {
 		return null
 	}
 
 	const result: ParsedContainer = {
-		container: matroska ? "mkv" : transport === null ? "mp4" : "ts",
+		container: matroska ? "mkv" : ogg ? "ogg" : transport === null ? "mp4" : "ts",
 		durationSec: null,
 		index: null,
 		tracks: [],
@@ -73,7 +75,9 @@ export async function walkContainer(source: BlockSource, tier: ProbeTier, option
 	try {
 		const keyframes = options.keyframes === true
 
-		if (transport !== null) {
+		if (ogg) {
+			await walkOgg(source, result)
+		} else if (transport !== null) {
 			await walkMpegTs(source, tier, result, transport)
 		} else {
 			await (matroska ? walkMatroska(source, tier, result, keyframes) : walkIsobmff(source, tier, result, keyframes))
@@ -137,7 +141,7 @@ function toRecord(parsed: ParsedContainer, tier: ProbeTier): VideoProbe {
 }
 
 // Reads one tier of a file's probe record through `source` (from probeSource). Null for a file that is
-// no MP4/MOV/Matroska/WebM/MPEG-TS; throws BlockReadError when a download fails.
+// no MP4/MOV/Matroska/WebM/MPEG-TS/Ogg; throws BlockReadError when a download fails.
 export async function probeVideo(source: BlockSource, tier: ProbeTier): Promise<VideoProbe | null> {
 	const parsed = await walkContainer(source, tier)
 

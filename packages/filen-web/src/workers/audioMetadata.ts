@@ -2,7 +2,7 @@ import { CouldNotDetermineFileTypeError, parseFromTokenizer, selectCover, type I
 import { normalizeTrackTags, parseReplayGain, type TrackGain } from "@filen/shared"
 import { log } from "@/lib/log"
 import { BlockTokenizer } from "@/features/audio/lib/blockTokenizer"
-import { BlockSource, type ReadRange } from "@filen/shared/videos"
+import { BlockSource, oggHeadVideo, type OggVideoFacts, type ReadRange } from "@filen/shared/videos"
 
 // Tag + cover extraction for one audio file, run inside the sdk worker so the parser's many small reads
 // go straight to the SDK (no page round trip per read) and the embedded cover never leaves the worker at
@@ -17,10 +17,12 @@ export interface AudioTrackTags {
 
 // "unparseable" is final for the file (unsupported container, garbage bytes, a parse that wanted more
 // than tags ever need). "readFailed" says nothing about the file: the bytes did not arrive this time.
-// `gain` is all nulls for a file without ReplayGain tags.
+// `gain` is all nulls for a file without ReplayGain tags. `video`: an Ogg file whose head, as the parse read it, holds
+// a real Theora/VP8 picture stream (oggHeadVideo); absent otherwise. Facts only: whether this browser plays it as a
+// video is the page's question.
 export type AudioMetadataResult =
-	| { type: "parsed"; tags: AudioTrackTags; gain: TrackGain; thumbnail: Uint8Array | null }
-	| { type: "unparseable" }
+	| { type: "parsed"; tags: AudioTrackTags; gain: TrackGain; thumbnail: Uint8Array | null; video?: OggVideoFacts }
+	| { type: "unparseable"; video?: OggVideoFacts }
 	| { type: "readFailed" }
 
 export interface AudioMetadataDeps {
@@ -85,6 +87,14 @@ async function sniffThenHint(hasHint: boolean, parse: (hinted: boolean) => Promi
 	}
 }
 
+// The picture stream at an Ogg file's head, from the block the parse already read: never a download of its own.
+async function headVideo(source: BlockSource): Promise<{ video?: OggVideoFacts }> {
+	const head = await source.residentBlock(0)
+	const video = head === null ? null : oggHeadVideo(head)
+
+	return video === null ? {} : { video }
+}
+
 // A drive file, read by range through the shared block cache.
 export async function readAudioMetadata(
 	size: number,
@@ -107,7 +117,7 @@ export async function readAudioMetadata(
 
 		log.info("audio-metadata", "unparseable audio file", error)
 
-		return { type: "unparseable" }
+		return { type: "unparseable", ...(await headVideo(source)) }
 	}
 
 	deps.signal.throwIfAborted()
@@ -118,5 +128,5 @@ export async function readAudioMetadata(
 		return { type: "readFailed" }
 	}
 
-	return toResult(parsed, deps)
+	return { ...(await toResult(parsed, deps)), ...(await headVideo(source)) }
 }

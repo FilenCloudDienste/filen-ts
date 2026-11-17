@@ -50,7 +50,7 @@ function record(overrides: Partial<TrackTagRecord> = {}): TrackTagRecord {
 
 const GAIN = { trackDb: -7.5, trackPeak: 0.9, albumDb: null, albumPeak: null }
 
-function parsed(thumbnail: Uint8Array | null = null): AudioMetadataResult {
+function parsed(thumbnail: Uint8Array | null = null): Extract<AudioMetadataResult, { type: "parsed" }> {
 	return { type: "parsed", tags: { title: "Song", artist: "Band", album: "Album", durationSec: 200 }, gain: GAIN, thumbnail }
 }
 
@@ -424,6 +424,58 @@ describe("TrackMetadataService", () => {
 		expect(await service.request(track("a")).promise).toMatchObject({ type: "ready", record: { gain: GAIN } })
 		expect(getTrackTags("a")?.gain).toEqual(GAIN)
 		expect(deps.readRemote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), expect.any(String), { skipCover: false })
+	})
+
+	describe("Ogg picture-stream check", () => {
+		const facts = { codec: "theora", codecString: "theora", width: 320, height: 240 } as const
+
+		function ogg(uuid: string): QueueTrack {
+			return { ...track(uuid), name: `${uuid}.ogg`, mime: "audio/ogg" }
+		}
+
+		it("keeps what the read found on an Ogg record: the facts, or null for none", async () => {
+			const { service, deps } = makeService()
+
+			deps.readRemote.mockResolvedValueOnce({ ...parsed(), video: facts }).mockResolvedValueOnce(parsed())
+
+			expect(await service.request(ogg("a")).promise).toMatchObject({ record: { oggVideo: facts } })
+			expect(await service.request(ogg("b")).promise).toMatchObject({ record: { oggVideo: null } })
+			expect(getTrackTags("c")).toBeUndefined()
+
+			await service.request(track("c")).promise
+
+			expect(getTrackTags("c")).not.toHaveProperty("oggVideo")
+		})
+
+		it("re-reads an Ogg record from before the check once, without the cover, and keeps its tags", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record({ title: "Kept", cover: true }))
+			deps.readRemote.mockResolvedValue({ type: "unparseable", video: facts })
+
+			const outcome = await service.request(ogg("a")).promise
+
+			expect(deps.readRemote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), expect.any(String), { skipCover: true })
+			expect(outcome).toMatchObject({ record: { title: "Kept", cover: true, oggVideo: facts } })
+
+			putTrackTags("b", record())
+			deps.readRemote.mockResolvedValue({ type: "readFailed" })
+
+			await service.request(ogg("b")).promise
+			await service.request(ogg("b")).promise
+
+			expect(deps.readRemote).toHaveBeenCalledTimes(2)
+		})
+
+		it("never re-reads a record of any other file for it", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record())
+
+			await service.request(track("a")).promise
+
+			expect(deps.readRemote).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("refreshGain", () => {

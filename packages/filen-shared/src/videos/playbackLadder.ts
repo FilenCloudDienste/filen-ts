@@ -99,7 +99,9 @@ const DIRECT_BASE: Readonly<Record<string, string>> = {
 	m4v: "video/mp4",
 	// Chrome lacks video/quicktime in canPlayType but plays MOV by sniffing, so it is probed as MP4.
 	mov: "video/mp4",
-	webm: "video/webm"
+	webm: "video/webm",
+	// Ogg Theora/VP8: only a browser that plays it from a plain src (Firefox); nothing remuxes it.
+	ogg: "video/ogg"
 }
 
 const REMUX_CONTAINERS: ReadonlySet<string> = new Set(["mkv", "webm", "mp4", "m4v", "mov", "ts"])

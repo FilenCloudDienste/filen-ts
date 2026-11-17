@@ -90,6 +90,68 @@ function flac(): Uint8Array {
 	return concat(encoder.encode("fLaC"), block(0, false, streamInfo), block(4, false, vorbis), block(6, true, picture), new Uint8Array(64))
 }
 
+// One Ogg page of whole packets (CRC zero: music-metadata does not check it).
+function oggPage(serial: number, flags: number, granule: number, packets: Uint8Array[]): Uint8Array {
+	const lacing = packets.flatMap(packet => [...new Array<number>(Math.floor(packet.length / 255)).fill(255), packet.length % 255])
+
+	return concat(
+		encoder.encode("OggS"),
+		new Uint8Array([0, flags]),
+		le32(granule),
+		le32(0),
+		le32(serial),
+		le32(0),
+		le32(0),
+		new Uint8Array([lacing.length, ...lacing]),
+		...packets
+	)
+}
+
+// Ogg Vorbis, and beside it a Theora stream of `pictures` picture packets (320x240, 25 fps).
+function oggWithTheora(pictures: number, size: number): Uint8Array {
+	const theora = concat(
+		new Uint8Array([0x80]),
+		encoder.encode("theora"),
+		new Uint8Array([3, 2, 1, 0, 20, 0, 15, 0, 1, 64, 0, 0, 240, 0, 0, 0, 0, 0, 25, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0xc0])
+	)
+	const vorbis = concat(
+		new Uint8Array([1]),
+		encoder.encode("vorbis"),
+		le32(0),
+		new Uint8Array([2]),
+		le32(44100),
+		le32(0),
+		le32(0),
+		le32(0),
+		new Uint8Array([0xb8, 1])
+	)
+	const vendor = encoder.encode("test")
+	const comment = concat(new Uint8Array([3]), encoder.encode("vorbis"), le32(vendor.length), vendor, le32(0), new Uint8Array([1]))
+	const setup = concat(new Uint8Array([5]), encoder.encode("vorbis"), new Uint8Array([0]))
+	const out = new Uint8Array(size)
+
+	out.set(
+		concat(
+			oggPage(1, 2, 0, [theora]),
+			oggPage(2, 2, 0, [vorbis]),
+			oggPage(1, 0, 0, [
+				concat(new Uint8Array([0x81]), encoder.encode("theora")),
+				concat(new Uint8Array([0x82]), encoder.encode("theora"))
+			]),
+			oggPage(2, 0, 0, [comment, setup]),
+			oggPage(
+				1,
+				0,
+				pictures << 6,
+				Array.from({ length: pictures }, () => new Uint8Array([0, 1, 2]))
+			),
+			oggPage(2, 4, 44100, [new Uint8Array([0, 9])])
+		)
+	)
+
+	return out
+}
+
 function readerOver(bytes: Uint8Array): ReturnType<typeof vi.fn<(start: number, end: number) => Promise<Uint8Array>>> {
 	return vi.fn<(start: number, end: number) => Promise<Uint8Array>>((start, end) => Promise.resolve(bytes.slice(start, end)))
 }
@@ -189,6 +251,19 @@ describe("readAudioMetadata (ranged)", () => {
 		})
 		expect(deps.makeThumbnail).not.toHaveBeenCalled()
 		expect(deps.storeThumbnail).not.toHaveBeenCalled()
+	})
+
+	it("reports a real Ogg picture stream from the block it already read, and no cover frame as one", async () => {
+		const bytes = oggWithTheora(3, BLOCK_BYTES * 3)
+		const reader = readerOver(bytes)
+		const result = await readAudioMetadata(bytes.length, "audio/ogg", reader, makeDeps())
+
+		expect(result).toMatchObject({ video: { codec: "theora", codecString: "theora", width: 320, height: 240 } })
+		expect(reader.mock.calls.every(([start]) => start !== BLOCK_BYTES)).toBe(true)
+
+		const cover = oggWithTheora(1, 4096)
+
+		expect(await readAudioMetadata(cover.length, "audio/ogg", readerOver(cover), makeDeps())).not.toHaveProperty("video")
 	})
 
 	it("settles unparseable for bytes no parser recognizes", async () => {
