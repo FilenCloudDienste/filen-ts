@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { readCalendar, type CalendarEntry, type CalendarTime } from "@filen/shared/calendarFile"
 import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
 import {
@@ -200,6 +200,18 @@ describe("days and ends", () => {
 })
 
 describe("the zone cache", () => {
+	it("registers its sign-out disposer once, however often the cache refills", async () => {
+		const disposers = await import("@/lib/workers/previewDisposers")
+		const register = vi.spyOn(disposers, "registerPreviewDisposer")
+
+		runPreviewDisposers()
+
+		for (let index = 0; index < 2000; index++) instantOf(time("2024-07-15", "10:00:00", { tzid: `Other/Zone${String(index)}` }))
+
+		expect(register).toHaveBeenCalledTimes(1)
+		register.mockRestore()
+	})
+
 	it("keeps at most 256 zone names, and none past sign-out", () => {
 		for (let index = 0; index < 600; index++) instantOf(time("2024-07-15", "10:00:00", { tzid: `Fake/Zone${String(index)}` }))
 

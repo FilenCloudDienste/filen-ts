@@ -33,6 +33,7 @@ export function dayMs(day: string): number {
 // Zone formatters by the names files give, bounded (a file may name thousands), dropped at sign-out.
 const zoneFormats = new Map<string, Intl.DateTimeFormat | null>()
 const MAX_ZONE_FORMATS = 256
+let disposerRegistered = false
 
 // How many zone names are cached (bounded; emptied at sign-out).
 export function cachedZoneCount(): number {
@@ -49,9 +50,12 @@ function zoneFormat(zone: string): Intl.DateTimeFormat | null {
 			zoneFormats.clear()
 		}
 
-		if (zoneFormats.size === 0) {
+		// Once until sign-out runs it (a disposer runs once), however often the cache empties.
+		if (!disposerRegistered) {
+			disposerRegistered = true
 			registerPreviewDisposer("calendar-zones", () => {
 				zoneFormats.clear()
+				disposerRegistered = false
 			})
 		}
 

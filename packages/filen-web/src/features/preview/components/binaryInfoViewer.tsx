@@ -124,9 +124,11 @@ export function HeldBinaryInfo({ item, bytes }: { item: DriveItem; bytes: Uint8A
 				if (!abort.signal.aborted) setState({ status: "done", reading })
 			},
 			(e: unknown) => {
-				log.error("preview", "reading an executable's headers failed", e)
+				// Closed while reading: no failure to report.
+				if (abort.signal.aborted) return
 
-				if (!abort.signal.aborted) setState({ status: "failed" })
+				log.error("preview", "reading an executable's headers failed", e)
+				setState({ status: "failed" })
 			}
 		)
 
