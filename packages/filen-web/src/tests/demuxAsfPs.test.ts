@@ -265,3 +265,53 @@ describe("MPEG program stream demuxer over a stream that ends before the file do
 		expect(read).toBeLessThan(bytes.length + 2 * 1024 * 1024)
 	})
 })
+
+describe("MPEG program stream demuxer over pictures a PTS only every megabyte and a half", () => {
+	it("reads the bytes past a window, which finish its pictures, once for the windows after it", async () => {
+		// MPEG-2: a sequence header and its extension, then a picture start, on the first PES of each picture.
+		const sequence = [0, 0, 1, 0xb3, 0x04, 0x00, 0x24, 0x13, 0xff, 0xff, 0xe0, 0x18, 0, 0, 1, 0xb5, 0x14, 0x8a, 0, 0x01, 0, 0]
+		const picture = [0, 0, 1, 0x00, 0x00, 0x0f, 0xff, 0xf8]
+		const filler = new Array<number>(2000).fill(0x55)
+		const PICTURES = 6
+		const PES_PER_PICTURE = 750
+		const pack = Uint8Array.from(videoPack(null, filler))
+		const parts: Uint8Array[] = []
+
+		for (let index = 0; index < PICTURES; index++) {
+			parts.push(Uint8Array.from(videoPack(90_000 + index * 3600, [...sequence, ...picture, ...filler])))
+
+			for (let i = 1; i < PES_PER_PICTURE; i++) {
+				parts.push(pack)
+			}
+		}
+
+		const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+		let at = 0
+
+		for (const part of parts) {
+			bytes.set(part, at)
+			at += part.length
+		}
+
+		let read = 0
+		const file = new Input({
+			formats: [MPEG_PS],
+			source: new CustomSource({
+				getSize: () => bytes.length,
+				read: (start, end) => {
+					read += end - start
+
+					return bytes.subarray(start, end)
+				},
+				// Small, so a window read again reaches the source rather than mediabunny's cache.
+				maxCacheSize: 256 * 1024
+			})
+		})
+		const pictures = await all(file.getPrimaryVideoTrack())
+
+		expect(pictures.length).toBeGreaterThanOrEqual(PICTURES - 1)
+		// Each window's finishing megabyte is taken by the next windows from what was read: about 1.4 times the file,
+		// where reading it again for every window took 2.6.
+		expect(read).toBeLessThan(bytes.length * 1.6)
+	})
+})

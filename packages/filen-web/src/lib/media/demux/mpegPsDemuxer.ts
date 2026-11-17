@@ -24,7 +24,7 @@ import { MAX_UNIT_BYTES, parseRawFrame, rawUnitLength } from "@/workers/remux/ra
 // Bytes of packs read at once.
 const WINDOW_BYTES = 256 * 1024
 // Bytes read past a window to finish the frames that started in it.
-const FINISH_BYTES = 1024 * 1024
+const FINISH_BYTES = 262144
 // How far a resync looks for the next pack.
 const RESYNC_BYTES = 1024 * 1024
 const HEAD_BYTES = 1024 * 1024
@@ -303,6 +303,9 @@ class MpegPsReader implements ContainerReader {
 	private readonly input: Input
 	private readonly size: number
 	private readonly streams: Map<number, Track>
+	// The bytes the last window read: a window reads a megabyte past itself to finish its pictures, which the next
+	// windows (and a read again with more finishing bytes) then take from here rather than reading them once more.
+	private lastRead: { start: number; bytes: Uint8Array } | null = null
 
 	public constructor(input: Input, size: number, duration: number | null, streams: Map<number, Track>) {
 		this.input = input
@@ -333,7 +336,7 @@ class MpegPsReader implements ContainerReader {
 		finish: number
 	): Promise<{ result: { packets: DemuxPacket[]; next: number } | null; cut: boolean }> {
 		const windowEnd = Math.min(this.size, pos + WINDOW_BYTES)
-		const bytes = (await readAt(this.input, pos, Math.min(this.size - pos, WINDOW_BYTES + finish))) ?? new Uint8Array()
+		const bytes = (await this.readSpan(pos, Math.min(this.size - pos, WINDOW_BYTES + finish))) ?? new Uint8Array()
 		const readEnd = pos + bytes.length
 		const packets: DemuxPacket[] = []
 		const open = new Map<number, Open>()
@@ -762,6 +765,40 @@ class MpegPsReader implements ContainerReader {
 						: following.pts - packet.pts
 			}
 		}
+	}
+
+	// `length` bytes at `start`: as much of them as the last read holds is taken from it, the rest read.
+	private async readSpan(start: number, length: number): Promise<Uint8Array | null> {
+		const last = this.lastRead
+		const held = last === null ? 0 : Math.max(0, last.start + last.bytes.length - start)
+
+		if (last === null || start < last.start || held === 0) {
+			const bytes = await readAt(this.input, start, length)
+
+			this.lastRead = bytes === null ? null : { start, bytes }
+
+			return bytes
+		}
+
+		const from = start - last.start
+
+		if (held >= length) {
+			return last.bytes.subarray(from, from + length)
+		}
+
+		const rest = await readAt(this.input, start + held, length - held)
+
+		if (rest === null) {
+			return null
+		}
+
+		const bytes = new Uint8Array(held + rest.length)
+
+		bytes.set(last.bytes.subarray(from), 0)
+		bytes.set(rest, held)
+		this.lastRead = { start, bytes }
+
+		return bytes
 	}
 
 	public async resync(pos: number): Promise<number | null> {
