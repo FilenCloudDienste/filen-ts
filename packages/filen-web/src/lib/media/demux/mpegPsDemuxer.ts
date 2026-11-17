@@ -5,7 +5,6 @@ import {
 	MPEG_PS_PACK,
 	MPEG_PS_PRIVATE_1,
 	forEachMpegPsUnit,
-	mpegAudioHeader,
 	mpegPsPes,
 	mpegPsStreamKey,
 	readMpegPsStreams,
@@ -15,6 +14,8 @@ import {
 } from "@filen/shared/videos"
 import { avcParameters, avcPicture, freshTimeline, type AvcParameters, type AvcTimelineState } from "@/lib/media/demux/avcTimeline"
 import { MAX_PARTS, PacketDemuxer, readAt, type ContainerReader, type DemuxPacket, type DemuxTrack } from "@/lib/media/demux/packetDemuxer"
+import { frameAt } from "@/workers/remux/audioDuration.logic"
+import { MAX_UNIT_BYTES, parseRawFrame, rawUnitLength } from "@/workers/remux/rawAudio.logic"
 
 // MPEG program streams (.mpg, .mpeg, .vob): packs of PES packets, the same elementary streams as a transport stream
 // carries, with PTS but no index. A picture runs from one PTS-bearing PES of its stream to the next; audio PES carry
@@ -36,110 +37,39 @@ const MAX_FRAME_BYTES = 16 * 1024 * 1024
 const PRIVATE_HEADER_BYTES = 4
 const LPCM_HEADER_BYTES = 7
 
-const AC3_FRAME_WORDS: readonly (readonly number[])[] = [
-	[64, 69, 96],
-	[64, 70, 96],
-	[80, 87, 120],
-	[80, 88, 120],
-	[96, 104, 144],
-	[96, 105, 144],
-	[112, 121, 168],
-	[112, 122, 168],
-	[128, 139, 192],
-	[128, 140, 192],
-	[160, 174, 240],
-	[160, 175, 240],
-	[192, 208, 288],
-	[192, 209, 288],
-	[224, 243, 336],
-	[224, 244, 336],
-	[256, 278, 384],
-	[256, 279, 384],
-	[320, 348, 480],
-	[320, 349, 480],
-	[384, 417, 576],
-	[384, 418, 576],
-	[448, 487, 672],
-	[448, 488, 672],
-	[512, 557, 768],
-	[512, 558, 768],
-	[640, 696, 960],
-	[640, 697, 960],
-	[768, 835, 1152],
-	[768, 836, 1152],
-	[896, 975, 1344],
-	[896, 976, 1344],
-	[1024, 1114, 1536],
-	[1024, 1115, 1536],
-	[1152, 1253, 1728],
-	[1152, 1254, 1728],
-	[1280, 1393, 1920],
-	[1280, 1394, 1920]
-]
-const AC3_RATES = [48000, 44100, 32000]
-
 type FrameKind = "mpeg-audio" | "dolby" | "dts" | "adts"
 
-// The length and samples of the audio frame at `at`, or null where none starts.
-function audioFrame(kind: FrameKind, bytes: Uint8Array, at: number): { bytes: number; samples: number; rate: number } | null {
-	if (kind === "mpeg-audio") {
-		const header = mpegAudioHeader(bytes, at)
-		const frameBytes = header === null ? null : header.frameBytes
+// What parseRawFrame reads of a header.
+const RAW_HEADER_BYTES = 16
 
-		return header === null || frameBytes === null ? null : { bytes: frameBytes, samples: header.samples, rate: header.rate }
+// The audio unit at `at`: an MPEG audio or ADTS frame, or an AC-3/E-AC-3 or DTS access unit with its dependent frames
+// and extension substreams, by the parsers the bare streams and their durations already use. Null where none starts;
+// "more" where one may, but `bytes` ends before it can tell.
+function audioFrame(kind: FrameKind, bytes: Uint8Array, at: number): { bytes: number; samples: number; rate: number } | "more" | null {
+	if (kind === "mpeg-audio" || kind === "adts") {
+		const frame = frameAt(kind === "adts" ? "adts" : "mp3", bytes, at)
+
+		return frame === null ? null : { bytes: frame.bytes, samples: frame.samples, rate: frame.rate }
 	}
 
-	if (kind === "adts") {
-		const length = (((bytes[at + 3] ?? 0) & 0x03) << 11) | ((bytes[at + 4] ?? 0) << 3) | ((bytes[at + 5] ?? 0) >> 5)
-		const rate = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350][
-			((bytes[at + 2] ?? 0) >> 2) & 0x0f
-		]
-
-		return bytes[at] === 0xff && ((bytes[at + 1] ?? 0) & 0xf6) === 0xf0 && length >= 7 && rate !== undefined
-			? { bytes: length, samples: 1024, rate }
-			: null
+	if (at + RAW_HEADER_BYTES > bytes.length) {
+		return "more"
 	}
 
-	if (kind === "dolby") {
-		if (bytes[at] !== 0x0b || bytes[at + 1] !== 0x77) {
-			return null
-		}
+	const first = parseRawFrame(bytes, at)
 
-		const bsid = (bytes[at + 5] ?? 0) >> 3
-
-		// E-AC-3: frmsiz (11 bits) + 1 words, six blocks of 256 samples.
-		if (bsid > 10) {
-			const words = ((((bytes[at + 2] ?? 0) & 0x07) << 8) | (bytes[at + 3] ?? 0)) + 1
-			const fscod = (bytes[at + 4] ?? 0) >> 6
-			const rate = fscod === 3 ? ([24000, 22050, 16000][((bytes[at + 4] ?? 0) >> 4) & 0x03] ?? 48000) : (AC3_RATES[fscod] ?? 48000)
-
-			return { bytes: words * 2, samples: 1536, rate }
-		}
-
-		const fscod = (bytes[at + 4] ?? 0) >> 6
-		const words = AC3_FRAME_WORDS[(bytes[at + 4] ?? 0) & 0x3f]?.[fscod]
-		const rate = AC3_RATES[fscod]
-
-		return words === undefined || rate === undefined ? null : { bytes: words * 2, samples: 1536, rate }
-	}
-
-	if (bytes[at] !== 0x7f || bytes[at + 1] !== 0xfe || bytes[at + 2] !== 0x80 || bytes[at + 3] !== 0x01) {
+	if (first === null || !first.unitStart || (kind === "dts") !== (first.codec === "dts")) {
 		return null
 	}
 
-	// DTS core: NBLKS (7 bits) at bit 39, FSIZE (14 bits) at bit 46, SFREQ (4 bits) at bit 66.
-	const bits = (from: number, count: number): number => {
-		let value = 0
+	// A unit's end is confirmed by the next unit's start.
+	const length = rawUnitLength(bytes, at, first.codec, false)
 
-		for (let i = from; i < from + count; i++) {
-			value = value * 2 + (((bytes[at + (i >> 3)] ?? 0) >> (7 - (i & 7))) & 1)
-		}
-
-		return value
+	if (length === null) {
+		return bytes.length - at < MAX_UNIT_BYTES ? "more" : null
 	}
-	const rate = [0, 8000, 16000, 32000, 0, 0, 11025, 22050, 44100, 0, 0, 12000, 24000, 48000, 0, 0][bits(66, 4)] ?? 0
 
-	return rate === 0 ? null : { bytes: bits(46, 14) + 1, samples: (bits(39, 7) + 1) * 32, rate }
+	return { bytes: length, samples: first.samples, rate: first.sampleRate }
 }
 
 interface Track {
@@ -720,6 +650,10 @@ class MpegPsReader implements ContainerReader {
 
 		while (offset + 12 <= pending.bytes.length) {
 			const frame = audioFrame(kind, pending.bytes, offset)
+
+			if (frame === "more") {
+				break
+			}
 
 			if (frame === null) {
 				offset++

@@ -88,19 +88,22 @@ const FORMAT_TAGS: Readonly<Record<number, MediaCodec>> = {
 
 const WAVE_FORMAT_EXTENSIBLE = 0xfffe
 
+// The format tag of a WAVEFORMATEX(TENSIBLE) at `at`, `length` bytes: an extensible one's is its sub-format GUID's
+// first two bytes.
+export function waveFormatTag(bytes: Uint8Array, at: number, length: number): number {
+	const tag = uint16le(bytes, at)
+	const extra = length >= 18 ? Math.min(uint16le(bytes, at + 16), length - 18) : 0
+
+	return tag === WAVE_FORMAT_EXTENSIBLE && extra >= 22 ? uint16le(bytes, at + 24) : tag
+}
+
 // A WAVEFORMATEX(TENSIBLE) at `at`, `length` bytes: codec, channels, rate and, for AAC, the AudioSpecificConfig its
 // extra bytes hold.
 export function waveFormatAudio(bytes: Uint8Array, at: number, length: number): Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate"> {
-	let tag = uint16le(bytes, at)
+	const tag = waveFormatTag(bytes, at, length)
 	const ch = uint16le(bytes, at + 2)
 	const rate = uint32le(bytes, at + 4)
 	const extra = length >= 18 ? Math.min(uint16le(bytes, at + 16), length - 18) : 0
-
-	// The sub-format GUID's first two bytes are the format tag it stands for.
-	if (tag === WAVE_FORMAT_EXTENSIBLE && extra >= 22) {
-		tag = uint16le(bytes, at + 24)
-	}
-
 	const codec = FORMAT_TAGS[tag] ?? null
 	let codecString: string | null = null
 

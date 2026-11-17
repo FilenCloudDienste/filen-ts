@@ -218,6 +218,14 @@ describe("waveProbedCodec", () => {
 		expect(waveProbedCodec("adpcm", waveFormat(0x0011, 1, 22_050, 11_100, 512, 4, [0xf9, 0x01]), null, null)?.codec).toBe(
 			"adpcm_ima_wav"
 		)
+		// WAVE_FORMAT_EXTENSIBLE: the sub-format GUID's first two bytes are the tag.
+		const guidTail = [0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71]
+		const extensible = (tag: number): number[] => [16, 0, 3, 0, 0, 0, tag & 0xff, tag >> 8, ...guidTail]
+
+		expect(waveProbedCodec("wma", waveFormat(0xfffe, 2, 44_100, 16_000, 2973, 16, extensible(0x0160)), null, null)?.codec).toBe("wmav1")
+		expect(waveProbedCodec("adpcm", waveFormat(0xfffe, 1, 22_050, 11_100, 512, 4, extensible(0x0011)), null, null)?.codec).toBe(
+			"adpcm_ima_wav"
+		)
 		// ADPCM with no WAVEFORMATEX to say which (Flash's own, in FLV): no decoder here reads it.
 		expect(waveProbedCodec("adpcm", null, 22_050, 1)).toBeNull()
 	})

@@ -12,7 +12,10 @@ import {
 	type AviStream,
 	type MediaCodec,
 	type ByteRange,
-	type ReadAt
+	type ReadAt,
+	uint16le,
+	uint32le,
+	waveFormatTag
 } from "@filen/shared/videos"
 import {
 	avcPicture,
@@ -23,6 +26,7 @@ import {
 	type AvcTimelineState
 } from "@/lib/media/demux/avcTimeline"
 import { blockCacheOf } from "@/lib/media/demux/inputCache"
+import { pcmCodec } from "@/lib/media/demux/waveFormat"
 import { MAX_PARTS, PacketDemuxer, readAt, type ContainerReader, type DemuxPacket, type DemuxTrack } from "@/lib/media/demux/packetDemuxer"
 
 // AVI: a movi list of chunks, one stream's frame (or a stretch of its audio) each, in decode order with no
@@ -53,14 +57,6 @@ const MAX_CHUNK_BYTES = 32 * 1024 * 1024
 const MAX_STANDARD_INDEX_BYTES = 1024 * 1024
 
 const VIDEO_CODECS: Partial<Record<MediaCodec, VideoCodec>> = { h264: "avc", hevc: "hevc", vp8: "vp8", vp9: "vp9", av1: "av1" }
-
-function uint16le(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
-}
-
-function uint32le(bytes: Uint8Array, at: number): number {
-	return uint16le(bytes, at) + uint16le(bytes, at + 2) * 0x10000
-}
 
 function fourcc(bytes: Uint8Array, at: number): string {
 	return String.fromCharCode(bytes[at] ?? 0, bytes[at + 1] ?? 0, bytes[at + 2] ?? 0, bytes[at + 3] ?? 0)
@@ -136,24 +132,12 @@ function videoTrack(stream: AviStream, index: number, avc: AvcStream | null, ext
 	}
 }
 
-function pcmCodec(tag: number, bits: number): AudioCodec | null {
-	if (tag === 0x0003) {
-		return bits === 64 ? "pcm-f64" : bits === 32 ? "pcm-f32" : null
-	}
-
-	return bits === 8 ? "pcm-u8" : bits === 16 ? "pcm-s16" : bits === 24 ? "pcm-s24" : bits === 32 ? "pcm-s32" : null
-}
-
 function audioTrack(stream: AviStream, index: number, isDefault: boolean): DemuxTrack {
 	const strf = stream.strf ?? new Uint8Array()
 	const probed = stream.audio
-	let tag = uint16le(strf, 0)
+	const tag = waveFormatTag(strf, 0, strf.length)
 	const bits = uint16le(strf, 14)
 	const extraLength = strf.length >= 18 ? Math.min(uint16le(strf, 16), strf.length - 18) : 0
-
-	if (tag === 0xfffe && extraLength >= 22) {
-		tag = uint16le(strf, 24)
-	}
 
 	const channels = probed?.ch ?? 2
 	const sampleRate = probed?.rate ?? 48000

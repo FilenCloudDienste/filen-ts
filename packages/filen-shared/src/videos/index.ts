@@ -25,7 +25,18 @@ export {
 } from "./probeAsf"
 export * from "./probeEbml"
 export { annexBNal, mpegAudioHeader, type MpegAudioHeader } from "./probeElementary"
-export { aviFirstChunk, aviLists, parseAviHeader, type AviHeader, type AviLists, type AviStream, type ReadAt } from "./probeAvi"
+export {
+	aviFirstChunk,
+	aviLists,
+	parseAviHeader,
+	uint16le,
+	uint32le,
+	waveFormatTag,
+	type AviHeader,
+	type AviLists,
+	type AviStream,
+	type ReadAt
+} from "./probeAvi"
 export { flvAudioTag, flvVideoTag, readFlvMetaData, type FlvMetaData } from "./probeFlv"
 export * from "./probeFragments"
 export * from "./probeIsobmff"

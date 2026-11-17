@@ -10,7 +10,7 @@ import {
 	type InputAudioTrack,
 	type InputFormat
 } from "mediabunny"
-import { BlockSource, mpegAudioHeader, walkContainer } from "@filen/shared/videos"
+import { BlockSource, mpegAudioHeader, waveFormatTag, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
 import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
 import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
@@ -528,7 +528,7 @@ export function waveProbedCodec(
 	channels: number | null
 ): ProbedCodec | null {
 	const view = format === null || format.length < 16 ? null : new DataView(format.buffer, format.byteOffset, format.byteLength)
-	const tag = view?.getUint16(0, true) ?? 0
+	const tag = format === null || view === null ? 0 : waveFormatTag(format, 0, format.length)
 	const extraLength = view === null || format === null || format.length < 18 ? 0 : Math.min(view.getUint16(16, true), format.length - 18)
 	const stream: FfmpegStream = {
 		blockAlign: view?.getUint16(12, true) ?? 0,

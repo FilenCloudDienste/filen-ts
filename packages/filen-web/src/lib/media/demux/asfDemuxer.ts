@@ -8,7 +8,10 @@ import {
 	isGuid,
 	mpegAudioHeader,
 	parseAsfHeader,
+	uint16le,
+	uint32le,
 	uint64le,
+	waveFormatTag,
 	type AsfHeader,
 	type AsfStream,
 	type MediaCodec
@@ -21,6 +24,7 @@ import {
 	type AvcParameters,
 	type AvcTimelineState
 } from "@/lib/media/demux/avcTimeline"
+import { pcmCodec } from "@/lib/media/demux/waveFormat"
 import { MAX_PARTS, PacketDemuxer, readAt, type ContainerReader, type DemuxPacket, type DemuxTrack } from "@/lib/media/demux/packetDemuxer"
 
 // ASF (Windows Media): fixed-size data packets, each carrying payloads: fragments of media objects (a picture, a
@@ -44,14 +48,6 @@ const MAX_SIMPLE_INDEX_BYTES = BLOCK_BYTES
 const PARAMETER_SEARCH_PACKETS = 512
 
 const VIDEO_CODECS: Partial<Record<MediaCodec, VideoCodec>> = { h264: "avc", hevc: "hevc", vp8: "vp8", vp9: "vp9", av1: "av1" }
-
-function uint16le(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
-}
-
-function uint32le(bytes: Uint8Array, at: number): number {
-	return uint16le(bytes, at) + uint16le(bytes, at + 2) * 0x10000
-}
 
 // A field whose 2-bit length type is 0 (absent), 1 (BYTE), 2 (WORD) or 3 (DWORD).
 function sized(bytes: Uint8Array, at: number, type: number): [value: number, length: number] {
@@ -486,29 +482,11 @@ class AsfReader implements ContainerReader {
 	}
 }
 
-function pcmCodec(tag: number, bits: number): AudioCodec | null {
-	if (tag === 0x0003) {
-		return bits === 32 ? "pcm-f32" : bits === 64 ? "pcm-f64" : null
-	}
-
-	return tag !== 0x0001
-		? null
-		: bits === 8
-			? "pcm-u8"
-			: bits === 16
-				? "pcm-s16"
-				: bits === 24
-					? "pcm-s24"
-					: bits === 32
-						? "pcm-s32"
-						: null
-}
-
 function audioTrack(stream: Extract<AsfStream, { audio: unknown }>, isDefault: boolean): DemuxTrack {
 	const { audio, specific } = stream
 	const channels = audio.ch ?? 2
 	const sampleRate = audio.rate ?? 44100
-	const tag = uint16le(specific, 0)
+	const tag = waveFormatTag(specific, 0, specific.length)
 	let codec: AudioCodec | null = null
 
 	if (audio.codec === "mp3" || audio.codec === "aac" || audio.codec === "ac3") {
