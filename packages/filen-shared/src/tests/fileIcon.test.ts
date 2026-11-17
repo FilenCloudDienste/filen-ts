@@ -103,6 +103,13 @@ describe("fileIconKey", () => {
 		expect(fileIconKey(ext, stubSets)).toBe("other")
 	})
 
+	// A .key is a Keynote package or a key file: the presentation glyph only once a read found the package.
+	it("gives .key its glyph once a read found what it means", () => {
+		expect(fileIconKey("key", stubSets, true)).toBe("ppt")
+		expect(fileIconKey("key", stubSets, false)).toBe("other")
+		expect(fileIconKey("pptx", stubSets, true)).toBe("ppt")
+	})
+
 	it("falls back to other for an unrecognised or empty extension", () => {
 		expect(fileIconKey("xyz", stubSets)).toBe("other")
 		expect(fileIconKey("", stubSets)).toBe("other")

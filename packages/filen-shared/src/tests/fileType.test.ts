@@ -144,6 +144,8 @@ const MIME_TYPES_SNAPSHOT: readonly (readonly [string, string])[] = [
 	["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
 	["application/vnd.ms-excel.sheet.macroenabled.12", "xlsm"],
 	["application/vnd.ms-excel", "xls"],
+	["application/vnd.apple.pages", "pages"],
+	["application/vnd.apple.numbers", "numbers"],
 	["text/csv", "csv"],
 	["text/tab-separated-values", "tsv"],
 	["text/markdown", "md"],

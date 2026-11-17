@@ -114,6 +114,8 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx", "both"],
 	["application/vnd.ms-excel.sheet.macroenabled.12", "xlsm", "both"],
 	["application/vnd.ms-excel", "xls", "both"],
+	["application/vnd.apple.pages", "pages", "both"],
+	["application/vnd.apple.numbers", "numbers", "both"],
 	["text/csv", "csv", "both"],
 	["text/tab-separated-values", "tsv", "both"],
 	["text/markdown", "md", "both"],

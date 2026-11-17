@@ -58,7 +58,7 @@ export function ArchiveWaiting({ onCancel }: { onCancel: () => void }) {
 	)
 }
 
-function Banner({
+export function Banner({
 	tone,
 	icon,
 	children,

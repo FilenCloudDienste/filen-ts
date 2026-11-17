@@ -35,7 +35,8 @@ const KINDS: Readonly<Record<string, string>> = {
 	docx: "docx",
 	dot: "docx",
 	pot: "presentation",
-	vhd: "code"
+	vhd: "code",
+	key: "iwork"
 }
 
 function kindOf(extension: string): string | null {
@@ -116,7 +117,14 @@ const ROWS: Row[] = [
 	// A .vhd is VHDL source or a Virtual Hard Disk: only a read decides, never its type.
 	["alu.vhd", "text/x-vhdl", 3_000, null, "code", "vhd", "default", true, true],
 	["alu.vhd", null, 3_000, "notVirtualDisk", "code", "vhd", "sniff", true, false],
-	["disk.vhd", "application/x-vhd", 3 * MIB, "virtualDisk", null, "vhd", "sniff", true, false]
+	["disk.vhd", "application/x-vhd", 3 * MIB, "virtualDisk", null, "vhd", "sniff", true, false],
+	// A .key is a Keynote package or a key file: neither until a read decides, and its type never does. Unread, it
+	// reads like an unknown extension (a text type makes it text).
+	["deck.key", "application/x-iwork-keynote-sffkey", 3 * MIB, null, null, "key", "default", true, true],
+	["deck.key", null, 3 * MIB, "iworkPackage", "iwork", "key", "sniff", true, false],
+	["server.key", null, 1_700, "notIworkPackage", null, "key", "sniff", true, false],
+	["server.key", "text/plain", 1_700, null, "text", "txt", "mime", true, true],
+	["server.key", "audio/mpeg", 1_700, null, null, "key", "default", true, true]
 ]
 
 describe("resolveFileKind", () => {
@@ -243,12 +251,13 @@ describe("verdictChangesKind", () => {
 
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
-		expect(["ts", "mts", "dot", "pot", "vhd", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
+		expect(["ts", "mts", "dot", "pot", "vhd", "key", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
 			"transportStream",
 			"transportStream",
 			"wordTemplate",
 			"presentationTemplate",
 			"virtualDisk",
+			"iworkPackage",
 			null,
 			null,
 			null,
@@ -261,7 +270,8 @@ describe("content sniffs", () => {
 			transportStream: ["transportStream", "notTransportStream"],
 			wordTemplate: ["wordBinary", "notWordBinary"],
 			presentationTemplate: ["presentationBinary", "notPresentationBinary"],
-			virtualDisk: ["virtualDisk", "notVirtualDisk"]
+			virtualDisk: ["virtualDisk", "notVirtualDisk"],
+			iworkPackage: ["iworkPackage", "notIworkPackage"]
 		})
 	})
 
@@ -270,6 +280,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("dot")).toEqual(["dot", "dot", "txt"])
 		expect(sniffCandidates("pot")).toEqual(["pot", "pot", "txt"])
 		expect(sniffCandidates("vhd")).toEqual(["vhd", null, "vhd"])
+		expect(sniffCandidates("key")).toEqual([null, "key", null])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 
@@ -296,6 +307,19 @@ describe("content sniffs", () => {
 		expect(verdictChangesKind({ name: "disk.dot", size: 300 }, "wordBinary", kindOf, table)).toBe(true)
 		expect(verdictChangesKind({ name: "disk.vhd", size: 300 }, "virtualDisk", kindOf)).toBe(true)
 		expect(verdictChangesKind({ name: "alu.vhd", size: 300 }, "notVirtualDisk", kindOf)).toBe(false)
+		expect(verdictChangesKind({ name: "deck.key", size: 300 }, "iworkPackage", kindOf)).toBe(true)
+		expect(verdictChangesKind({ name: "server.key", size: 300 }, "notIworkPackage", kindOf)).toBe(false)
+	})
+
+		// An app whose table has no Keynote reads a .key as before: by its MIME type, else no kind.
+	it("leaves a .key to its MIME type on a table without Keynote", () => {
+		const withoutKey = (extension: string) => (extension === "key" ? null : kindOf(extension))
+
+		expect(resolveFileKind({ name: "server.key", mime: "text/plain" }, withoutKey)).toMatchObject({ kind: "text", extension: "txt" })
+		expect(resolveFileKind({ name: "deck.key", mime: "application/octet-stream", verdict: "iworkPackage" }, withoutKey)).toMatchObject({
+			kind: null,
+			extension: "key"
+		})
 	})
 
 	// An app whose table has no .vhd reads it as before: by its MIME type, else no kind.

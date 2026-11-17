@@ -22,6 +22,13 @@ export function isVirtualDiskHead(head: Uint8Array): boolean {
 	return head.length >= VHD_COOKIE.length && VHD_COOKIE.every((byte, index) => head[index] === byte)
 }
 
+// A Keynote package is a zip, whose first local file header begins "PK\x03\x04" (the SDK lists by the same magic).
+const ZIP_LOCAL_HEADER = [0x50, 0x4b, 0x03, 0x04] as const
+
+export function isZipHead(head: Uint8Array): boolean {
+	return head.length >= ZIP_LOCAL_HEADER.length && ZIP_LOCAL_HEADER.every((byte, index) => head[index] === byte)
+}
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
@@ -33,6 +40,11 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: VHD_FOOTER_BYTES,
 		decide: head => (isVirtualDiskHead(head) ? "virtualDisk" : "notVirtualDisk")
+	},
+	iworkPackage: {
+		mode: "head",
+		headBytes: ZIP_LOCAL_HEADER.length,
+		decide: head => (isZipHead(head) ? "iworkPackage" : "notIworkPackage")
 	}
 }
 

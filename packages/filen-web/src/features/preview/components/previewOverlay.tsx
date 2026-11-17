@@ -82,6 +82,7 @@ import { ImageViewer, RawImageViewer } from "@/features/preview/components/image
 import type { FileVerdict } from "@filen/shared"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
+import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 import { fileKindVerdict, subscribeFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
 import { DocxViewer } from "@/features/preview/components/docxViewer"
 import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
@@ -2850,6 +2851,13 @@ function PreviewBody({
 				<ArchiveBrowser
 					item={item}
 					variant={variant}
+				/>
+			)
+		case "iwork":
+			return (
+				<IworkPreview
+					item={item}
+					alt={alt}
 				/>
 			)
 		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive

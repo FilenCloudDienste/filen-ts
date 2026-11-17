@@ -665,6 +665,8 @@ export const drive = {
 	drivePreviewKindMarkdown: "Markdown",
 	/** Info panel — Kind row value: an archive or compressed file (zip, 7z, tar, gz, …) */
 	drivePreviewKindArchive: "Archive",
+	/** Info panel — Kind row value: an Apple Pages, Numbers or Keynote document */
+	drivePreviewKindIwork: "iWork document",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

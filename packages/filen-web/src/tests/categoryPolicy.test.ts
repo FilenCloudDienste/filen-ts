@@ -75,6 +75,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	code: "drivePreviewKindCode",
 	markdown: "drivePreviewKindMarkdown",
 	archive: "drivePreviewKindArchive",
+	iwork: "drivePreviewKindIwork",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -101,8 +102,9 @@ const LEGACY_AUDIO_TIER = [
 	"dts"
 ]
 
+// An iWork document (added after the policy table) is listed by the SDK like an archive: no cap.
 function legacyBufferedSizeCap(category: PreviewCategory): bigint | null {
-	if (category === "rawImage" || category === "archive") {
+	if (category === "rawImage" || category === "archive" || category === "iwork") {
 		return null
 	}
 

@@ -86,10 +86,11 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 					alt={alt}
 				/>
 			)
-		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and keeps an archive for
-		// FileHero's own browser (publicArchive.tsx), and an entry opens only in the categories it loads
-		// whole (entryAccess.logic.ts).
+		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and an iWork document (whose
+		// package needs a session to list) and keeps an archive for FileHero's own browser (publicArchive.tsx), and an
+		// entry opens only in the categories it loads whole (entryAccess.logic.ts).
 		case "archive":
+		case "iwork":
 		case "other":
 			return null
 		// `category` narrows to `never` here only while every PreviewCategory has an arm above, so adding

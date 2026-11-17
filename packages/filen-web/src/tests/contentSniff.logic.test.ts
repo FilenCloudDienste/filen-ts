@@ -16,7 +16,7 @@ import {
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { canOpenEntry, entryAwaitsSniff } from "@/features/archive/lib/entryAccess.logic"
-import { EXTENSIONLESS_SNIFF, gateRunsSniffer, isVirtualDiskHead, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
+import { EXTENSIONLESS_SNIFF, gateRunsSniffer, isVirtualDiskHead, isZipHead, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { legacyUnprobedTransportStream, legacyUnsniffedTemplate } from "@/tests/support/legacySniff"
 import { storeOf } from "@/tests/support/archiveEntries"
@@ -105,6 +105,32 @@ describe("needsContentSniff", () => {
 		expect(needsContentSniff(fileNamed("alu.vhdl", 3_000n), null)).toBeNull()
 	})
 
+	// A Keynote package or a key file: no kind until its head says it is a zip, which opens as an iWork document.
+	it("reads a .key's head before it has a kind", () => {
+		const deck = fileNamed("deck.key", 3n * MIB)
+
+		expect(needsContentSniff(deck, null)).toBe("iworkPackage")
+		expect(previewType(deck, null)).toBe("other")
+		expect(needsContentSniff(deck, "iworkPackage")).toBeNull()
+		expect(previewType(deck, "iworkPackage")).toBe("iwork")
+		expect(needsContentSniff(deck, "notIworkPackage")).toBeNull()
+		expect(previewType(deck, "notIworkPackage")).toBe("other")
+		expect(canPreview(deck)).toBe(true)
+		// Unread, it has no kind, so a key file may still be opened as text.
+		expect(canOpenAsText(deck)).toBe(true)
+
+		// A type that says text settles it with no read.
+		const pem = fileNamed("server.key", 1_700n, "text/plain")
+
+		expect(needsContentSniff(pem, null)).toBeNull()
+		expect(previewType(pem, null)).toBe("text")
+
+		// Pages and Numbers mean one thing.
+		expect(needsContentSniff(fileNamed("report.pages", 3n * MIB), null)).toBeNull()
+		expect(previewType(fileNamed("report.pages", 3n * MIB), null)).toBe("iwork")
+		expect(previewType(fileNamed("budget.numbers", 3n * MIB), null)).toBe("iwork")
+	})
+
 	it("ships no extensionless read", () => {
 		expect(EXTENSIONLESS_SNIFF).toBeNull()
 		expect(needsContentSniff(fileNamed("blob", 300n), null)).toBeNull()
@@ -149,6 +175,18 @@ describe("sniffAdmits", () => {
 		}
 
 		expect(canPreview(fileNamed("disk.vhd", 2n * 1024n * MIB))).toBe(false)
+	})
+
+	// The SDK lists the package at any size on the drive; a public link's or an archive's needs an archive reader.
+	it("admits a .key on the drive only, at any size", () => {
+		for (const size of [3n * MIB, 4n * 1024n * MIB]) {
+			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "drive")).toBe(true)
+			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "link")).toBe(false)
+			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "entry")).toBe(false)
+		}
+
+		expect(anonPreviewability(fileNamed("deck.key", 3n * MIB))).not.toBe("previewable")
+		expect(anonPreviewability(fileNamed("report.pages", 3n * MIB))).not.toBe("previewable")
 	})
 
 	it("admits an archive's .ts as the code it opens as there: an entry never streams", () => {
@@ -209,6 +247,32 @@ describe("SNIFFERS", () => {
 		if (SNIFFERS.virtualDisk.mode === "head") {
 			expect(SNIFFERS.virtualDisk.decide(disk, 512)).toBe("virtualDisk")
 			expect(SNIFFERS.virtualDisk.decide(encode("entity alu is"), 13)).toBe("notVirtualDisk")
+		}
+	})
+
+	it("finds a Keynote package by the zip's first local header, from its first 4 bytes", () => {
+		const sniffer = SNIFFERS.iworkPackage
+		const zip = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00])
+		const pem = new TextEncoder().encode("-----BEGIN PRIVATE KEY-----")
+
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(4)
+		expect(isZipHead(zip)).toBe(true)
+		expect(isZipHead(pem)).toBe(false)
+		expect(isZipHead(zip.subarray(0, 3))).toBe(false)
+		// An empty zip (end of central directory first) holds no preview either way.
+		expect(isZipHead(Uint8Array.from([0x50, 0x4b, 0x05, 0x06]))).toBe(false)
+
+		if (sniffer.mode === "head") {
+			expect(sniffer.decide(zip, 6)).toBe("iworkPackage")
+			expect(sniffer.decide(pem, pem.length)).toBe("notIworkPackage")
+		}
+	})
+
+	it("opens no iWork document inside an archive yet", () => {
+		const DIRECT = { type: "direct", packedBytes: 10n } as const
+
+		for (const path of ["deck.key", "report.pages"]) {
+			expect(canOpenEntry(storeOf([{ path, access: DIRECT, size: Number(MIB) }]), 0), path).toBe(false)
 		}
 	})
 

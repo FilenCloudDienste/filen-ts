@@ -116,11 +116,22 @@ const ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, 
 	["ahk", "code"]
 ])
 
+// Extensions only a read of the file gives a meaning (fileKind.ts): their glyph once the read found that meaning, the
+// generic one before. A `.key` is a Keynote package or a key file.
+const READ_ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, FileIconKey>([["key", "ppt"]])
+
 // Resolves an already-normalised extension (lowercase, no leading dot) to its type-icon key.
 // image/video/audio are resolved first via the injected `sets`, then the fixed table, then the shared
 // code set. An extension matching nothing (including "", an undecryptable file with no name to read
-// one from) falls through to "other".
-export function fileIconKey(ext: string, sets: FileIconSets): FileIconKey {
+// one from) falls through to "other". `readFound`: a read of the file's content found what its extension means (a
+// verdict gave it its kind), which an extension only a read gives a meaning needs for its glyph.
+export function fileIconKey(ext: string, sets: FileIconSets, readFound = false): FileIconKey {
+	const read = READ_ICON_KEY_BY_EXTENSION.get(ext)
+
+	if (read !== undefined) {
+		return readFound ? read : "other"
+	}
+
 	if (sets.isImage(ext)) {
 		return "image"
 	}

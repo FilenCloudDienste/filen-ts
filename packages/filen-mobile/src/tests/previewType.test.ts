@@ -504,7 +504,15 @@ describe("getPreviewType — ambiguous extensions", () => {
 		["recording", "video/mp2t", "unknown", "m2ts"],
 		// No .vhd in this table (VHDL source or a disk image elsewhere): read by its mime, as before.
 		["alu.vhd", "text/plain", "text", "txt"],
-		["disk.vhd", "application/octet-stream", "unknown", "vhd"]
+		["disk.vhd", "application/octet-stream", "unknown", "vhd"],
+		// No Keynote in this table (a package or a key file elsewhere): read by its mime, as before, except that an audio
+		// or video type no longer makes a .key a media file (before: audio).
+		["server.key", "text/plain", "text", "txt"],
+		["slides.key", "application/x-iwork-keynote-sffkey", "unknown", "key"],
+		["slides.key", "audio/mpeg", "unknown", "key"],
+		// The Pages and Numbers types name extensions this table lacks: an extensionless document stays unread, as before.
+		["report", "application/vnd.apple.pages", "unknown", ""],
+		["budget", "application/vnd.apple.numbers", "unknown", ""]
 	])("%s (%s) is %s by .%s", (name, mime, type, extension) => {
 		expect(getPreviewType(name, mime)).toBe(type)
 		expect(fileTypeExtension(name, mime)).toBe(extension)

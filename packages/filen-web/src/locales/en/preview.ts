@@ -638,6 +638,14 @@ export const preview = {
 	previewArchiveEta: "{{eta}} left",
 	/** Archive browser — stops a running listing; what was read stays browsable */
 	previewArchiveStop: "Stop",
+
+	// ── iWork documents ──────────────────────────────────────────────────────
+	/** iWork preview banner — the document shows as the image of its first page it carries; {{app}} is Pages, Numbers or Keynote */
+	previewIworkFirstPageImage: "Preview image of the first page. Open in {{app}} for the full document.",
+	/** iWork preview banner — an older document shows as the PDF copy it carries; {{app}} is Pages, Numbers or Keynote */
+	previewIworkSavedCopy: "Preview copy saved in the document. Open in {{app}} for the full document.",
+	/** iWork preview — the document carries no preview of itself (or is no iWork package) */
+	previewIworkNoPreview: "No preview inside this file.",
 	/** Archive browser — the user stopped the listing */
 	previewArchiveStopped_one: "Listing stopped after {{count}} entry.",
 	/** Archive browser — the user stopped the listing */

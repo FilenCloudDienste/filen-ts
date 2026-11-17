@@ -3,6 +3,7 @@ import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
+import { IWORK_EXTENSIONS } from "@/features/iwork/lib/iworkPreview.logic"
 import {
 	AUDIO_FORMATS,
 	CODE_FILE_EXTENSIONS,
@@ -39,6 +40,7 @@ export type PreviewCategory =
 	| "code"
 	| "markdown"
 	| "archive"
+	| "iwork"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -305,6 +307,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindArchive",
 		assistantKind: null
 	},
+	// The SDK lists the package and reads the one rendering it carries (iworkPreview.ts), so any size opens. Inside an
+	// archive, or on a public link, the package needs an archive reader the SDK does not have yet.
+	iwork: {
+		streamed: false,
+		ranged: true,
+		bufferCap: null,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "none",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindIwork",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -373,6 +391,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
 	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],
+	// A `.key` is one only once a read of its head found a zip (resolveFileKind gives it no kind until then).
+	[IWORK_EXTENSIONS, "iwork"],
 	// A `.vhd` is VHDL until a read of its head finds a Virtual Hard Disk.
 	[CODE_EXTENSIONS, "code"]
 ]
@@ -402,10 +422,20 @@ export function previewCategoryForExtension(ext: string): PreviewCategory | null
 // computes from it follows a change; the store's when absent, which is the same value. Null resolves
 // without one (the SDK worker, which holds no verdicts).
 export function fileTypeExtension(name: string, mime: string | null | undefined, uuid?: string, verdict?: FileVerdict | null): string {
+	return fileTypeKind(name, mime, uuid, verdict).extension
+}
+
+// The whole resolution fileTypeExtension reads its extension from: the kind, and whether a read decided it.
+export function fileTypeKind(
+	name: string,
+	mime: string | null | undefined,
+	uuid?: string,
+	verdict?: FileVerdict | null
+): FileKind<PreviewCategory> {
 	return resolveFileKind(
 		{ name, mime, verdict: verdict === undefined ? (uuid === undefined ? null : fileKindVerdict(uuid)) : verdict },
 		previewCategoryForExtension
-	).extension
+	)
 }
 
 // The extension a drive item's type reads from, content verdicts included (itemFileKind); "" for a

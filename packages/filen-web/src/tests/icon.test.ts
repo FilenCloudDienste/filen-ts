@@ -45,6 +45,16 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("disk.vmdk")).toBe("iso")
 	})
 
+	// A Keynote package or a key file: Keynote's glyph only once a read found the package.
+	it("gives a .key the presentation glyph once a read found it is Keynote's", () => {
+		expect(fileIconKey("deck.key")).toBe("other")
+		expect(fileIconKey("deck.key", null, undefined, "iworkPackage")).toBe("ppt")
+		expect(fileIconKey("server.key", null, undefined, "notIworkPackage")).toBe("other")
+		expect(fileIconKey("report.pages")).toBe("doc")
+		expect(fileIconKey("budget.numbers")).toBe("xls")
+		expect(fileIconKey("report", "application/vnd.apple.pages")).toBe("doc")
+	})
+
 	it("routes by mime when the extension is missing or unknown, never over a known one", () => {
 		expect(fileIconKey("clip", "video/mp4")).toBe("video")
 		expect(fileIconKey("export.dat", "text/plain")).toBe("txt")

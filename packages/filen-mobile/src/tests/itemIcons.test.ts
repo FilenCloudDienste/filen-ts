@@ -392,7 +392,13 @@ describe("resolveFileIconKey", () => {
 		expect(resolveFileIconKey("disk.vmdk")).toBe("iso")
 	})
 
-	// Each means more than one format: unchanged until a read can tell which.
+	// Before = after: the Pages and Numbers types name extensions this platform's tables lack.
+	it("keeps an extensionless Pages or Numbers document the generic icon", () => {
+		expect(resolveFileIconKey("report", "application/vnd.apple.pages")).toBe("other")
+		expect(resolveFileIconKey("budget", "application/vnd.apple.numbers")).toBe("other")
+	})
+
+	// Each means more than one format: unchanged until a read can tell which (this platform reads none of them).
 	it.each(["song.mod", "song.it", "model.obj", "data.db", "slides.key", "alu.vhd"])("keeps %s on the generic glyph", name => {
 		expect(resolveFileIconKey(name)).toBe("other")
 	})
