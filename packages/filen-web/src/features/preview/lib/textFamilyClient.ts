@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import TextFamilyWorker from "@/features/preview/workers/textFamily.worker.ts?worker"
-import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
+import type { EmailTextReading, TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
 import { WorkerJobTimeoutError, workerJob, type JobClock } from "@/features/preview/lib/workerJob"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
@@ -10,7 +10,7 @@ import type { ContactFile } from "@filen/shared/contactFile"
 import type { BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 import type { BinarySource } from "@/features/preview/lib/binaryInfo/types"
 
-export type { TorrentReading } from "@/features/preview/workers/textFamily.worker"
+export type { EmailTextReading, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 
 // The text family's parsers in one stateless worker: idle after 30 s with nothing to read, ended at sign-out. The page keeps its bytes (the preview cache's) and posts a copy.
 const TEXT_FAMILY_IDLE_MS = 30_000
@@ -33,16 +33,31 @@ export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading
 	})
 }
 
-// A message's headers, bodies and attachments (Blobs), from a copy of its bytes. A parse past the job's budget is a
-// message too large to read here (a slow device on a hostile one), not a failure.
+// A message's headers, bodies and attachments (Blobs), from a copy of its bytes.
 export async function readEmailFile(bytes: Uint8Array): Promise<EmailReading> {
-	try {
-		return await job<EmailReading>(async remote => {
-			// A copy per attempt: a transferred one is gone.
-			const copy = bytes.slice()
+	return await emailJob<EmailReading>(async remote => {
+		// A copy per attempt: a transferred one is gone.
+		const copy = bytes.slice()
 
-			return await remote.email(Comlink.transfer(copy, [copy.buffer]))
-		})
+		return await remote.email(Comlink.transfer(copy, [copy.buffer]))
+	})
+}
+
+// A message as plain text for the assistant: headers, body and attachment names, at most `limit` characters and one
+// more; only that string comes back.
+export async function readEmailText(bytes: Uint8Array, limit: number): Promise<EmailTextReading> {
+	return await emailJob<EmailTextReading>(async remote => {
+		const copy = bytes.slice()
+
+		return await remote.emailText(Comlink.transfer(copy, [copy.buffer]), limit)
+	})
+}
+
+// A message's parse past the job's budget is a message too large to read here (a slow device on a hostile one), not a
+// failure.
+async function emailJob<R>(run: (remote: WorkerHandle<TextFamilyWorkerApi>["remote"]) => Promise<R>): Promise<R | { status: "tooLarge" }> {
+	try {
+		return await job<R>(run)
 	} catch (e) {
 		if (e instanceof WorkerJobTimeoutError) {
 			return { status: "tooLarge" }

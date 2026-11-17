@@ -81,6 +81,21 @@ vi.mock("@/features/preview/lib/previewCache", async importOriginal => {
 
 	return { ...actual, loadPreviewBytes: vi.fn(actual.loadPreviewBytes) }
 })
+// The text-family worker's message extract, run here: the same reader and extract the worker runs.
+vi.mock("@/features/preview/lib/textFamilyClient", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/preview/lib/textFamilyClient")>()
+	const { readEmail } = await import("@/features/preview/lib/emailReading")
+	const { emailText } = await import("@/features/preview/lib/emailText")
+
+	return {
+		...actual,
+		readEmailText: async (bytes: Uint8Array, limit: number) => {
+			const reading = await readEmail(new Uint8Array(bytes))
+
+			return reading.status === "ok" ? { status: "ok", text: emailText(reading, limit) } : reading
+		}
+	}
+})
 
 // First, so it binds to the mocked playlist fetch before anything loads the real module.
 import "@/features/audio/queries/playlists"
@@ -893,6 +908,44 @@ describe("read_text_file", () => {
 		await call("list_directory", {})
 
 		expect(json(await call("read_text_file", { handle: "f1" }))["content"]).toBe("نامه\u200Cها را می\u200Cخواهم")
+	})
+
+	it("reads a message as its headers, its HTML's text and its attachments' names, never their bytes", async () => {
+		const mail = rawFile(testUuid("mail"), "numbers.eml", ROOT, "message/rfc822")
+
+		sdk.listDirectory.mockResolvedValue({ dirs: [], files: [mail] })
+		queryClient.removeQueries({ queryKey: driveListingQueryKey({ variant: "drive", uuid: null }) })
+		sdk.downloadFileBytes.mockResolvedValue(
+			new Uint8Array(
+				new TextEncoder().encode(
+					[
+						"From: Anna <anna@example.com>",
+						"To: me@example.com",
+						"Subject: Numbers",
+						'Content-Type: multipart/mixed; boundary="m"',
+						"",
+						"--m",
+						"Content-Type: text/html",
+						"",
+						"<style>p{color:red}</style><p>Revenue &amp; costs</p><script>x()</script><p>are up.</p>",
+						"--m",
+						'Content-Type: application/pdf; name="report.pdf"',
+						"Content-Transfer-Encoding: base64",
+						"",
+						"JVBERi0xLjcKU0VDUkVUUEFZTE9BRA==",
+						"--m--",
+						""
+					].join("\r\n")
+				)
+			)
+		)
+		await call("list_directory", {})
+
+		const content = String(json(await call("read_text_file", { handle: "f1" }))["content"])
+
+		expect(content).toBe(
+			"From: Anna <anna@example.com>\nTo: me@example.com\nSubject: Numbers\nAttachments: report.pdf\n\nRevenue & costs\nare up."
+		)
 	})
 
 	it("refuses anything but text, code and markdown without downloading it", async () => {

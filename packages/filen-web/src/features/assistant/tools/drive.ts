@@ -28,6 +28,8 @@ import { WATCHDOG_MS } from "@/features/drive/lib/searchStatus.logic"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { spreadsheetFileKind } from "@/features/spreadsheet/lib/fileKind"
 import { loadDriveFileBytes } from "@/features/preview/lib/fileBytes"
+import { EMAIL_MAX_BYTES } from "@/features/preview/lib/previewCaps"
+import { readEmailText } from "@/features/preview/lib/textFamilyClient"
 import { readTextFileDetected } from "@/features/preview/lib/encodingGuess"
 import { assistantRouter, navigateChecked } from "@/features/assistant/tools/navigation"
 import { navigateToRoute } from "@/features/assistant/tools/routes"
@@ -635,6 +637,11 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 		throw new AssistantToolError("This file cannot be decrypted")
 	}
 
+	// A message reads as its parsed text (headers, body, attachment names), never its raw parts.
+	if (previewType(item) === "email") {
+		return await readEmailTool(scope, entity, item, name)
+	}
+
 	const csv = spreadsheetFileKind(extensionOf(name).toLowerCase())
 
 	// CSV and TSV preview as spreadsheets but are text.
@@ -653,6 +660,34 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 	}
 
 	const { text, truncated } = clipText((await readTextFileDetected(bytes)).text, TEXT_FILE_MAX_CHARS)
+
+	return {
+		value: {
+			handle: showDrive(scope, item, livePath(entity, item)),
+			name,
+			content: text,
+			...(truncated ? { truncated: true } : {})
+		}
+	}
+}
+
+async function readEmailTool(
+	scope: ToolScope,
+	entity: { item: DriveItem; path?: string },
+	item: DriveItem,
+	name: string
+): ReturnType<ToolAdapter> {
+	if (item.data.size > BigInt(EMAIL_MAX_BYTES)) {
+		throw new AssistantToolError(`"${name}" is too large to read (${formatBytes(Number(item.data.size))})`)
+	}
+
+	const reading = await readEmailText(await loadDriveFileBytes(item, abortSignalOf(scope.signal)), TEXT_FILE_MAX_CHARS)
+
+	if (reading.status !== "ok") {
+		throw new AssistantToolError(`"${name}" is too large to read`)
+	}
+
+	const { text, truncated } = clipText(reading.text, TEXT_FILE_MAX_CHARS)
 
 	return {
 		value: {

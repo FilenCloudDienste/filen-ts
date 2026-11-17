@@ -6,10 +6,13 @@ import { readContacts, type ContactFile } from "@filen/shared/contactFile"
 import { cmsSigner } from "@filen/office/core/pdfsign"
 import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 import { readEmail, type EmailReading } from "@/features/preview/lib/emailReading"
+import { emailText } from "@/features/preview/lib/emailText"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
 // plain data, keeping nothing (a stateless worker, textFamilyClient.ts).
+
+export type EmailTextReading = { readonly status: "ok"; readonly text: string } | { readonly status: "tooLarge" }
 
 export type TorrentReading =
 	| { readonly status: "ok"; readonly info: TorrentInfo; readonly hashes: TorrentHashes; readonly magnet: string }
@@ -35,6 +38,12 @@ const api = {
 	},
 	// A message: a copy of its bytes, parsed and dropped; attachments come back as Blobs (no copy on the way).
 	email: (bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> => readEmail(bytes),
+	// A message as plain text (headers, body, attachment names), at most `limit` characters and one more.
+	emailText: async (bytes: Uint8Array<ArrayBuffer>, limit: number): Promise<EmailTextReading> => {
+		const reading = await readEmail(bytes)
+
+		return reading.status === "ok" ? { status: "ok", text: emailText(reading, limit) } : reading
+	},
 	// The text the page already decoded (in the encoding it shows), parsed by its extension's format: cue times as
 	// transferred arrays, cue text as plain text.
 	subtitles: (text: string, extension: string): SubtitleReading => {
