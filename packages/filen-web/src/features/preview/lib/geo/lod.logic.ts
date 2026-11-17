@@ -79,3 +79,30 @@ export function lodLevel(pointSpacingPixels: number, maxPixels = 2): number {
 
 	return level
 }
+
+// Steps sampled for the typical one: enough for a stable median, cheap at any point count.
+const SPACING_SAMPLES = 4096
+
+// The median distance between consecutive points of a line, from an even sample of the steps: what the level of detail
+// is picked by. A mean would be pulled up by a few long jumps (two dense clusters far apart) and draw every point.
+export function typicalStep(x: Float64Array, y: Float64Array, segments: Uint32Array): number {
+	const steps: number[] = []
+	const count = x.length
+	const stride = Math.max(1, Math.floor(count / SPACING_SAMPLES))
+	let s = 0
+
+	for (let i = 1; i < count; i += stride) {
+		while (s + 1 < segments.length && (segments[s + 1] ?? 0) <= i) s++
+
+		// A line's first point has no step before it.
+		if (i === (segments[s] ?? 0)) continue
+
+		steps.push(Math.hypot((x[i] ?? 0) - (x[i - 1] ?? 0), (y[i] ?? 0) - (y[i - 1] ?? 0)))
+	}
+
+	if (steps.length === 0) return 0
+
+	steps.sort((a, b) => a - b)
+
+	return steps[Math.floor(steps.length / 2)] ?? 0
+}

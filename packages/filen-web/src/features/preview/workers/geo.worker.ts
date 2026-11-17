@@ -3,7 +3,7 @@ import * as Comlink from "comlink"
 import { loadGeo, type GeoFileFormat } from "@/features/preview/lib/geo/load"
 import type { GeoPoints, GeoWaypoint } from "@/features/preview/lib/geo/extract.logic"
 import { elevationProfile, pointAtDistance, type GeoStats } from "@/features/preview/lib/geo/stats.logic"
-import { buildLod, lodLevel, type LodLevel } from "@/features/preview/lib/geo/lod.logic"
+import { buildLod, lodLevel, typicalStep, type LodLevel } from "@/features/preview/lib/geo/lod.logic"
 import {
 	fitView,
 	panView,
@@ -90,13 +90,10 @@ function build(
 	const count = points.lon.length
 	const x = new Float64Array(count)
 	const y = new Float64Array(count)
-	let length = 0
 
 	for (let i = 0; i < count; i++) {
 		x[i] = projectX(p, points.lon[i] ?? 0)
 		y[i] = projectY(p, points.lat[i] ?? 0)
-
-		if (i > 0) length += Math.hypot((x[i] ?? 0) - (x[i - 1] ?? 0), (y[i] ?? 0) - (y[i - 1] ?? 0))
 	}
 
 	const chunks = new Float64Array(Math.ceil(count / CHUNK) * 4)
@@ -123,7 +120,7 @@ function build(
 		x,
 		y,
 		lod: buildLod(x, y, points.segments),
-		spacing: count > 1 ? length / (count - 1) : 0,
+		spacing: typicalStep(x, y, points.segments),
 		chunks,
 		waypoints: waypoints.map(waypoint => ({ x: projectX(p, waypoint.lon), y: projectY(p, waypoint.lat) })),
 		fit: (w, h) => fitView(p, bounds, w, h)
@@ -185,10 +182,12 @@ function drawTrack(ctx: OffscreenCanvasRenderingContext2D, current: Plot, at: Ge
 				continue
 			}
 
-			const point = toCanvas(at, width, height, current.x[i] ?? 0, current.y[i] ?? 0)
+			// toCanvas, inlined: no object per point.
+			const px = ((current.x[i] ?? 0) - at.x) * at.scale + width / 2
+			const py = ((current.y[i] ?? 0) - at.y) * at.scale + height / 2
 
-			if (pen) ctx.lineTo(point.x, point.y)
-			else ctx.moveTo(point.x, point.y)
+			if (pen) ctx.lineTo(px, py)
+			else ctx.moveTo(px, py)
 
 			pen = true
 		}

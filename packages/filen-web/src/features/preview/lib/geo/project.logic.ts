@@ -1,4 +1,5 @@
 import type { GeoBounds } from "@/features/preview/lib/geo/stats.logic"
+import { IMAGE_WHEEL_SENSITIVITY } from "@/features/preview/components/imageViewer.logic"
 
 // The plot's projection and view: equirectangular in metres around the bounds' centre, scaled by cos(φ₀) so distances
 // read true near it; a view is a centre and a scale (canvas pixels per metre) that pans and zooms toward the pointer.
@@ -71,9 +72,9 @@ export function zoomView(view: GeoView, fitted: GeoView, factor: number, width: 
 	return { scale, x: anchor.x - (px - width / 2) / scale, y: anchor.y - (py - height / 2) / scale }
 }
 
-// A wheel turn's zoom factor: about 15 % a notch.
+// A wheel turn's zoom factor, at the image viewer's sensitivity: about 15 % a notch.
 export function wheelFactor(deltaY: number): number {
-	return Math.exp(-deltaY * 0.0015)
+	return Math.exp(-deltaY * IMAGE_WHEEL_SENSITIVITY)
 }
 
 const NICE = [1, 2, 5] as const

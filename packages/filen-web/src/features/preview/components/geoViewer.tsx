@@ -1,4 +1,4 @@
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import * as Comlink from "comlink"
 import { CodeIcon, MapIcon, MaximizeIcon } from "lucide-react"
@@ -8,6 +8,7 @@ import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { Button } from "@/components/ui/button"
 import { resolveTheme, useTheme } from "@/providers/themeProvider"
 import { useOwnedWorker } from "@/lib/workers/ownedWorker"
+import { geoFileFormat } from "@/features/preview/lib/geo/formats.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CanvasViewerShell } from "@/features/preview/components/canvasViewerShell"
 import { TextViewer } from "@/features/preview/components/textViewer"
@@ -18,14 +19,13 @@ import type { GeoStats } from "@/features/preview/lib/geo/stats.logic"
 import {
 	distanceParts,
 	duration,
-	geoFormat,
 	kilometresPerHour,
 	nearestSample,
 	profilePath,
 	wholeMetres
 } from "@/features/preview/components/geoViewer.logic"
 
-type LoadState = { status: "loading" } | { status: "ready"; summary: GeoSummary } | { status: "failed" }
+type LoadState = { status: "loading" } | { status: "ready"; summary: GeoSummary } | { status: "failed" } | { status: "tooLarge" }
 
 const PROFILE_WIDTH = 1000
 const PROFILE_HEIGHT = 64
@@ -86,39 +86,106 @@ function Summary({ stats, waypoints }: { stats: GeoStats; waypoints: number }) {
 	return <p className="truncate px-4 pt-3 pb-2 text-sm text-muted-foreground">{parts.join(" · ")}</p>
 }
 
+// One profile step for the arrow keys: a hundredth of the track.
+const PROFILE_KEY_STEPS = 100
+
 function Profile({ summary, onHover }: { summary: GeoSummary; onHover: (distance: number | null) => void }) {
 	const { t } = useTranslation("preview")
 	const distance = useDistance()
 	const [hover, setHover] = useState<number | null>(null)
+	// The highlight follows at most once a frame, the latest position.
+	const pending = useRef<{ frame: number | null; distance: number | null }>({ frame: null, distance: null })
 	const { distance: at, elevation } = summary.profile
 	const total = at.at(-1) ?? 0
+
+	useEffect(() => {
+		const queued = pending.current
+
+		return () => {
+			if (queued.frame !== null) cancelAnimationFrame(queued.frame)
+		}
+	}, [])
 
 	if (at.length < 2 || total <= 0) {
 		return null
 	}
 
+	const highlight = (next: number | null): void => {
+		const queued = pending.current
+
+		queued.distance = next
+		queued.frame ??= requestAnimationFrame(() => {
+			queued.frame = null
+			onHover(queued.distance)
+		})
+	}
+	const pick = (sample: number | null): void => {
+		setHover(sample)
+		highlight(sample === null || sample < 0 ? null : (at[sample] ?? 0))
+	}
 	const move = (event: ReactPointerEvent<SVGSVGElement>): void => {
 		const box = event.currentTarget.getBoundingClientRect()
 		const fraction = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)))
-		const sample = nearestSample(at, fraction * total)
 
-		setHover(sample)
-		onHover(sample < 0 ? null : (at[sample] ?? 0))
+		pick(nearestSample(at, fraction * total))
+	}
+	const key = (event: ReactKeyboardEvent<SVGSVGElement>): void => {
+		const step = Math.max(1, Math.round(at.length / PROFILE_KEY_STEPS))
+		const current = hover ?? -1
+		const next =
+			event.key === "ArrowRight" || event.key === "ArrowUp"
+				? Math.min(at.length - 1, current < 0 ? 0 : current + step)
+				: event.key === "ArrowLeft" || event.key === "ArrowDown"
+					? Math.max(0, current < 0 ? at.length - 1 : current - step)
+					: event.key === "Home"
+						? 0
+						: event.key === "End"
+							? at.length - 1
+							: undefined
+
+		if (event.key === "Escape" && hover !== null) {
+			event.stopPropagation()
+			pick(null)
+
+			return
+		}
+
+		if (next === undefined) return
+
+		// The profile's own keys, not the pager's.
+		event.preventDefault()
+		event.stopPropagation()
+		pick(next)
 	}
 	const sample = hover ?? -1
+	const readout =
+		sample >= 0
+			? t("previewGeoProfileAt", {
+					distance: distance(at[sample] ?? 0),
+					elevation: t("previewGeoMetres", { value: wholeMetres(elevation[sample] ?? 0) })
+				})
+			: undefined
 
 	return (
 		<div className="relative shrink-0 border-t border-border/50 px-4 py-2">
 			<svg
-				role="img"
+				role="slider"
+				tabIndex={0}
 				aria-label={t("previewGeoProfile")}
+				aria-valuemin={0}
+				aria-valuemax={Math.round(total)}
+				aria-valuenow={sample >= 0 ? Math.round(at[sample] ?? 0) : 0}
+				aria-valuetext={readout ?? t("previewGeoProfile")}
 				viewBox={`0 0 ${String(PROFILE_WIDTH)} ${String(PROFILE_HEIGHT)}`}
 				preserveAspectRatio="none"
-				className="block h-16 w-full touch-none text-primary"
+				className="block h-16 w-full touch-none rounded-sm text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				onPointerMove={move}
 				onPointerLeave={() => {
-					setHover(null)
-					onHover(null)
+					pick(null)
+				}}
+				onKeyDown={key}
+				onBlur={() => {
+					pick(null)
 				}}
 			>
 				<path
@@ -140,13 +207,8 @@ function Profile({ summary, onHover }: { summary: GeoSummary; onHover: (distance
 					/>
 				) : null}
 			</svg>
-			{sample >= 0 ? (
-				<span className="pointer-events-none absolute top-1 right-4 text-xs text-muted-foreground tabular-nums">
-					{t("previewGeoProfileAt", {
-						distance: distance(at[sample] ?? 0),
-						elevation: t("previewGeoMetres", { value: wholeMetres(elevation[sample] ?? 0) })
-					})}
-				</span>
+			{readout !== undefined ? (
+				<span className="pointer-events-none absolute top-1 right-4 text-xs text-muted-foreground tabular-nums">{readout}</span>
 			) : null}
 		</div>
 	)
@@ -156,7 +218,7 @@ function GeoPlot({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Array
 	const { t } = useTranslation("preview")
 	const { theme } = useTheme()
 	const dark = resolveTheme(theme) === "dark"
-	const format = geoFormat(itemTypeExtension(item))
+	const format = geoFileFormat(itemTypeExtension(item))
 	const [attempt, setAttempt] = useState(0)
 	const worker = useOwnedWorker<GeoWorkerApi>(createGeoWorker, `${item.data.uuid}:${String(attempt)}`, "geo")
 	const owned = worker.status === "ready" ? worker.owned : null
@@ -180,8 +242,11 @@ function GeoPlot({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Array
 				summary => {
 					if (live) setState({ owner: owned, load: { status: "ready", summary } })
 				},
-				() => {
-					if (live) setState({ owner: owned, load: { status: "failed" } })
+				(error: unknown) => {
+					// A KMZ whose KML unpacks past the cap.
+					const tooLarge = error instanceof Error && error.name === "GeoTooLarge"
+
+					if (live) setState({ owner: owned, load: { status: tooLarge ? "tooLarge" : "failed" } })
 				}
 			)
 
@@ -203,6 +268,15 @@ function GeoPlot({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Array
 				{t("previewGeoShowSource")}
 			</Button>
 		)
+
+	if (load.status === "tooLarge") {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewGeoTooLarge")}
+			/>
+		)
+	}
 
 	if (format === null || worker.status === "failed" || load.status === "failed") {
 		return (

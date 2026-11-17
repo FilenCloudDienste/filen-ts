@@ -1,5 +1,7 @@
 import { parseXml } from "@filen/office/core/xml"
-import { ZipArchive, bytesSource } from "@filen/office/core/opc"
+import { ZipArchive, ZipError, bytesSource } from "@filen/office/core/opc"
+import { entryFits } from "@/features/preview/lib/zipBudget.logic"
+import { GEO_MAX_BYTES, type GeoFileFormat } from "@/features/preview/lib/geo/formats.logic"
 import {
 	GEO_MAX_POINTS,
 	GeoFormatError,
@@ -16,7 +18,7 @@ import { GeoStatsSink, pointStats, type GeoStats } from "@/features/preview/lib/
 // A geo file read in the geo worker: its source by format (a KMZ's first root .kml), counted, then filled into packed
 // arrays, or, past GEO_MAX_POINTS, only summed.
 
-export type GeoFileFormat = "gpx" | "kml" | "kmz" | "geojson"
+export type { GeoFileFormat }
 
 export interface GeoLoaded {
 	readonly stats: GeoStats
@@ -27,13 +29,35 @@ export interface GeoLoaded {
 	readonly cumulative: Float64Array | null
 }
 
-// A KMZ's document: the first .kml at its root, else the first anywhere.
+// A KMZ whose KML unpacks past the geo cap, or past the zip ratio.
+export class GeoTooLargeError extends Error {
+	constructor() {
+		super("the document unpacks past the geo cap")
+
+		this.name = "GeoTooLarge"
+	}
+}
+
+// A KMZ's document: the first .kml at its root, else the first anywhere, within the geo cap. No entry may declare more,
+// so nothing inflates past it.
 async function kmzDocument(bytes: Uint8Array): Promise<Uint8Array> {
-	const archive = await ZipArchive.open(bytesSource(bytes))
+	let archive: ZipArchive
+
+	try {
+		archive = await ZipArchive.open(bytesSource(bytes), { limits: { maxEntryUncompressed: GEO_MAX_BYTES } })
+	} catch (error) {
+		if (error instanceof ZipError && error.code === "tooLarge") throw new GeoTooLargeError()
+
+		throw error
+	}
+
 	const kml = archive.entries.filter(entry => entry.name.toLowerCase().endsWith(".kml"))
 	const entry = kml.find(candidate => !candidate.name.includes("/")) ?? kml[0]
 
 	if (entry === undefined) throw new GeoFormatError("the KMZ holds no KML document")
+	if (!entryFits({ compressed: entry.compressedSize, uncompressed: entry.uncompressedSize }, GEO_MAX_BYTES)) {
+		throw new GeoTooLargeError()
+	}
 
 	return await archive.read(entry)
 }

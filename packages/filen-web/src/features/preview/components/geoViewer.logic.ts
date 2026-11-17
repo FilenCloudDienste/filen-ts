@@ -1,18 +1,4 @@
-import type { GeoFileFormat } from "@/features/preview/lib/geo/load"
-
-// The track viewer's pure parts: the file's format by its type extension, and how figures read.
-
-export function geoFormat(extension: string): GeoFileFormat | null {
-	switch (extension) {
-		case "gpx":
-		case "kml":
-		case "kmz":
-		case "geojson":
-			return extension
-		default:
-			return null
-	}
-}
+// The track viewer's pure parts: how figures read, the profile's path and hover.
 
 const ONE_DECIMAL = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })
 const WHOLE = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { GeoStatsSink, elevationProfile, haversine, pointAtDistance } from "@/features/preview/lib/geo/stats.logic"
-import { buildLod, lodLevel } from "@/features/preview/lib/geo/lod.logic"
+import { buildLod, lodLevel, typicalStep } from "@/features/preview/lib/geo/lod.logic"
 import { fitView, projection, scaleBar, toCanvas, zoomView } from "@/features/preview/lib/geo/project.logic"
 import { distanceParts, duration, nearestSample } from "@/features/preview/components/geoViewer.logic"
 
@@ -102,5 +102,19 @@ describe("geo projection", () => {
 		expect(distanceParts(812)).toEqual({ unit: "m", value: "812" })
 		expect(duration(7_864_000)).toBe("2:11:04")
 		expect(duration(64_000)).toBe("1:04")
+	})
+})
+
+describe("typicalStep", () => {
+	it("takes the median step within lines, so far-apart clusters do not draw every point", () => {
+		// Two dense clusters (steps of 1) joined by one long jump, and a second line starting far away.
+		const x = Float64Array.from([0, 1, 2, 3, 1000, 1001, 1002, 5000, 5001])
+		const y = new Float64Array(x.length)
+
+		expect(typicalStep(x, y, Uint32Array.from([0, 7, 9]))).toBe(1)
+		// Zoomed out to 0.01: the mean step (about 143) would pick every point; the median picks a coarse level.
+		expect(lodLevel(143 * 0.01)).toBe(0)
+		expect(lodLevel(typicalStep(x, y, Uint32Array.from([0, 7, 9])) * 0.01)).toBe(3)
+		expect(typicalStep(Float64Array.from([0]), Float64Array.from([0]), Uint32Array.from([0, 1]))).toBe(0)
 	})
 })

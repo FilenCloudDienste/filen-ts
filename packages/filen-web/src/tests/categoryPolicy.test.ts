@@ -30,6 +30,7 @@ import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { legacyUnprobedTransportStream } from "@/tests/support/legacySniff"
 import { canOpenEntry } from "@/features/archive/lib/entryAccess.logic"
+import { GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.logic"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { isPhotoCategory } from "@/features/photos/lib/predicate"
 import { canEditImage, isTextCategory } from "@/features/drive/lib/previewSave.logic"
@@ -554,6 +555,8 @@ describe("the geo row", () => {
 		expect(previewType(fileNamed("world.topojson", 1024n))).toBe("other")
 		expect(previewType(fileNamed("data.json", 1024n))).toBe("code")
 		expect(previewKindLabelKey("geo")).toBe("drivePreviewKindGeo")
+		// The text cap, so View source reads the bytes the plot was drawn from.
+		expect(BigInt(GEO_MAX_BYTES)).toBe(TEXT_MAX_BYTES)
 	})
 })
 

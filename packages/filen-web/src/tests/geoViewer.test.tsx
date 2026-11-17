@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 import type { GeoSummary } from "@/features/preview/workers/geo.worker"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
@@ -10,10 +10,22 @@ import { linkedFileItem } from "@/tests/fixtures/sdk"
 // many points or none, and the card for one that does not read, with Source.
 
 const { load } = vi.hoisted(() => ({ load: { next: (): Promise<GeoSummary> => new Promise(() => undefined) } }))
+const highlights = vi.hoisted(() => [] as (number | null)[])
 const worker = vi.hoisted(() => ({
 	status: "ready",
 	generation: 1,
-	owned: { run: (call: (remote: unknown) => unknown) => call({ load: () => load.next(), setColors: () => Promise.resolve() }) }
+	owned: {
+		run: (call: (remote: unknown) => unknown) =>
+			call({
+				load: () => load.next(),
+				setColors: () => Promise.resolve(),
+				highlight: (distance: number | null) => {
+					highlights.push(distance)
+
+					return Promise.resolve()
+				}
+			})
+	}
 }))
 
 vi.mock("@/lib/workers/ownedWorker", async importOriginal => ({
@@ -56,6 +68,11 @@ function summary(overrides: Partial<GeoSummary> = {}): GeoSummary {
 	}
 }
 
+// The viewer's first import is the slow part: outside any test's own timeout.
+beforeAll(async () => {
+	await import("@/features/preview/components/geoViewer")
+}, 30_000)
+
 afterEach(() => {
 	cleanup()
 })
@@ -74,6 +91,43 @@ describe("GeoViewer", () => {
 		expect(await screen.findByText(/42\.3 km · ↑ 612 m ↓ 598 m · 2:11:04 \(1:58:10 moving\)/)).toBeTruthy()
 		expect(screen.getByText("plot")).toBeTruthy()
 		expect(screen.getByText("2 network references not loaded")).toBeTruthy()
+	})
+
+	it("moves the profile's marker by keyboard, sending the map one highlight a frame", async () => {
+		highlights.length = 0
+		load.next = () =>
+			Promise.resolve(
+				summary({ profile: { distance: Float64Array.from([0, 500, 1000]), elevation: Float64Array.from([400, 450, 420]) } })
+			)
+		await renderViewer()
+
+		const profile = await screen.findByRole("slider", { name: "Elevation profile" })
+
+		fireEvent.keyDown(profile, { key: "Home" })
+		fireEvent.keyDown(profile, { key: "ArrowRight" })
+		fireEvent.keyDown(profile, { key: "ArrowRight" })
+
+		expect(profile.getAttribute("aria-valuenow")).toBe("1000")
+		expect(screen.getByText("1.0 km · 420 m")).toBeTruthy()
+
+		await act(
+			() =>
+				new Promise(resolve => {
+					requestAnimationFrame(() => {
+						resolve(undefined)
+					})
+				})
+		)
+
+		// Three key presses in one frame: the latest position, once.
+		expect(highlights).toEqual([1000])
+	})
+
+	it("says a KMZ that unpacks too far is too large to preview", async () => {
+		load.next = () => Promise.reject(Object.assign(new Error("too large"), { name: "GeoTooLarge" }))
+		await renderViewer("places.kmz")
+
+		expect(await screen.findByText("This file is too large to preview.")).toBeTruthy()
 	})
 
 	it("describes a file with too many points without plotting it", async () => {

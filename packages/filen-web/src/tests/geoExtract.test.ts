@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { zipSync } from "fflate"
 import { GEO_MAX_POINTS, type GeoSource } from "@/features/preview/lib/geo/extract.logic"
-import { geoSource, loadGeo, loadSource } from "@/features/preview/lib/geo/load"
+import { GeoTooLargeError, geoSource, loadGeo, loadSource } from "@/features/preview/lib/geo/load"
+import { pointAtDistance } from "@/features/preview/lib/geo/stats.logic"
 
 // GPX, KML, KMZ and GeoJSON read into packed arrays: counted first, filled to size, and above the point cap only summed.
 
@@ -41,7 +42,7 @@ describe("geo extraction", () => {
 		expect([...(loaded.points?.segments ?? [])]).toEqual([0, 3, 4])
 		expect(loaded.points?.ele[2]).toBe(510)
 		expect(loaded.points?.time[1]).toBe(Date.parse("2024-05-01T08:00:20Z"))
-		expect(loaded.waypoints).toEqual([{ lon: 8, lat: 47, name: "Hut", description: "Water here" }])
+		expect(loaded.waypoints).toEqual([{ lon: 8, lat: 47 }])
 		expect(loaded.stats.points).toBe(4)
 	})
 
@@ -51,7 +52,7 @@ describe("geo extraction", () => {
 
 		expect([...(loaded.points?.segments ?? [])]).toEqual([0, 3, 5])
 		expect(loaded.points?.time[4]).toBe(Date.parse("2024-01-01T00:01:00Z"))
-		expect(loaded.waypoints).toEqual([{ lon: 8.5, lat: 47.5, name: "Summit", description: "" }])
+		expect(loaded.waypoints).toEqual([{ lon: 8.5, lat: 47.5 }])
 		expect(loaded.references).toBe(2)
 		expect(fetch).not.toHaveBeenCalled()
 		fetch.mockRestore()
@@ -114,11 +115,53 @@ describe("geo extraction", () => {
 
 		expect([...(loaded.points?.segments ?? [])]).toEqual([0, 2, 5])
 		expect(loaded.points?.ele[0]).toBe(400)
-		expect(loaded.waypoints[0]?.name).toBe("Gate")
+		expect(loaded.waypoints).toEqual([{ lon: 8, lat: 47 }])
 		await expect(
 			loadGeo(encode(JSON.stringify({ type: "FeatureCollection", features: [{ type: "Nope" }] })), "geojson")
 		).rejects.toThrow()
 		await expect(loadGeo(encode("{"), "geojson")).rejects.toThrow()
+	})
+
+	it("keeps only the valid points, so the last one, the distances and the profile stay right", async () => {
+		const gpx = `<gpx><trk><trkseg>
+			<trkpt lat="47.000" lon="8"><ele>500</ele></trkpt>
+			<trkpt lat="" lon="8"><ele>900</ele></trkpt>
+			<trkpt lat="95" lon="8"/>
+			<trkpt lat="47.010" lon="8"><ele>510</ele></trkpt>
+		</trkseg></trk></gpx>`
+		const loaded = await loadGeo(encode(gpx), "gpx")
+		const lat = loaded.points?.lat ?? new Float64Array(0)
+
+		expect(lat).toHaveLength(2)
+		expect(lat.at(-1)).toBe(47.01)
+		expect(loaded.cumulative?.at(-1)).toBeGreaterThan(1000)
+		expect(pointAtDistance(loaded.cumulative ?? new Float64Array(0), 2000)).toBe(1)
+	})
+
+	it("reads KML tuples written with spaces after the comma, character references and comments", async () => {
+		const kml = `<kml><Placemark><LineString><coordinates>8.0, 47.0 <!-- a note --> 8.1,47.1&#10;8.2,47.2</coordinates></LineString></Placemark></kml>`
+		const source = await geoSource(encode(kml), "kml")
+		const loaded = loadSource(source)
+
+		// The count may only exceed what the fill keeps.
+		expect(source.count().points).toBeGreaterThanOrEqual(3)
+		expect([...(loaded.points?.lon ?? [])]).toEqual([8, 8.1, 8.2])
+	})
+
+	it("plots GPX points outside any trkseg as a line of their own", async () => {
+		const gpx = `<gpx><trk><trkpt lat="47" lon="8"/><trkpt lat="47.001" lon="8"/></trk><trk><trkseg><trkpt lat="47.002" lon="8"/></trkseg></trk></gpx>`
+		const loaded = await loadGeo(encode(gpx), "gpx")
+
+		expect([...(loaded.points?.segments ?? [])]).toEqual([0, 2, 3])
+		expect(loaded.stats.points).toBe(3)
+	})
+
+	it("refuses a KMZ whose KML unpacks past the geo cap or too far for its size", async () => {
+		const big = zipSync({ "doc.kml": new Uint8Array(33 * 1024 * 1024).fill(0x20) })
+		const bomb = zipSync({ "doc.kml": new Uint8Array(4 * 1024 * 1024).fill(0x20) })
+
+		await expect(loadGeo(big, "kmz")).rejects.toBeInstanceOf(GeoTooLargeError)
+		await expect(loadGeo(bomb, "kmz")).rejects.toBeInstanceOf(GeoTooLargeError)
 	})
 
 	it("only sums a file past the point cap, allocating no arrays", () => {

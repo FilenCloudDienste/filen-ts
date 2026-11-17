@@ -8,6 +8,7 @@ import { trackForeignRequests } from "./helpers/requests"
 import { RICH_FONT_FAMILY, RICH_SQLITE_ENTRY } from "./fixtures/rich"
 import { RICH_CUBE_TRIANGLES, RICH_MODEL_ENTRY, RICH_MODELS_PASSWORD } from "./fixtures/richModels"
 import { WORKER_WEBGL } from "./helpers/workerWebgl"
+import { drawnPixels } from "./helpers/canvasPixels"
 
 // The rich viewers on files of the shared fixture tree: what each shows, read from the file alone (no request leaves
 // the app and Filen's hosts).
@@ -145,7 +146,9 @@ test("a track is plotted from the file alone, with its figures, profile and refe
 	await expect(dialog.getByText(/↑ \d+ m ↓ \d+ m/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText(/120 points · 1 waypoint/)).toBeVisible()
 	await expect(dialog.getByLabel("Track plot")).toBeVisible()
-	await expect(dialog.getByRole("img", { name: "Elevation profile" })).toBeVisible()
+	// The track, its markers and the scale bar are drawn (the worker draws on demand, a frame after the load).
+	await expect.poll(() => drawnPixels(dialog.getByLabel("Track plot")), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(200)
+	await expect(dialog.getByRole("slider", { name: "Elevation profile" })).toBeVisible()
 
 	// The source is the file's text, read-only.
 	await dialog.getByRole("button", { name: "Source", exact: true }).click()

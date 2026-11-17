@@ -8,8 +8,6 @@ import { type } from "arktype"
 // Above this many points the file is described (stats from a streaming pass) but not plotted.
 export const GEO_MAX_POINTS = 5_000_000
 export const GEO_MAX_WAYPOINTS = 10_000
-// A waypoint's name and description are cut here.
-export const GEO_MAX_TEXT = 1024
 // GeoJSON nesting a reader follows (GeometryCollection in GeometryCollection...).
 const GEO_MAX_DEPTH = 32
 
@@ -19,11 +17,10 @@ export interface PointSink {
 	point(lon: number, lat: number, ele: number, time: number): void
 }
 
+// Only placed, never labelled: names and descriptions are not read.
 export interface GeoWaypoint {
 	readonly lon: number
 	readonly lat: number
-	readonly name: string
-	readonly description: string
 }
 
 export interface WaypointSink {
@@ -49,10 +46,6 @@ export interface GeoSource {
 	// What emit would produce, counted without decoding a coordinate or allocating.
 	count(): GeoCount
 	readonly references: number
-}
-
-function clip(text: string): string {
-	return text.length > GEO_MAX_TEXT ? text.slice(0, GEO_MAX_TEXT) : text
 }
 
 function localNames(doc: XmlDocument): string[] {
@@ -138,13 +131,7 @@ export function gpxSource(doc: XmlDocument): GeoSource {
 						const lon = number(doc.attribute(node, "lon"))
 						const lat = number(doc.attribute(node, "lat"))
 
-						if (validLonLat(lon, lat))
-							waypoints.waypoint({
-								lon,
-								lat,
-								name: clip(childText(doc, node, local, "name") ?? ""),
-								description: clip(childText(doc, node, local, "desc") ?? "")
-							})
+						if (validLonLat(lon, lat)) waypoints.waypoint({ lon, lat })
 
 						break
 					}
@@ -158,9 +145,13 @@ function isSpaceByte(byte: number): boolean {
 	return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
 }
 
-// Each whitespace-separated "lon,lat[,alt]" tuple of a KML <coordinates>.
+// Each whitespace-separated "lon,lat[,alt]" tuple of a KML <coordinates>; whitespace around a comma (written by some
+// exporters) does not split a tuple.
 function eachTuple(doc: XmlDocument, node: number, visit: (lon: number, lat: number, ele: number) => void): void {
-	for (const tuple of doc.textContent(node).split(/\s+/)) {
+	for (const tuple of doc
+		.textContent(node)
+		.replace(/\s*,\s*/g, ",")
+		.split(/\s+/)) {
 		if (tuple === "") continue
 
 		const parts = tuple.split(",")
@@ -169,7 +160,9 @@ function eachTuple(doc: XmlDocument, node: number, visit: (lon: number, lat: num
 	}
 }
 
-// Counts the tuples of a <coordinates> without decoding them.
+// At least as many as the tuples of a <coordinates>, counted over its raw bytes without decoding them: every run of
+// non-space bytes, and every character reference (which may decode to a space and split a run). Comments and CDATA
+// markers only add to it; the fill pass keeps what it really finds.
 function countTuples(doc: XmlDocument, node: number): number {
 	const bytes = doc.bytes
 	const end = doc.contentEnd(node)
@@ -177,9 +170,10 @@ function countTuples(doc: XmlDocument, node: number): number {
 	let inToken = false
 
 	for (let at = doc.contentStart(node); at < end; at++) {
-		const space = isSpaceByte(bytes[at] ?? 0)
+		const byte = bytes[at] ?? 0
+		const space = isSpaceByte(byte)
 
-		if (!space && !inToken) count++
+		if ((!space && !inToken) || byte === 0x26) count++
 
 		inToken = !space
 	}
@@ -191,14 +185,6 @@ function ancestorName(doc: XmlDocument, node: number, local: readonly string[]):
 	const parent = doc.parent(node)
 
 	return parent <= 0 ? undefined : local[doc.nameId(parent)]
-}
-
-function placemarkOf(doc: XmlDocument, node: number, local: readonly string[]): number {
-	for (let at = doc.parent(node); at > 0; at = doc.parent(at)) {
-		if (local[doc.nameId(at)] === "Placemark") return at
-	}
-
-	return -1
 }
 
 // A KML document: LineString and LinearRing coordinates (a line each), gx:Track (coord and when in order), Point
@@ -227,17 +213,8 @@ export function kmlSource(doc: XmlDocument): GeoSource {
 					if (owner === "Point") {
 						if (waypoints === null) continue
 
-						const placemark = placemarkOf(doc, node, local)
-
 						eachTuple(doc, node, (lon, lat) => {
-							if (!validLonLat(lon, lat)) return
-
-							waypoints.waypoint({
-								lon,
-								lat,
-								name: placemark < 0 ? "" : clip(childText(doc, placemark, local, "name") ?? ""),
-								description: placemark < 0 ? "" : clip(childText(doc, placemark, local, "description") ?? "")
-							})
+							if (validLonLat(lon, lat)) waypoints.waypoint({ lon, lat })
 						})
 					} else if (owner === "LineString" || owner === "LinearRing") {
 						points.segment()
@@ -307,7 +284,7 @@ function countKml(doc: XmlDocument): GeoCount {
 
 // The envelope arktype checks; positions are checked number by number as they are read.
 const geometry = type({ type: "string", "coordinates?": "unknown", "geometries?": "unknown[]" })
-const feature = type({ type: "'Feature'", geometry: geometry.or("null"), "properties?": "unknown" })
+const feature = type({ type: "'Feature'", geometry: geometry.or("null") })
 const envelope = type({ type: "string", "features?": feature.array(), "geometry?": geometry.or("null") })
 
 export class GeoFormatError extends Error {
@@ -340,7 +317,7 @@ function line(value: unknown, points: PointSink): void {
 	}
 }
 
-function emitGeometry(value: unknown, points: PointSink, waypoints: WaypointSink | null, name: string, depth: number): void {
+function emitGeometry(value: unknown, points: PointSink, waypoints: WaypointSink | null, depth: number): void {
 	if (depth > GEO_MAX_DEPTH || typeof value !== "object" || value === null) return
 
 	const { type: kind, coordinates, geometries } = value as { type?: unknown; coordinates?: unknown; geometries?: unknown }
@@ -350,7 +327,7 @@ function emitGeometry(value: unknown, points: PointSink, waypoints: WaypointSink
 		case "Point": {
 			const at = position(coordinates)
 
-			if (at !== null) waypoints?.waypoint({ lon: at[0], lat: at[1], name, description: "" })
+			if (at !== null) waypoints?.waypoint({ lon: at[0], lat: at[1] })
 
 			break
 		}
@@ -358,7 +335,7 @@ function emitGeometry(value: unknown, points: PointSink, waypoints: WaypointSink
 			for (const entry of list) {
 				const at = position(entry)
 
-				if (at !== null) waypoints?.waypoint({ lon: at[0], lat: at[1], name, description: "" })
+				if (at !== null) waypoints?.waypoint({ lon: at[0], lat: at[1] })
 			}
 
 			break
@@ -378,8 +355,7 @@ function emitGeometry(value: unknown, points: PointSink, waypoints: WaypointSink
 
 			break
 		case "GeometryCollection":
-			if (Array.isArray(geometries))
-				for (const child of geometries as unknown[]) emitGeometry(child, points, waypoints, name, depth + 1)
+			if (Array.isArray(geometries)) for (const child of geometries as unknown[]) emitGeometry(child, points, waypoints, depth + 1)
 
 			break
 	}
@@ -395,25 +371,11 @@ export function geoJsonSource(value: unknown): GeoSource {
 		checked.type === "FeatureCollection"
 			? (checked.features ?? [])
 			: checked.type === "Feature"
-				? [
-						{
-							type: "Feature" as const,
-							geometry: checked.geometry ?? null,
-							properties: (value as { properties?: unknown }).properties
-						}
-					]
-				: [{ type: "Feature" as const, geometry: value, properties: undefined }]
+				? [{ type: "Feature" as const, geometry: checked.geometry ?? null }]
+				: [{ type: "Feature" as const, geometry: value }]
 
 	const emit = (points: PointSink, waypoints: WaypointSink | null): void => {
-		for (const entry of features) {
-			const properties = entry.properties
-			const label =
-				typeof properties === "object" && properties !== null && typeof (properties as { name?: unknown }).name === "string"
-					? clip((properties as { name: string }).name)
-					: ""
-
-			emitGeometry(entry.geometry, points, waypoints, label, 0)
-		}
+		for (const entry of features) emitGeometry(entry.geometry, points, waypoints, 0)
 	}
 
 	return {
@@ -464,7 +426,9 @@ export interface GeoPoints {
 	readonly segments: Uint32Array
 }
 
-// Fills pre-sized arrays for `count` points (a count pass sized them); empty lines are dropped.
+// Fills arrays sized by a count pass, which may count more than the points that turn out valid: the arrays returned are
+// views of the points filled. Empty lines are dropped; points before any line starts (a GPX trkpt outside a trkseg)
+// open a line of their own.
 export function fillSource(
 	source: GeoSource,
 	{ points: count, segments: segmentCount }: GeoCount
@@ -473,7 +437,8 @@ export function fillSource(
 	const lat = new Float64Array(count)
 	const ele = new Float64Array(count)
 	const times = new Float64Array(count)
-	const starts = new Uint32Array(segmentCount + 1)
+	// Each counted line, the one points before any line may open, and the end.
+	const starts = new Uint32Array(segmentCount + 2)
 	const waypoints: GeoWaypoint[] = []
 	let at = 0
 	let segments = 0
@@ -488,6 +453,8 @@ export function fillSource(
 				if (at >= count) return
 
 				if (!open) {
+					if (segments > segmentCount) return
+
 					// A new line: the previous one, if empty, is overwritten.
 					if (segments === 0 || (starts[segments - 1] ?? 0) !== at) segments++
 
@@ -512,5 +479,14 @@ export function fillSource(
 
 	starts[segments] = at
 
-	return { points: { lon, lat, ele, time: times, segments: starts.slice(0, segments + 1) }, waypoints }
+	return {
+		points: {
+			lon: lon.subarray(0, at),
+			lat: lat.subarray(0, at),
+			ele: ele.subarray(0, at),
+			time: times.subarray(0, at),
+			segments: starts.slice(0, segments + 1)
+		},
+		waypoints
+	}
 }

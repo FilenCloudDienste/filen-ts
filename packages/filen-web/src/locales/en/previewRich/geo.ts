@@ -26,6 +26,8 @@ export const previewRichGeo = {
 	previewGeoReferences_other: "{{count, number}} network references not loaded",
 	/** Track viewer — the file holds more points than the plot draws; its figures are still shown */
 	previewGeoTooMany: "Too many points to plot.",
+	/** Track viewer — a KMZ whose KML unpacks past what the viewer reads */
+	previewGeoTooLarge: "This file is too large to preview.",
 	/** Track viewer — the file has no track, route or place to plot */
 	previewGeoEmpty: "There are no points to plot in this file.",
 	/** Track viewer — the file is not a readable GPX, KML or GeoJSON; shown with Download and Show source */
