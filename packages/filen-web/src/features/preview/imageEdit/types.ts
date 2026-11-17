@@ -58,7 +58,16 @@ export interface ImageEditRecipe {
 }
 
 export type SourceMime =
-	"image/jpeg" | "image/png" | "image/webp" | "image/gif" | "image/bmp" | "image/x-icon" | "image/avif" | "image/heic" | "image/x-qoi"
+	| "image/jpeg"
+	| "image/png"
+	| "image/webp"
+	| "image/gif"
+	| "image/bmp"
+	| "image/x-icon"
+	| "image/avif"
+	| "image/heic"
+	| "image/x-qoi"
+	| "image/jxl"
 
 // What the sniffers learn about the original from its header bytes (magic, never the extension).
 export interface SourceInfo {
@@ -90,7 +99,7 @@ export type SaveTarget =
 
 // Where the editor gets the original's full-resolution pixels: the held bytes (decoded in the render worker),
 // a bitmap taken from the viewer's already decoded <img> (transferred to the worker), or RGBA a decoder of our own
-// made (HEIC, QOI, through the raster decode pool).
+// made (HEIC, QOI, JPEG XL, through the raster decode pool).
 export type ImageEditSource =
 	| { kind: "blob"; blob: Blob }
 	| { kind: "bitmap"; bitmap: ImageBitmap }

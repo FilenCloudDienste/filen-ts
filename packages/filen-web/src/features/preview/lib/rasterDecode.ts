@@ -107,9 +107,10 @@ export async function decodeHeicRgba(bytes: Uint8Array, signal?: AbortSignal): P
 }
 
 // What one pixel of each format costs the worker while it is shown: the decoder's frame plus every copy made of it
-// (QOI: its RGBA, then the bitmap).
+// (QOI: its RGBA, then the bitmap; JPEG XL: libjxl's working frames in its wasm heap, the RGBA handed out, the bitmap).
 export const RASTER_BYTES_PER_PIXEL: Readonly<Record<DisplayRasterFormat, number>> = {
-	qoi: 8
+	qoi: 8,
+	jxl: 20
 }
 
 // The whole image as RGBA, decoded off the main thread from a private copy of `bytes`; `maxPixels` refuses a larger

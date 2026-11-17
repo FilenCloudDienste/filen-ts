@@ -198,11 +198,21 @@ const { recoverIfNewerBuildMock } = vi.hoisted(() => ({ recoverIfNewerBuildMock:
 
 vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild: recoverIfNewerBuildMock }))
 
+const { supportsNativeImageMock, thumbnailRasterMock } = vi.hoisted(() => ({
+	supportsNativeImageMock: vi.fn<(format: string) => Promise<boolean>>(),
+	thumbnailRasterMock:
+		vi.fn<(bytes: Uint8Array, type: string, size: { width: number; height: number }, maxDim: number) => Promise<Uint8Array>>()
+}))
+
+vi.mock("@/lib/nativeImageSupport", () => ({ supportsNativeImage: supportsNativeImageMock }))
+vi.mock("@/features/drive/lib/thumbRaster", () => ({ thumbnailRaster: thumbnailRasterMock }))
+
 import {
 	generateSdkThumb,
 	generateVideoThumb,
 	generatePdfThumb,
 	generateSvgThumb,
+	generateRasterThumb,
 	rasterizeSvgThumb,
 	resetDriveKeyframes,
 	warmUploadThumbnail
@@ -286,12 +296,13 @@ beforeEach(() => {
 
 describe("registration", () => {
 	// The old image and heic arms are gone, both folded into the single sdk arm.
-	it("registers sdk/video/pdf/svg generators exactly once, at import", () => {
+	it("registers sdk/video/pdf/svg/raster generators exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
 			["sdk", generateSdkThumb],
 			["video", generateVideoThumb],
 			["pdf", generatePdfThumb],
-			["svg", generateSvgThumb]
+			["svg", generateSvgThumb],
+			["raster", generateRasterThumb]
 		])
 	})
 })
@@ -717,6 +728,53 @@ describe("generateSvgThumb", () => {
 		await expect(generateSvgThumb(itemAsBaseFile(narrowItem(namedFile("logo.svg", "image/svg+xml"))), live())).resolves.toEqual({
 			type: "failed"
 		})
+	})
+})
+
+describe("generateRasterThumb", () => {
+	// A bare JPEG XL codestream of 1000 × 750 (13-bit height, 4:3).
+	const JXL_1000 = Uint8Array.from([0xff, 0x0a, 0x6a, 0x17, 0x03, 0x00])
+
+	function jxlItem(size = 6n): BaseFileItem {
+		return itemAsBaseFile(narrowItem(namedFile("photo.jxl", "image/jxl", { size })))
+	}
+
+	it("has none, reading nothing, where the browser decodes no JPEG XL", async () => {
+		supportsNativeImageMock.mockResolvedValue(false)
+
+		await expect(generateRasterThumb(jxlItem(), live())).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("refuses a file above the whole-read limit before reading it", async () => {
+		supportsNativeImageMock.mockResolvedValue(true)
+
+		await expect(generateRasterThumb(jxlItem(65n * BigInt(MIB)), live())).resolves.toEqual({
+			type: "unavailable",
+			reason: "overBudget"
+		})
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("draws the header's size in the raster worker", async () => {
+		supportsNativeImageMock.mockResolvedValue(true)
+		downloadFileBytesMock.mockResolvedValue(JXL_1000.slice())
+		thumbnailRasterMock.mockResolvedValue(new Uint8Array([9]))
+
+		await expect(generateRasterThumb(jxlItem(), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([9]) })
+		expect(thumbnailRasterMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/jxl", { width: 1000, height: 750 }, THUMB_MAX_DIM)
+	})
+
+	it("settles bytes that are no JPEG XL, or that the browser cannot decode, as corrupt", async () => {
+		supportsNativeImageMock.mockResolvedValue(true)
+		downloadFileBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]))
+
+		await expect(generateRasterThumb(jxlItem(), live())).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+
+		downloadFileBytesMock.mockResolvedValue(JXL_1000.slice())
+		thumbnailRasterMock.mockRejectedValue(Object.assign(new Error("decode"), { name: "InvalidStateError" }))
+
+		await expect(generateRasterThumb(jxlItem(), live())).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
 	})
 })
 

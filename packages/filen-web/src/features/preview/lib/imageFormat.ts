@@ -2,9 +2,10 @@ import type { DeviceProfile } from "@/lib/deviceProfile"
 import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
-// route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi").
-// The image tier of the preview's category table is this table's keys.
-export type ImageDecode = "native" | "heic" | "qoi"
+// route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi",
+// "jxl" in libjxl). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
+// tier of the preview's category table is this table's keys.
+export type ImageDecode = "native" | "heic" | "qoi" | "jxl"
 
 export interface ImageFormat {
 	decode: ImageDecode
@@ -24,6 +25,8 @@ const NATIVE_EDITABLE: ImageFormat = { decode: "native", editable: true }
 const HEIC: ImageFormat = { decode: "heic", editable: true }
 // Held whole and decoded in the raster decode pool.
 const QOI: ImageFormat = { decode: "qoi", editable: true, cap: 256n * MIB }
+// Streamed where the browser decodes it; elsewhere held whole (its cap) and decoded by libjxl in the pool.
+const JXL: ImageFormat = { decode: "jxl", editable: true, cap: 256n * MIB }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -45,7 +48,8 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["heic", HEIC],
 	["heif", HEIC],
 	["hif", HEIC],
-	["qoi", QOI]
+	["qoi", QOI],
+	["jxl", JXL]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.
@@ -61,6 +65,8 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 			return true
 		case "heic":
 			return profile.heicNative === "yes"
+		case "jxl":
+			return profile.jxlNative === "yes"
 		case "qoi":
 			return false
 	}
@@ -74,5 +80,12 @@ export function isPhotoFormat(format: ImageFormat): boolean {
 // The probe whose answer picks the format's route while it is still unknown: a viewer waits on it rather than take the
 // decoded route an unknown answer reads as.
 export function pendingProbe(format: ImageFormat, profile: DeviceProfile): NativeImageFormat | null {
-	return format.decode === "heic" && profile.heicNative === "unknown" ? "heic" : null
+	switch (format.decode) {
+		case "heic":
+			return profile.heicNative === "unknown" ? "heic" : null
+		case "jxl":
+			return profile.jxlNative === "unknown" ? "jxl" : null
+		default:
+			return null
+	}
 }

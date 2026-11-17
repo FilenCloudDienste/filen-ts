@@ -10,6 +10,7 @@ import { QOI_SIZE } from "./fixtures/images"
 // Every leg reads the shared fixture tree; entering the editor writes nothing.
 
 const [QOI] = FIXTURE_FILES["images-qoi"]
+const [JXL] = FIXTURE_FILES["images-jxl"]
 
 test("a QOI image is decoded and drawn, and opens in the editor", async ({ page, context, browserName }) => {
 	const cspViolations = trackCspViolations(page)
@@ -37,6 +38,32 @@ test("a QOI image is decoded and drawn, and opens in the editor", async ({ page,
 		await expect(page.getByRole("button", { name: "Save as PNG copy" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await page.getByRole("button", { name: "Cancel", exact: true }).click()
 	}
+
+	await page.keyboard.press("Escape")
+	await expect(picture).toHaveCount(0)
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a JPEG XL is shown by the browser where it decodes one, else decoded in the pool", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-jxl")
+
+	await itemRow(listbox, JXL).dblclick()
+
+	const picture = page.getByRole("img", { name: JXL })
+
+	await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	// The boot probe's answer picks the route: the browser's <img>, or the pool's bitmap on a canvas.
+	const { jxl: native } = await page.evaluate(() => window.__filenE2E.nativeImageSupport())
+
+	expect(await picture.evaluate(element => element.tagName)).toBe(native ? "IMG" : "CANVAS")
 
 	await page.keyboard.press("Escape")
 	await expect(picture).toHaveCount(0)

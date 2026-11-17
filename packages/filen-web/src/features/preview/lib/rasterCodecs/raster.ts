@@ -7,8 +7,9 @@ export interface DecodedRaster {
 	hasAlpha: boolean
 }
 
-// The formats the pool decodes itself: HEIC (libheif), QOI (in-house).
-export type RasterFormat = "heic" | "qoi"
+// The formats the pool decodes itself: HEIC (libheif), QOI (in-house), JPEG XL (libjxl, where the browser has no
+// decoder of its own).
+export type RasterFormat = "heic" | "qoi" | "jxl"
 
 // The formats it decodes for display, as a bitmap: HEIC is shown from its JPEG re-encode instead.
 export type DisplayRasterFormat = Exclude<RasterFormat, "heic">

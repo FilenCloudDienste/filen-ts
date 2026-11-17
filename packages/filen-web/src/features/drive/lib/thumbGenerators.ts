@@ -19,6 +19,7 @@ import {
 	THUMB_SDK_MAX_HEIGHT,
 	THUMB_SDK_LOSSY_QUALITY,
 	THUMB_WARM_SIZE_GATE,
+	THUMB_RASTER_READ_MAX,
 	pdfThumbReadBudget,
 	thumbnailCategory
 } from "@/features/drive/lib/thumbnails.logic"
@@ -63,6 +64,10 @@ import FrameWorker from "@/features/videos/workers/frame.worker.ts?worker"
 import type { FrameCaptureParams, FrameCaptureResult, FrameWorkerApi } from "@/features/videos/workers/frame.worker"
 import { rangeReads } from "@/lib/media/rangeReads"
 import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
+import { thumbnailRaster } from "@/features/drive/lib/thumbRaster"
+import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
+import { supportsNativeImage } from "@/lib/nativeImageSupport"
+import { thumbnail } from "@/lib/pixelBudget"
 
 // Past this share of its bytes, a download whose thumbnail nobody wants any more finishes anyway: the
 // rest costs less than starting over the next time the cell scrolls into view.
@@ -855,6 +860,59 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 	return await rasterizeSvgThumb(new TextDecoder().decode(bytes))
 }
 
+// A decode error from the browser's own decoder (createImageBitmap): a verdict about the bytes.
+function isUndecodable(e: unknown): boolean {
+	return e instanceof Error && (e.name === "InvalidStateError" || e.name === "EncodingError")
+}
+
+// A JPEG XL, where this browser decodes it itself (the boot probe's answer; one decode of a few bytes, once per tab);
+// elsewhere it has no thumbnail, as no decoder of ours is run for one. Its whole bytes, at most THUMB_RASTER_READ_MAX,
+// its header checked against the thumbnail pixel budget before anything is decoded, then drawn in the raster
+// thumbnail worker.
+export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
+	if (!(await supportsNativeImage("jxl"))) {
+		return { type: "unavailable", reason: "unsupported" }
+	}
+
+	if (item.data.size > THUMB_RASTER_READ_MAX) {
+		return { type: "unavailable", reason: "overBudget" }
+	}
+
+	let bytes: Uint8Array
+
+	try {
+		bytes = await downloadWholeFile(item, signal)
+	} catch (e) {
+		if (!signal.aborted) {
+			log.warn("thumb-generators", "generateRasterThumb: download failed", item.data.uuid, e)
+		}
+
+		return { type: "failed" }
+	}
+
+	const header = sniffJxl(bytes, bytes.length)
+
+	if (header === null) {
+		return { type: "unavailable", reason: "corrupt" }
+	}
+
+	if (header.width * header.height > thumbnail()) {
+		return { type: "unavailable", reason: "overBudget" }
+	}
+
+	try {
+		return { type: "bytes", bytes: await thumbnailRaster(bytes, "image/jxl", header, THUMB_MAX_DIM) }
+	} catch (e) {
+		if (isUndecodable(e)) {
+			return { type: "unavailable", reason: "corrupt" }
+		}
+
+		log.warn("thumb-generators", "generateRasterThumb: draw failed", item.data.uuid, e)
+
+		return { type: "failed" }
+	}
+}
+
 // One pdf.js worker shared by every PDF thumbnail, instead of one spun up and torn down per file.
 // Handed to pdf.js as the host's own (openPdf's "shared" worker), so a task's destroy() ends only its own document
 // and never the worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
@@ -1099,3 +1157,4 @@ registerThumbGenerator("sdk", generateSdkThumb)
 registerThumbGenerator("video", generateVideoThumb)
 registerThumbGenerator("pdf", generatePdfThumb)
 registerThumbGenerator("svg", generateSvgThumb)
+registerThumbGenerator("raster", generateRasterThumb)

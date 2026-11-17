@@ -31,10 +31,15 @@ vi.mock("@/lib/sdk/client", async () => {
 		threadCount: () => 1
 	}
 })
-vi.mock("@/features/preview/lib/rasterDecode", () => ({ displayRaster, RASTER_BYTES_PER_PIXEL: { qoi: 8 }, transformHeicBytes: vi.fn() }))
+vi.mock("@/features/preview/lib/rasterDecode", () => ({
+	displayRaster,
+	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 20 },
+	transformHeicBytes: vi.fn()
+}))
 
 const { ImageViewer } = await import("@/features/preview/components/imageViewer")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
+const { refineDeviceProfile } = await import("@/lib/deviceProfile")
 
 function qoiHeader(width: number, height: number): Uint8Array {
 	const bytes = new Uint8Array(22)
@@ -69,6 +74,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup()
+	refineDeviceProfile({ jxlNative: "unknown" })
 })
 
 describe("ImageViewer on a QOI", () => {
@@ -106,6 +112,29 @@ describe("ImageViewer on a QOI", () => {
 		render(createElement(ImageViewer, { item: qoi("eeeeeeee-0000-0000-0000-000000000013", 22), alt: "render" }))
 
 		await screen.findByText("This image couldn't be read.")
+	})
+
+	it("decodes a JPEG XL in the pool where the browser has no decoder for it", async () => {
+		refineDeviceProfile({ jxlNative: "no" })
+		// A bare codestream of 1000 × 750 (13-bit height, 4:3).
+		downloadFileBytes.mockResolvedValue(Uint8Array.from([0xff, 0x0a, 0x6a, 0x17, 0x03, 0x00]))
+		displayRaster.mockResolvedValue({ bitmap: bitmap(1000, 750), width: 1000, height: 750 })
+		render(
+			createElement(ImageViewer, {
+				item: linkedFileItem("photo.jxl", {
+					uuid: "eeeeeeee-0000-0000-0000-000000000015",
+					size: 6n,
+					mime: { Decrypted: "image/jxl" }
+				}),
+				alt: "photo"
+			})
+		)
+
+		await waitFor(() => {
+			expect(screen.getByRole("img", { name: "photo" }).getAttribute("width")).toBe("1000")
+		})
+		expect(displayRaster.mock.calls[0]?.[0]).toBe("jxl")
+		expect(displayRaster.mock.calls[0]?.[2].maxPixels).toBe(Math.floor((1024 * 1024 * 1024 - 6) / 20))
 	})
 
 	it("refuses a file above the held cap before downloading it", async () => {

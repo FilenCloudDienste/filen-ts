@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { MAX_EPSI_LINES, sniffEps } from "@/features/preview/lib/imageSniff/eps"
-import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
+import { sniffJxl, sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
 import { MAX_PSD_RESOURCE_BLOCKS, sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 import { MAX_TIFF_IFDS, sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
@@ -76,6 +76,66 @@ const FTYP = new Bytes().u32(20).ascii("ftyp").ascii("jxl ").u32(0).ascii("jxl "
 function jxlContainer(...boxes: Bytes[]): Uint8Array {
 	return Uint8Array.from([...JXL_SIGNATURE.build(), ...boxes.flatMap(box => [...box.build()])])
 }
+
+describe("sniffJxlImage", () => {
+	// The 1000 × 750 size header, then ImageMetadata's leading fields.
+	function codestream(metadata: readonly (readonly [number, number])[]): Uint8Array {
+		return Uint8Array.from([0xff, 0x0a, ...jxlBits([[0, 1], [1, 2], [749, 13], [3, 3], ...metadata])])
+	}
+
+	it("reads all-default metadata as an upright, opaque still", () => {
+		const head = codestream([[1, 1]])
+
+		expect(sniffJxlImage(head, head.length)).toEqual({ width: 1000, height: 750, orientation: 1, animated: false, hasAlpha: false })
+	})
+
+	it("reads the orientation past an intrinsic size and a preview, and an alpha channel", () => {
+		const head = codestream([
+			[0, 1],
+			[1, 1],
+			// orientation 6 is stored as 5
+			[5, 3],
+			// an intrinsic size: small, 8 × 8
+			[1, 1],
+			[1, 1],
+			[0, 5],
+			[1, 3],
+			// a preview: div8, selector 2 (5 bits + 1), ratio 1
+			[1, 1],
+			[1, 1],
+			[2, 2],
+			[3, 5],
+			[1, 3],
+			// no animation; 8 bits per sample, modular 16-bit sufficient, one extra channel
+			[0, 1],
+			[0, 1],
+			[0, 2],
+			[1, 1],
+			[1, 2]
+		])
+
+		expect(sniffJxlImage(head, head.length)).toEqual({ width: 1000, height: 750, orientation: 6, animated: false, hasAlpha: true })
+	})
+
+	it("tells an animation", () => {
+		const head = codestream([
+			[0, 1],
+			[1, 1],
+			[0, 3],
+			[0, 1],
+			[0, 1],
+			[1, 1]
+		])
+
+		expect(sniffJxlImage(head, head.length)?.animated).toBe(true)
+	})
+
+	it("says nothing when the head ends inside the metadata", () => {
+		const head = Uint8Array.from(JXL_CODESTREAM)
+
+		expect(sniffJxlImage(head, head.length)).toBeNull()
+	})
+})
 
 describe("sniffJxl", () => {
 	it("reads a bare codestream's size, with a fixed aspect ratio", () => {

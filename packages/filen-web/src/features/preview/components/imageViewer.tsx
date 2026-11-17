@@ -244,12 +244,14 @@ function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
 
 // The decoded route: the format's own decoder.
 function DecodedRoute({ item, alt, route }: { item: DriveItem; alt: string; route: Exclude<ImageRoute, "native"> }) {
-	if (imageDecodeFor(item) === "qoi") {
+	const decode = imageDecodeFor(item)
+
+	if (decode === "qoi" || decode === "jxl") {
 		return (
 			<DecodedImage
 				item={item}
 				alt={alt}
-				format="qoi"
+				format={decode}
 			/>
 		)
 	}

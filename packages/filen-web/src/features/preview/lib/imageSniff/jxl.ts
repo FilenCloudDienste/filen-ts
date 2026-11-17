@@ -9,6 +9,14 @@ export interface JxlHeader {
 	readonly height: number
 }
 
+// What the image metadata after the size says: the Exif-style orientation (1 when not given), whether the image is an
+// animation, and whether it carries extra channels (alpha, in practice: an edited copy keeps them as PNG).
+export interface JxlImage extends JxlHeader {
+	readonly orientation: number
+	readonly animated: boolean
+	readonly hasAlpha: boolean
+}
+
 export const MAX_JXL_BOXES = 256
 
 const CODESTREAM_SIGNATURE = [0xff, 0x0a]
@@ -67,12 +75,22 @@ function readDimension(read: BitReader, small: boolean): number | null {
 	return value === null ? null : value + 1
 }
 
-function readSizeHeader(bytes: Uint8Array, start: number): JxlHeader | null {
-	if (!startsWith(bytes, CODESTREAM_SIGNATURE, start)) {
+// U32(BitsOffset(…), …): a 2-bit selector, then that distribution's bits plus its offset.
+function readU32(read: BitReader, distributions: readonly (readonly [bits: number, offset: number])[]): number | null {
+	const selector = read(2)
+	const distribution = selector === null ? undefined : distributions[selector]
+
+	if (distribution === undefined) {
 		return null
 	}
 
-	const read = bitReader(bytes, start + 2)
+	const value = read(distribution[0])
+
+	return value === null ? null : value + distribution[1]
+}
+
+// SizeHeader (18181-1 A.2): the image's size as coded, before its orientation turns it.
+function readSize(read: BitReader): JxlHeader | null {
 	const small = read(1)
 
 	if (small === null) {
@@ -90,6 +108,136 @@ function readSizeHeader(bytes: Uint8Array, start: number): JxlHeader | null {
 	const width = fixed === undefined ? readDimension(read, small === 1) : Math.floor((height * fixed[0]) / fixed[1])
 
 	return width === null || width === 0 ? null : { width, height }
+}
+
+const PREVIEW_DIV8: readonly (readonly [number, number])[] = [
+	[0, 16],
+	[0, 32],
+	[5, 1],
+	[9, 33]
+]
+const PREVIEW_SIZE: readonly (readonly [number, number])[] = [
+	[6, 1],
+	[8, 65],
+	[10, 321],
+	[12, 1]
+]
+
+// PreviewHeader (18181-1 A.6): read only to step past it.
+function skipPreview(read: BitReader): boolean {
+	const div8 = read(1)
+
+	if (div8 === null) {
+		return false
+	}
+
+	const distributions = div8 === 1 ? PREVIEW_DIV8 : PREVIEW_SIZE
+
+	if (readU32(read, distributions) === null) {
+		return false
+	}
+
+	const ratio = read(3)
+
+	return ratio !== null && (ratio !== 0 || readU32(read, distributions) !== null)
+}
+
+const BITS_PER_SAMPLE: readonly (readonly [number, number])[] = [
+	[0, 8],
+	[0, 10],
+	[0, 12],
+	[6, 1]
+]
+const FLOAT_BITS: readonly (readonly [number, number])[] = [
+	[0, 32],
+	[0, 16],
+	[0, 24],
+	[6, 1]
+]
+const EXTRA_CHANNELS: readonly (readonly [number, number])[] = [
+	[0, 0],
+	[0, 1],
+	[4, 2],
+	[12, 1]
+]
+
+// BitDepth and modular_16bit_buffer_sufficient, then num_extra_channels (18181-1 A.6, A.7).
+function readExtraChannels(read: BitReader): number | null {
+	const float = read(1)
+
+	if (float === null || readU32(read, float === 1 ? FLOAT_BITS : BITS_PER_SAMPLE) === null) {
+		return null
+	}
+
+	if (float === 1 && read(4) === null) {
+		return null
+	}
+
+	return read(1) === null ? null : readU32(read, EXTRA_CHANNELS)
+}
+
+// ImageMetadata's leading fields (18181-1 A.6): all_default, then extra_fields with the orientation, an intrinsic size,
+// a preview and the animation flag, then the bit depth and the extra channels. An animation's own header is not read:
+// its frames are not edited.
+function readImage(read: BitReader, size: JxlHeader): JxlImage | null {
+	const allDefault = read(1)
+
+	if (allDefault === null) {
+		return null
+	}
+
+	if (allDefault === 1) {
+		return { ...size, orientation: 1, animated: false, hasAlpha: false }
+	}
+
+	const extraFields = read(1)
+	let orientation = 1
+
+	if (extraFields === null) {
+		return null
+	}
+
+	if (extraFields === 1) {
+		const stored = read(3)
+		const intrinsic = read(1)
+
+		if (stored === null || intrinsic === null || (intrinsic === 1 && readSize(read) === null)) {
+			return null
+		}
+
+		const preview = read(1)
+
+		if (preview === null || (preview === 1 && !skipPreview(read))) {
+			return null
+		}
+
+		const animation = read(1)
+
+		if (animation === null) {
+			return null
+		}
+
+		orientation = stored + 1
+
+		if (animation === 1) {
+			return { ...size, orientation, animated: true, hasAlpha: false }
+		}
+	}
+
+	const extraChannels = readExtraChannels(read)
+
+	return extraChannels === null ? null : { ...size, orientation, animated: false, hasAlpha: extraChannels > 0 }
+}
+
+function readHeaders(bytes: Uint8Array, start: number): { size: JxlHeader; read: BitReader } | null {
+	if (!startsWith(bytes, CODESTREAM_SIGNATURE, start)) {
+		return null
+	}
+
+	const read = bitReader(bytes, start + 2)
+	const size = readSize(read)
+
+	return size === null ? null : { size, read }
 }
 
 // The offset of the codestream within the container's boxes, or -1.
@@ -137,16 +285,25 @@ function codestreamOffset(head: Uint8Array, fileSize: number): number {
 	return -1
 }
 
-export function sniffJxl(head: Uint8Array, fileSize: number): JxlHeader | null {
+// Where the codestream starts in `head`, or -1.
+function codestreamStart(head: Uint8Array, fileSize: number): number {
 	if (startsWith(head, CODESTREAM_SIGNATURE)) {
-		return readSizeHeader(head, 0)
+		return 0
 	}
 
-	if (!startsWith(head, CONTAINER_SIGNATURE)) {
-		return null
-	}
+	return startsWith(head, CONTAINER_SIGNATURE) ? codestreamOffset(head, fileSize) : -1
+}
 
-	const offset = codestreamOffset(head, fileSize)
+export function sniffJxl(head: Uint8Array, fileSize: number): JxlHeader | null {
+	const start = codestreamStart(head, fileSize)
 
-	return offset < 0 ? null : readSizeHeader(head, offset)
+	return start < 0 ? null : (readHeaders(head, start)?.size ?? null)
+}
+
+// The size and the metadata the editor needs (orientation, animation); null when the head ends before them.
+export function sniffJxlImage(head: Uint8Array, fileSize: number): JxlImage | null {
+	const start = codestreamStart(head, fileSize)
+	const headers = start < 0 ? null : readHeaders(head, start)
+
+	return headers === null ? null : readImage(headers.read, headers.size)
 }

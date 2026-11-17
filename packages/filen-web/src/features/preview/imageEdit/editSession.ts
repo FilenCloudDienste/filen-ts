@@ -61,16 +61,17 @@ const EXTENSION_FAMILY: ReadonlyMap<string, SourceMime> = new Map<string, Source
 	["ico", "image/x-icon"],
 	["avif", "image/avif"],
 	["qoi", "image/x-qoi"],
+	["jxl", "image/jxl"],
 	...[...HEIC_EXTENSIONS].map(extension => [extension, "image/heic"] as const)
 ])
 
-// The formats whose editing source our own code decodes from the whole file, whatever the viewer shows.
-type EditDecoder = "heic" | "qoi"
+// The formats whose editing source our own code decodes from the whole file.
+type EditDecoder = "heic" | "qoi" | "jxl"
 
 function editDecoder(item: DriveItem): EditDecoder | null {
 	const decode = imageDecodeFor(item)
 
-	return decode === "heic" || decode === "qoi" ? decode : null
+	return decode === "heic" || decode === "qoi" || decode === "jxl" ? decode : null
 }
 
 export function matchesExtension(name: string, mime: SourceMime): boolean {
@@ -147,7 +148,9 @@ async function sourceFor(
 		return { source: { kind: "blob", blob: heldBlob(held, info.mime) }, info, buffered: true }
 	}
 
-	const bitmap = await bitmapOf(image).catch((e: unknown) => {
+	// Never a picture shown at another size than its own.
+	const whole = image !== null && image.naturalWidth === info.width && image.naturalHeight === info.height
+	const bitmap = await bitmapOf(whole ? image : null).catch((e: unknown) => {
 		log.warn("image-edit", "taking the shown image's pixels failed; reading the file instead", e)
 
 		return null
@@ -212,8 +215,10 @@ async function enter(
 	const name = driveItemName(item)
 	const size = Number(narrowToAnyFile(item).size)
 	// Decoded by our own code from its whole bytes on every browser, also where the viewer streams it natively: a HEIC's
-	// Exif and ICC only the bytes give.
-	const decoder = editDecoder(item)
+	// Exif and ICC only the bytes give. A JPEG XL the browser shows itself gives its <img>'s pixels instead, as any
+	// native image does.
+	const shownNatively = imageDecodeFor(item) === "jxl" && image !== null && image.complete && image.naturalWidth > 0
+	const decoder = shownNatively ? null : editDecoder(item)
 	const cached = getPreviewBytes(cacheScope, item.data.uuid)
 	// Where the viewer streams a HEIC natively it opens at any size: one past what is ever held is refused before its
 	// download, never buffered.

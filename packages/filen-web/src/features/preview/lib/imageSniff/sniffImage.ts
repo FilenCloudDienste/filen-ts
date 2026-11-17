@@ -26,6 +26,7 @@ import {
 import type { Orientation, SourceInfo } from "@/features/preview/imageEdit/types"
 import { startsWith, viewOf } from "@/features/preview/lib/imageSniff/bytes"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
+import { sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
 
 // What an image's leading bytes say about it, from its magic and headers (never its name). `head` is the start of
 // the file (the whole file when small), `totalSize` the file's length. Retained metadata (ICC, Exif) is copied out
@@ -609,6 +610,28 @@ export function sniffImage(head: Uint8Array, totalSize: number): SourceInfo | nu
 		const qoi = sniffQoi(head)
 
 		return qoi === null ? null : { ...BASE, mime: "image/x-qoi", width: qoi.width, height: qoi.height, hasAlpha: qoi.hasAlpha }
+	}
+
+	// A bare codestream (FF 0A) or the container's signature box.
+	if (startsWith(head, [0xff, 0x0a]) || startsWith(head, [0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20])) {
+		const jxl = sniffJxlImage(head, totalSize)
+
+		if (jxl === null) {
+			return null
+		}
+
+		const orientation = jxl.orientation as Orientation
+		const turned = swapsAxes(orientation)
+
+		return {
+			...BASE,
+			mime: "image/jxl",
+			width: turned ? jxl.height : jxl.width,
+			height: turned ? jxl.width : jxl.height,
+			orientation,
+			hasAlpha: jxl.hasAlpha,
+			animated: jxl.animated
+		}
 	}
 
 	// An ISOBMFF "ftyp" box at the start.

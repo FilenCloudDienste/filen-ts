@@ -6,8 +6,9 @@ import { itemTypeExtension, previewType } from "@/features/drive/lib/preview.log
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
 // them ever sees now. "video", "pdf" and "svg" stay client-side because Rust decodes none of them.
 // "none" covers every directory arm, an undecryptable file, an svg over its size gate, and
-// anything the SDK itself says it cannot thumbnail.
-export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "none"
+// anything the SDK itself says it cannot thumbnail. "raster" is an image the SDK cannot decode but a browser can (JPEG
+// XL), drawn by the browser itself in a worker of its own.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
 // roughly the same size. The video and pdf generators use it for both dimensions (a square fit), the
@@ -35,6 +36,9 @@ export const THUMB_SDK_MAX_HEIGHT = THUMB_MAX_DIM * 2
 // at or below it may be read whole, so this is also the old whole-download ceiling. No gate at open: what costs is
 // what is read, and the SDK's own byte ceiling (`max_source_bytes`, 64 MiB by default) is the same figure.
 export const THUMB_PDF_READ_MAX = 67_108_864
+
+// Most of a file read whole for a thumbnail the browser draws (64 MiB): the SDK's own source ceiling, as for a pdf.
+export const THUMB_RASTER_READ_MAX = BigInt(THUMB_PDF_READ_MAX)
 
 // The least a pdf's thumbnail may read (16 MiB): a small file's whole length is too tight a budget when pdf.js reads
 // whole blocks.
@@ -106,6 +110,9 @@ export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]
 
 export const THUMB_EXT = ".thumb"
 
+// The images no SDK decoder reads that a browser may (whether this one does is the generator's answer).
+const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
+
 // Category routing over every file-family arm — owned, shared-root and nested shared files alike
 // (asDirectoryOrFile). A shared file carries the same decrypted meta and the SDK's own
 // canMakeThumbnail, and the SDK thumbnails any AnyFile, so a shared file routes exactly like an owned
@@ -120,10 +127,11 @@ export const THUMB_EXT = ".thumb"
 //                                           mode runs no script; never handed to the SDK's decoders)
 //   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
 //   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
-//   5. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
-//   6. everything else           -> none
+//   5. jxl                       -> raster (client-side: the browser's own decoder, where it has one)
+//   6. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
+//   7. everything else           -> none
 //
-// Step 5 is the SINGLE SOURCE OF TRUTH for SDK thumbnailability — there is deliberately no extension
+// Step 6 is the SINGLE SOURCE OF TRUTH for SDK thumbnailability — there is deliberately no extension
 // allowlist mirroring it here. The flag comes off the file the SDK itself decrypted, so it already
 // accounts for formats this app has never heard of, and duplicating it as a JS list would only create
 // a second answer that can drift.
@@ -148,6 +156,10 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 
 	if (ext === "pdf") {
 		return "pdf"
+	}
+
+	if (RASTER_THUMBNAIL_EXTENSIONS.has(ext)) {
+		return "raster"
 	}
 
 	return base.data.canMakeThumbnail ? "sdk" : "none"

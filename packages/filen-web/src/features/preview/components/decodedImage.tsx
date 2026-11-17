@@ -34,7 +34,7 @@ export function HeldImageGate({ item, tooLarge, children }: { item: DriveItem; t
 	return children
 }
 
-// An image only our own code decodes (QOI): its whole bytes, decoded in the raster decode pool into a bitmap shown at
+// An image our own code decodes (QOI, a JPEG XL the browser does not): its whole bytes, decoded in the raster decode pool into a bitmap shown at
 // the display long side, its full resolution a click away.
 export function DecodedImage({ item, alt, format }: { item: DriveItem; alt: string; format: DisplayRasterFormat }) {
 	return (

@@ -1,3 +1,4 @@
+import { decodeJxl } from "@/features/preview/lib/rasterCodecs/jxl"
 import { decodeQoi } from "@/features/preview/lib/rasterCodecs/qoi"
 import type { DecodedRaster, DisplayRasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
 
@@ -12,7 +13,8 @@ export interface DisplayedRaster {
 }
 
 const DECODERS: Readonly<Record<DisplayRasterFormat, (bytes: Uint8Array, maxPixels: number) => DecodedRaster | Promise<DecodedRaster>>> = {
-	qoi: decodeQoi
+	qoi: decodeQoi,
+	jxl: decodeJxl
 }
 
 // The whole image as RGBA; `maxPixels` refuses a header naming more before anything is allocated.

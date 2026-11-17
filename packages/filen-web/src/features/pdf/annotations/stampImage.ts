@@ -7,14 +7,14 @@ import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
 
 // A picture for an image stamp, as the editor takes it: PNG or JPEG bytes no wider or taller than STAMP_MAX_SIDE and
-// within the engine's size limit. A PNG or JPEG that already fits goes in as it is; HEIC and QOI are decoded off the
-// main thread (the raster decode pool) and every other picture the browser decodes; those are drawn into a PNG, scaled
-// down to fit.
+// within the engine's size limit. A PNG or JPEG that already fits goes in as it is; HEIC, QOI and JPEG XL are decoded
+// off the main thread (the raster decode pool, whatever the browser decodes itself) and every other picture the
+// browser decodes; those are drawn into a PNG, scaled down to fit.
 
 export const STAMP_MAX_SIDE = 2048
 
 // The image formats a stamp is made from: the browser's own, and those the raster decode pool decodes.
-const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi"])
+const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi", "jxl"])
 
 // A drive file the picture picker offers: what the previews show as a picture, HEIC included.
 export function isStampPicture(item: DriveItem): boolean {
@@ -69,7 +69,7 @@ async function drawn(source: CanvasImageSource, width: number, height: number): 
 async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage> {
 	const decode = IMAGE_FORMATS.get(extensionOf(name))?.decode
 
-	if (decode === "heic" || decode === "qoi") {
+	if (decode === "heic" || decode === "qoi" || decode === "jxl") {
 		const maxPixels =
 			decode === "heic"
 				? Number.POSITIVE_INFINITY

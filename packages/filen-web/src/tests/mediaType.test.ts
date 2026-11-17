@@ -125,6 +125,15 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"), { ...native, heicNative: "unknown" })).toBeNull()
 	})
 
+	it("serves a JPEG XL only where the browser decodes it", () => {
+		const native = { ...deviceProfile(), jxlNative: "yes" } as const
+
+		expect(allowedMediaContentType(fileNamed("photo.jxl", "image/jxl"), native)).toBe("image/jxl")
+		expect(allowedMediaContentType(fileNamed("photo.jxl", "application/octet-stream"), native)).toBe("image/jxl")
+		expect(allowedMediaContentType(fileNamed("photo.jxl", "image/jxl"), { ...native, jxlNative: "no" })).toBeNull()
+		expect(allowedMediaContentType(fileNamed("photo.jxl", "image/jxl"), { ...native, jxlNative: "unknown" })).toBeNull()
+	})
+
 	it("never serves an image only our own decoders show, whatever type it stored", () => {
 		expect(allowedMediaContentType(fileNamed("render.qoi", "image/x-qoi"))).toBeNull()
 		expect(allowedMediaContentType(fileNamed("render.qoi", "image/png"))).toBeNull()
