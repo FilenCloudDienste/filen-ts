@@ -7,13 +7,16 @@ export function SliderVisual({
 	percent,
 	segments,
 	duration,
-	thumbShown
+	thumbShown,
+	ticks
 }: {
 	percent: number
 	// Buffered ranges, drawn under the fill.
 	segments?: readonly TimeRange[] | undefined
 	duration?: number | undefined
 	thumbShown?: boolean | undefined
+	// Marks on the rail, as percentages (chapter starts).
+	ticks?: readonly number[] | undefined
 }) {
 	return (
 		<>
@@ -37,6 +40,13 @@ export function SliderVisual({
 					className="absolute inset-y-0 left-0 bg-primary"
 					style={{ width: `${String(percent)}%` }}
 				/>
+				{ticks?.map(tick => (
+					<div
+						key={tick}
+						className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background/80"
+						style={{ left: `${String(tick)}%` }}
+					/>
+				))}
 			</div>
 			<div
 				aria-hidden="true"

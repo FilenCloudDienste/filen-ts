@@ -1,67 +1,15 @@
-import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { decidePlayback, type ProbeAudio, type VideoProbe } from "@filen/shared/videos"
+import type { ProbeAudio, VideoProbe } from "@filen/shared/videos"
 import { SUBTITLE_ENCODINGS } from "@filen/shared/textEncoding"
 import { Button } from "@/components/ui/button"
 import { TracksPopover, type TrackOption } from "@/components/media/video/tracksPopover"
-import { playbackCapabilities } from "@/lib/media/playback/capabilities"
-import { streamFacts, toLadderProbe } from "@/lib/media/playback/capabilities.logic"
+import { useTranscodedTracks } from "@/lib/media/playback/useTranscodedTracks"
 import type { PlayerSubtitleTrack, SubtitleChoice } from "@/features/videos/lib/player/subtitles.logic"
-import { audioTrackName, subtitleTrackName } from "@/features/videos/lib/player/trackLabels.logic"
+import { audioTrackDetail, audioTrackName, subtitleTrackName } from "@/features/videos/lib/player/trackLabels.logic"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 
 // The Videos player's audio and subtitle choices in the tracks popover: labels from the probe and the sidecar
 // names, Smart showing what it picked, a marker on audio this browser plays only converted.
-
-const CODEC_NAMES: Readonly<Record<string, string>> = {
-	aac: "AAC",
-	mp3: "MP3",
-	ac3: "Dolby Digital",
-	eac3: "Dolby Digital Plus",
-	dts: "DTS",
-	truehd: "TrueHD",
-	opus: "Opus",
-	vorbis: "Vorbis",
-	flac: "FLAC",
-	alac: "ALAC"
-}
-
-// Which audio tracks this browser plays only re-encoded, asked when the menu opens (decoder answers are kept
-// per session, so it costs nothing after the first time).
-function useTranscodedTracks(probe: VideoProbe | null, size: number, open: boolean): ReadonlySet<number> {
-	const [transcoded, setTranscoded] = useState<ReadonlySet<number>>(new Set())
-
-	useEffect(() => {
-		if (!open || probe === null || probe.audio.length === 0) {
-			return
-		}
-
-		let live = true
-		const ladderProbe = toLadderProbe(probe)
-
-		void Promise.all(
-			probe.audio.map(async (_, index) => {
-				const selection = { audioIndex: index, subtitle: "none" as const }
-				const caps = await playbackCapabilities.capabilities(ladderProbe, selection, streamFacts({ probe, selection, size }))
-
-				return decidePlayback(ladderProbe, selection, caps).audio.mode === "transcode" ? index : -1
-			})
-		).then(
-			results => {
-				if (live) {
-					setTranscoded(new Set(results.filter(index => index >= 0)))
-				}
-			},
-			() => undefined
-		)
-
-		return () => {
-			live = false
-		}
-	}, [probe, size, open])
-
-	return transcoded
-}
 
 export function PlayerTracks({
 	probe,
@@ -108,17 +56,13 @@ export function PlayerTracks({
 
 	function audioOption(track: ProbeAudio, index: number): TrackOption {
 		const name = audioTrackName(track, index, t)
-		const details = [
-			track.commentary ? t("playerAudioCommentary") : null,
-			track.name,
-			track.codec === null ? null : (CODEC_NAMES[track.codec] ?? null)
-		].filter((part): part is string => part !== null && part.length > 0)
+		const detail = audioTrackDetail(track, t)
 		const converted = transcoded.has(index) || (index === audioIndex && decisionAudioMode === "transcode")
 
 		return {
 			id: String(index),
 			label: name,
-			detail: details.length === 0 ? undefined : [...new Set(details)].join(" · "),
+			detail: detail ?? undefined,
 			note: converted ? t("playerAudioTranscoded") : undefined
 		}
 	}

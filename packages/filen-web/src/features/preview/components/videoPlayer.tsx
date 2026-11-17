@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { CaptionsIcon, MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon, XIcon } from "lucide-react"
+import { MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { languageName } from "@filen/shared/videos"
 import { MediaElementScrubber } from "@/components/media/mediaScrubber"
 import { MediaCurrentTime, MediaDuration } from "@/components/media/mediaTime"
 import { VolumeControl } from "@/components/media/volumeControl"
@@ -15,6 +14,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
+import type { StageChapter } from "@/components/media/video/stage.logic"
 import { Spinner } from "@/components/ui/spinner"
 import { MEDIA_GLASS_SURFACE_CLASS, MEDIA_GLASS_TONE_CLASS } from "@/components/ui/surface"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
@@ -39,7 +39,8 @@ import { setVideoPosition } from "@/features/preview/lib/videoContinuity"
 import { CODECS, type CodecId } from "@/features/preview/lib/containerTracks"
 import { cannotStream, unplayableCodecs, unplayableContainer } from "@/features/preview/lib/previewPlayback.logic"
 import { usePreviewVideo } from "@/features/preview/hooks/usePreviewVideo"
-import { usePreviewSubtitles, type PreviewSubtitleOption, type PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
+import { usePreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
+import { ChaptersMenu, TracksMenu } from "@/features/preview/components/videoTrackMenus"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { SubtitleOverlay } from "@/components/media/video/subtitleOverlay"
 import {
@@ -136,6 +137,8 @@ export function VideoPlayer({
 	const loading = !failed && (!hasMetadata || waiting)
 	const visible = controlsVisible({ paused, waiting: loading, pointerActive, keyboardFocus, menuOpen, scrubbing })
 	const silentCodec = snapshot?.silentCodec ?? null
+	const chapters: StageChapter[] = (snapshot?.probe?.chapters ?? []).map(chapter => ({ start: chapter.t, title: chapter.title }))
+	const chapterStarts = chapters.length >= 2 ? chapters.map(chapter => chapter.start) : []
 
 	useSyncedMediaVolume(video)
 	useHoldReadsWhilePlaying(video)
@@ -235,7 +238,7 @@ export function VideoPlayer({
 						}
 					}}
 					onKeyDown={event => {
-						if (handlePlayerKeyDown(event, video, container, combos)) {
+						if (handlePlayerKeyDown(event, video, container, combos, chapterStarts)) {
 							idleTimer.poke()
 						}
 					}}
@@ -311,6 +314,13 @@ export function VideoPlayer({
 					<div
 						role="group"
 						aria-label={t("previewMediaControls")}
+						// The tracks and chapters a menu here lists are read on the first reach for the bar, not at open.
+						onPointerEnter={() => {
+							controller?.ensureProbe()
+						}}
+						onFocus={() => {
+							controller?.ensureProbe()
+						}}
 						className={cn(
 							"@container absolute inset-x-3 bottom-3 mx-auto flex max-w-4xl items-center gap-1 rounded-2xl px-2 py-1.5 transition-opacity duration-200 motion-reduce:transition-none",
 							MEDIA_GLASS_SURFACE_CLASS,
@@ -337,6 +347,7 @@ export function VideoPlayer({
 						<MediaElementScrubber
 							media={video}
 							label={t("audio:seek")}
+							markers={chapters.length >= 2 ? chapters : undefined}
 							onScrub={seconds => {
 								setScrubbing(seconds !== null)
 							}}
@@ -347,13 +358,27 @@ export function VideoPlayer({
 							className="min-w-9"
 						/>
 						<VolumeControl sliderClassName="@max-md:hidden" />
-						{subtitles.options.length > 0 ? (
-							<SubtitlesMenu
-								subtitles={subtitles}
+						{chapters.length >= 2 ? (
+							<ChaptersMenu
+								chapters={chapters}
+								media={video}
 								container={fullscreen ? container : null}
 								onOpenChange={setMenuOpen}
 							/>
 						) : null}
+						<TracksMenu
+							subtitles={subtitles}
+							probe={snapshot?.probe ?? null}
+							nativeAudio={snapshot?.nativeAudio ?? null}
+							decision={snapshot?.decision ?? null}
+							audioIndex={snapshot?.audioIndex ?? -1}
+							onAudio={index => {
+								controller?.selectAudio(index)
+							}}
+							size={Number(item.data.size)}
+							container={fullscreen ? container : null}
+							onOpenChange={setMenuOpen}
+						/>
 						<PlaybackSpeedMenu
 							media={video}
 							// Only a fullscreen player needs the menu inside it; elsewhere it portals as usual.
@@ -423,88 +448,6 @@ function PlaybackSpeedMenu({
 							value={String(option)}
 						>
 							{option === 1 ? t("previewMediaNormalSpeed") : t("previewMediaSpeedRate", { rate: option })}
-						</DropdownMenuRadioItem>
-					))}
-				</DropdownMenuRadioGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
-	)
-}
-
-type SubtitleLabelKey =
-	"previewMediaSubtitleUnknownLanguage" | "previewMediaSubtitleForced" | "previewMediaSubtitleSdh" | "previewMediaSubtitleEmbedded"
-
-// "English · Forced · Embedded": the language, the track's own title, then its flags.
-function subtitleLabel(option: PreviewSubtitleOption, t: (key: SubtitleLabelKey) => string): string {
-	const parts = [languageName(option.lang) ?? t("previewMediaSubtitleUnknownLanguage")]
-
-	if (option.title.length > 0) {
-		parts.push(option.title)
-	}
-
-	if (option.forced) {
-		parts.push(t("previewMediaSubtitleForced"))
-	}
-
-	if (option.sdh) {
-		parts.push(t("previewMediaSubtitleSdh"))
-	}
-
-	if (option.embedded) {
-		parts.push(t("previewMediaSubtitleEmbedded"))
-	}
-
-	return parts.join(" · ")
-}
-
-function SubtitlesMenu({
-	subtitles,
-	container,
-	onOpenChange
-}: {
-	subtitles: PreviewSubtitles
-	container: HTMLElement | null
-	onOpenChange: (open: boolean) => void
-}) {
-	const { t } = useTranslation("preview")
-
-	return (
-		<DropdownMenu onOpenChange={onOpenChange}>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("previewMediaSubtitles")}
-					>
-						<CaptionsIcon />
-					</Button>
-				}
-			/>
-			<DropdownMenuContent
-				side="top"
-				align="end"
-				container={container ?? undefined}
-				className={cn(MEDIA_GLASS_TONE_CLASS, "w-auto max-w-80 min-w-44 before:backdrop-saturate-100")}
-			>
-				<DropdownMenuRadioGroup
-					value={subtitles.selected}
-					onValueChange={(next: string) => {
-						subtitles.select(next)
-					}}
-				>
-					<DropdownMenuLabel>{t("previewMediaSubtitles")}</DropdownMenuLabel>
-					<DropdownMenuRadioItem value="off">{t("previewMediaSubtitlesOff")}</DropdownMenuRadioItem>
-					{subtitles.options.map(option => (
-						<DropdownMenuRadioItem
-							key={option.id}
-							value={option.id}
-						>
-							<span className="truncate">
-								{subtitles.failed && option.id === subtitles.selected
-									? t("previewMediaSubtitleUnreadable", { name: subtitleLabel(option, key => t(key)) })
-									: subtitleLabel(option, key => t(key))}
-							</span>
 						</DropdownMenuRadioItem>
 					))}
 				</DropdownMenuRadioGroup>

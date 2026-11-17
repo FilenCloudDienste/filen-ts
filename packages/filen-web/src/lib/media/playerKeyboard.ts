@@ -14,7 +14,7 @@ import {
 } from "@/lib/media/mediaKeys.logic"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
-import { frameDuration, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
+import { chapterTarget, frameDuration, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
 import { mediaDuration, seekMedia, setPlaybackRate, toggleMediaPlayback } from "@/lib/media/useMediaState"
 
 const IS_MAC = isMacPlatform()
@@ -41,6 +41,18 @@ const PREVIEW_VIDEO_ACTIONS: readonly MediaAction[] = [
 ]
 
 const PREVIEW_VIDEO_ACTIONS_FULLSCREEN: readonly MediaAction[] = [...PREVIEW_VIDEO_ACTIONS, "media.fullscreen"]
+const CHAPTER_ACTIONS: readonly MediaAction[] = ["media.chapterPrevious", "media.chapterNext"]
+const PREVIEW_VIDEO_ACTIONS_CHAPTERS: readonly MediaAction[] = [...PREVIEW_VIDEO_ACTIONS, ...CHAPTER_ACTIONS]
+const PREVIEW_VIDEO_ACTIONS_FULLSCREEN_CHAPTERS: readonly MediaAction[] = [...PREVIEW_VIDEO_ACTIONS_FULLSCREEN, ...CHAPTER_ACTIONS]
+
+// PageUp/PageDown are the player's only with two chapters or more; otherwise they page whatever is around it.
+export function previewVideoActions(fullscreen: boolean, chapterCount: number): readonly MediaAction[] {
+	if (chapterCount >= 2) {
+		return fullscreen ? PREVIEW_VIDEO_ACTIONS_FULLSCREEN_CHAPTERS : PREVIEW_VIDEO_ACTIONS_CHAPTERS
+	}
+
+	return fullscreen ? PREVIEW_VIDEO_ACTIONS_FULLSCREEN : PREVIEW_VIDEO_ACTIONS
+}
 
 function togglePictureInPicture(video: HTMLVideoElement): void {
 	if (document.pictureInPictureElement === video) {
@@ -52,18 +64,20 @@ function togglePictureInPicture(video: HTMLVideoElement): void {
 
 // A preview player's keydown handler, under `combos` (useBindings). Returns whether the key was the player's. A handled
 // key stops here: past the player, the preview overlay would page on the same arrow and a single-letter app shortcut
-// would fire. `fullscreenTarget` is the container F fullscreens; null until it has mounted.
+// would fire. `fullscreenTarget` is the container F fullscreens; null until it has mounted. `chapterStarts` are the
+// video's chapter starts in order, in seconds.
 export function handlePlayerKeyDown(
 	event: KeyboardEvent,
 	video: HTMLVideoElement | null,
 	fullscreenTarget: HTMLElement | null,
-	combos: Readonly<Record<string, string>>
+	combos: Readonly<Record<string, string>>,
+	chapterStarts: readonly number[]
 ): boolean {
 	if (video === null || event.defaultPrevented || isRecordingCombo()) {
 		return false
 	}
 
-	const actions = fullscreenTarget !== null && fullscreenSupported() ? PREVIEW_VIDEO_ACTIONS_FULLSCREEN : PREVIEW_VIDEO_ACTIONS
+	const actions = previewVideoActions(fullscreenTarget !== null && fullscreenSupported(), chapterStarts.length)
 	const action = mediaKeyAction(event, playerKeyTarget(event.target), actions, combos, IS_MAC)
 
 	if (action === null) {
@@ -77,12 +91,17 @@ export function handlePlayerKeyDown(
 		return true
 	}
 
-	runPreviewAction(action, video, fullscreenTarget)
+	runPreviewAction(action, video, fullscreenTarget, chapterStarts)
 
 	return true
 }
 
-function runPreviewAction(action: MediaAction, video: HTMLVideoElement, fullscreenTarget: HTMLElement | null): void {
+function runPreviewAction(
+	action: MediaAction,
+	video: HTMLVideoElement,
+	fullscreenTarget: HTMLElement | null,
+	chapterStarts: readonly number[]
+): void {
 	const fraction = jumpFraction(action)
 
 	if (fraction !== null) {
@@ -142,6 +161,16 @@ function runPreviewAction(action: MediaAction, video: HTMLVideoElement, fullscre
 		case "media.pictureInPicture":
 			togglePictureInPicture(video)
 			break
+		case "media.chapterPrevious":
+		case "media.chapterNext": {
+			const target = chapterTarget(chapterStarts, video.currentTime, action === "media.chapterPrevious" ? -1 : 1)
+
+			if (target !== null) {
+				seekMedia(video, target)
+			}
+
+			break
+		}
 		case "media.fullscreen":
 			if (fullscreenTarget !== null) {
 				void toggleFullscreen(fullscreenTarget).catch(() => undefined)

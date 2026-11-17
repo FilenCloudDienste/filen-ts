@@ -28,6 +28,30 @@ export function audioTrackName(track: Pick<ProbeAudio, "lang" | "ch">, index: nu
 		.join(" ")
 }
 
+const CODEC_NAMES: Readonly<Record<string, string>> = {
+	aac: "AAC",
+	mp3: "MP3",
+	ac3: "Dolby Digital",
+	eac3: "Dolby Digital Plus",
+	dts: "DTS",
+	truehd: "TrueHD",
+	opus: "Opus",
+	vorbis: "Vorbis",
+	flac: "FLAC",
+	alac: "ALAC"
+}
+
+// An audio track's second line in a tracks menu: commentary, its own title, its codec ("Director · Dolby Digital").
+export function audioTrackDetail(track: Pick<ProbeAudio, "commentary" | "name" | "codec">, t: TFunction<"videos">): string | null {
+	const details = [
+		track.commentary ? t("playerAudioCommentary") : null,
+		track.name,
+		track.codec === null ? null : (CODEC_NAMES[track.codec] ?? null)
+	].filter((part): part is string => part !== null && part.length > 0)
+
+	return details.length === 0 ? null : [...new Set(details)].join(" · ")
+}
+
 // A subtitle track as the tracks menu names it: its language, forced and SDH marked ("German · Forced").
 export function subtitleTrackName(track: Pick<PlayerSubtitleTrack, "lang" | "forced" | "hi">, t: TFunction<"videos">): string {
 	const parts = [languageName(track.lang) ?? t("subtitleUnknownLanguage")]

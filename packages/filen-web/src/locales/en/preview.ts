@@ -600,6 +600,10 @@ export const preview = {
 	previewTextTooLarge: "This file is too large to show as text.",
 	/** Preview overlay body — the browser has no way to stream this video or audio file (no service worker, no MediaSource); the Download button sits below */
 	previewMediaCannotStream: "This file can't be streamed here.",
+	/** Video player — chapters menu button and its heading */
+	previewMediaChapters: "Chapters",
+	/** Video player — chapters menu: a chapter without a title */
+	previewMediaChapterNumber: "Chapter {{number}}",
 	/** Video player — subtitles menu button and its heading */
 	previewMediaSubtitles: "Subtitles",
 	/** Video player — subtitles menu: no subtitles */

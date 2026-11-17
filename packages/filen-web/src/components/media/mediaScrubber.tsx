@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
 import { SliderVisual } from "@/components/media/sliderVisual"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
+import { chapterAt, type StageChapter } from "@/components/media/video/stage.logic"
 import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
 import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, timeAtRatio } from "@/lib/media/scrubber.logic"
 import { seekMedia, useMediaBuffered, useMediaCurrentTime, useMediaDuration } from "@/lib/media/useMediaState"
@@ -19,6 +20,8 @@ interface MediaScrubberProps {
 	onScrub?: ((seconds: number | null) => void) | undefined
 	// Off where readouts beside the rail already say the time, and a tip would cover neighbouring controls.
 	tooltip?: boolean | undefined
+	// Start-ordered chapters: a tick at each start, and the tip names the chapter under the pointer.
+	markers?: readonly StageChapter[] | undefined
 	className?: string | undefined
 }
 
@@ -26,7 +29,7 @@ interface MediaScrubberProps {
 // so a stream is asked for the bytes of one position instead of every one the pointer crossed. The
 // range input underneath carries the value, the keyboard and the accessible name; the pointer is handled
 // on the rail so the drawn fill and the pointer agree to the pixel.
-export function MediaScrubber({ value, duration, label, onSeek, buffered, onScrub, tooltip, className }: MediaScrubberProps) {
+export function MediaScrubber({ value, duration, label, onSeek, buffered, onScrub, tooltip, markers, className }: MediaScrubberProps) {
 	const { t } = useTranslation("common")
 	const inputRef = useRef<HTMLInputElement>(null)
 	const [dragTime, setDragTime] = useState<number | null>(null)
@@ -34,6 +37,12 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 	const disabled = duration <= 0
 	const shown = dragTime ?? Math.min(value, duration)
 	const tipTime = tooltip === false ? null : (dragTime ?? hoverTime)
+	const tipChapter = tipTime === null || markers === undefined ? null : chapterAt(markers, tipTime)
+	// Ticks inside the rail only: one at either end would only thicken its edge.
+	const ticks =
+		markers === undefined || disabled
+			? undefined
+			: markers.filter(marker => marker.start > 0.5 && marker.start < duration - 0.5).map(marker => percentOf(marker.start, duration))
 
 	function timeAt(event: PointerEvent<HTMLDivElement>): number {
 		const rect = event.currentTarget.getBoundingClientRect()
@@ -136,17 +145,21 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 				segments={buffered !== undefined ? parseBufferedRanges(buffered) : undefined}
 				duration={duration}
 				thumbShown={dragTime !== null}
+				ticks={ticks}
 			/>
 			{tipTime !== null && !disabled ? (
 				<div
 					aria-hidden="true"
 					className={cn(
-						"pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 rounded-lg px-1.5 py-0.5 text-xs font-medium text-popover-foreground tabular-nums",
+						"pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 rounded-lg px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-popover-foreground tabular-nums",
 						GLASS_SURFACE_CLASS
 					)}
 					style={{ left: `${String(percentOf(tipTime, duration))}%` }}
 				>
 					{formatSecondsToMediaClock(tipTime)}
+					{tipChapter?.title === null || tipChapter?.title === undefined || tipChapter.title.length === 0 ? null : (
+						<span className="ml-1 inline-block max-w-48 truncate align-bottom text-muted-foreground">· {tipChapter.title}</span>
+					)}
 				</div>
 			) : null}
 		</div>
@@ -158,11 +171,13 @@ export function MediaElementScrubber({
 	media,
 	label,
 	onScrub,
+	markers,
 	className
 }: {
 	media: HTMLMediaElement | null
 	label: string
 	onScrub?: ((seconds: number | null) => void) | undefined
+	markers?: readonly StageChapter[] | undefined
 	className?: string | undefined
 }) {
 	const currentTime = useMediaCurrentTime(media)
@@ -176,6 +191,7 @@ export function MediaElementScrubber({
 			buffered={buffered}
 			label={label}
 			onScrub={onScrub}
+			markers={markers}
 			className={className}
 			onSeek={seconds => {
 				if (media !== null) {
