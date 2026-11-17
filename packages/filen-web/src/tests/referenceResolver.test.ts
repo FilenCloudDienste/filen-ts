@@ -116,5 +116,10 @@ describe("onceEach", () => {
 
 		expect(ask).toHaveBeenCalledTimes(MAX_REFERENCES)
 		expect(references.unlisted()).toBe(5)
+
+		// The same unlisted file named again is not counted again.
+		await references.ask(`x${String(MAX_REFERENCES + 3)}.png`)
+		await references.ask(`./X${String(MAX_REFERENCES + 3)}.PNG`)
+		expect(references.unlisted()).toBe(5)
 	})
 })

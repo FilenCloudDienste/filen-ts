@@ -15,9 +15,10 @@ export const OBJ_MAX_CORNERS = 3_000_000
 export const OBJ_MAX_VERTICES = 3_000_000
 // What a 3MF or USDZ may unpack to in all (the model cap), each entry also within the zip ratio.
 export const MODEL_MAX_UNPACKED_BYTES = MODEL_MAX_BYTES
-// The JS heap a binary FBX's parse builds: FBXLoader turns every array into a plain JS array (8 bytes an element, a
-// boolean as much as a double), every node into an object and every property into a value.
-export const FBX_MAX_HEAP_BYTES = 512 * 1024 * 1024
+// The JS heap a parse may build in plain arrays and objects: a binary FBX's (FBXLoader turns every array into a plain JS
+// array, 8 bytes an element, a boolean as much as a double, every node into an object and every property into a
+// value), and the numbers of an ASCII FBX's or USDA layer's text.
+export const MODEL_MAX_HEAP_BYTES = 512 * 1024 * 1024
 // The GPU memory a scene may take: attributes, textures with mipmaps, the framebuffer.
 export const MODEL_MAX_GPU_BYTES = 768 * 1024 * 1024
 // A texture's decoded RGBA bytes per pixel before resizing (W2's pixel budget figure).
@@ -328,12 +329,16 @@ class FbxEnd extends Error {}
 // content (the footer's 160 bytes and alignment); a record's properties, then its children while its end offset lies
 // ahead (null records included, and records past them); an uncompressed array taking its element count's bytes
 // whatever its length field says, a compressed one its compressed length (which the patched loader inflates into its
-// declared size, never past it). Returns the JS heap the parse would build, or null when the bytes would not parse.
-export function fbxHeapBytes(bytes: Uint8Array): number | null {
+// declared size, never past it). Returns the JS heap the parse would build, and the face corners its geometry builds
+// (every PolygonVertexIndex entry fans into at most three corners, rebuilt once per blend-shape geometry); null when the
+// bytes would not parse.
+export function fbxCosts(bytes: Uint8Array): { heap: number; corners: number } | null {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 	const size = bytes.length
 	let offset = 23
 	let heap = 0
+	let polygonIndices = 0
+	let shapes = 0
 
 	const need = (count: number): void => {
 		if (count < 0 || offset + count > size) throw new FbxEnd()
@@ -378,7 +383,10 @@ export function fbxHeapBytes(bytes: Uint8Array): number | null {
 		if (wide) uint64()
 		else uint32()
 
-		skip(uint8())
+		const nameLength = uint8()
+		const name = new TextDecoder("latin1").decode(bytes.subarray(offset, offset + nameLength))
+
+		skip(nameLength)
 		heap += JS_NODE_BYTES
 
 		if (endOffset === 0) return
@@ -395,6 +403,15 @@ export function fbxHeapBytes(bytes: Uint8Array): number | null {
 			} else if (type === "R" || type === "S") {
 				const length = uint32()
 
+				// A blend shape is a Geometry whose type is "Shape": FBXLoader builds the base geometry's buffers again for it.
+				if (
+					type === "S" &&
+					name === "Geometry" &&
+					length === 5 &&
+					new TextDecoder("latin1").decode(bytes.subarray(offset, offset + 5)) === "Shape"
+				)
+					shapes++
+
 				skip(length)
 				heap += length
 			} else if (element !== undefined) {
@@ -404,36 +421,68 @@ export function fbxHeapBytes(bytes: Uint8Array): number | null {
 
 				skip(encoding === 0 ? count * element : compressed)
 				heap += count * JS_ELEMENT_BYTES + (encoding === 0 ? 0 : count * element)
+
+				if (name === "PolygonVertexIndex") polygonIndices += count
 			} else {
 				throw new FbxEnd()
 			}
 
-			if (heap > FBX_MAX_HEAP_BYTES) return
+			if (heap > MODEL_MAX_HEAP_BYTES) return
 		}
 
-		while (endOffset > offset && heap <= FBX_MAX_HEAP_BYTES) node(depth + 1)
+		while (endOffset > offset && heap <= MODEL_MAX_HEAP_BYTES) node(depth + 1)
 	}
 
 	try {
-		while (!endOfContent() && heap <= FBX_MAX_HEAP_BYTES) node(0)
+		while (!endOfContent() && heap <= MODEL_MAX_HEAP_BYTES) node(0)
 	} catch (error) {
 		if (error instanceof FbxEnd || error instanceof RangeError) return null
 
 		throw error
 	}
 
-	return heap
+	return { heap, corners: 3 * polygonIndices * (1 + shapes) }
+}
+
+// An ASCII FBX's numbers, each a JS value of the arrays FBXLoader builds from its text: counted, not parsed.
+export function textNumbers(text: string): number {
+	let count = 0
+	let inNumber = false
+
+	for (let at = 0; at < text.length; at++) {
+		const code = text.charCodeAt(at)
+		const digit = code >= 0x30 && code <= 0x39
+
+		if (digit && !inNumber) count++
+
+		inNumber = digit || (inNumber && (code === 0x2e || code === 0x65 || code === 0x45 || code === 0x2d || code === 0x2b))
+	}
+
+	return count
+}
+
+// A USDZ's text layers (.usda): their numbers against the heap they become.
+export function preflightUsdaText(texts: readonly string[]): Preflight {
+	let numbers = 0
+
+	for (const text of texts) numbers += textNumbers(text)
+
+	return numbers * JS_ELEMENT_BYTES > MODEL_MAX_HEAP_BYTES ? { ok: false, reason: "tooLarge" } : OK
 }
 
 export function preflightFbx(bytes: Uint8Array): Preflight {
-	// ASCII FBX: its arrays are its text, bounded by the cap.
-	if (!isBinaryFbx(bytes)) return OK
+	// ASCII FBX: every number of its text a value of an array FBXLoader builds, against the same heap.
+	if (!isBinaryFbx(bytes)) {
+		return textNumbers(new TextDecoder().decode(bytes)) * JS_ELEMENT_BYTES > MODEL_MAX_HEAP_BYTES
+			? { ok: false, reason: "tooLarge" }
+			: OK
+	}
 
-	const heap = fbxHeapBytes(bytes)
+	const costs = fbxCosts(bytes)
 
-	if (heap === null) return { ok: false, reason: "malformed" }
+	if (costs === null) return { ok: false, reason: "malformed" }
 
-	return heap > FBX_MAX_HEAP_BYTES ? { ok: false, reason: "tooLarge" } : OK
+	return costs.heap > MODEL_MAX_HEAP_BYTES || costs.corners > OBJ_MAX_CORNERS ? { ok: false, reason: "tooLarge" } : OK
 }
 
 // How large a texture of `width` × `height` is drawn: within `maxSide` a side. Null for no size.

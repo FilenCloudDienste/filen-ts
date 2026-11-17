@@ -198,7 +198,7 @@ patchedDependencies:
   react-native-screens@4.30.0: 38fb3df9c913bf4c102d1b126ec58c36901c4494b9accc8220225df5cf229882
   react-native-svg@15.16.0: 032616792f4720b593e011bd31b37c270a43413d13a64d0823d2123dcb0bffb0
   sonner@2.0.8: 2d04f3dd9b4280ee9553ef3bc0812cc9503ba710f4f5cdddc884955fe50d63be
-  three@0.187.0: 6a8165f9559073baa3fe4a61fab636fa9bef01624932351b8b880a4de09c0530
+  three@0.187.0: d7e88dc4e23f2a23d6aa5db133c6edb311792565e13835bd9bc96236c3190c4b
 
 importers:
 
@@ -1286,7 +1286,7 @@ importers:
         version: 7.0.0
       three:
         specifier: 0.187.0
-        version: 0.187.0(patch_hash=6a8165f9559073baa3fe4a61fab636fa9bef01624932351b8b880a4de09c0530)
+        version: 0.187.0(patch_hash=d7e88dc4e23f2a23d6aa5db133c6edb311792565e13835bd9bc96236c3190c4b)
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -21898,7 +21898,7 @@ snapshots:
 
   tesseract.js-core@7.0.0: {}
 
-  three@0.187.0(patch_hash=6a8165f9559073baa3fe4a61fab636fa9bef01624932351b8b880a4de09c0530): {}
+  three@0.187.0(patch_hash=d7e88dc4e23f2a23d6aa5db133c6edb311792565e13835bd9bc96236c3190c4b): {}
 
   throat@5.0.0: {}
 

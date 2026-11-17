@@ -71,10 +71,29 @@ index fc155a4dfae3175309a6970659a7f37fa39356ea..3cda25ccf7dd24c55ce1ee0a8c724546
  
  				switch ( type ) {
 diff --git a/examples/jsm/loaders/USDLoader.js b/examples/jsm/loaders/USDLoader.js
-index 1b657516005dd87895804f1ab33ce6665ec346c5..f93c0bdd5a482c7b75b7d98d07b51027f271174d 100644
+index 1b657516005dd87895804f1ab33ce6665ec346c5..fceaa6331a6c65a78aab1ea7f03dbf8071a5fce6 100644
 --- a/examples/jsm/loaders/USDLoader.js
 +++ b/examples/jsm/loaders/USDLoader.js
-@@ -275,7 +275,8 @@ class USDLoader extends Loader {
+@@ -6,7 +6,7 @@ import {
+ 
+ import { unzipSync } from '../libs/fflate.module.js';
+ import { USDAParser } from './usd/USDAParser.js';
+-import { USDCParser } from './usd/USDCParser.js';
++import { USDCParser, resetUsdcBudget } from './usd/USDCParser.js';
+ import { USDComposer } from './usd/USDComposer.js';
+ 
+ /**
+@@ -100,6 +100,9 @@ class USDLoader extends Loader {
+ 	 */
+ 	parse( buffer, path = '', onLoad, onError ) {
+ 
++		// Patched: every crate of this parse shares one memory budget.
++		resetUsdcBudget();
++
+ 		const usda = new USDAParser();
+ 		const usdc = new USDCParser();
+ 		const textDecoder = new TextDecoder();
+@@ -275,7 +278,8 @@ class USDLoader extends Loader {
  
  		if ( bytes[ 0 ] === 0x50 && bytes[ 1 ] === 0x4B ) {
  
@@ -85,16 +104,40 @@ index 1b657516005dd87895804f1ab33ce6665ec346c5..f93c0bdd5a482c7b75b7d98d07b51027
  			const { file, filename, basePath } = findUSD( zip );
  
 diff --git a/examples/jsm/loaders/usd/USDCParser.js b/examples/jsm/loaders/usd/USDCParser.js
-index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133921114b9 100644
+index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..30e70162ce5bfe7467cc04377e49dc5158541d6c 100644
 --- a/examples/jsm/loaders/usd/USDCParser.js
 +++ b/examples/jsm/loaders/usd/USDCParser.js
-@@ -182,13 +182,29 @@ function lz4DecompressBlock( input, inputOffset, inputEnd, output, outputOffset,
+@@ -182,13 +182,73 @@ function lz4DecompressBlock( input, inputOffset, inputEnd, output, outputOffset,
  }
  
  // USD uses TfFastCompression which wraps LZ4 with chunk headers
-+// Patched: every buffer the crate's declared counts and sizes ask for is checked before it is allocated, against the
-+// most one buffer of a USDZ package may take (its unpacked cap): a lying count throws instead of allocating.
++// Patched: every buffer and list the crate's declared counts and sizes ask for is checked before it is built: one
++// buffer against the most one buffer of a USDZ package may take (its unpacked cap), and all of a parse's together
++// against a running total over every crate of one USDLoader parse (resetUsdcBudget), JS objects and values counted at
++// their heap cost. A lying count throws
++// instead of allocating.
 +const MAX_BUFFER_BYTES = 128 * 1024 * 1024;
++const MAX_PARSE_BYTES = 1024 * 1024 * 1024;
++// What a JS object (a field, a spec) and a JS value (a token, an index) take on the heap.
++const OBJECT_BYTES = 64;
++const VALUE_BYTES = 16;
++// LZ4 expands one input byte to at most 255 output bytes.
++const LZ4_MAX_RATIO = 255;
++let parseBytes = 0;
++
++function resetUsdcBudget() {
++
++	parseBytes = 0;
++
++}
++
++function charge( bytes ) {
++
++	parseBytes += bytes;
++
++	if ( parseBytes > MAX_PARSE_BYTES ) throw new Error( 'THREE.USDCParser: the crate asks for more memory than allowed' );
++
++}
 +
 +function checkedLength( length, bytesPerElement ) {
 +
@@ -104,7 +147,24 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
 +
 +	}
 +
++	charge( length * bytesPerElement );
++
 +	return length;
++
++}
++
++// A list of `count` entries built from data `available` bytes long, each entry `minBytes` of it at least.
++function checkedCount( count, available, minBytes, heapBytes ) {
++
++	if ( ! Number.isSafeInteger( count ) || count < 0 || count * minBytes > available ) {
++
++		throw new Error( 'THREE.USDCParser: ' + count + ' entries do not fit their data' );
++
++	}
++
++	charge( count * heapBytes );
++
++	return count;
 +
 +}
 +
@@ -115,11 +175,14 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  	// Multi chunk (byte 0 > 0): [numChunks] + [compressedSizes...] + [chunkData...]
  
 -	const output = new Uint8Array( uncompressedSize );
++	// Patched: the output an input of this size can hold at most, checked before it is allocated.
++	if ( uncompressedSize > input.length * LZ4_MAX_RATIO ) throw new Error( 'THREE.USDCParser: an LZ4 block declares more than its input can hold' );
++
 +	const output = new Uint8Array( checkedLength( uncompressedSize, 1 ) );
  	const numChunks = input[ 0 ];
  
  	if ( numChunks === 0 ) {
-@@ -270,7 +286,7 @@ function decodeIntegers32( data, numInts ) {
+@@ -270,7 +330,7 @@ function decodeIntegers32( data, numInts ) {
  	const codesStart = offset;
  	const vintsStart = offset + numCodesBytes;
  
@@ -128,16 +191,140 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  	let prevVal = 0;
  	let codesOffset = codesStart;
  	let vintsOffset = vintsStart;
-@@ -788,7 +804,7 @@ class USDCParser {
+@@ -512,6 +572,8 @@ class USDCParser {
+ 
+ 		this.buffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+ 		this.reader = new BinaryReader( this.buffer );
++		// Patched: each value read once by its value rep.
++		this._valueCache = new Map();
+ 		this.version = { major: 0, minor: 0, patch: 0 };
+ 
+ 		this._conversionBuffer = new ArrayBuffer( 4 );
+@@ -608,6 +670,9 @@ class USDCParser {
+ 			const tokensNumBytes = reader.readUint64();
+ 			const tokensData = reader.readBytes( tokensNumBytes );
+ 
++			// Patched: each token ends in a NUL byte of its data.
++			checkedCount( numTokens, tokensData.length, 1, VALUE_BYTES );
++
+ 			let strStart = 0;
+ 			for ( let i = 0; i < numTokens; i ++ ) {
+ 
+@@ -628,6 +693,9 @@ class USDCParser {
+ 
+ 			const tokensData = decompressLZ4( compressedData, uncompressedSize );
+ 
++			// Patched: each token ends in a NUL byte of its data.
++			checkedCount( numTokens, tokensData.length, 1, VALUE_BYTES );
++
+ 			let strStart = 0;
+ 			for ( let i = 0; i < numTokens; i ++ ) {
+ 
+@@ -656,7 +724,8 @@ class USDCParser {
+ 		const reader = this.reader;
  		reader.seek( section.start );
  
- 		const numPaths = reader.readUint64();
+-		const numStrings = reader.readUint64();
++		// Patched: four bytes each, within the section.
++		const numStrings = checkedCount( reader.readUint64(), section.size, 4, VALUE_BYTES );
+ 		this.strings = [];
+ 
+ 		for ( let i = 0; i < numStrings; i ++ ) {
+@@ -682,6 +751,8 @@ class USDCParser {
+ 			// Uncompressed fields
+ 			const numFields = Math.floor( section.size / 12 ); // 4 bytes token index + 8 bytes value rep
+ 
++			charge( numFields * OBJECT_BYTES );
++
+ 			for ( let i = 0; i < numFields; i ++ ) {
+ 
+ 				const tokenIndex = reader.readUint32();
+@@ -698,7 +769,8 @@ class USDCParser {
+ 		} else {
+ 
+ 			// Compressed fields (version >= 0.4.0)
+-			const numFields = reader.readUint64();
++			// Patched: eight bytes of value rep each, at most LZ4's expansion of the section.
++			const numFields = checkedCount( reader.readUint64(), section.size * LZ4_MAX_RATIO, 8, OBJECT_BYTES );
+ 
+ 			// Read compressed token indices
+ 			const tokenIndicesCompressedSize = reader.readUint64();
+@@ -748,6 +820,8 @@ class USDCParser {
+ 			// Uncompressed field sets
+ 			const numFieldSets = Math.floor( section.size / 4 );
+ 
++			charge( numFieldSets * VALUE_BYTES );
++
+ 			for ( let i = 0; i < numFieldSets; i ++ ) {
+ 
+ 				this.fieldSets.push( reader.readUint32() );
+@@ -757,7 +831,8 @@ class USDCParser {
+ 		} else {
+ 
+ 			// Compressed field sets
+-			const numFieldSets = reader.readUint64();
++			// Patched: at most LZ4's expansion of the section, four bytes each.
++			const numFieldSets = checkedCount( reader.readUint64(), section.size * LZ4_MAX_RATIO, 4, VALUE_BYTES );
+ 			const compressedSize = reader.readUint64();
+ 			const compressed = reader.readBytes( compressedSize );
+ 
+@@ -787,8 +862,9 @@ class USDCParser {
+ 		const reader = this.reader;
+ 		reader.seek( section.start );
+ 
+-		const numPaths = reader.readUint64();
 -		this.paths = new Array( numPaths ).fill( '' );
++		// Patched: at most LZ4's expansion of the section, four bytes each.
++		const numPaths = checkedCount( reader.readUint64(), section.size * LZ4_MAX_RATIO, 4, VALUE_BYTES );
 +		this.paths = new Array( checkedLength( numPaths, 8 ) ).fill( '' );
  
  		if ( this.version.major === 0 && this.version.minor < 4 ) {
  
-@@ -1401,7 +1417,7 @@ class USDCParser {
+@@ -1003,6 +1079,8 @@ class USDCParser {
+ 			const specSize = ( this.version.minor === 0 && this.version.patch === 1 ) ? 16 : 12;
+ 			const numSpecs = Math.floor( section.size / specSize );
+ 
++			charge( numSpecs * OBJECT_BYTES );
++
+ 			for ( let i = 0; i < numSpecs; i ++ ) {
+ 
+ 				const pathIndex = reader.readUint32();
+@@ -1018,7 +1096,8 @@ class USDCParser {
+ 		} else {
+ 
+ 			// Compressed specs
+-			const numSpecs = reader.readUint64();
++			// Patched: at most LZ4's expansion of the section, twelve bytes each.
++			const numSpecs = checkedCount( reader.readUint64(), section.size * LZ4_MAX_RATIO, 12, OBJECT_BYTES );
+ 
+ 			const compressedSize1 = reader.readUint64();
+ 			const pathIndicesCompressed = reader.readBytes( compressedSize1 );
+@@ -1070,6 +1149,24 @@ class USDCParser {
+ 
+ 	_readValue( valueRep ) {
+ 
++		// Patched: specs sharing a value rep read it once.
++		const key = valueRep.hi * 0x100000000 + valueRep.lo;
++		this._valueCache ??= new Map();
++
++		const cached = this._valueCache.get( key );
++
++		if ( cached !== undefined ) return cached;
++
++		const value = this._readValueUncached( valueRep );
++
++		this._valueCache.set( key, value );
++
++		return value;
++
++	}
++
++	_readValueUncached( valueRep ) {
++
+ 		const type = valueRep.typeEnum;
+ 		const isArray = valueRep.isArray;
+ 		const isInlined = valueRep.isInlined;
+@@ -1401,7 +1498,7 @@ class USDCParser {
  
  				// DoubleVector is a count-prefixed array of doubles
  				const count = reader.readUint64();
@@ -146,7 +333,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < count; i ++ ) arr[ i ] = reader.readFloat64();
  				return arr;
  
-@@ -1606,7 +1622,7 @@ class USDCParser {
+@@ -1606,7 +1703,7 @@ class USDCParser {
  
  			case TypeEnum.Int: {
  
@@ -155,7 +342,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size; i ++ ) arr[ i ] = reader.readInt32();
  				return arr;
  
-@@ -1614,7 +1630,7 @@ class USDCParser {
+@@ -1614,7 +1711,7 @@ class USDCParser {
  
  			case TypeEnum.UInt: {
  
@@ -164,7 +351,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size; i ++ ) arr[ i ] = reader.readUint32();
  				return arr;
  
-@@ -1622,7 +1638,7 @@ class USDCParser {
+@@ -1622,7 +1719,7 @@ class USDCParser {
  
  			case TypeEnum.Float: {
  
@@ -173,7 +360,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size; i ++ ) arr[ i ] = reader.readFloat32();
  				return arr;
  
-@@ -1630,7 +1646,7 @@ class USDCParser {
+@@ -1630,7 +1727,7 @@ class USDCParser {
  
  			case TypeEnum.Double: {
  
@@ -182,7 +369,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size; i ++ ) arr[ i ] = reader.readFloat64();
  				return arr;
  
-@@ -1638,7 +1654,7 @@ class USDCParser {
+@@ -1638,7 +1735,7 @@ class USDCParser {
  
  			case TypeEnum.Vec2f: {
  
@@ -191,7 +378,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 2; i ++ ) arr[ i ] = reader.readFloat32();
  				return arr;
  
-@@ -1646,7 +1662,7 @@ class USDCParser {
+@@ -1646,7 +1743,7 @@ class USDCParser {
  
  			case TypeEnum.Vec3f: {
  
@@ -200,7 +387,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 3; i ++ ) arr[ i ] = reader.readFloat32();
  				return arr;
  
-@@ -1654,7 +1670,7 @@ class USDCParser {
+@@ -1654,7 +1751,7 @@ class USDCParser {
  
  			case TypeEnum.Vec4f: {
  
@@ -209,7 +396,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 4; i ++ ) arr[ i ] = reader.readFloat32();
  				return arr;
  
-@@ -1663,7 +1679,7 @@ class USDCParser {
+@@ -1663,7 +1760,7 @@ class USDCParser {
  			case TypeEnum.Vec3h: {
  
  				// Half-precision vec3 array (used for scales in skeletal animation)
@@ -218,7 +405,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 3; i ++ ) arr[ i ] = this._readHalf();
  				return arr;
  
-@@ -1671,7 +1687,7 @@ class USDCParser {
+@@ -1671,7 +1768,7 @@ class USDCParser {
  
  			case TypeEnum.Quatf: {
  
@@ -227,7 +414,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 4; i ++ ) arr[ i ] = reader.readFloat32();
  				return arr;
  
-@@ -1680,7 +1696,7 @@ class USDCParser {
+@@ -1680,7 +1777,7 @@ class USDCParser {
  			case TypeEnum.Quath: {
  
  				// Half-precision quaternion array
@@ -236,7 +423,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 4; i ++ ) arr[ i ] = this._readHalf();
  				return arr;
  
-@@ -1689,7 +1705,7 @@ class USDCParser {
+@@ -1689,7 +1786,7 @@ class USDCParser {
  			case TypeEnum.Matrix4d: {
  
  				// 4x4 matrix array (16 doubles per matrix, row-major)
@@ -245,7 +432,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size * 16; i ++ ) arr[ i ] = reader.readFloat64();
  				return arr;
  
-@@ -1711,7 +1727,7 @@ class USDCParser {
+@@ -1711,7 +1808,7 @@ class USDCParser {
  
  			case TypeEnum.Half: {
  
@@ -254,7 +441,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  				for ( let i = 0; i < size; i ++ ) arr[ i ] = this._readHalf();
  				return arr;
  
-@@ -1762,14 +1778,14 @@ class USDCParser {
+@@ -1762,14 +1859,14 @@ class USDCParser {
  						),
  						size
  					);
@@ -271,7 +458,7 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  					for ( let i = 0; i < lutSize; i ++ ) lut[ i ] = reader.readFloat32();
  
  					const compressedSize = reader.readUint64();
-@@ -1782,14 +1798,14 @@ class USDCParser {
+@@ -1782,14 +1879,14 @@ class USDCParser {
  						size
  					);
  
@@ -282,9 +469,16 @@ index 47f2eb8599c2db7fc285e87f8f5d5f1d2303e509..0d9664885b338e49aab872ef5136e133
  
  				}
  
- 				console.warn( 'USDCParser: Unknown float compression code', code );
+-				console.warn( 'USDCParser: Unknown float compression code', code );
 -				return new Float32Array( size );
-+				return new Float32Array( checkedLength( size, 4 ) );
++				// Patched: an unknown code is an error, not a zero-filled array.
++				throw new Error( 'THREE.USDCParser: unknown float compression code ' + code );
  
  			}
  
+@@ -1872,4 +1969,4 @@ class USDCParser {
+ 
+ }
+ 
+-export { USDCParser };
++export { USDCParser, resetUsdcBudget };

@@ -46,6 +46,19 @@ export function charArray(values: readonly number[]): Uint8Array {
 	return concat([Uint8Array.of(0x63), u32(values.length), u32(0), u32(values.length), Uint8Array.from(values)])
 }
 
+// An int32 array of `count` zeros, zlib-compressed: a few KB however long.
+export function intArray(count: number): Uint8Array {
+	const body = zlibSync(new Uint8Array(count * 4))
+
+	return concat([Uint8Array.of(0x69), u32(count), u32(1), u32(body.length), body])
+}
+
+export function string(value: string): Uint8Array {
+	const bytes = new TextEncoder().encode(value)
+
+	return concat([Uint8Array.of(0x53), u32(bytes.length), bytes])
+}
+
 export function int32(value: number): Uint8Array {
 	return concat([Uint8Array.of(0x49), u32(value)])
 }

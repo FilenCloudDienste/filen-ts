@@ -182,6 +182,7 @@ patchedDependencies:
   sonner@2.0.8: patches/sonner@2.0.8.patch
   # The 3D viewer parses untrusted models: FBXLoader inflates a compressed array into its declared length and stops
   # once it would outgrow it (unzlibSync grows without limit); ThreeMFLoader and USDLoader take an `unzip` the caller
-  # supplies (the app unpacks with its own capped zip reader); USDCParser checks every buffer size the crate declares
-  # before allocating it. Re-author on every bump.
+  # supplies (the app unpacks with its own capped zip reader); USDCParser checks every buffer and list the crate declares
+  # before building it (128 MiB a buffer, 1 GiB a parse, counts within their sections, LZ4 output within its input's
+  # reach), throws on an unknown float compression and reads each value rep once. Re-author on every bump.
   three@0.187.0: patches/three@0.187.0.patch

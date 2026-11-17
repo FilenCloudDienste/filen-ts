@@ -50,6 +50,9 @@ export function referenceKey(path: string): string {
 	return segments === null ? path : segments.map(nameKey).join("/")
 }
 
+// Distinct unlisted files remembered for the count; a model naming more is counted by its calls past them.
+const MAX_UNLISTED_KEYS = 65_536
+
 // A loader's references, each file asked for once however often it is named, at most MAX_REFERENCES of them; the rest
 // are counted and not asked for.
 export function onceEach<T>(ask: (path: string) => Promise<T | null>): {
@@ -57,7 +60,9 @@ export function onceEach<T>(ask: (path: string) => Promise<T | null>): {
 	readonly unlisted: () => number
 } {
 	const asked = new Map<string, Promise<T | null>>()
-	let unlisted = 0
+	// The distinct files past the limit, kept as keys up to a bound; past it each further call counts.
+	const unlistedKeys = new Set<string>()
+	let overflow = 0
 
 	return {
 		ask: path => {
@@ -67,7 +72,10 @@ export function onceEach<T>(ask: (path: string) => Promise<T | null>): {
 			if (known !== undefined) return known
 
 			if (asked.size >= MAX_REFERENCES) {
-				unlisted++
+				if (unlistedKeys.has(key)) return Promise.resolve(null)
+
+				if (unlistedKeys.size < MAX_UNLISTED_KEYS) unlistedKeys.add(key)
+				else overflow++
 
 				return Promise.resolve(null)
 			}
@@ -78,7 +86,7 @@ export function onceEach<T>(ask: (path: string) => Promise<T | null>): {
 
 			return asking
 		},
-		unlisted: () => unlisted
+		unlisted: () => unlistedKeys.size + overflow
 	}
 }
 

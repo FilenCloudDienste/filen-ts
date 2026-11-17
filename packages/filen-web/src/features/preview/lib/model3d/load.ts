@@ -34,6 +34,7 @@ import {
 	preflightObj,
 	preflightPly,
 	preflightStl,
+	preflightUsdaText,
 	preflightZip,
 	type ModelFormat,
 	type Preflight
@@ -260,6 +261,14 @@ export async function loadModel(
 		}
 		case "usdz": {
 			const parts = await unpack(bytes)
+
+			refuse(
+				preflightUsdaText(
+					Object.entries(parts)
+						.filter(([name]) => name.toLowerCase().endsWith(".usda"))
+						.map(([, part]) => new TextDecoder().decode(part))
+				)
+			)
 			const loader = new USDLoader()
 
 			loader.unzip = () => parts

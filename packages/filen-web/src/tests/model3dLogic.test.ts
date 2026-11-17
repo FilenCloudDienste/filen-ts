@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { charArray, doubleArray, fbxFile, int32 } from "@/tests/support/fbx"
+import { charArray, doubleArray, fbxFile, int32, intArray, string } from "@/tests/support/fbx"
 import {
 	cameraPosition,
 	fitOrbit,
@@ -11,12 +11,14 @@ import {
 	zoomOrbit
 } from "@/features/preview/lib/model3d/orbit.logic"
 import {
-	FBX_MAX_HEAP_BYTES,
+	MODEL_MAX_HEAP_BYTES,
 	MODEL_MAX_BYTES,
 	MODEL_MAX_TRIANGLES,
 	MODEL_MAX_UNPACKED_BYTES,
 	OBJ_MAX_CORNERS,
-	fbxHeapBytes,
+	fbxCosts,
+	preflightUsdaText,
+	textNumbers,
 	gifDimensions,
 	gltfMeshoptBytes,
 	ktx2Pixels,
@@ -214,7 +216,7 @@ describe("preflight", () => {
 	it("walks a binary FBX as FBXLoader reads it, counting the JS heap its arrays become", () => {
 		const honest = fbxFile([{ name: "Geometry", properties: [doubleArray(1000, new Uint8Array(8000))] }])
 
-		expect(fbxHeapBytes(honest)).toBeGreaterThan(1000 * 8)
+		expect(fbxCosts(honest)?.heap).toBeGreaterThan(1000 * 8)
 		expect(preflightFbx(honest)).toEqual({ ok: true })
 		// A boolean array of type 'c' is one FBXLoader reads.
 		expect(preflightFbx(fbxFile([{ name: "Flags", properties: [charArray([1, 0, 1])] }]))).toEqual({ ok: true })
@@ -229,7 +231,7 @@ describe("preflight", () => {
 	})
 
 	it("finds an array hidden after a null record, nested or at the top level", () => {
-		const huge = doubleArray(FBX_MAX_HEAP_BYTES / 8, new Uint8Array(8))
+		const huge = doubleArray(MODEL_MAX_HEAP_BYTES / 8, new Uint8Array(8))
 
 		expect(
 			preflightFbx(fbxFile([{ name: "Objects", properties: [], children: [null, { name: "Geometry", properties: [huge] }] }]))
@@ -240,9 +242,44 @@ describe("preflight", () => {
 		})
 	})
 
+	it("counts the face corners an FBX's polygon indices build, once more per blend shape", () => {
+		// 1.1M indices fan into at most 3.3M corners: past the cap, from a few KB of zlib.
+		const indices = (count: number) => ({ name: "PolygonVertexIndex", properties: [intArray(count)] })
+		const geometry = (count: number, shape = false) => ({
+			name: "Geometry",
+			properties: [int32(1), string("Geometry::"), string(shape ? "Shape" : "Mesh")],
+			children: [indices(count)]
+		})
+
+		expect(fbxCosts(fbxFile([{ name: "Objects", properties: [], children: [geometry(600_000)] }]))?.corners).toBe(1_800_000)
+		expect(preflightFbx(fbxFile([{ name: "Objects", properties: [], children: [geometry(600_000)] }]))).toEqual({ ok: true })
+		expect(preflightFbx(fbxFile([{ name: "Objects", properties: [], children: [geometry(1_100_000)] }]))).toEqual({
+			ok: false,
+			reason: "tooLarge"
+		})
+		// A blend shape builds the base geometry's buffers again.
+		expect(preflightFbx(fbxFile([{ name: "Objects", properties: [], children: [geometry(600_000), geometry(10, true)] }]))).toEqual({
+			ok: false,
+			reason: "tooLarge"
+		})
+	})
+
+	it("counts the numbers of an ASCII FBX's or USDA layer's text against the heap they become", () => {
+		expect(textNumbers("Vertices: *6 { a: 0.5,-1,2e-3, 4 }")).toBe(5)
+		expect(textNumbers("Kaydara, no numbers")).toBe(0)
+		expect(preflightUsdaText(["point3f[] points = [(0, 0, 0), (1, 0, 0)]"])).toEqual({ ok: true })
+		// A layer of numbers past the heap the arrays they become may take, counted across the layers.
+		const layer = "1,".repeat(1 << 22)
+
+		expect(preflightUsdaText(Array.from({ length: MODEL_MAX_HEAP_BYTES / 8 / (1 << 22) + 1 }, () => layer))).toEqual({
+			ok: false,
+			reason: "tooLarge"
+		})
+	})
+
 	it("steps over a stored array by its element count, whatever its length field says", () => {
 		const stored = doubleArray(10, new Uint8Array(80), { compressed: false, lengthField: 0 })
-		const huge = doubleArray(FBX_MAX_HEAP_BYTES / 8, new Uint8Array(8))
+		const huge = doubleArray(MODEL_MAX_HEAP_BYTES / 8, new Uint8Array(8))
 
 		expect(preflightFbx(fbxFile([{ name: "Geometry", properties: [stored, huge] }]))).toEqual({ ok: false, reason: "tooLarge" })
 		expect(preflightFbx(fbxFile([{ name: "Geometry", properties: [stored, int32(5)] }]))).toEqual({ ok: true })
