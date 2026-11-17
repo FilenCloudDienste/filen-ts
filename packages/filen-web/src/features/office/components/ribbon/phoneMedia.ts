@@ -5,6 +5,8 @@ import { useSyncExternalStore } from "react"
 // controls then grow to a touch target.
 const PHONE_QUERY = "(max-width: 39.99rem)"
 const COARSE_QUERY = "(pointer: coarse)"
+// Tailwind's md: where side rails beside a document show.
+const MEDIUM_QUERY = "(min-width: 48rem)"
 
 interface MediaSource {
 	readonly subscribe: (change: () => void) => () => void
@@ -31,6 +33,7 @@ function mediaSource(source: string): MediaSource {
 
 const PHONE = mediaSource(PHONE_QUERY)
 const COARSE = mediaSource(COARSE_QUERY)
+const MEDIUM = mediaSource(MEDIUM_QUERY)
 
 export function usePhoneWidth(): boolean {
 	return useSyncExternalStore(PHONE.subscribe, PHONE.matches)
@@ -38,4 +41,8 @@ export function usePhoneWidth(): boolean {
 
 export function useCoarsePointer(): boolean {
 	return useSyncExternalStore(COARSE.subscribe, COARSE.matches)
+}
+
+export function useMediumWidth(): boolean {
+	return useSyncExternalStore(MEDIUM.subscribe, MEDIUM.matches)
 }

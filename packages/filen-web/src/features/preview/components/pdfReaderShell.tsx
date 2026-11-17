@@ -42,6 +42,8 @@ import { pageShown } from "@/features/pdf/pages/pagesSurface.logic"
 import type { RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
 import { togglePdfPagesRail, usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import { PdfOutlinePane } from "@/features/preview/components/pdfOutlinePane"
+import { outlineKeyTarget } from "@/features/preview/lib/pdfOutline.logic"
+import { useMediumWidth, usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { closePdfOutlinePane, setPdfRailTab, togglePdfOutlinePane, usePdfOutlinePaneOpen } from "@/features/preview/lib/pdfOutlineOpen"
 
 // The PDF reader every MuPDF and pdf.js document is shown in: the command bar or the editor's ribbon, the pages with
@@ -231,6 +233,8 @@ export function PdfReaderShell({
 	const [outline, setOutline] = useState<readonly PdfOutlineItem[]>([])
 	const paneOpen = usePdfOutlinePaneOpen()
 	const railOpen = usePdfPagesRailOpen()
+	const phone = usePhoneWidth()
+	const medium = useMediumWidth()
 	const [properties, setProperties] = useState(false)
 	const linkGate = useTrustedLinkGate()
 	const download = usePreviewDownload()
@@ -454,18 +458,21 @@ export function PdfReaderShell({
 				setProperties(true)
 				break
 			case "preview.pdfOutline":
-				if (outline.length === 0) {
-					break
-				}
+				switch (
+					outlineKeyTarget({ hasOutline: outline.length > 0, editing: edit !== null, paneShows: !phone, railShows: medium })
+				) {
+					case "pane":
+						togglePdfOutlinePane()
+						break
+					case "rail":
+						if (!railOpen) {
+							togglePdfPagesRail()
+						}
 
-				if (edit === null) {
-					togglePdfOutlinePane()
-				} else {
-					if (!railOpen) {
-						togglePdfPagesRail()
-					}
-
-					setPdfRailTab("outline")
+						setPdfRailTab("outline")
+						break
+					case "none":
+						break
 				}
 
 				break

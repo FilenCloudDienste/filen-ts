@@ -155,3 +155,22 @@ export function outlinePositions(items: readonly PdfOutlineItem[]): { readonly p
 		return { posInSet: group.indexOf(index) + 1, setSize: group.length }
 	})
 }
+
+// What the Outline key does: toggle the viewer's pane, show the editor's rail on its Outline tab, or nothing where
+// that would not show (the pane is hidden below sm, the rail below md) and must not be saved as open either.
+export function outlineKeyTarget({
+	hasOutline,
+	editing,
+	paneShows,
+	railShows
+}: {
+	readonly hasOutline: boolean
+	readonly editing: boolean
+	readonly paneShows: boolean
+	readonly railShows: boolean
+}): "pane" | "rail" | "none" {
+	if (!hasOutline) return "none"
+	if (editing) return railShows ? "rail" : "none"
+
+	return paneShows ? "pane" : "none"
+}

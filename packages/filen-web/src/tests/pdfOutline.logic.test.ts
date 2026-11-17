@@ -4,6 +4,7 @@ import {
 	currentSection,
 	hasChildren,
 	outlineKeyMove,
+	outlineKeyTarget,
 	OUTLINE_RESOLVE_MARGIN,
 	parentOf,
 	rowsToResolve,
@@ -64,5 +65,15 @@ describe("the outline pane's tree", () => {
 		expect(currentSection(resolved, 4)).toBe(2)
 		expect(currentSection(resolved, 9)).toBe(3)
 		expect(currentSection(new Map(), 3)).toBeNull()
+	})
+
+	it("toggles the outline with its key only where the pane or the rail shows", () => {
+		const base = { hasOutline: true, editing: false, paneShows: true, railShows: true }
+
+		expect(outlineKeyTarget(base)).toBe("pane")
+		expect(outlineKeyTarget({ ...base, paneShows: false })).toBe("none")
+		expect(outlineKeyTarget({ ...base, editing: true })).toBe("rail")
+		expect(outlineKeyTarget({ ...base, editing: true, railShows: false })).toBe("none")
+		expect(outlineKeyTarget({ ...base, hasOutline: false })).toBe("none")
 	})
 })
