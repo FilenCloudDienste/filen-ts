@@ -3,23 +3,25 @@
 // meet another sanitizer's (the rich-text one's, Mermaid's) and theirs never meet its.
 //
 // It keeps the document whole (an email's head carries its style element) and drops everything that runs, embeds,
-// submits or redirects. Nothing remote may load: every URL attribute and every CSS url(), @import, @font-face and
-// image-set() that does not point at the message's own parts (cid:, resolved to a local URL) or an inline image
-// (data:image/) is removed and counted. The frame's own Content Security Policy is the guarantee; this keeps the
-// count honest and the console free of refused loads.
+// submits or redirects. Nothing remote may load: every URL attribute that does not point at the message's own parts
+// (cid:, resolved to a local URL) or an inline image (data:image/), and every CSS rule, declaration or attribute value
+// (SVG presentation attributes included) that could load anything else, is removed and counted. CSS is never
+// rewritten: it is judged on its escapes decoded, and kept byte for byte or dropped whole. The frame's own Content
+// Security Policy is the guarantee; this keeps the count honest and the console free of refused loads.
 //
-// Links are kept, and returned too: a frame without scripts runs no listener in some engines (WebKit), so the host
-// lists them beside the frame, where they open through its own gate. Only http(s) and mailto links, each once.
+// Links never stay links: a kept one's address moves to data-filen-href (normalized, http(s) and mailto only), so the
+// frame can never navigate, and the host opens it through its own gate. They are also returned, once each, labelled
+// by their visible text, for the host to list beside the frame (a script-less frame runs no listener in WebKit).
 
 export interface EmailLink {
 	readonly href: string
-	// The link's text, or its address when it has none.
+	// The link's visible text (format and bidi controls removed), or its address when it has none.
 	readonly text: string
 }
 
 export interface EmailSanitizeResult {
 	readonly html: string
-	// URLs and CSS loads removed because they pointed outside the message.
+	// URLs, CSS rules, declarations and attribute values removed because they pointed outside the message.
 	readonly remoteBlocked: number
 	readonly links: readonly EmailLink[]
 }
@@ -35,10 +37,15 @@ export interface EmailPurifier {
 			FORBID_TAGS: string[]
 			FORBID_ATTR: string[]
 			ADD_TAGS: string[]
+			RETURN_DOM: true
 		}
-	): string
+	): Node
+	// What the last run removed: it holds that run's parsed document until cleared.
+	removed: unknown[]
 }
 
+// The attribute a kept link's address moves to.
+export const EMAIL_LINK_ATTRIBUTE = "data-filen-href"
 // The most links listed beside a body (a newsletter can carry hundreds; the frame keeps them all).
 export const EMAIL_MAX_LINKS = 100
 // A link's listed text beyond this many characters is cut.
@@ -70,14 +77,19 @@ const FORBID_ATTR = ["srcdoc", "formaction", "action", "ping", "http-equiv"]
 
 // Attributes holding a URL the browser loads.
 const LOADING_ATTRIBUTES = ["src", "srcset", "background", "poster", "lowsrc", "dynsrc", "data", "xlink:href", "longdesc"]
+// SVG presentation attributes: CSS values the browser parses, a url() among them loading its target.
+const PRESENTATION_ATTRIBUTES = ["fill", "stroke", "filter", "mask", "clip-path", "marker-start", "marker-mid", "marker-end", "cursor"]
 
 const DATA_IMAGE = /^\s*data:image\//i
 const CID = /^\s*cid:\s*<?([^>\s]+)>?\s*$/i
 const LINK_SCHEMES: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"])
 
-// CSS escapes (`\75 rl(`, `\@import`) decoded, so the checks below see what the browser's parser will.
+// A data: URL that is one clean token: an image type, parameters, and a payload of URL-safe characters only.
+const CLEAN_DATA_IMAGE = /^data:image\/[a-z0-9.+-]+(?:;[a-z0-9-]+=[a-z0-9.+-]+)*(?:;base64)?,[a-z0-9+/=%._~!$&*,;:@-]*$/i
+
+// CSS escapes (`\75 rl(`, `\@import`) decoded once, for judging only: never written back.
 function decodeCssEscapes(css: string): string {
-	return css.replace(/\\(?:([0-9a-f]{1,6})\s?|([^\n0-9a-f]))/gi, (_whole, hex: string | undefined, char: string | undefined) => {
+	return css.replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([^\n0-9a-f]))/gi, (_whole, hex: string | undefined, char: string | undefined) => {
 		if (hex === undefined) {
 			return char ?? ""
 		}
@@ -88,11 +100,144 @@ function decodeCssEscapes(css: string): string {
 	})
 }
 
+// Comments out, so `ur/**/l(` and the like are judged as the parser reads them.
+function withoutComments(css: string): string {
+	return css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ")
+}
+
+const LOADS = /@import|@font-face|image-set\s*\(|(?:^|[^a-z0-9_-])src\s*:/i
+const URL_START = /url\s*\(/gi
+
+// The value of the url( token starting at `open` (just past its parenthesis), or null when it does not parse cleanly.
+function urlToken(css: string, open: number): string | null {
+	let at = open
+
+	while (/\s/.test(css[at] ?? "")) at++
+
+	const quote = css[at]
+
+	if (quote === "\"" || quote === "'") {
+		const end = css.indexOf(quote, at + 1)
+
+		if (end === -1) {
+			return null
+		}
+
+		let close = end + 1
+
+		while (/\s/.test(css[close] ?? "")) close++
+
+		return css[close] === ")" ? css.slice(at + 1, end) : null
+	}
+
+	const end = css.indexOf(")", at)
+	const value = end === -1 ? null : css.slice(at, end).trimEnd()
+
+	return value === null || /["'(\s]/.test(value) ? null : value
+}
+
+// Whether CSS could load anything from outside the message: judged on its escapes decoded and comments out. Escapes
+// left after one decode (a double escape the browser would decode again) and a url( that does not parse cleanly count
+// as loads. A url() is local only as one clean data:image token, or a cid: part (resolved by `cid`).
+function cssLoads(css: string, cid: (id: string) => boolean): boolean {
+	const decoded = withoutComments(decodeCssEscapes(css))
+
+	if (decoded.includes("\\") || LOADS.test(decoded)) {
+		return true
+	}
+
+	for (const match of decoded.matchAll(URL_START)) {
+		const value = urlToken(decoded, match.index + match[0].length)
+
+		if (value === null) {
+			return true
+		}
+
+		const part = CID.exec(value)?.[1]
+
+		if (!CLEAN_DATA_IMAGE.test(value) && (part === undefined || !cid(part))) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CSS text split at its top level: statements (`@charset …;`) and blocks (`p{…}`, `@media{…}` whole), strings and
+// comments respected; a trailing unterminated part is one chunk.
+function topLevelChunks(css: string): string[] {
+	const chunks: string[] = []
+	let start = 0
+	let depth = 0
+
+	for (let at = 0; at < css.length; at++) {
+		const char = css[at]
+
+		if (char === "/" && css[at + 1] === "*") {
+			const end = css.indexOf("*/", at + 2)
+
+			at = end === -1 ? css.length : end + 1
+		} else if (char === "\"" || char === "'") {
+			while (++at < css.length && css[at] !== char) {
+				if (css[at] === "\\") at++
+			}
+		} else if (char === "\\") {
+			at++
+		} else if (char === "{") {
+			depth++
+		} else if (char === "}" && depth > 0) {
+			depth--
+
+			if (depth === 0) {
+				chunks.push(css.slice(start, at + 1))
+				start = at + 1
+			}
+		} else if (char === ";" && depth === 0) {
+			chunks.push(css.slice(start, at + 1))
+			start = at + 1
+		}
+	}
+
+	if (start < css.length) {
+		chunks.push(css.slice(start))
+	}
+
+	return chunks
+}
+
+// Declarations of a style attribute, split on top-level semicolons (strings and parentheses respected).
+function declarations(css: string): string[] {
+	const parts: string[] = []
+	let start = 0
+	let depth = 0
+
+	for (let at = 0; at < css.length; at++) {
+		const char = css[at]
+
+		if (char === "\"" || char === "'") {
+			while (++at < css.length && css[at] !== char) {
+				if (css[at] === "\\") at++
+			}
+		} else if (char === "\\") {
+			at++
+		} else if (char === "(") {
+			depth++
+		} else if (char === ")" && depth > 0) {
+			depth--
+		} else if (char === ";" && depth === 0) {
+			parts.push(css.slice(start, at))
+			start = at + 1
+		}
+	}
+
+	parts.push(css.slice(start))
+
+	return parts
+}
+
 interface Run {
 	resolveCid: (id: string) => string | null
 	remoteBlocked: number
-	links: EmailLink[]
-	seen: Set<string>
 }
 
 // A loading URL kept as is (an inline image), resolved (a part of the message), or null to remove.
@@ -106,61 +251,59 @@ function localUrl(value: string, run: Run): string | null {
 	return cid === undefined ? null : run.resolveCid(cid)
 }
 
-// CSS with everything that would load from outside the message made inert.
-function cleanCss(css: string, run: Run): string {
-	return decodeCssEscapes(css)
-		.replace(/@import\b[^;]*;?/gi, () => {
-			run.remoteBlocked++
+// A cid: url() token in CSS that loads nothing else, rewritten to its part's local URL; any other CSS as it was.
+function resolveCssParts(css: string, run: Run): string {
+	return css.replace(/url\(\s*(['"]?)\s*cid:\s*<?([^>\s'")]+)>?\s*\1\s*\)/gi, (whole, _quote: string, id: string) => {
+		const local = run.resolveCid(id)
 
-			return ""
-		})
-		.replace(/@font-face\s*\{[^}]*\}/gi, () => {
-			run.remoteBlocked++
+		return local === null ? whole : `url('${local}')`
+	})
+}
 
-			return ""
-		})
-		.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (whole, _quote: string, url: string) => {
-			const local = localUrl(url, run)
+const isPart = (run: Run) => (id: string) => run.resolveCid(id) !== null
 
-			if (local === url) {
-				return whole
+// A style element's CSS with every rule that could load from outside dropped whole (an @media block with one inside
+// it too).
+function cleanStyleSheet(css: string, run: Run): string {
+	return topLevelChunks(css)
+		.filter(chunk => {
+			if (!cssLoads(chunk, isPart(run))) {
+				return true
 			}
 
-			if (local === null) {
-				run.remoteBlocked++
-
-				return "url()"
-			}
-
-			return `url('${local}')`
-		})
-		.replace(/((?:-webkit-)?image-set)\s*\(/gi, () => {
-			// An unknown function: the browser drops the declaration.
 			run.remoteBlocked++
 
-			return "blocked-image-set("
+			return false
 		})
+		.map(chunk => resolveCssParts(chunk, run))
+		.join("")
+}
+
+// A style attribute with every declaration that could load from outside dropped.
+function cleanStyleAttribute(css: string, run: Run): string {
+	return declarations(css)
+		.filter(declaration => {
+			if (!cssLoads(declaration, isPart(run))) {
+				return true
+			}
+
+			run.remoteBlocked++
+
+			return false
+		})
+		.map(declaration => resolveCssParts(declaration, run))
+		.join(";")
 }
 
 function linkHref(value: string): string | null {
 	try {
-		const url = new URL(value.trim())
+		const url = new URL(value)
 
-		return LINK_SCHEMES.has(url.protocol) ? url.href : null
+		// A value the parser had to repair (`https:/x`, `https:\\x`) is not a link anyone wrote: refused.
+		return LINK_SCHEMES.has(url.protocol) && (url.protocol === "mailto:" || /^https?:\/\//i.test(value)) ? url.href : null
 	} catch {
 		return null
 	}
-}
-
-function keepLink(href: string, text: string, run: Run): void {
-	if (run.seen.has(href) || run.links.length >= EMAIL_MAX_LINKS) {
-		return
-	}
-
-	const label = text.replace(/\s+/g, " ").trim()
-
-	run.seen.add(href)
-	run.links.push({ href, text: label.length === 0 ? href : label.slice(0, MAX_LINK_TEXT) })
 }
 
 function cleanAttributes(node: Element, run: Run): void {
@@ -181,27 +324,93 @@ function cleanAttributes(node: Element, run: Run): void {
 		}
 	}
 
+	const tag = node.tagName.toLowerCase()
 	const href = node.getAttribute("href")
 
-	if (href !== null) {
-		const tag = node.tagName.toLowerCase()
-		const safe = tag === "a" || tag === "area" ? linkHref(href) : null
+	node.removeAttribute("href")
+	node.removeAttribute("target")
 
-		if (safe === null) {
-			node.removeAttribute("href")
-		} else {
-			keepLink(safe, tag === "a" ? (node.textContent ?? "") : (node.getAttribute("alt") ?? ""), run)
+	if (href !== null && (tag === "a" || tag === "area")) {
+		const safe = linkHref(href)
+
+		if (safe !== null) {
+			node.setAttribute(EMAIL_LINK_ATTRIBUTE, safe)
+			node.setAttribute("role", "link")
+			node.setAttribute("tabindex", "0")
 		}
 	}
-
-	// The frame opens nothing itself: the host opens links.
-	node.removeAttribute("target")
 
 	const style = node.getAttribute("style")
 
 	if (style !== null) {
-		node.setAttribute("style", cleanCss(style, run))
+		node.setAttribute("style", cleanStyleAttribute(style, run))
 	}
+
+	// Judged as one declaration each.
+	for (const name of PRESENTATION_ATTRIBUTES) {
+		const value = node.getAttribute(name)
+
+		if (value !== null && cssLoads(value, isPart(run))) {
+			node.removeAttribute(name)
+			run.remoteBlocked++
+		}
+	}
+}
+
+// Text a reader sees: none from an element hidden by its attributes or its own style.
+const HIDDEN_STYLE =
+	/(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0*)?\s*(?:;|$)|font-size\s*:\s*0(?:px|em|rem|%)?\s*(?:;|$))/i
+const FORMAT_CHARACTERS = /\p{Cf}/gu
+
+function hidden(element: Element): boolean {
+	return (
+		element.hasAttribute("hidden") ||
+		element.getAttribute("aria-hidden") === "true" ||
+		HIDDEN_STYLE.test(element.getAttribute("style") ?? "")
+	)
+}
+
+function visibleText(element: Element): string {
+	let text = ""
+	const pending: Node[] = [element]
+
+	for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+		if (node.nodeType === 3) {
+			text += node.nodeValue ?? ""
+		} else if (node.nodeType === 1 && (node === element || !hidden(node as Element))) {
+			for (let child = node.lastChild; child !== null; child = child.previousSibling) {
+				pending.push(child)
+			}
+		}
+	}
+
+	return text
+}
+
+// The kept links in document order, each once, labelled after sanitizing by what a reader sees.
+function keptLinks(root: Element): EmailLink[] {
+	const links: EmailLink[] = []
+	const seen = new Set<string>()
+
+	for (const element of root.querySelectorAll(`[${EMAIL_LINK_ATTRIBUTE}]`)) {
+		const href = element.getAttribute(EMAIL_LINK_ATTRIBUTE) ?? ""
+
+		if (seen.has(href)) {
+			continue
+		}
+
+		if (links.length >= EMAIL_MAX_LINKS) {
+			break
+		}
+
+		const source = element.tagName.toLowerCase() === "area" ? (element.getAttribute("alt") ?? "") : visibleText(element)
+		const label = source.replace(FORMAT_CHARACTERS, "").replace(/\s+/g, " ").trim()
+
+		seen.add(href)
+		links.push({ href, text: label.length === 0 ? href : label.slice(0, MAX_LINK_TEXT) })
+	}
+
+	return links
 }
 
 export function createEmailHtmlSanitizer(
@@ -213,7 +422,7 @@ export function createEmailHtmlSanitizer(
 
 	purifier.addHook("uponSanitizeElement", node => {
 		if (current !== null && node.nodeName.toLowerCase() === "style" && node.textContent !== null) {
-			node.textContent = cleanCss(node.textContent, current)
+			node.textContent = cleanStyleSheet(node.textContent, current)
 		}
 	})
 	purifier.addHook("afterSanitizeAttributes", node => {
@@ -223,21 +432,26 @@ export function createEmailHtmlSanitizer(
 	})
 
 	return (html, resolveCid) => {
-		const run: Run = { resolveCid, remoteBlocked: 0, links: [], seen: new Set() }
+		const run: Run = { resolveCid, remoteBlocked: 0 }
 
 		current = run
 
 		try {
-			const clean = purifier.sanitize(html, {
+			const root = purifier.sanitize(html, {
 				WHOLE_DOCUMENT: true,
 				FORBID_TAGS: [...FORBID_TAGS],
 				FORBID_ATTR: [...FORBID_ATTR],
-				ADD_TAGS: ["style"]
+				ADD_TAGS: ["style"],
+				RETURN_DOM: true
 			})
 
-			return { html: clean, remoteBlocked: run.remoteBlocked, links: run.links }
+			// WHOLE_DOCUMENT with RETURN_DOM: the document's html element.
+			const element = root as Element
+
+			return { html: element.outerHTML, remoteBlocked: run.remoteBlocked, links: keptLinks(element) }
 		} finally {
 			current = null
+			purifier.removed.length = 0
 		}
 	}
 }

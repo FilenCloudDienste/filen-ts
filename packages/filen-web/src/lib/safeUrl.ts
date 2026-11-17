@@ -5,18 +5,23 @@ import { classifyLink } from "@filen/shared"
 // a full parse so a url the browser could not navigate to is refused too. A relative or fragment-only
 // reference is refused as well: resolved against the app's own origin it would open a copy of the app.
 export function isSafeAbsoluteHref(href: string): boolean {
+	return safeAbsoluteHref(href) !== null
+}
+
+// The URL isSafeAbsoluteHref judged (the link policy's, trimmed), to open exactly that; null when it refuses it.
+export function safeAbsoluteHref(href: string): string | null {
 	const verdict = classifyLink(href)
 
 	if (verdict.kind !== "external") {
-		return false
+		return null
 	}
 
 	try {
 		new URL(verdict.url)
 
-		return true
+		return verdict.url
 	} catch {
-		return false
+		return null
 	}
 }
 

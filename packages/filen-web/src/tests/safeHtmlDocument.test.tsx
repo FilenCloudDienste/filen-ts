@@ -4,26 +4,43 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 
-// Sanitized HTML in a frame that runs no script and loads nothing remote; links never navigate it: in the frame they
-// open through the trusted-link gate where the engine runs listeners, and under it they are listed for every browser.
+// Sanitized HTML written into a sandboxed frame without scripts, behind a policy that loads nothing remote, its links
+// opened by the host only: in the frame through the trusted-link gate where listeners run, and under it from a list.
 
 vi.mock("@/lib/trustedLinks/trustedDomainsQuery", () => ({
 	useTrustedDomainsQuery: () => ({ data: new Set(["example.com"]), refetch: vi.fn() })
 }))
 
+const { filled } = vi.hoisted(() => ({ filled: [] as { document: Document; html: string }[] }))
+
+vi.mock("@/features/preview/lib/safeHtmlFrame", async () => {
+	const actual = await vi.importActual<typeof import("@/features/preview/lib/safeHtmlFrame")>("@/features/preview/lib/safeHtmlFrame")
+
+	return {
+		...actual,
+		// Recorded: the frame's own document is filled on its load (fillSafeHtml is covered below on a real frame).
+		fillSafeHtml: (document: Document, html: string) => {
+			filled.push({ document, html })
+		}
+	}
+})
+
 const { SafeHtmlDocument } = await import("@/features/preview/components/safeHtmlDocument")
-const { interceptFrameLinks, linkPlace, safeHtmlSrcdoc, SAFE_HTML_CSP } = await import("@/features/preview/lib/safeHtmlFrame")
+const { fillSafeHtml, interceptFrameLinks, linkPlace, nextAutoHeight, safeHtmlPrefix, SAFE_HTML_CSP, SAFE_HTML_MAX_CHARS } =
+	await vi.importActual<typeof import("@/features/preview/lib/safeHtmlFrame")>("@/features/preview/lib/safeHtmlFrame")
 
 afterEach(() => {
 	cleanup()
 	vi.restoreAllMocks()
+	filled.length = 0
 	document.body.replaceChildren()
 })
 
-const DOCUMENT = '<html><head><style>p{margin:0}</style></head><body><p>Hi <a href="https://example.com/a">there</a></p></body></html>'
+const DOCUMENT =
+	'<html><head><style>p{margin:0}</style></head><body><p>Hi <a data-filen-href="https://example.com/a">there</a></p></body></html>'
 
 describe("SafeHtmlDocument", () => {
-	it("frames the document without scripts, under its own policy, on white paper", () => {
+	it("fills the frame once its policy has loaded, without scripts, the document never in its srcdoc", () => {
 		render(
 			<SafeHtmlDocument
 				html={DOCUMENT}
@@ -34,19 +51,35 @@ describe("SafeHtmlDocument", () => {
 			/>
 		)
 
-		const frame = screen.getByTitle("Message")
-		const srcdoc = frame.getAttribute("srcdoc") ?? ""
+		const frame = screen.getByTitle<HTMLIFrameElement>("Message")
 
 		expect(frame.getAttribute("sandbox")).toBe("allow-same-origin")
-		expect(srcdoc.startsWith(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SAFE_HTML_CSP}">`)).toBe(
-			true
-		)
-		expect(srcdoc).toContain("background:#fff")
-		expect(srcdoc).toContain("<style>p{margin:0}</style>")
+		expect(frame.getAttribute("srcdoc")).toBe(safeHtmlPrefix({ paper: true, autoHeight: false }))
+		expect(filled).toEqual([])
+
+		fireEvent.load(frame)
+
+		expect(filled).toEqual([{ document: frame.contentDocument, html: DOCUMENT }])
 		expect(screen.queryByRole("button", { name: /Links/ })).toBeNull()
 	})
 
-	it("lists the links under the document, each opening through the gate", () => {
+	it("shows no frame for a document past the cap", () => {
+		render(
+			<SafeHtmlDocument
+				html={"x".repeat(SAFE_HTML_MAX_CHARS + 1)}
+				links={[]}
+				title="Message"
+				layout="fill"
+				paper
+			/>
+		)
+
+		expect(screen.queryByTitle("Message")).toBeNull()
+		expect(screen.getByText("This formatted content is too large to show.")).toBeTruthy()
+		expect(filled).toEqual([])
+	})
+
+	it("lists the links under the document, each opening through the gate, mail extras told", () => {
 		const open = vi.spyOn(window, "open").mockReturnValue(null)
 
 		render(
@@ -54,7 +87,7 @@ describe("SafeHtmlDocument", () => {
 				html={DOCUMENT}
 				links={[
 					{ href: "https://example.com/a", text: "there" },
-					{ href: "mailto:a@b.c", text: "mailto:a@b.c" }
+					{ href: "mailto:a@b.c?bcc=spy@x.y", text: "write" }
 				]}
 				title="Message"
 				layout="fill"
@@ -66,6 +99,42 @@ describe("SafeHtmlDocument", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Open there (example.com)" }))
 
 		expect(open).toHaveBeenCalledWith("https://example.com/a", "_blank", "noopener,noreferrer")
+		expect(screen.getByRole("button", { name: "Open write (a@b.c, with copies to others)" })).toBeTruthy()
+	})
+})
+
+describe("the frame's document", () => {
+	// The policy comes before every part of the document, whatever its markup (a literal "<head>" in an attribute).
+	it("starts with its policy, then its styles", () => {
+		expect(safeHtmlPrefix({ paper: true, autoHeight: true })).toBe(
+			`<!doctype html><meta http-equiv="Content-Security-Policy" content="${SAFE_HTML_CSP}"><style>` +
+				"[data-filen-href]{cursor:pointer;text-decoration:underline;color:LinkText}" +
+				"html{background:#fff;color:#000;color-scheme:light}html,body{height:auto!important;min-height:0!important}</style>"
+		)
+	})
+})
+
+describe("fillSafeHtml", () => {
+	it("imports the document after the frame's own head, and replaces what an earlier fill put in", () => {
+		const frame = document.createElement("iframe")
+
+		document.body.append(frame)
+
+		const inner = frame.contentDocument
+
+		if (inner === null) throw new Error("no frame document")
+
+		inner.head.innerHTML = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'"><style>own{}</style>'
+		fillSafeHtml(inner, '<html lang="x"><head><style>p{margin:0}</style></head><body dir="rtl"><p>one</p></body></html>')
+		fillSafeHtml(inner, '<html lang="y"><head><style>p{margin:1px}</style></head><body><p>two</p></body></html>')
+
+		expect(inner.documentElement.getAttribute("lang")).toBe("y")
+		expect([...inner.head.children].map(child => child.outerHTML)).toEqual([
+			'<meta http-equiv="Content-Security-Policy" content="default-src \'none\'">',
+			"<style>own{}</style>",
+			'<style data-filen-content="">p{margin:1px}</style>'
+		])
+		expect(inner.body.outerHTML).toBe("<body><p>two</p></body>")
 	})
 })
 
@@ -81,17 +150,17 @@ describe("the frame's links", () => {
 			throw new Error("no frame document")
 		}
 
-		inner.body.innerHTML = '<p>x <a href="https://example.com/a"><b id="in">in</b></a> <span id="out">out</span></p>'
+		inner.body.innerHTML =
+			'<p>x <a data-filen-href="https://example.com/a" tabindex="0"><b id="in">in</b></a> <span id="out">out</span></p>'
 
 		return inner
 	}
 
-	it("opens a clicked, middle-clicked or entered link through the host, never in the frame", () => {
+	it("opens a clicked, middle-clicked or entered link through the host, once for a held key", () => {
 		const inner = frameDocument()
 		const opened: string[] = []
 		const stop = interceptFrameLinks(inner, href => opened.push(href))
 		const target = inner.getElementById("in")
-
 		const view = inner.defaultView
 
 		if (target === null || view === null) throw new Error("no link")
@@ -99,20 +168,16 @@ describe("the frame's links", () => {
 		const click = new view.MouseEvent("click", { bubbles: true, cancelable: true })
 		const middle = new view.MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 })
 		const enter = new view.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })
+		const held = new view.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", repeat: true })
 		const other = new view.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "a" })
 
-		target.dispatchEvent(click)
-		target.dispatchEvent(middle)
-		target.dispatchEvent(enter)
-		target.dispatchEvent(other)
+		for (const event of [click, middle, enter, held, other]) {
+			target.dispatchEvent(event)
+		}
+
 		inner.getElementById("out")?.dispatchEvent(new view.MouseEvent("click", { bubbles: true, cancelable: true }))
 
-		expect([click.defaultPrevented, middle.defaultPrevented, enter.defaultPrevented, other.defaultPrevented]).toEqual([
-			true,
-			true,
-			true,
-			false
-		])
+		expect([click, middle, enter, held, other].map(event => event.defaultPrevented)).toEqual([true, true, true, false, false])
 		expect(opened).toEqual(["https://example.com/a", "https://example.com/a", "https://example.com/a"])
 
 		stop()
@@ -120,11 +185,21 @@ describe("the frame's links", () => {
 		expect(opened).toHaveLength(3)
 	})
 
-	it("names a link by its host, or its mail address", () => {
-		expect(linkPlace("https://www.example.com:8443/a?b")).toBe("www.example.com:8443")
-		expect(linkPlace("mailto:a%40b@c.d")).toBe("a@b@c.d")
-		expect(safeHtmlSrcdoc("<p>bare</p>", false)).toBe(
-			`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SAFE_HTML_CSP}"></head><body><p>bare</p></body></html>`
-		)
+	it("names a link by its host, or its whole mail address without bidi controls, telling extras", () => {
+		expect(linkPlace("https://www.example.com:8443/a?b")).toEqual({ place: "www.example.com:8443", extras: null })
+		expect(linkPlace("mailto:a%E2%80%AEb@c.d")).toEqual({ place: "ab@c.d", extras: null })
+		expect(linkPlace("mailto:a@b.c?CC=x@y.z")).toEqual({ place: "a@b.c", extras: "copies" })
+		expect(linkPlace("mailto:a@b.c?subject=hi")).toEqual({ place: "a@b.c", extras: "parameters" })
+	})
+})
+
+describe("nextAutoHeight", () => {
+	it("follows the content up to the cap, and holds where it only grows with the frame", () => {
+		expect(nextAutoHeight([], 300.2, 4000)).toBe(301)
+		expect(nextAutoHeight([301], 280, 4000)).toBe(280)
+		expect(nextAutoHeight([301], 600, 4000)).toBe(600)
+		expect(nextAutoHeight([300, 600], 5000, 4000)).toBe(4000)
+		// Grew by the 20 px the frame itself just grew: held.
+		expect(nextAutoHeight([300, 320], 340, 4000)).toBe(320)
 	})
 })

@@ -6,7 +6,8 @@ import "@/lib/i18n"
 
 // A link a surface intercepted itself (in a frame whose own navigation is off) opens through the same gate as a click
 // on the page: a scheme the link policy refuses never opens, an untrusted domain asks first, and the rest open in a
-// new tab. linkHrefOf finds the link from a node of another window.
+// new tab, as the very URL the policy judged. linkHrefOf finds a sanitized link (data-filen-href) from a node of
+// another window.
 
 vi.mock("@/lib/trustedLinks/trustedDomainsQuery", () => ({
 	useTrustedDomainsQuery: () => ({ data: new Set(["trusted.example"]), refetch: vi.fn() })
@@ -26,7 +27,7 @@ describe("requestOpen", () => {
 		const { result } = renderHook(() => useTrustedLinkGate())
 
 		act(() => {
-			result.current.requestOpen("https://trusted.example/a")
+			result.current.requestOpen("  https://trusted.example/a")
 			result.current.requestOpen("mailto:someone@example.com")
 			result.current.requestOpen("javascript:alert(1)")
 			result.current.requestOpen("/relative")
@@ -61,7 +62,7 @@ describe("linkHrefOf", () => {
 			throw new Error("no frame document")
 		}
 
-		anchor.setAttribute("href", "https://example.com/x")
+		anchor.setAttribute("data-filen-href", "https://example.com/x")
 		span.append(text)
 		anchor.append(span)
 		inner.body.append(anchor)

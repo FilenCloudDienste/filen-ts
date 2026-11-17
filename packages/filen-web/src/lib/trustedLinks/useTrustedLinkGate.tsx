@@ -4,7 +4,8 @@ import { externalLinkDomain, shouldInterceptLinkClick } from "@/lib/trustedLinks
 import { trustDomain } from "@/lib/trustedLinks/trustedDomains"
 import { useTrustedDomainsQuery } from "@/lib/trustedLinks/trustedDomainsQuery"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { isSafeAbsoluteHref } from "@/lib/safeUrl"
+import { EMAIL_LINK_ATTRIBUTE } from "@filen/shared/dom"
+import { safeAbsoluteHref } from "@/lib/safeUrl"
 
 // The part of a DOM node linkHrefOf reads, whichever window it belongs to.
 interface LinkNode {
@@ -13,13 +14,13 @@ interface LinkNode {
 	closest?(selectors: string): { getAttribute(name: string): string | null } | null
 }
 
-// The href of the link an event landed in (an `a` or image-map `area` with an href: the target or an ancestor), from
-// any realm: a frame's nodes are not this window's Element, so it reads the node type, never instanceof.
+// The address of the sanitized link an event landed in (data-filen-href, the target or an ancestor), from any realm: a
+// frame's nodes are not this window's Element, so it reads the node type, never instanceof.
 export function linkHrefOf(target: EventTarget | null): string | null {
 	const node = target as unknown as LinkNode | null
 	const element = node === null ? null : node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
 
-	return element?.closest?.("a[href], area[href]")?.getAttribute("href") ?? null
+	return element?.closest?.(`[${EMAIL_LINK_ATTRIBUTE}]`)?.getAttribute(EMAIL_LINK_ATTRIBUTE) ?? null
 }
 
 export interface TrustedLinkGate {
@@ -111,8 +112,11 @@ export function useTrustedLinkGate(): TrustedLinkGate {
 			setPending(null)
 		},
 		requestOpen: href => {
-			if (isSafeAbsoluteHref(href) && !intercept(href)) {
-				window.open(href, "_blank", "noopener,noreferrer")
+			// The URL the policy judged is the one asked about and the one opened.
+			const url = safeAbsoluteHref(href)
+
+			if (url !== null && !intercept(url)) {
+				window.open(url, "_blank", "noopener,noreferrer")
 			}
 		}
 	}
