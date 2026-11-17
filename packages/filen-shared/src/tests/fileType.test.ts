@@ -98,7 +98,10 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["application/font-woff", "woff"],
 	["font/woff2", "woff2"],
 	["application/vnd.sqlite3", "sqlite"],
-	["application/x-sqlite3", "sqlite"]
+	["application/x-sqlite3", "sqlite"],
+	["application/epub+zip", "epub"],
+	["application/x-mobipocket-ebook", "mobi"],
+	["application/x-fictionbook+xml", "fb2"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
@@ -238,6 +241,17 @@ describe("TYPE_ROWS", () => {
 		for (const [extension, mime] of AUDIO_TYPES_SNAPSHOT) {
 			expect(mimeForExtension(extension)).toBe(mime)
 		}
+	})
+})
+
+describe("e-book types", () => {
+	it("reads and serves EPUB, MOBI and FB2 by their own types", () => {
+		expect(extensionForMime("application/epub+zip")).toBe("epub")
+		expect(extensionForMime("application/x-mobipocket-ebook")).toBe("mobi")
+		expect(extensionForMime("application/x-fictionbook+xml")).toBe("fb2")
+		expect(mimeForExtension("epub")).toBe("application/epub+zip")
+		expect(mimeForExtension("mobi")).toBe("application/x-mobipocket-ebook")
+		expect(mimeForExtension("fb2")).toBe("application/x-fictionbook+xml")
 	})
 })
 
