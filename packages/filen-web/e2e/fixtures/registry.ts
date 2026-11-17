@@ -2,10 +2,11 @@ import { CORE_SCENARIOS } from "./core"
 import { ROUTING_SCENARIOS } from "./routing"
 import { IWORK_SCENARIOS } from "./iwork"
 import { RICH_SCENARIOS } from "./rich"
+import { TEXT_SCENARIOS } from "./text"
 import type { FixturePayload, ScenarioFiles, ScenarioModule } from "./scenarios"
 
 // Every scenario module, once. Its scenarios join the shared tree in this order; a workstream adds its module here.
-const SCENARIO_MODULES = [CORE_SCENARIOS, ROUTING_SCENARIOS, IWORK_SCENARIOS, RICH_SCENARIOS] as const
+const SCENARIO_MODULES = [CORE_SCENARIOS, ROUTING_SCENARIOS, IWORK_SCENARIOS, RICH_SCENARIOS, TEXT_SCENARIOS] as const
 
 type FilesOf<M> = M extends ScenarioModule<infer F> ? F : never
 
