@@ -1,4 +1,4 @@
-import { gzipSync } from "node:zlib"
+import { crc32, deflateSync, gzipSync } from "node:zlib"
 import { encodeQoi, qoiTestPixels } from "@/tests/support/qoiBytes"
 import { bigTiffHeader, encodeTiff } from "@/tests/support/tiffBytes"
 import { encodePsd } from "@/tests/support/psdBytes"
@@ -17,6 +17,9 @@ export const TIFF_PAGE = { width: 120, height: 80 } as const
 export const PSD_SIZE = { width: 90, height: 60 } as const
 
 export const EPSI_WIDTH = 16
+
+// 60 MP: a black 1-bit PNG, small on disk, 240 MB once the browser decodes it.
+export const HUGE_PNG_SIZE = { width: 7800, height: 7800 } as const
 
 const POSTSCRIPT_AI = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
 // Taller than a view, so stepping pages scrolls the column.
@@ -37,6 +40,39 @@ export function tiffSample(): Buffer {
 	return Buffer.from(encodeTiff([{ ...TIFF_PAGE, rgb: [40, 120, 200] }]))
 }
 
+// A PNG chunk: its data's length, the type, the data, then a CRC over type and data.
+function pngChunk(type: string, data: Buffer): Buffer {
+	const body = Buffer.concat([Buffer.from(type, "latin1"), data])
+	const head = Buffer.alloc(4)
+	const tail = Buffer.alloc(4)
+
+	head.writeUInt32BE(data.length)
+	tail.writeUInt32BE(crc32(body))
+
+	return Buffer.concat([head, body, tail])
+}
+
+// The huge PNG.
+function hugePng(): Buffer {
+	const { width, height } = HUGE_PNG_SIZE
+	const header = Buffer.alloc(13)
+
+	header.writeUInt32BE(width, 0)
+	header.writeUInt32BE(height, 4)
+	// Bit depth 1, greyscale; deflate, adaptive filtering, no interlace.
+	header.set([1, 0, 0, 0, 0], 8)
+
+	// Each row: filter type 0, then its bits, all 0 (black).
+	const rows = Buffer.alloc((1 + Math.ceil(width / 8)) * height)
+
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		pngChunk("IHDR", header),
+		pngChunk("IDAT", deflateSync(rows, { level: 9 })),
+		pngChunk("IEND", Buffer.alloc(0))
+	])
+}
+
 // The archive's entries, read through the entry origin.
 export const IMAGE_ENTRIES = { qoi: "entry-sample.qoi", jxl: "entry-sample.jxl", tiff: "entry-single.tif" } as const
 
@@ -49,7 +85,8 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"images-archive": ["img-entries.zip"],
 		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"],
 		"images-ai": ["img-pdfcompat.ai", "img-postscript.ai"],
-		"images-eps": ["img-dos.eps", "img-epsi.eps", "img-plain.eps"]
+		"images-eps": ["img-dos.eps", "img-epsi.eps", "img-plain.eps"],
+		"images-huge": ["img-60mp.png"]
 	},
 	() => ({
 		"img-sample.qoi": { buffer: qoiSample(), mimeType: "image/x-qoi" },
@@ -112,6 +149,7 @@ export const IMAGE_SCENARIOS = scenarioModule(
 			mimeType: "application/postscript"
 		},
 		"img-plain.eps": { buffer: Buffer.from(plainEps()), mimeType: "application/postscript" },
+		"img-60mp.png": { buffer: hugePng(), mimeType: "image/png" },
 		"img-entries.zip": {
 			buffer: buildZip([
 				{ name: IMAGE_ENTRIES.qoi, data: qoiSample() },

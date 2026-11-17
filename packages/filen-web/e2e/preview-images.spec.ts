@@ -5,10 +5,20 @@ import { FIXTURE_FILES, gotoFixture, openFixtureRows } from "./helpers/fixtures"
 import { itemRow, openArchive, openRowMenu } from "./helpers/archive"
 import { menuItemName } from "./helpers/menu"
 import { trackCspViolations } from "./helpers/csp"
-import { trackForeignRequests } from "./helpers/requests"
+import { observeEgest, trackForeignRequests, type EgestObserver } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { PDF_BYTES } from "./helpers/fixtureBytes"
-import { EPSI_WIDTH, IMAGE_ENTRIES, PSD_SIZE, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
+import {
+	EPSI_WIDTH,
+	HUGE_PNG_SIZE,
+	IMAGE_ENTRIES,
+	PSD_SIZE,
+	QOI_SIZE,
+	TIFF_PAGE,
+	jxlSample,
+	qoiSample,
+	tiffSample
+} from "./fixtures/images"
 import { preview } from "@/locales/en/preview"
 
 // Images only the app's own decoders show (QOI, JPEG XL where the browser has no decoder, gzipped SVG, TIFF): decoded
@@ -492,4 +502,53 @@ test("an EPS file is shown by its preview picture, never by running its PostScri
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+})
+
+// The rows' thumbnails done: no download request for two looks in a row.
+async function egestQuiet(egest: EgestObserver): Promise<void> {
+	let last = -1
+
+	await expect
+		.poll(
+			() => {
+				const now = egest.requests()
+				const still = now === last
+
+				last = now
+
+				return still
+			},
+			{ intervals: [1500], timeout: 60_000 }
+		)
+		.toBe(true)
+}
+
+// The browser's own decode of a native image, as wide as the file says.
+async function expectNativeImage(page: Page, name: string): Promise<void> {
+	const shown = picture(page, name)
+
+	await expect(shown).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	expect(await tagOf(shown)).toBe("IMG")
+	await expect
+		.poll(() => shown.evaluate(element => (element as HTMLImageElement).naturalWidth), { timeout: 60_000 })
+		.toBe(HUGE_PNG_SIZE.width)
+}
+
+const [HUGE] = FIXTURE_FILES["images-huge"]
+
+test("a 60 MP native image opens as the browser's own <img> on a desktop, with no request added", async ({ page, context }) => {
+	const egest = observeEgest(context)
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-huge")
+
+	await egestQuiet(egest)
+
+	egest.reset()
+	await itemRow(listbox, HUGE).dblclick()
+	await expectNativeImage(page, HUGE)
+	// The file's one chunk, streamed to the <img>: nothing read ahead of it.
+	expect(egest.requests()).toBe(1)
+	await page.keyboard.press("Escape")
 })
