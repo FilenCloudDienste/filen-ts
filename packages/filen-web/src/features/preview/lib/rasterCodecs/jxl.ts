@@ -3,7 +3,7 @@ import decodeJxlImage, { init as initJxl } from "@jsquash/jxl/decode"
 // lookup would point into the dependency pre-bundle in dev. CSP's 'wasm-unsafe-eval' admits the compile.
 import jxlWasmUrl from "@jsquash/jxl/codec/dec/jxl_dec.wasm?url"
 import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
-import type { DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
+import { anyTranslucent, type DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
 
 // JPEG XL where the browser has no decoder of its own: libjxl through @jsquash/jxl, in the raster decode pool. The
 // first frame of an animation is what it gives. Its wasm heap grows to the largest image decoded and never shrinks;
@@ -20,17 +20,6 @@ function ensureDecoder(): Promise<unknown> {
 	})
 
 	return ready
-}
-
-// Whether any pixel is less than opaque: libjxl hands back RGBA whether or not the file has an alpha channel.
-function anyTranslucent(data: Uint8ClampedArray): boolean {
-	for (let i = 3; i < data.length; i += 4) {
-		if (data[i] !== 255) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // The whole image as RGBA. `maxPixels` refuses a header naming more before the decoder is even loaded; a header the
@@ -54,5 +43,6 @@ export async function decodeJxl(bytes: Uint8Array, maxPixels: number): Promise<D
 			: bytes.slice().buffer
 	const image = await decodeJxlImage(buffer)
 
+	// libjxl hands back RGBA whether or not the file has an alpha channel.
 	return { width: image.width, height: image.height, data: image.data, hasAlpha: anyTranslucent(image.data) }
 }

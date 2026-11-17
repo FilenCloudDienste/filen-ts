@@ -17,6 +17,8 @@ import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/previ
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomableImage"
 import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
+import { TiffImage } from "@/features/preview/components/tiffImage"
+import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
 
 export interface ImageViewerProps {
 	item: DriveItem
@@ -24,6 +26,8 @@ export interface ImageViewerProps {
 	// Holds the shown <img> while it is mounted, for the image editor to take its decoded pixels instead of fetching
 	// the file again. Not set for HEIC/HEIF (the editor decodes those itself).
 	imageRef?: RefObject<HTMLImageElement | null> | undefined
+	// Holds the page shown by a document engine (a TIFF's), for the image editor to draw from it.
+	pageSourceRef?: RefObject<ImagePageSource | null> | undefined
 }
 
 // Keyed by the buffer itself: a revisited slot gets the same cached Uint8Array back from
@@ -226,8 +230,28 @@ function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
 }
 
 // The decoded route: the format's own decoder.
-function DecodedRoute({ item, alt, route }: { item: DriveItem; alt: string; route: Exclude<ImageRoute, "native"> }) {
+function DecodedRoute({
+	item,
+	alt,
+	route,
+	pageSourceRef
+}: {
+	item: DriveItem
+	alt: string
+	route: Exclude<ImageRoute, "native">
+	pageSourceRef: ImageViewerProps["pageSourceRef"]
+}) {
 	const decode = imageDecodeFor(item)
+
+	if (decode === "mupdf") {
+		return (
+			<TiffImage
+				item={item}
+				alt={alt}
+				pageSourceRef={pageSourceRef}
+			/>
+		)
+	}
 
 	if (decode === "svgz") {
 		return (
@@ -263,7 +287,7 @@ function DecodedRoute({ item, alt, route }: { item: DriveItem; alt: string; rout
 // decode of a few hundred bytes) rather than take the decoded route an unknown answer reads as. The route is then
 // picked once per file: a probe that refines the device profile while it is open changes the next open, never this one
 // (which would drop the decoded picture, its zoom, and download it again).
-export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
+export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerProps) {
 	const profile = useDeviceProfile()
 	const uuid = item.data.uuid
 	const probe = pendingImageProbe(item, profile)
@@ -293,6 +317,7 @@ export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 				item={item}
 				alt={alt}
 				route={current}
+				pageSourceRef={pageSourceRef}
 			/>
 		)
 	}

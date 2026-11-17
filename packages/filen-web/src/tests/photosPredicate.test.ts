@@ -56,6 +56,9 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("beach.heic"))).toBe(true)
 		expect(isPhotoItem(fileNamed("DSCF0001.HIF"))).toBe(true)
 		expect(isPhotoItem(fileNamed("render.qoi"))).toBe(true)
+		expect(isPhotoItem(fileNamed("photo.jxl"))).toBe(true)
+		expect(isPhotoItem(fileNamed("scan.tif"))).toBe(true)
+		expect(isPhotoItem(fileNamed("scan.TIFF"))).toBe(true)
 	})
 
 	it("drops an image format that is no photo by its own row (a gzipped SVG)", () => {

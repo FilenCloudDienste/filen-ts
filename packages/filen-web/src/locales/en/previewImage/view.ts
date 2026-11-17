@@ -10,5 +10,9 @@ export const previewImageView = {
 	/** Image preview — an image whose data could not be decoded (damaged or not what its name says) */
 	previewImageDecodeFailed: "This image couldn't be read.",
 	/** Image preview — a compressed SVG (.svgz) that inflates to more than the preview holds */
-	previewSvgzTooLarge: "This image is too large to show once uncompressed."
+	previewSvgzTooLarge: "This image is too large to show once uncompressed.",
+	/** Image preview — a TIFF in the BigTIFF format (for files over 4 GB), which the preview doesn't read */
+	previewBigTiffUnsupported: "BigTIFF images can't be previewed.",
+	/** Image editing header — beside the save button when the image has several pages: the copy holds the page shown */
+	previewImageSaveCopyPage: "Current page only"
 } as const

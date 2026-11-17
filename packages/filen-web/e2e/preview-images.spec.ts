@@ -4,7 +4,7 @@ import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
 import { itemRow } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
-import { QOI_SIZE } from "./fixtures/images"
+import { QOI_SIZE, TIFF_PAGE } from "./fixtures/images"
 
 // Images only the app's own decoders show: decoded in the raster decode pool and drawn from a bitmap on a canvas.
 // Every leg reads the shared fixture tree; entering the editor writes nothing.
@@ -12,6 +12,7 @@ import { QOI_SIZE } from "./fixtures/images"
 const [QOI] = FIXTURE_FILES["images-qoi"]
 const [JXL] = FIXTURE_FILES["images-jxl"]
 const [SVGZ, SVGZ_BOMB] = FIXTURE_FILES["images-svgz"]
+const [TIFF_SINGLE, TIFF_PAGES, TIFF_BIG] = FIXTURE_FILES["images-tiff"]
 
 test("a QOI image is decoded and drawn, and opens in the editor", async ({ page, context, browserName }) => {
 	const cspViolations = trackCspViolations(page)
@@ -97,6 +98,50 @@ test("a gzipped SVG is inflated and shown as an SVG, and one inflating past the 
 	await expect(page.getByText("This image is too large to show once uncompressed.", { exact: true })).toBeVisible({
 		timeout: LAZY_VIEWER_TIMEOUT_MS
 	})
+	await page.keyboard.press("Escape")
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a TIFF is read by the MuPDF engine: one page as a picture, several in the page column, BigTIFF refused", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-tiff")
+
+	// One page: drawn whole as a bitmap on a canvas, at its own size (below the display long side).
+	await itemRow(listbox, TIFF_SINGLE).dblclick()
+
+	const single = page.getByRole("img", { name: TIFF_SINGLE })
+
+	await expect(single).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	expect(await single.evaluate(element => element.tagName)).toBe("CANVAS")
+	await expect(single).toHaveAttribute("width", String(TIFF_PAGE.width))
+	await page.keyboard.press("Escape")
+	await expect(single).toHaveCount(0)
+
+	// Several pages: the page column with its page commands (no find: an image has no text); the next-page key walks
+	// to the last.
+	await itemRow(listbox, TIFF_PAGES).dblclick()
+	await expect(page.getByText("Page 1 of 3", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("button", { name: "Find in document" })).toHaveCount(0)
+
+	for (const shown of [2, 3]) {
+		await page.keyboard.press("n")
+		await expect(page.getByText(`Page ${String(shown)} of 3`, { exact: true })).toBeVisible({ timeout: 15_000 })
+	}
+
+	await page.keyboard.press("Escape")
+
+	// BigTIFF: refused from its header.
+	await itemRow(listbox, TIFF_BIG).dblclick()
+	await expect(page.getByText("BigTIFF images can't be previewed.", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await page.keyboard.press("Escape")
 
 	expect(cspViolations).toEqual([])

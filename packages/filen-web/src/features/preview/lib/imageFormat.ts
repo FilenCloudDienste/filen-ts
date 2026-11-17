@@ -3,10 +3,10 @@ import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
 // route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi",
-// "jxl" in libjxl), or inflated first ("svgz", then shown as the SVG it is). HEIC and JPEG XL stream like a native
-// image where a probe found the browser decodes them. The image tier of the preview's category table is this table's
-// keys.
-export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz"
+// "jxl" in libjxl), inflated first ("svgz", then shown as the SVG it is), or read by the MuPDF read role ("mupdf", a
+// TIFF's pages). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
+// tier of the preview's category table is this table's keys.
+export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz" | "mupdf"
 
 export interface ImageFormat {
 	decode: ImageDecode
@@ -31,6 +31,8 @@ const JXL: ImageFormat = { decode: "jxl", editable: true, cap: 256n * MIB }
 // Gzipped SVG: held whole (32 MiB compressed at most) and inflated by the browser's gzip, never served as it is.
 // Markup, not pixels: no raster editor, and no photo.
 const SVGZ: ImageFormat = { decode: "svgz", editable: false, cap: 32n * MIB, photo: false }
+// TIFF, read whole into the MuPDF engine's heap: a phone's heap holds less. Its editor takes the page shown.
+const TIFF: ImageFormat = { decode: "mupdf", editable: true, cap: profile => (profile.mobile ? 64n * MIB : 256n * MIB) }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -54,7 +56,9 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["hif", HEIC],
 	["qoi", QOI],
 	["jxl", JXL],
-	["svgz", SVGZ]
+	["svgz", SVGZ],
+	["tif", TIFF],
+	["tiff", TIFF]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.
@@ -74,6 +78,7 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 			return profile.jxlNative === "yes"
 		case "qoi":
 		case "svgz":
+		case "mupdf":
 			return false
 	}
 }

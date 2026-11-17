@@ -13,3 +13,14 @@ export type RasterFormat = "heic" | "qoi" | "jxl"
 
 // The formats it decodes for display, as a bitmap: HEIC is shown from its JPEG re-encode instead.
 export type DisplayRasterFormat = Exclude<RasterFormat, "heic">
+
+// Whether any pixel is less than opaque: a decoder that hands back RGBA whatever the file holds says no more.
+export function anyTranslucent(data: Uint8ClampedArray): boolean {
+	for (let i = 3; i < data.length; i += 4) {
+		if (data[i] !== 255) {
+			return true
+		}
+	}
+
+	return false
+}

@@ -27,6 +27,7 @@ import type { Orientation, SourceInfo } from "@/features/preview/imageEdit/types
 import { startsWith, viewOf } from "@/features/preview/lib/imageSniff/bytes"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 import { sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
+import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
 
 // What an image's leading bytes say about it, from its magic and headers (never its name). `head` is the start of
 // the file (the whole file when small), `totalSize` the file's length. Retained metadata (ICC, Exif) is copied out
@@ -632,6 +633,14 @@ export function sniffImage(head: Uint8Array, totalSize: number): SourceInfo | nu
 			hasAlpha: jxl.hasAlpha,
 			animated: jxl.animated
 		}
+	}
+
+	// "II*\0" / "MM\0*" (and BigTIFF's 43, which nothing here reads). A first IFD past the head leaves the size unknown
+	// (0 × 0): the engine that draws a page knows it.
+	if (startsWith(head, [0x49, 0x49, 0x2a, 0]) || startsWith(head, [0x4d, 0x4d, 0, 0x2a])) {
+		const tiff = sniffTiff(head, totalSize)
+
+		return tiff?.kind !== "tiff" ? null : { ...BASE, mime: "image/tiff", width: tiff.size?.width ?? 0, height: tiff.size?.height ?? 0 }
 	}
 
 	// An ISOBMFF "ftyp" box at the start.

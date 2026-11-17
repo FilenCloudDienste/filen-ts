@@ -5,16 +5,19 @@ import { IMAGE_FORMATS, type ImageDecode } from "@/features/preview/lib/imageFor
 import { decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
+import { bytesOrigin } from "@/lib/sdk/byteOrigin"
+import { mupdfImagePixels, openMupdfReader } from "@/lib/mupdf/reader"
+import { readerPageSource } from "@/features/preview/lib/imagePageSource"
 
 // A picture for an image stamp, as the editor takes it: PNG or JPEG bytes no wider or taller than STAMP_MAX_SIDE and
 // within the engine's size limit. A PNG or JPEG that already fits goes in as it is; HEIC, QOI and JPEG XL are decoded
-// off the main thread (the raster decode pool, whatever the browser decodes itself) and every other picture the
-// browser decodes; those are drawn into a PNG, scaled down to fit.
+// off the main thread (the raster decode pool, whatever the browser decodes itself), a TIFF's first page is drawn by the
+// MuPDF engine, and every other picture the browser decodes; those are drawn into a PNG, scaled down to fit.
 
 export const STAMP_MAX_SIDE = 2048
 
 // The image formats a stamp is made from: the browser's own, and those the raster decode pool decodes.
-const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi", "jxl"])
+const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi", "jxl", "mupdf"])
 
 // A drive file the picture picker offers: what the previews show as a picture, HEIC included.
 export function isStampPicture(item: DriveItem): boolean {
@@ -66,8 +69,39 @@ async function drawn(source: CanvasImageSource, width: number, height: number): 
 	return { bytes, width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
 }
 
+// A TIFF's first page from an engine of its own over the bytes in hand, drawn no larger than the stamp takes.
+async function tiffPage(bytes: Uint8Array): Promise<{ data: Uint8ClampedArray<ArrayBuffer>; width: number; height: number }> {
+	const origin = bytesOrigin(new Blob([bytes as Uint8Array<ArrayBuffer>]), `stamp:${crypto.randomUUID()}`)
+	const reader = await openMupdfReader({
+		origin,
+		access: "authed",
+		scope: null,
+		format: "tiff",
+		maxImagePixels: mupdfImagePixels(deviceProfile(), origin, "tiff")
+	})
+
+	try {
+		const page = await readerPageSource(reader, 0).renderRgba(STAMP_MAX_SIDE * STAMP_MAX_SIDE, new AbortController().signal)
+
+		return { data: page.rgba, width: page.width, height: page.height }
+	} finally {
+		await reader.close()
+	}
+}
+
 async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage> {
 	const decode = IMAGE_FORMATS.get(extensionOf(name))?.decode
+
+	if (decode === "mupdf") {
+		const page = await tiffPage(bytes)
+		const bitmap = await createImageBitmap(new ImageData(page.data, page.width, page.height))
+
+		try {
+			return await drawn(bitmap, bitmap.width, bitmap.height)
+		} finally {
+			bitmap.close()
+		}
+	}
 
 	if (decode === "heic" || decode === "qoi" || decode === "jxl") {
 		const maxPixels =

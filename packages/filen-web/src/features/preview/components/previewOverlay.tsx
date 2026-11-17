@@ -55,6 +55,7 @@ import { recordOwnSave } from "@/features/preview/lib/ownSaves"
 import { imageSaveDeps, writeEditedCopy } from "@/features/preview/lib/editedCopy"
 import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor"
 import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdit/editSession"
+import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
@@ -297,6 +298,8 @@ export function PreviewOverlay({
 	// The image viewer's <img>, whose decoded pixels the image editor starts from; and the open image editor's export
 	// (what a save writes) and commands (the header's Revert).
 	const imageRef = useRef<HTMLImageElement | null>(null)
+	// The page a document engine shows instead (a TIFF's), which the image editor draws from that engine.
+	const imagePageRef = useRef<ImagePageSource | null>(null)
 	const imageSaveRef = useRef<ImageExportSource | null>(null)
 	const imageCommandsRef = useRef<ImageEditorCommands | null>(null)
 	// The open video editor's commands (Mod+S opens its Save popover; the remote-change dialog's copy is its export).
@@ -560,34 +563,39 @@ export function PreviewOverlay({
 		enterAbortRef.current = controller
 		setEnteringEdit(true)
 
-		void enterImageEdit({ item, frozenUuid: raw.data.uuid, cacheScope, image: imageRef.current, signal: controller.signal }).then(
-			outcome => {
-				if (enterAbortRef.current === controller) {
-					enterAbortRef.current = null
-				}
-
-				// Gone, or another file on screen by now: the session is never shown, so it ends here.
-				if (!mountedRef.current || currentSlotRef.current !== slot) {
-					if (outcome.status === "ready") {
-						outcome.state.release()
-					}
-
-					if (mountedRef.current) {
-						setEnteringEdit(false)
-					}
-
-					return
-				}
-
-				setEnteringEdit(false)
-
-				if (outcome.status === "refused") {
-					toast.error(t(outcome.messageKey))
-				} else if (outcome.status === "ready") {
-					setEditState(outcome.state)
-				}
+		void enterImageEdit({
+			item,
+			frozenUuid: raw.data.uuid,
+			cacheScope,
+			image: imageRef.current,
+			page: imagePageRef.current,
+			signal: controller.signal
+		}).then(outcome => {
+			if (enterAbortRef.current === controller) {
+				enterAbortRef.current = null
 			}
-		)
+
+			// Gone, or another file on screen by now: the session is never shown, so it ends here.
+			if (!mountedRef.current || currentSlotRef.current !== slot) {
+				if (outcome.status === "ready") {
+					outcome.state.release()
+				}
+
+				if (mountedRef.current) {
+					setEnteringEdit(false)
+				}
+
+				return
+			}
+
+			setEnteringEdit(false)
+
+			if (outcome.status === "refused") {
+				toast.error(t(outcome.messageKey))
+			} else if (outcome.status === "ready") {
+				setEditState(outcome.state)
+			}
+		})
 	}
 
 	// Edits are dropped by the caller's choice (or there were none).
@@ -2057,6 +2065,11 @@ export function PreviewOverlay({
 										>
 											{t("previewImageSaveRevertAction")}
 										</Button>
+										{editing.pageOnly ? (
+											<span className="px-1 text-xs whitespace-nowrap text-muted-foreground max-sm:hidden">
+												{t("previewImageSaveCopyPage")}
+											</span>
+										) : null}
 										{/* A copy is the other way to save where the primary writes in place; a copy-only format has just the one. */}
 										<div className="flex items-center">
 											<Button
@@ -2336,6 +2349,7 @@ export function PreviewOverlay({
 															docxRef={docxRef}
 															presentationRef={presentationRef}
 															imageRef={imageRef}
+															imagePageRef={imagePageRef}
 															onSave={() => performSaveRef.current()}
 															onAutosave={() => performSaveRef.current(true)}
 															canSaveCopy={canSaveCopyBeside(driveItem, variant)}
@@ -2706,6 +2720,8 @@ interface PreviewBodyProps {
 	presentationRef: RefObject<PresentationSaveSource | null>
 	// The image viewer's shown <img> (the image editor starts from its pixels).
 	imageRef: RefObject<HTMLImageElement | null>
+	// The image viewer's page from a document engine (the image editor draws it there).
+	imagePageRef: RefObject<ImagePageSource | null>
 	// A save the user asked for in the viewer (a deck's File ▸ Save); true when one started.
 	onSave: () => boolean
 	// Idle autosave asks the overlay to save; true when a save started.
@@ -2745,6 +2761,7 @@ function PreviewBody({
 	docxRef,
 	presentationRef,
 	imageRef,
+	imagePageRef,
 	onSave,
 	onAutosave,
 	onOpenFile,
@@ -2776,6 +2793,7 @@ function PreviewBody({
 					item={item}
 					alt={alt}
 					imageRef={imageRef}
+					pageSourceRef={imagePageRef}
 				/>
 			)
 		case "video":

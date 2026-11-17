@@ -86,7 +86,7 @@ const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
 const LEGACY_IMAGE_TIER = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif", "heic", "heif", "hif"]
 const JPEG_ALIASES = ["jfif", "jpe", "pjpeg", "pjp"]
 // Formats our own decoders show, added after the policy table.
-const DECODED_SINCE = ["qoi", "jxl", "svgz"]
+const DECODED_SINCE = ["qoi", "jxl", "svgz", "tif", "tiff"]
 const LEGACY_AUDIO_TIER = [
 	"mp3",
 	"m4a",

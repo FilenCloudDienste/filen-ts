@@ -1,4 +1,5 @@
 import { sanitizePdfMathML } from "@/features/preview/lib/pdfMathSanitizer"
+import { PDF_PAGE_CLASS_NAMES } from "@/features/preview/lib/pdfPageColumn"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { loadPdfOutline, type PdfOutlineItem, type PdfViewerCommand, type PdfViewport } from "@filen/office/dom/pdf"
@@ -49,15 +50,6 @@ import { closePdfOutlinePane, setPdfRailTab, togglePdfOutlinePane, usePdfOutline
 // The PDF reader every MuPDF and pdf.js document is shown in: the command bar or the editor's ribbon, the pages with
 // their find, links, print and properties, and the editor's surfaces when it edits. The PDF viewer and the e-book
 // reader share it.
-
-// The column grows to its widest page (w-max) and at least fills the view (min-w-full), so narrower pages stay
-// centred while a page zoomed wider than the view overflows to the right only, keeping its left side scrollable.
-const CLASS_NAMES = {
-	column: "flex w-max min-w-full flex-col items-center gap-4 py-4",
-	page: "flex shrink-0 items-center justify-center bg-white shadow-sm",
-	canvas: (rendered: boolean) => (rendered ? "block max-w-full" : "invisible"),
-	link: "rounded-xs focus-ring-row"
-}
 
 export interface PdfReaderShellProps {
 	item: DriveItem
@@ -641,7 +633,7 @@ export function PdfReaderShell({
 						pdfjs={PDFJS}
 						{...viewer.pages}
 						className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none [overflow-anchor:none]"
-						classNames={CLASS_NAMES}
+						classNames={PDF_PAGE_CLASS_NAMES}
 						pageLabel={(page, total) => `${alt} — ${t("previewPdfPageIndicator", { current: page, total })}`}
 						placeholder={
 							<LoadingState

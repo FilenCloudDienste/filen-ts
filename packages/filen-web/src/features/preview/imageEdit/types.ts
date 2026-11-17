@@ -68,6 +68,7 @@ export type SourceMime =
 	| "image/heic"
 	| "image/x-qoi"
 	| "image/jxl"
+	| "image/tiff"
 
 // What the sniffers learn about the original from its header bytes (magic, never the extension).
 export interface SourceInfo {
@@ -99,7 +100,7 @@ export type SaveTarget =
 
 // Where the editor gets the original's full-resolution pixels: the held bytes (decoded in the render worker),
 // a bitmap taken from the viewer's already decoded <img> (transferred to the worker), or RGBA a decoder of our own
-// made (HEIC, QOI, JPEG XL, through the raster decode pool).
+// made (HEIC, QOI, JPEG XL, through the raster decode pool; a TIFF's page, by the MuPDF engine).
 export type ImageEditSource =
 	| { kind: "blob"; blob: Blob }
 	| { kind: "bitmap"; bitmap: ImageBitmap }

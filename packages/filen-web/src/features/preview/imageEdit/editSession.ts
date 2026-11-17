@@ -18,6 +18,10 @@ import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { mupdfImagePixels, openMupdfReader } from "@/lib/mupdf/reader"
+import { readerPageSource, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import { anyTranslucent } from "@/features/preview/lib/rasterCodecs/raster"
 
 // Entering the image editor: what the original is (sniffed from its own bytes, never its name), whether this device
 // can edit it, and where the editor gets its full-resolution pixels, reusing whatever the viewer already holds.
@@ -37,6 +41,8 @@ export interface ImageEditState {
 	// The slot showed the file from its held bytes: a save keeps what it uploads there, so the saved version
 	// reopens without a download. A streamed slot streams the saved version as well.
 	buffered: boolean
+	// The source is one page of several (a TIFF's): the copy holds that page alone.
+	pageOnly: boolean
 	// Ends the session (once, however often called) and frees a bitmap the editor never took.
 	release(): void
 }
@@ -62,16 +68,18 @@ const EXTENSION_FAMILY: ReadonlyMap<string, SourceMime> = new Map<string, Source
 	["avif", "image/avif"],
 	["qoi", "image/x-qoi"],
 	["jxl", "image/jxl"],
+	["tif", "image/tiff"],
+	["tiff", "image/tiff"],
 	...[...HEIC_EXTENSIONS].map(extension => [extension, "image/heic"] as const)
 ])
 
-// The formats whose editing source our own code decodes from the whole file.
-type EditDecoder = "heic" | "qoi" | "jxl"
+// The formats whose editing source our own code decodes from the whole file, or ("mupdf") a document engine draws.
+type EditDecoder = "heic" | "qoi" | "jxl" | "mupdf"
 
 function editDecoder(item: DriveItem): EditDecoder | null {
 	const decode = imageDecodeFor(item)
 
-	return decode === "heic" || decode === "qoi" || decode === "jxl" ? decode : null
+	return decode === "heic" || decode === "qoi" || decode === "jxl" || decode === "mupdf" ? decode : null
 }
 
 export function matchesExtension(name: string, mime: SourceMime): boolean {
@@ -185,9 +193,61 @@ async function heicSource(
 	}
 }
 
+// The engine's page drawn whole at its own resolution, from the viewer's engine (the page it shows) or, before that one
+// is open, from an engine of its own on the file's first page. Refused when the page is larger than the editor takes.
+async function pageSourced(
+	item: DriveItem,
+	info: SourceInfo,
+	shown: ImagePageSource | null,
+	maxPixels: number,
+	cacheScope: string | null,
+	signal: AbortSignal
+): Promise<{ source: ImageEditSource; info: SourceInfo; pageOnly: boolean } | null> {
+	if (shown !== null) {
+		return await drawPage(shown, info, maxPixels, signal)
+	}
+
+	const origin: ByteOrigin = { kind: "file", file: narrowToAnyFile(item) }
+	const reader = await openMupdfReader({
+		origin,
+		access: "authed",
+		scope: cacheScope,
+		format: "tiff",
+		maxImagePixels: mupdfImagePixels(deviceProfile(), origin, "tiff"),
+		signal
+	})
+
+	try {
+		return await drawPage(readerPageSource(reader, 0), info, maxPixels, signal)
+	} finally {
+		await reader.close()
+	}
+}
+
+async function drawPage(
+	page: ImagePageSource,
+	info: SourceInfo,
+	maxPixels: number,
+	signal: AbortSignal
+): Promise<{ source: ImageEditSource; info: SourceInfo; pageOnly: boolean } | null> {
+	const extent = await page.extent()
+
+	if (extent !== null && extent.width * extent.height > maxPixels) {
+		return null
+	}
+
+	const drawn = await page.renderRgba(maxPixels, signal)
+
+	return {
+		source: { kind: "rgba", width: drawn.width, height: drawn.height, data: drawn.rgba },
+		info: { ...info, width: drawn.width, height: drawn.height, orientation: 1, hasAlpha: anyTranslucent(drawn.rgba) },
+		pageOnly: page.pageCount > 1
+	}
+}
+
 // The full-resolution RGBA a decoder of our own makes from the whole file.
 async function decodedSource(
-	decoder: EditDecoder,
+	decoder: Exclude<EditDecoder, "mupdf">,
 	bytes: Uint8Array,
 	info: SourceInfo,
 	signal: AbortSignal
@@ -210,6 +270,7 @@ async function enter(
 	frozenUuid: string,
 	cacheScope: string | null,
 	image: HTMLImageElement | null,
+	page: ImagePageSource | null,
 	signal: AbortSignal
 ): Promise<EnterImageEditOutcome> {
 	const name = driveItemName(item)
@@ -219,16 +280,18 @@ async function enter(
 	// native image does.
 	const shownNatively = imageDecodeFor(item) === "jxl" && image !== null && image.complete && image.naturalWidth > 0
 	const decoder = shownNatively ? null : editDecoder(item)
+	// A document engine's page is drawn by the engine: the file is not held here.
+	const fromBytes = decoder !== null && decoder !== "mupdf"
 	const cached = getPreviewBytes(cacheScope, item.data.uuid)
 	// Where the viewer streams a HEIC natively it opens at any size: one past what is ever held is refused before its
 	// download, never buffered.
-	const cap = decoder !== null && cached === undefined ? heldImageCap(item, deviceProfile()) : null
+	const cap = fromBytes && cached === undefined ? heldImageCap(item, deviceProfile()) : null
 
 	if (cap !== null && BigInt(size) > cap) {
 		return { status: "refused", messageKey: "previewImageSaveRefusedTooLarge" }
 	}
 
-	let held = cached ?? (decoder !== null ? await wholeBytes(item, cacheScope, signal) : undefined)
+	let held = cached ?? (fromBytes ? await wholeBytes(item, cacheScope, signal) : undefined)
 	let info = sniffImage(held ?? (await headBytes(item, signal)), size)
 
 	if (info === null || !matchesExtension(name, info.mime)) {
@@ -248,7 +311,7 @@ async function enter(
 	const opened = await openEditSession()
 
 	// Whatever goes wrong from here closes the session, which would otherwise hold the worker.
-	return await prepare(item, frozenUuid, info, held, decoder, opened, cacheScope, image, signal).catch((e: unknown) => {
+	return await prepare(item, frozenUuid, info, held, decoder, opened, cacheScope, image, page, signal).catch((e: unknown) => {
 		opened.session.close()
 
 		throw e
@@ -264,6 +327,7 @@ async function prepare(
 	opened: { session: EditSession; capabilities: EditCapabilities },
 	cacheScope: string | null,
 	image: HTMLImageElement | null,
+	page: ImagePageSource | null,
 	signal: AbortSignal
 ): Promise<EnterImageEditOutcome> {
 	const refuse = (messageKey: PreviewKey): EnterImageEditOutcome => {
@@ -276,14 +340,29 @@ async function prepare(
 		return refuse("previewImageSaveRefusedNoGraphics")
 	}
 
-	if (info.width * info.height > opened.capabilities.maxPixels) {
+	// A document engine's page is checked by its own extent: the header sniffed is the first page's.
+	if (decoder !== "mupdf" && info.width * info.height > opened.capabilities.maxPixels) {
 		return refuse("previewImageSaveRefusedTooLarge")
 	}
 
-	const prepared =
-		decoder !== null && held !== undefined
-			? { ...(await decodedSource(decoder, held, info, signal)), buffered: true }
-			: await sourceFor(item, info, held, image, cacheScope, signal)
+	let prepared: { source: ImageEditSource; info: SourceInfo; buffered: boolean; pageOnly: boolean }
+
+	if (decoder === "mupdf") {
+		const drawn = await pageSourced(item, info, page, opened.capabilities.maxPixels, cacheScope, signal)
+
+		if (drawn === null) {
+			return refuse("previewImageSaveRefusedTooLarge")
+		}
+
+		prepared = { ...drawn, buffered: false }
+	} else {
+		prepared = {
+			...(decoder !== null && held !== undefined
+				? { ...(await decodedSource(decoder, held, info, signal)), buffered: true }
+				: await sourceFor(item, info, held, image, cacheScope, signal)),
+			pageOnly: false
+		}
+	}
 
 	if (signal.aborted) {
 		opened.session.close()
@@ -309,6 +388,7 @@ async function prepare(
 			capabilities: opened.capabilities,
 			targets: saveTargets(prepared.info, opened.capabilities.canEncodeWebp),
 			buffered: prepared.buffered,
+			pageOnly: prepared.pageOnly,
 			release: () => {
 				if (released) {
 					return
@@ -327,15 +407,17 @@ async function prepare(
 }
 
 // Everything the editor needs to open `item` (shown in the slot `frozenUuid`), or why it cannot. `image`: the
-// viewer's <img>, whose decoded pixels are taken rather than fetching the file again. Never rejects.
+// viewer's <img>, whose decoded pixels are taken rather than fetching the file again; `page`: the page a document
+// engine shows (a TIFF's), drawn by that engine. Never rejects.
 export async function enterImageEdit(args: {
 	item: DriveItem
 	frozenUuid: string
 	cacheScope: string | null
 	image: HTMLImageElement | null
+	page?: ImagePageSource | null
 	signal: AbortSignal
 }): Promise<EnterImageEditOutcome> {
-	return await enter(args.item, args.frozenUuid, args.cacheScope, args.image, args.signal).catch((e: unknown) => {
+	return await enter(args.item, args.frozenUuid, args.cacheScope, args.image, args.page ?? null, args.signal).catch((e: unknown) => {
 		if (args.signal.aborted) {
 			return { status: "cancelled" as const }
 		}
