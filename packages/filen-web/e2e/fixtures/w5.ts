@@ -66,7 +66,9 @@ export const W5_SCENARIOS = scenarioModule(
 		"preview-synth": ["chiptune.mod", "chiptune-15.mod", "piano.mid"],
 		"preview-mod-video": ["camcorder.mod"],
 		"preview-legacy-media": ["legacy.avi", "legacy.asf", "legacy.vob", "legacy-mp2.ts"],
-		"preview-audio-tracks": ["two-tracks.mp4"]
+		"preview-audio-tracks": ["two-tracks.mp4"],
+		// The demuxer tests' B-frame streams, played for what the browsers report (preview-legacy-bframes.spec.ts).
+		"preview-legacy-bframes": ["bframes.avi", "bframes.asf", "bframes.vob"]
 	},
 	() => ({
 		"chiptune.mod": { buffer: Buffer.from(tinyMod(31)), mimeType: "audio/x-mod" },
@@ -78,6 +80,9 @@ export const W5_SCENARIOS = scenarioModule(
 		"legacy.asf": { buffer: readFileSync(`${MEDIA}legacy.asf`), mimeType: "video/x-ms-asf" },
 		"legacy.vob": { buffer: readFileSync(`${MEDIA}legacy.vob`), mimeType: "video/mpeg" },
 		"legacy-mp2.ts": { buffer: readFileSync(`${MEDIA}h264-mp2.m2ts`), mimeType: "video/mp2t" },
-		"two-tracks.mp4": { buffer: readFileSync(`${MEDIA}tracks.mp4`), mimeType: "video/mp4" }
+		"two-tracks.mp4": { buffer: readFileSync(`${MEDIA}tracks.mp4`), mimeType: "video/mp4" },
+		"bframes.avi": { buffer: readFileSync(`${DEMUX}h264-bframes-mp3.avi`), mimeType: "video/x-msvideo" },
+		"bframes.asf": { buffer: readFileSync(`${DEMUX}h264-mp3.asf`), mimeType: "video/x-ms-asf" },
+		"bframes.vob": { buffer: readFileSync(`${DEMUX}h264-ac3.vob`), mimeType: "video/mpeg" }
 	})
 )
