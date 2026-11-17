@@ -112,6 +112,52 @@ describe("the editor's document", () => {
 		expect(await document.getPageIndex({ num: 7, gen: 0 })).toBe(1)
 	})
 
+	it("names a read document's generation in every request, and keeps each line's direction", async () => {
+		const requests: (readonly [string, unknown])[] = []
+		const rtl: PdfPageText = {
+			lines: [{ ...TEXT.lines[0], str: "\u05e9\u05dc\u05d5\u05dd", dir: "rtl" } as PdfPageText["lines"][number]],
+			links: []
+		}
+		const call = (op: string, args: unknown): Promise<unknown> => {
+			requests.push([op, args])
+
+			if (op === "pages") return Promise.resolve([{ width: 300, height: 400, label: "1" }])
+			if (op === "text") return Promise.resolve(rtl)
+			if (op === "outline") return Promise.resolve([{ title: "One", dest: [0, { name: "XYZ" }, 0, 0], items: [] }])
+			if (op === "destination") return Promise.resolve({ page: 0, left: null, top: null })
+			if (op === "render") return Promise.resolve({ bitmap: { width: 1, height: 1, close: () => undefined }, tile: [0, 0, 1, 1] })
+
+			return Promise.resolve(null)
+		}
+		const engine = {
+			call: call as PdfEditEngine["call"],
+			queued: ((op: string, args: unknown) => ({ promise: call(op, args), cancel: () => undefined })) as PdfEditEngine["queued"]
+		}
+		const document = MupdfPdfDocument.open(engine, { pageCount: 1, tileSize: 512, facts: FACTS, generation: 3 })
+		const page = await document.getPage(1)
+
+		expect((await page.getTextContent()).items).toEqual([expect.objectContaining({ dir: "rtl" })])
+		await page.render({
+			canvasContext: { canvas: { width: 10, height: 10 }, drawImage: () => undefined },
+			viewport: page.getViewport({ scale: 1 })
+		}).promise
+		await document.getDestination("chapter.xhtml#a")
+		page.cleanup()
+
+		const outline = await document.getOutline()
+
+		expect(await document.getOutline()).toBe(outline)
+		expect(requests.filter(([op]) => op === "outline")).toHaveLength(1)
+		expect(requests.map(([op, args]) => [op, Reflect.get(args as object, "generation")])).toEqual([
+			["pages", 3],
+			["text", 3],
+			["render", 3],
+			["destination", 3],
+			["evict", 3],
+			["outline", 3]
+		])
+	})
+
 	it("hands out new page objects only for the pages a change touched", async () => {
 		const { engine, calls } = fakeEngine()
 		const first = MupdfPdfDocument.open(engine, { pageCount: 2, tileSize: 512, facts: FACTS })

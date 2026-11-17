@@ -29,6 +29,9 @@ export interface MupdfDocumentOptions {
 	// Device pixels per tile edge (PDF_TILE_DESKTOP / PDF_TILE_MOBILE).
 	readonly tileSize: number
 	readonly facts: PdfDocumentFacts
+	// A read document's (the engine's read role) layout generation, which every request names; absent for a PDF. Its
+	// outline is asked of the engine when first wanted.
+	readonly generation?: number
 }
 
 interface PageEntry {
@@ -40,19 +43,39 @@ interface PageEntry {
 class PageStore {
 	readonly engine: PdfEditEngine
 	readonly tileSize: number
+	readonly generation: number | undefined
+	// What every request carries: the read document's generation, nothing for a PDF.
+	readonly at: { readonly generation?: number }
 	private readonly pages = new Map<number, PageEntry>()
 	private readonly texts = new Map<number, Promise<PdfPageText>>()
+	private outline: Promise<readonly unknown[] | null> | null = null
 
-	constructor(engine: PdfEditEngine, tileSize: number) {
+	constructor(engine: PdfEditEngine, tileSize: number, generation: number | undefined) {
 		this.engine = engine
 		this.tileSize = tileSize
+		this.generation = generation
+		this.at = generation === undefined ? {} : { generation }
+	}
+
+	// A read document's outline, asked once (a failed ask is asked again).
+	readOutline(generation: number): Promise<readonly unknown[] | null> {
+		if (this.outline === null) {
+			const outline = this.engine.call("outline", { generation })
+
+			this.outline = outline
+			outline.catch(() => {
+				if (this.outline === outline) this.outline = null
+			})
+		}
+
+		return this.outline
 	}
 
 	page(index: number): Promise<MupdfPage> {
 		let entry = this.pages.get(index)
 
 		if (entry === undefined) {
-			const info = this.engine.call("pages", { from: index, count: 1 }).then(pages => {
+			const info = this.engine.call("pages", { from: index, count: 1, ...this.at }).then(pages => {
 				const first = pages[0]
 
 				if (first === undefined) throw new RangeError("no such page")
@@ -75,7 +98,7 @@ class PageStore {
 		let text = this.texts.get(index)
 
 		if (text === undefined) {
-			text = this.engine.call("text", { page: index })
+			text = this.engine.call("text", { page: index, ...this.at })
 			this.texts.set(index, text)
 			text.catch(() => {
 				if (this.texts.get(index) === text) this.texts.delete(index)
@@ -96,7 +119,7 @@ class PageStore {
 	// The page left the view: its text and the engine's display list go; its size stays.
 	evict(index: number): void {
 		this.texts.delete(index)
-		void this.engine.call("evict", { pages: [index] }).catch(() => undefined)
+		void this.engine.call("evict", { pages: [index], ...this.at }).catch(() => undefined)
 	}
 }
 
@@ -108,7 +131,7 @@ function textContent(text: PdfPageText): PdfTextContent & { readonly styles: typ
 	return {
 		items: text.lines.map(line => ({
 			str: line.str,
-			dir: "ltr",
+			dir: line.dir,
 			transform: [line.size * line.dx, line.size * line.dy, -line.size * line.dy, line.size * line.dx, line.x, line.y],
 			width: line.width,
 			height: line.size,
@@ -187,6 +210,7 @@ class MupdfPage implements PdfPage<ReadableStream> {
 					rotation,
 					tile,
 					priority: "visible",
+					...this.store.at,
 					...(print === undefined ? {} : { print })
 				})
 
@@ -264,7 +288,7 @@ export class MupdfPdfDocument implements PdfDomDocument {
 	}
 
 	static open(engine: PdfEditEngine, options: MupdfDocumentOptions): MupdfPdfDocument {
-		return new MupdfPdfDocument(new PageStore(engine, options.tileSize), options.pageCount, options.facts)
+		return new MupdfPdfDocument(new PageStore(engine, options.tileSize, options.generation), options.pageCount, options.facts)
 	}
 
 	// The revision after a change that touched `pages` (or every page, after an undo or redo).
@@ -288,7 +312,7 @@ export class MupdfPdfDocument implements PdfDomDocument {
 
 	// A named destination as an explicit one in the engine's page space.
 	async getDestination(id: string): Promise<unknown[] | null> {
-		const point = await this.store.engine.call("destination", { name: id })
+		const point = await this.store.engine.call("destination", { name: id, ...this.store.at })
 
 		return point === null ? null : [point.page, { name: "XYZ" }, point.left, point.top, null]
 	}
@@ -307,7 +331,9 @@ export class MupdfPdfDocument implements PdfDomDocument {
 	}
 
 	getOutline(): Promise<readonly unknown[] | null> {
-		return Promise.resolve(this.facts.outline)
+		const { generation } = this.store
+
+		return generation === undefined ? Promise.resolve(this.facts.outline) : this.store.readOutline(generation)
 	}
 
 	getMetadata(): Promise<{ readonly info: unknown }> {
