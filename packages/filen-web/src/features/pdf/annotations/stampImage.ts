@@ -2,7 +2,7 @@ import { PDF_STAMP_MAX_BYTES } from "@filen/office/dom/pdfedit"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { IMAGE_FORMATS, type ImageDecode } from "@/features/preview/lib/imageFormat"
-import { decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
+import { decodeRasterRgba, displayRaster, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
 import { bytesOrigin } from "@/lib/sdk/byteOrigin"
@@ -110,12 +110,20 @@ async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage>
 		}
 	}
 
-	if (decode === "heic" || decode === "qoi" || decode === "jxl") {
-		const maxPixels =
-			decode === "heic"
-				? Number.POSITIVE_INFINITY
-				: workerDecodePixels(deviceProfile(), bytes.byteLength, RASTER_BYTES_PER_PIXEL[decode])
-		const decoded = await decodeRasterRgba(decode, bytes, maxPixels)
+	// Scaled to the stamp's size in the worker: only that bitmap reaches the page.
+	if (decode === "qoi" || decode === "jxl") {
+		const maxPixels = workerDecodePixels(deviceProfile(), bytes.byteLength, RASTER_BYTES_PER_PIXEL[decode])
+		const { bitmap } = await displayRaster(decode, bytes, { maxPixels, maxLongSide: STAMP_MAX_SIDE })
+
+		try {
+			return await drawn(bitmap, bitmap.width, bitmap.height)
+		} finally {
+			bitmap.close()
+		}
+	}
+
+	if (decode === "heic") {
+		const decoded = await decodeRasterRgba(decode, bytes, Number.POSITIVE_INFINITY)
 		const bitmap = await createImageBitmap(new ImageData(decoded.data, decoded.width, decoded.height))
 
 		try {
