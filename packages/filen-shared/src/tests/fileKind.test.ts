@@ -306,9 +306,17 @@ describe("content sniffs", () => {
 	it("keeps a verdict that takes the kind away", () => {
 		expect(verdictChangesKind({ name: "disk.dot", size: 300 }, "wordBinary", kindOf, table)).toBe(true)
 		expect(verdictChangesKind({ name: "disk.vhd", size: 300 }, "virtualDisk", kindOf)).toBe(true)
-		expect(verdictChangesKind({ name: "alu.vhd", size: 300 }, "notVirtualDisk", kindOf)).toBe(false)
 		expect(verdictChangesKind({ name: "deck.key", size: 300 }, "iworkPackage", kindOf)).toBe(true)
-		expect(verdictChangesKind({ name: "server.key", size: 300 }, "notIworkPackage", kindOf)).toBe(false)
+	})
+
+	// The kind stays, but the read it settles would otherwise run on every open.
+	it("keeps a verdict that settles the read its extension waits on", () => {
+		expect(verdictChangesKind({ name: "server.key", size: 300 }, "notIworkPackage", kindOf)).toBe(true)
+		expect(resolveFileKind({ name: "server.key", size: 300, verdict: "notIworkPackage" }, kindOf)).toMatchObject({ sniffable: false })
+		// One that leaves a viewer, which reads the file anyway, is not kept.
+		expect(verdictChangesKind({ name: "alu.vhd", size: 300 }, "notVirtualDisk", kindOf)).toBe(false)
+		// A media verdict on an extension no read settles changes nothing it would not already.
+		expect(verdictChangesKind({ name: "clip.mp4", size: 300 }, "video", kindOf)).toBe(false)
 	})
 
 		// An app whose table has no Keynote reads a .key as before: by its MIME type, else no kind.

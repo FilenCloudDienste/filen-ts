@@ -341,8 +341,8 @@ export function resolveFileKind<K>(
 	return fileKind<K>(null, own, "default", ambiguous, canSniff)
 }
 
-// Whether `verdict` would change what the file resolves to, or settle a `.ts` a content read would otherwise
-// still have to: worth keeping only then.
+// Whether `verdict` would change what the file resolves to, or settle a read the app would otherwise run again on every
+// open (a `.ts` that may be a stream, a `.key` found to be no Keynote package): worth keeping only then.
 export function verdictChangesKind<K>(
 	input: Omit<FileKindInput, "verdict">,
 	verdict: FileVerdict,
@@ -360,6 +360,12 @@ export function verdictChangesKind<K>(
 	}
 
 	const settled = resolveFileKind({ ...input, verdict }, kindOf, table)
+	const settlesRead = without.sniffable && without.source === "default" && sniffForExtension(without.extension, table) !== null
 
-	return settled.extension !== without.extension || settled.kind !== without.kind
+	// A read that found none of its meanings opens no viewer that could read it again.
+	return (
+		settled.extension !== without.extension ||
+		settled.kind !== without.kind ||
+		(settlesRead && settled.kind === null && !settled.sniffable)
+	)
 }

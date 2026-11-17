@@ -3,6 +3,7 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import type { FileVerdict } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
+import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import {
 	canOpenAsText,
 	canPreview,
@@ -118,6 +119,17 @@ describe("needsContentSniff", () => {
 		expect(canPreview(deck)).toBe(true)
 		// Unread, it has no kind, so a key file may still be opened as text.
 		expect(canOpenAsText(deck)).toBe(true)
+
+		// A key file, once read, keeps that for the session: no Preview, no second read, Open as text still offered.
+		const keyFile = fileNamed("license.key", 1_700n)
+
+		recordContentVerdict(
+			{ uuid: keyFile.data.uuid, name: "license.key", mime: "application/octet-stream", size: 1_700n },
+			"notIworkPackage"
+		)
+		expect(needsContentSniff(keyFile)).toBeNull()
+		expect(canPreview(keyFile)).toBe(false)
+		expect(canOpenAsText(keyFile)).toBe(true)
 
 		// A type that says text settles it with no read.
 		const pem = fileNamed("server.key", 1_700n, "text/plain")
