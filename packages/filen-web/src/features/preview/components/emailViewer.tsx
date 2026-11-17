@@ -14,6 +14,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewDownloadable, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
 import { sanitizeEmailHtml } from "@/features/preview/lib/emailSanitizer"
+import type { EmailSanitizeResult } from "@filen/shared/dom"
 import { readEmailFile } from "@/features/preview/lib/textFamilyClient"
 import type { EmailAttachment, EmailMessage, EmailReading } from "@/features/preview/lib/emailReading"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
@@ -295,10 +296,22 @@ function ViewSwitch({
 	)
 }
 
-function HtmlBody({ html, cidUrls, title }: { html: string; cidUrls: ReadonlyMap<string, string>; title: string }) {
+// The HTML sanitized, and the parts it shows in place (each Content-ID its pictures resolved): those are not listed.
+function sanitizeBody(html: string, cidUrls: ReadonlyMap<string, string>): { sanitized: EmailSanitizeResult; shown: ReadonlySet<string> } {
+	const shown = new Set<string>()
+	const sanitized = sanitizeEmailHtml(html, id => {
+		const url = cidUrls.get(id) ?? null
+
+		if (url !== null) shown.add(id)
+
+		return url
+	})
+
+	return { sanitized, shown }
+}
+
+function HtmlBody({ sanitized, title }: { sanitized: EmailSanitizeResult; title: string }) {
 	const { t } = useTranslation("preview")
-	// Sanitized once per message and set of parts (the compiler keeps it).
-	const sanitized = sanitizeEmailHtml(html, id => cidUrls.get(id) ?? null)
 
 	return (
 		<div className="flex size-full flex-col">
@@ -330,7 +343,12 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 	const [view, setView] = useState<View>(hasHtml ? "html" : "text")
 	const [opened, setOpened] = useState<number | null>(null)
 	const title = message.subject ?? t("previewEmailNoSubject")
-	const listed = message.attachments.map((attachment, index) => ({ attachment, index })).filter(({ attachment }) => !attachment.inline)
+	// Sanitized once per message and set of parts (the compiler keeps it).
+	const body = hasHtml ? sanitizeBody(message.html, cidUrls) : null
+	// Every part but the pictures the HTML shows in place: a part sent inline that is not one (a PDF, say) is listed.
+	const listed = message.attachments
+		.map((attachment, index) => ({ attachment, index }))
+		.filter(({ attachment }) => attachment.contentId === null || body?.shown.has(attachment.contentId) !== true)
 	const date =
 		message.date === null ? null : Number.isNaN(Date.parse(message.date)) ? message.date : formatDateTime(Date.parse(message.date))
 	const openedAttachment = opened === null ? undefined : message.attachments[opened]
@@ -403,10 +421,9 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 						item={item}
 						alt={title}
 					/>
-				) : view === "html" && hasHtml ? (
+				) : view === "html" && body !== null ? (
 					<HtmlBody
-						html={message.html}
-						cidUrls={cidUrls}
+						sanitized={body.sanitized}
 						title={title}
 					/>
 				) : hasText ? (

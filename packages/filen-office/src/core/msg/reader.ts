@@ -36,7 +36,6 @@ const EMBEDDED_HEADER = 24
 const ITEM_HEADER = 8
 
 const PT_INT32 = 0x0003
-const PT_BOOLEAN = 0x000b
 const PT_SYSTIME = 0x0040
 const PT_STRING8 = 0x001e
 const PT_UNICODE = 0x001f
@@ -67,12 +66,9 @@ const ATTACH_METHOD = 0x3705
 const ATTACH_LONG_FILENAME = 0x3707
 const ATTACH_MIME = 0x370e
 const ATTACH_CONTENT_ID = 0x3712
-const ATTACH_FLAGS = 0x3714
-const ATTACHMENT_HIDDEN = 0x7ffe
 
 const METHOD_BY_VALUE = 1
 const METHOD_EMBEDDED = 5
-const ATT_MHTML_REF = 4
 const RECIPIENT_TO = 1
 const RECIPIENT_CC = 2
 
@@ -86,8 +82,6 @@ export interface MsgAttachment {
 	readonly name: string | null
 	readonly mimeType: string | null
 	readonly contentId: string | null
-	// Shown by the HTML (referenced by MHTML, or hidden from the attachment list).
-	readonly inline: boolean
 	// An embedded message, as a .msg file of its own.
 	readonly message: boolean
 	readonly bytes: Uint8Array
@@ -158,12 +152,6 @@ class Properties {
 		const value = this.values.get(id)
 
 		return value?.type === PT_INT32 ? this.data.getInt32(value.at, true) : null
-	}
-
-	boolean(id: number): boolean {
-		const value = this.values.get(id)
-
-		return value?.type === PT_BOOLEAN && this.data.getUint8(value.at) !== 0
 	}
 
 	// A FILETIME as ISO 8601.
@@ -330,13 +318,11 @@ class Reader {
 				(await this.short(at, ATTACH_FILENAME, codepage)) ??
 				(await this.short(at, DISPLAY_NAME, codepage))
 			const contentId = await this.short(at, ATTACH_CONTENT_ID, codepage)
-			const flags = properties.int32(ATTACH_FLAGS) ?? 0
 
 			out.push({
 				name: method === METHOD_EMBEDDED ? withExtension(name, ".msg") : name,
 				mimeType: method === METHOD_EMBEDDED ? "application/vnd.ms-outlook" : await this.short(at, ATTACH_MIME, codepage),
 				contentId,
-				inline: contentId !== null && ((flags & ATT_MHTML_REF) !== 0 || properties.boolean(ATTACHMENT_HIDDEN)),
 				message: method === METHOD_EMBEDDED,
 				bytes
 			})

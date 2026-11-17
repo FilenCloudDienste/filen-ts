@@ -187,4 +187,36 @@ describe("EmailViewer", () => {
 		expect(await screen.findByRole("heading", { name: "Earlier thread" })).toBeTruthy()
 		expect(screen.getByText("Inner text")).toBeTruthy()
 	})
+
+	it("lists a part sent inline that the HTML does not show: a PDF, or a picture it never names", async () => {
+		message.current = [
+			"Subject: Inline parts",
+			'Content-Type: multipart/related; boundary="r"',
+			"",
+			"--r",
+			"Content-Type: text/html",
+			"",
+			"<p>See attached</p>",
+			"--r",
+			'Content-Type: application/pdf; name="terms.pdf"',
+			"Content-ID: <terms@x>",
+			'Content-Disposition: inline; filename="terms.pdf"',
+			"",
+			"%PDF-1.7",
+			"--r",
+			'Content-Type: image/png; name="unused.png"',
+			"Content-ID: <unused@x>",
+			"Content-Disposition: inline",
+			"Content-Transfer-Encoding: base64",
+			"",
+			"iVBORw0KGgo=",
+			"--r--",
+			""
+		].join("\r\n")
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByText("Attachments (2)")).toBeTruthy()
+		expect(screen.getByText("terms.pdf")).toBeTruthy()
+		expect(screen.getByText("unused.png")).toBeTruthy()
+	})
 })

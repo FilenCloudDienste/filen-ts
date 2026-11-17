@@ -29,8 +29,6 @@ export interface EmailAttachment {
 	// The raster type its first bytes say it is (never its declared type), or null: only such a part is shown in place
 	// by the HTML, as a blob of this type. SVG never is: a blob URL of it could be opened as a document.
 	readonly imageType: string | null
-	// An image the HTML shows in place (Content-Disposition inline, or related and named by the HTML).
-	readonly inline: boolean
 }
 
 export interface EmailMessage {
@@ -142,8 +140,7 @@ function readMessage(email: Email): EmailMessage {
 				size: blob.size,
 				blob,
 				contentId: id,
-				imageType: id === null ? null : rasterImageType(bytes),
-				inline: id !== null && (attachment.disposition === "inline" || attachment.related === true)
+				imageType: id === null ? null : rasterImageType(bytes)
 			}
 		}),
 		hasSource: true
@@ -178,8 +175,7 @@ function readMsgMessage(message: MsgMessage): EmailMessage {
 				size: blob.size,
 				blob,
 				contentId: id,
-				imageType: id === null ? null : rasterImageType(attachment.bytes),
-				inline: id !== null && attachment.inline
+				imageType: id === null ? null : rasterImageType(attachment.bytes)
 			}
 		}),
 		hasSource: false

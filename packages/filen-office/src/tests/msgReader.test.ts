@@ -132,12 +132,10 @@ describe("readMsg", () => {
 			html: '<p>Hi <img src="cid:pic@x"></p>',
 			text: "Hello"
 		})
-		expect(
-			message.attachments.map(({ name, mimeType, contentId, inline, message }) => [name, mimeType, contentId, inline, message])
-		).toEqual([
-			["pic.png", "image/png", "pic@x", true, false],
-			["report.pdf", null, null, false, false],
-			["Forwarded one.msg", "application/vnd.ms-outlook", null, false, true]
+		expect(message.attachments.map(({ name, mimeType, contentId, message }) => [name, mimeType, contentId, message])).toEqual([
+			["pic.png", "image/png", "pic@x", false],
+			["report.pdf", null, null, false],
+			["Forwarded one.msg", "application/vnd.ms-outlook", null, true]
 		])
 	})
 

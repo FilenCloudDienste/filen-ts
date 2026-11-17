@@ -77,11 +77,11 @@ describe("readEmail", () => {
 		expect(reading.html).toContain("cid:chart@x")
 		expect(reading.date?.startsWith("2026-11-16")).toBe(true)
 		expect(
-			reading.attachments.map(attachment => [attachment.name, attachment.mimeType, attachment.contentId, attachment.inline])
+			reading.attachments.map(attachment => [attachment.name, attachment.mimeType, attachment.contentId, attachment.imageType])
 		).toEqual([
-			["attachment-1", "image/png", "chart@x", true],
-			["report.pdf", "application/pdf", null, false],
-			["attachment-3.eml", "message/rfc822", null, false]
+			["attachment-1", "image/png", "chart@x", "image/png"],
+			["report.pdf", "application/pdf", null, null],
+			["attachment-3.eml", "message/rfc822", null, null]
 		])
 		expect(reading.attachments[1]?.blob).toBeInstanceOf(Blob)
 		expect(new TextDecoder().decode(await reading.attachments[1]?.blob.arrayBuffer())).toBe("%PDF-1.7\n")
@@ -163,8 +163,8 @@ describe("readEmail", () => {
 
 		if (reading.status !== "ok") return
 
-		expect(reading.attachments.map(attachment => [attachment.name, attachment.mimeType, attachment.inline])).toEqual([
-			["Earlier thread.msg", "application/vnd.ms-outlook", false]
+		expect(reading.attachments.map(attachment => [attachment.name, attachment.mimeType])).toEqual([
+			["Earlier thread.msg", "application/vnd.ms-outlook"]
 		])
 		expect(await readEmail(new Uint8Array((await reading.attachments[0]?.blob.arrayBuffer()) ?? new ArrayBuffer(0)))).toMatchObject({
 			status: "ok",
