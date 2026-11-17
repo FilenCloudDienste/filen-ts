@@ -4,10 +4,13 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
+import { itemRow, openRowMenu } from "./helpers/archive"
+import { menuItemName } from "./helpers/menu"
 import {
 	LEGACY_CYRILLIC_AS_KOI8_PREFIX,
 	LEGACY_CYRILLIC_TEXT,
 	MATH_REMOTE_IMAGES,
+	ISO_VOLUME,
 	TORRENT_INFOHASH,
 	TORRENT_TRACKER,
 	TORRENT_WEB_SEED
@@ -15,11 +18,18 @@ import {
 
 // Reading text-family files, from the shared fixture tree only: a legacy codepage named by the encoding detector (its
 // wasm loaded for real, under the page's isolation headers and CSP) and read again with another one; and markdown
-// math painted as MathML while the file's remote images are never fetched.
+// math painted as MathML while the file's remote images are never fetched; a torrent, subtitles, a calendar and contacts
+// read in the text-family worker, nothing they name ever contacted; executables and a disc image shown by their
+// headers.
 
 const [CYRILLIC] = FIXTURE_FILES["preview-text-legacy"]
 const [FORMULAS] = FIXTURE_FILES["preview-markdown-math"]
 const [TORRENT] = FIXTURE_FILES["preview-torrent"]
+const [CUES, MICRODVD, VOBSUB] = FIXTURE_FILES["preview-subtitles"]
+const [CALENDAR, CONTACTS, VARIANTS] = FIXTURE_FILES["preview-pim"]
+const [TOOL, SETUP, DISC] = FIXTURE_FILES["preview-binary-info"]
+const NEVER_RUN = "Never run. Read from the file's headers only."
+const NO_PREVIEW = "Preview isn't available for this file type yet."
 
 const MATHML = "http://www.w3.org/1998/Math/MathML"
 
@@ -128,6 +138,120 @@ test("a torrent shows its infohash, tracker, web seed and files, and neither add
 	await expect(dialog.getByText(TORRENT_WEB_SEED, { exact: true })).toBeVisible()
 	await expect(dialog.getByText("E2E Album/01 Intro.flac", { exact: true })).toBeVisible()
 
+	await close(page)
+
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("subtitles open on their cues with the source a toggle away, and a VobSub .sub is read and not shown", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-subtitles")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, CUES).dblclick()
+	await expect(dialog.getByText("SRT · 2 cues · UTF-8 · 00:00:05", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText("Hello there.", { exact: true })).toBeVisible()
+	await expect(dialog.getByRole("table", { name: "Cues" })).toHaveAttribute("aria-rowcount", "3")
+
+	await dialog.getByRole("searchbox", { name: "Find in cues" }).fill("kenobi")
+	await expect(dialog.getByRole("table", { name: "Cues" })).toHaveAttribute("aria-rowcount", "2")
+
+	await dialog.getByRole("button", { name: "Source", exact: true }).click()
+	await expect(dialog.locator(".cm-line").first()).toHaveText("1")
+	await close(page)
+
+	// MicroDVD: frames at 23.976 per second, a "|" a line break.
+	await itemRow(listbox, MICRODVD).dblclick()
+	await expect(dialog.getByText(/^SUB · 2 cues/u)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await close(page)
+
+	// VobSub images: its first bytes are an MPEG pack header, which nothing previews.
+	await itemRow(listbox, VOBSUB).dblclick()
+	await expect(page.getByText(NO_PREVIEW, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await close(page)
+
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("a calendar opens as an agenda and contacts as cards, nothing they name is fetched, and a genomics .vcf opens as text", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-pim")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, CALENDAR).dblclick()
+	await expect(dialog.getByText(/E2E Team/u)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText(/2 entries/u)).toBeVisible()
+	await expect(dialog.getByText("Every 2 weeks on Monday and Wednesday, 10 times", { exact: true })).toBeVisible()
+
+	const planning = dialog.getByRole("button", { name: /Planning/u })
+
+	await planning.click()
+	await expect(planning).toHaveAttribute("aria-expanded", "true")
+	await expect(dialog.getByText("https://calendar.e2e-never-contacted.example/planning", { exact: true })).toBeVisible()
+	await expect(dialog.getByText("File taxes", { exact: true })).toBeVisible()
+	await close(page)
+
+	await itemRow(listbox, CONTACTS).dblclick()
+	await expect(dialog.getByRole("listbox", { name: "2 contacts" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText("+44 7700 900123", { exact: true })).toBeVisible()
+	await expect(dialog.getByRole("button", { name: "Copy Phone (cell)" })).toBeVisible()
+	await dialog.getByRole("option", { name: /Charles Babbage/u }).click()
+	await expect(dialog.getByText("Difference engine", { exact: true })).toBeVisible()
+	await close(page)
+
+	// The same extension, a Variant Call Format file: its first line is no vCard's, so it opens as text.
+	await itemRow(listbox, VARIANTS).dblclick()
+	await expect(dialog.locator(".cm-line").first()).toHaveText("##fileformat=VCFv4.2", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await close(page)
+
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("executables and a disc image show what their headers say, and an extensionless program opened as text does too", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-binary-info")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, SETUP).dblclick()
+	await expect(dialog.getByText("Windows executable (PE32+, x86-64)", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText("Windows console", { exact: true })).toBeVisible()
+	await expect(dialog.getByText(NEVER_RUN, { exact: true })).toBeVisible()
+	await close(page)
+
+	await itemRow(listbox, DISC).dblclick()
+	await expect(dialog.getByText("Disc image (ISO 9660)", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText(ISO_VOLUME, { exact: true })).toBeVisible()
+	await close(page)
+
+	// No extension: Open as text finds an ELF head and shows its card instead of the not-text notice.
+	await openRowMenu(page, listbox, TOOL)
+	await page.getByRole("menuitem", { name: menuItemName("Open as text") }).click()
+	await expect(dialog.getByText("ELF executable (64-bit, x86-64)", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText("This file isn't text.", { exact: true })).toHaveCount(0)
 	await close(page)
 
 	expect(foreign).toEqual([])

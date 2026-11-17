@@ -41,6 +41,12 @@ async function openText(page: Page, listbox: Locator, name: string, text: string
 	await expect(page.getByText(text)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
+// A subtitle opens on its cue table; its text is a toggle away.
+async function toSource(page: Page): Promise<void> {
+	await page.getByRole("dialog").getByRole("button", { name: "Source", exact: true }).click()
+	await expect(editorContent(page)).toBeVisible()
+}
+
 async function closeText(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
 	await expect(editorContent(page)).toHaveCount(0)
@@ -74,11 +80,13 @@ test("code and text open in the editor, writable only as strict UTF-8, and binar
 
 	// A UTF-8 subtitle edits as text.
 	await openText(page, listbox, SUBTITLES, "Hello from a subtitle")
+	await toSource(page)
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "true")
 	await closeText(page)
 
 	// Windows-1252 reads correctly but cannot be written back as it is.
 	await openText(page, listbox, LATIN1, ROUTING_LATIN1_LINE)
+	await toSource(page)
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "false")
 	await closeText(page)
 
