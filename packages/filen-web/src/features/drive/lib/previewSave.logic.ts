@@ -141,16 +141,17 @@ export function pdfTooLargeToEdit(item: DriveItem, variant: DriveVariant, maxByt
 // data they carry beside the PDF: view only.
 const VIEW_ONLY_PDF_EXTENSIONS: ReadonlySet<string> = new Set(["ai"])
 
+// A file the PDF viewer shows that no PDF tool ever edits, wherever it is: the viewer offers it no tools at all.
+export function isViewOnlyPdf(item: DriveItem): boolean {
+	const base = asDirectoryOrFile(item)
+
+	return base.type === "file" && VIEW_ONLY_PDF_EXTENSIONS.has(extensionOf(driveItemName(base)))
+}
+
 function pdfEditable(item: DriveItem, variant: DriveVariant): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return (
-		variant === "drive" &&
-		base.type === "file" &&
-		!base.data.undecryptable &&
-		previewType(item) === "pdf" &&
-		!VIEW_ONLY_PDF_EXTENSIONS.has(extensionOf(driveItemName(base)))
-	)
+	return variant === "drive" && base.type === "file" && !base.data.undecryptable && previewType(item) === "pdf" && !isViewOnlyPdf(item)
 }
 
 function pdfOverEditLimit(item: DriveItem, maxBytes: number): boolean {

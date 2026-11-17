@@ -36,6 +36,7 @@ import {
 	canSaveCopyBeside,
 	editedSaveTimes,
 	canEditPdf,
+	isViewOnlyPdf,
 	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
@@ -2326,7 +2327,7 @@ export function PreviewOverlay({
 															documentKey={currentDocumentKey}
 															editable={slotWritable}
 															renamedReadOnly={renamedReadOnly}
-															neverEditable={variant !== "drive"}
+															neverEditable={variant !== "drive" || isViewOnlyPdf(driveItem)}
 															locked={saving}
 															onDirtyChange={setPreviewDirty}
 															readAs={readAs}

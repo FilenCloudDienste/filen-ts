@@ -7,6 +7,7 @@ import {
 	editedSaveTimes,
 	isEditable,
 	isUnresolvableParentError,
+	isViewOnlyPdf,
 	pdfTooLargeToEdit,
 	runPreviewSave,
 	type PreviewSaveDeps
@@ -280,6 +281,9 @@ describe("canEditPdf / pdfTooLargeToEdit", () => {
 		expect(previewType(ai)).toBe("pdf")
 		expect(canEditPdf(ai, "drive", LIMIT)).toBe(false)
 		expect(pdfTooLargeToEdit(ai, "drive", LIMIT)).toBe(false)
+		// No tools at all, not tools shown disabled.
+		expect(isViewOnlyPdf(ai)).toBe(true)
+		expect(isViewOnlyPdf(pdf(1_024n))).toBe(false)
 	})
 
 	it("is too large only when everything but the size passes", () => {
