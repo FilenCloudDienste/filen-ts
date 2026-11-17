@@ -1,4 +1,5 @@
 import { bytesToHex, platformTextDecoder, type PlatformTextDecoder } from "./bytes"
+import { withoutFormatControls } from "./formatControls"
 
 // A .torrent file's metadata (BEP 3, 12, 19, 27, 47, 52), read from its bencoding. Every bound is checked: the caller
 // hands untrusted bytes, so the value count, nesting, every text and the paths all have caps, and what passes a cap is
@@ -321,9 +322,6 @@ class Reader {
 	}
 }
 
-// Format and bidi controls out (ZWNJ and ZWJ, which scripts need, stay).
-const CONTROLS = /(?![‌‍])\p{Cf}/gu
-
 let decoder: PlatformTextDecoder | null = null
 
 // Lossy UTF-8 (a torrent's text is UTF-8 by convention, not by guarantee), its controls out, cut to `cap` units.
@@ -331,7 +329,7 @@ function display(bytes: Uint8Array, cap: number): string {
 	decoder ??= platformTextDecoder("utf-8")
 
 	// A cap's worth of characters takes at most four bytes each.
-	const text = decoder.decode(bytes.subarray(0, cap * 4)).replace(CONTROLS, "")
+	const text = withoutFormatControls(decoder.decode(bytes.subarray(0, cap * 4)))
 
 	return text.length > cap ? `${text.slice(0, cap - 1)}…` : text
 }

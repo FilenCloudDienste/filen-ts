@@ -1,4 +1,6 @@
 import { parseSubtitle, subtitleFormatFromExtension } from "@filen/shared/videos"
+import { withoutFormatControls } from "@filen/shared/formatControls"
+import { cueSegments } from "@/lib/media/subtitles/subtitleStyle.logic"
 
 // A subtitle file's cues as the cue table shows them: times in seconds, text as plain text.
 
@@ -9,13 +11,14 @@ export type SubtitleReading =
 
 export type SubtitleCues = Extract<SubtitleReading, { status: "ok" }>
 
-const CUE_MARKUP = /<\/?[ibu]>|&(amp|lt|nbsp);/g
-const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", nbsp: " " }
-
-// A cue's text without its markup: parsed cues carry WebVTT payload syntax, `<i>`, `<b>`, `<u>` and the `&amp;`,
-// `&lt;`, `&nbsp;` escapes only.
+// A cue's text without its markup (the player's own reading of cue payloads, styles dropped), and without format and
+// bidi controls, as every viewer shows a file's text.
 export function cuePlainText(text: string): string {
-	return text.replace(CUE_MARKUP, (_, entity: string | undefined) => (entity === undefined ? "" : (ENTITIES[entity] ?? "")))
+	return withoutFormatControls(
+		cueSegments(text)
+			.map(segment => segment.text)
+			.join("")
+	)
 }
 
 // Parsed by its extension's format (the text-family worker runs this).

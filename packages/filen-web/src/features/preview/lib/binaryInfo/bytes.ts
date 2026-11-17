@@ -1,3 +1,5 @@
+import { withoutFormatControls } from "@filen/shared/formatControls"
+
 // Byte helpers for the header readers: every read is bounds-checked and reads past the end as zero, so a hostile
 // offset gives a wrong value, never an exception or a huge allocation.
 
@@ -60,10 +62,10 @@ const UTF16BE = new TextDecoder("utf-16be")
 export function utf16(bytes: Uint8Array, start: number, end: number, little: boolean): string {
 	const view = bytes.subarray(Math.max(0, start), Math.max(start, Math.min(end, bytes.length)))
 
-	return (little ? UTF16LE : UTF16BE)
-		.decode(view.subarray(0, view.length - (view.length % 2)))
-		.replace(/(?![‌‍])\p{Cf}/gu, "")
-		.replace(/\0[\s\S]*$/, "")
+	return withoutFormatControls((little ? UTF16LE : UTF16BE).decode(view.subarray(0, view.length - (view.length % 2)))).replace(
+		/\0[\s\S]*$/,
+		""
+	)
 }
 
 export function hex(value: number, digits = 4): string {

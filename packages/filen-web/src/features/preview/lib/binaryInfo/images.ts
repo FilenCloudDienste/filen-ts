@@ -1,3 +1,4 @@
+import { withoutFormatControls } from "@filen/shared/formatControls"
 import { asciiField, startsWith, u16, u32, u64, utf16 } from "@/features/preview/lib/binaryInfo/bytes"
 import type { BinarySource, DmgInfo, IsoInfo } from "@/features/preview/lib/binaryInfo/types"
 
@@ -12,10 +13,7 @@ const MAX_PARTITIONS = 64
 const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }
 
 function xmlText(text: string): string {
-	return text
-		.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => ENTITIES[name] ?? "")
-		.replace(/(?![‌‍])\p{Cf}/gu, "")
-		.trim()
+	return withoutFormatControls(text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => ENTITIES[name] ?? "")).trim()
 }
 
 // A UDIF image, or an encrypted one (its header begins "encrcdsa"); null for neither.

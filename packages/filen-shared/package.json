@@ -40,6 +40,7 @@
 		"./bytes": "./src/bytes.ts",
 		"./textEncoding": "./src/textEncoding.ts",
 		"./torrent": "./src/torrent.ts",
+		"./formatControls": "./src/formatControls.ts",
 		"./calendarFile": "./src/calendarFile.ts",
 		"./contactFile": "./src/contactFile.ts",
 		"./session": "./src/session.ts",

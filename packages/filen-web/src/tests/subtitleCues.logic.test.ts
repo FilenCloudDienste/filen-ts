@@ -15,6 +15,10 @@ describe("cuePlainText", () => {
 		// An escaped escape stays one level escaped.
 		expect(cuePlainText("&amp;lt;")).toBe("&lt;")
 		expect(cuePlainText("line one\nline two")).toBe("line one\nline two")
+		// The player's own reading of cue entities, and bidi controls out as everywhere else.
+		expect(cuePlainText("a &gt; b")).toBe("a > b")
+		expect(cuePlainText("invoice\u202efdp.exe &rlm;x")).toBe("invoicefdp.exe x")
+		expect(cuePlainText("\u200dkept\u200c")).toBe("\u200dkept\u200c")
 	})
 })
 

@@ -1,4 +1,5 @@
 import { platformTextDecoder, type PlatformTextDecoder } from "./bytes"
+import { withoutFormatControls } from "./formatControls"
 
 // The content lines iCalendar (RFC 5545 §3.1) and vCard (RFC 6350 §3.3, and vCard 2.1's quoted-printable) share:
 // `group.NAME;PARAM=a,"b;c":value`, folded onto continuation lines that begin with a space or a tab.
@@ -309,7 +310,7 @@ export function decodedValue(line: ContentLine, escaped = true): string {
 export function displayText(text: string, max: number): string {
 	let out = ""
 
-	for (const char of text.replace(/(?![‌‍])\p{Cf}/gu, "")) {
+	for (const char of withoutFormatControls(text)) {
 		const code = char.codePointAt(0) ?? 0
 
 		if (code >= 0x20 || code === 0x09 || code === 0x0a) out += char
