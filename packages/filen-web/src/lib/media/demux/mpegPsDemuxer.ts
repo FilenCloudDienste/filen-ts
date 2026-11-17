@@ -24,7 +24,7 @@ import { MAX_UNIT_BYTES, parseRawFrame, rawUnitLength } from "@/workers/remux/ra
 // Bytes of packs read at once.
 const WINDOW_BYTES = 256 * 1024
 // Bytes read past a window to finish the frames that started in it.
-const FINISH_BYTES = 262144
+const FINISH_BYTES = 1024 * 1024
 // How far a resync looks for the next pack.
 const RESYNC_BYTES = 1024 * 1024
 const HEAD_BYTES = 1024 * 1024
@@ -303,7 +303,7 @@ class MpegPsReader implements ContainerReader {
 	private readonly input: Input
 	private readonly size: number
 	private readonly streams: Map<number, Track>
-	// The bytes the last window read: a window reads a megabyte past itself to finish its pictures, which the next
+	// The bytes the last window read: a window reads FINISH_BYTES past itself to finish its pictures, which the next
 	// windows (and a read again with more finishing bytes) then take from here rather than reading them once more.
 	private lastRead: { start: number; bytes: Uint8Array } | null = null
 
