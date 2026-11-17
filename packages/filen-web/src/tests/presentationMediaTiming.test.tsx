@@ -501,9 +501,17 @@ describe("an inserted clip", () => {
 	})
 })
 
+// On the fake clock: these steps are tens of milliseconds apart, and a process descheduled past one (a loaded run) let a
+// later step's timer and the code's own fire in either order.
 describe("a picked clip's object URL", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
 	it("is let go only once the probe's element has emptied and the insert is over", async () => {
 		const { letGo, releaseAfter } = await import("@/features/presentation/hooks/useMediaInsert")
+
+		vi.useFakeTimers()
 		const order: string[] = []
 		const element = Object.assign(new EventTarget(), {
 			preload: "metadata",
@@ -530,17 +538,19 @@ describe("a picked clip's object URL", () => {
 
 		releaseAfter([released, insert.promise], () => order.push("revoked"))
 		insert.resolve(undefined)
-		await new Promise(resolve => setTimeout(resolve, 50))
+		await vi.advanceTimersByTimeAsync(50)
 		// Emptied, and the insert over: the player still settling, nothing revoked yet.
 		expect(order).toEqual(["paused", "unlinked", "reset", "emptied"])
 		expect(element.preload).toBe("none")
 
-		await new Promise(resolve => setTimeout(resolve, 40))
+		await vi.advanceTimersByTimeAsync(40)
 		expect(order).toEqual(["paused", "unlinked", "reset", "emptied", "revoked"])
 	})
 
 	it("is let go after a bounded wait when the element never says it emptied, and after a failed insert", async () => {
 		const { letGo, releaseAfter } = await import("@/features/presentation/hooks/useMediaInsert")
+
+		vi.useFakeTimers()
 		const silent = Object.assign(new EventTarget(), {
 			removeAttribute: () => undefined,
 			load: () => undefined,
@@ -550,9 +560,9 @@ describe("a picked clip's object URL", () => {
 		const revoked = vi.fn()
 
 		releaseAfter([letGo(silent as never, 20, 0), Promise.reject(new Error("refused"))], revoked)
-		await new Promise(resolve => setTimeout(resolve, 10))
+		await vi.advanceTimersByTimeAsync(10)
 		expect(revoked).not.toHaveBeenCalled()
-		await new Promise(resolve => setTimeout(resolve, 30))
+		await vi.advanceTimersByTimeAsync(30)
 		expect(revoked).toHaveBeenCalledTimes(1)
 	})
 })
