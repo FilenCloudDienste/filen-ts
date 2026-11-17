@@ -3,6 +3,7 @@ import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
+import { resolveModKey } from "./helpers/modkey"
 import { buildZip } from "./helpers/archiveFixtures"
 import { preview } from "@/locales/en/preview"
 
@@ -147,7 +148,9 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 
 		await expect(first.getByText(OPENING_WORDS, { exact: false })).toBeAttached()
 
-		await page.getByRole("button", { name: preview.previewDocxFindAction, exact: true }).click()
+		// Find's key straight after the open, with no click: Mod as the page reads it (Playwright's WebKit reports a Mac
+		// user agent on every host, so the app binds Cmd there while ControlOrMeta would send Ctrl on Linux).
+		await page.keyboard.press(`${await resolveModKey(page)}+f`)
 		await page.keyboard.type("unique anchor phrase")
 		await page.keyboard.press("Enter")
 		await expect(page.locator(".fo-pdf-text-layer .highlight").first()).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
