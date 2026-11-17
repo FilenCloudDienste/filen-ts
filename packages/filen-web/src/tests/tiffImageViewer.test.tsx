@@ -5,7 +5,7 @@ import { createElement } from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { LinkedFile } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { bigTiffHeader, encodeTiff, tiffHead } from "@/tests/support/tiffBytes"
 import "@/lib/i18n"
@@ -67,7 +67,7 @@ afterEach(() => {
 describe("ImageViewer on a TIFF", () => {
 	it("draws its one page at the display long side, offers it whole, and hands the editor the page shown", async () => {
 		const reader = onePage({ width: 5000, height: 2 })
-		const pageSource: { current: ImagePageSource | null } = { current: null }
+		const pageSource: { current: ImagePageSlot | null } = { current: null }
 
 		openMupdfReader.mockResolvedValue(reader)
 		render(createElement(ImageViewer, { item: tiff("eeeeeeee-0000-0000-0000-000000000021"), alt: "scan", pageSourceRef: pageSource }))
@@ -76,8 +76,7 @@ describe("ImageViewer on a TIFF", () => {
 		expect(openMupdfReader.mock.calls[0]?.[0]).toMatchObject({ format: "tiff", maxImagePixels: 30_000_000 })
 		// 4096 × 2 at most: the long side fitted, never above the page's own pixels.
 		expect(reader.renderPage.mock.calls[0]?.[1]).toMatchObject({ maxPixels: 4096 * 2, output: "bitmap" })
-		expect(pageSource.current?.page).toBe(0)
-		expect(pageSource.current?.pageCount).toBe(1)
+		expect(pageSource.current).toMatchObject({ page: 0, pageCount: 1 })
 
 		fireEvent.click(screen.getByRole("button", { name: "Full res ▸" }))
 
@@ -113,6 +112,30 @@ describe("ImageViewer on a TIFF", () => {
 		expect(asked).toBeGreaterThan(16_000_000)
 		expect(screen.getByRole("img", { name: "scan" }).getAttribute("width")).toBe("4096")
 		expect(screen.queryByRole("button", { name: "Full res ▸" })).toBeNull()
+	})
+
+	it("tells the editor to wait for its engine while it opens, then gives it the first page", async () => {
+		const reader = onePage({ width: 8, height: 8 })
+		let open: (value: unknown) => void = () => undefined
+
+		head.bytes = encodeTiff([{ width: 8, height: 8, rgb: [0, 0, 0] }])
+		openMupdfReader.mockImplementation(() => new Promise(resolve => (open = resolve)))
+
+		const pageSourceRef: { current: ImagePageSlot | null } = { current: null }
+
+		render(createElement(ImageViewer, { item: tiff("eeeeeeee-0000-0000-0000-000000000026"), alt: "scan", pageSourceRef }))
+
+		await waitFor(() => {
+			expect(openMupdfReader).toHaveBeenCalledOnce()
+		})
+
+		const slot = pageSourceRef.current
+
+		if (slot === null || !("opening" in slot)) throw new Error("no engine opening")
+
+		open(reader)
+
+		expect((await slot.opening)?.page).toBe(0)
 	})
 
 	it("refuses a BigTIFF from its header, starting no engine", async () => {

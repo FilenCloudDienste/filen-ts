@@ -13,7 +13,7 @@ import { mupdfImagePixels, openMupdfReader, type MupdfReader } from "@/lib/mupdf
 import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
 import { fitLongSide, fullResolution } from "@/features/preview/lib/rasterCodecs/display"
-import { readerPageSource, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import { readerPageSource, type ImagePageSlot, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { usePreviewAccessMode, usePreviewCacheScope, usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { BitmapImage } from "@/features/preview/components/zoomableImage"
@@ -53,7 +53,7 @@ export interface TiffImageProps {
 	item: DriveItem
 	alt: string
 	// Holds the page shown while it is mounted, for the image editor to draw from the engine that holds the file.
-	pageSourceRef?: RefObject<ImagePageSource | null> | undefined
+	pageSourceRef?: RefObject<ImagePageSlot | null> | undefined
 }
 
 export function TiffImage(props: TiffImageProps) {
@@ -132,6 +132,17 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 		const controller = new AbortController()
 		let reader: MupdfReader | null = null
 		const { origin: current, profile: now } = latest()
+		// The editor asked meanwhile waits for this engine (its first page) rather than open one of its own.
+		let settle: (page: ImagePageSource | null) => void = () => undefined
+		const slot: ImagePageSlot = {
+			opening: new Promise<ImagePageSource | null>(resolve => {
+				settle = resolve
+			})
+		}
+
+		if (pageSourceRef !== undefined) {
+			pageSourceRef.current = slot
+		}
 
 		openTiff(current, access, scope, now, controller.signal).then(
 			result => {
@@ -147,9 +158,12 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 					reader = result.reader
 				}
 
+				settle(result.status === "open" ? readerPageSource(result.reader, 0) : null)
 				setOpened({ key, opened: result })
 			},
 			(error: unknown) => {
+				settle(null)
+
 				if (controller.signal.aborted) {
 					return
 				}
@@ -166,9 +180,15 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 
 		return () => {
 			controller.abort()
+			settle(null)
+
+			if (pageSourceRef?.current === slot) {
+				pageSourceRef.current = null
+			}
+
 			void reader?.close()
 		}
-	}, [key, access, scope])
+	}, [key, access, scope, pageSourceRef])
 
 	const current = opened?.key === key ? opened.opened : null
 

@@ -14,6 +14,10 @@ export interface ImagePageSource {
 	): Promise<{ readonly rgba: Uint8ClampedArray<ArrayBuffer>; readonly width: number; readonly height: number }>
 }
 
+// What the viewer holds for the editor: the page it shows, or its engine still opening (resolving to that page, or to
+// null when the viewer opened none: refused, failed, closed).
+export type ImagePageSlot = ImagePageSource | { readonly opening: Promise<ImagePageSource | null> }
+
 export function readerPageSource(reader: MupdfReader, page: number): ImagePageSource {
 	return {
 		page,

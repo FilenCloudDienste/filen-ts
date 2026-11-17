@@ -2,17 +2,20 @@
 
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import type { ImagePageSlot, ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { tiffHead } from "@/tests/support/tiffBytes"
 
 // Entering the editor on a TIFF: the page the viewer shows is drawn whole by the engine that holds the file (nothing
 // is downloaded here), refused when it is larger than the editor takes, and a page of several is saved alone.
 
-const { close, readFileBytesRange } = vi.hoisted(() => ({
+const { close, readFileBytesRange, openMupdfReader } = vi.hoisted(() => ({
 	close: vi.fn(),
-	readFileBytesRange: vi.fn()
+	readFileBytesRange: vi.fn(),
+	openMupdfReader: vi.fn()
 }))
+
+vi.mock("@/lib/mupdf/reader", () => ({ openMupdfReader, mupdfImagePixels: () => 30_000_000 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { readFileBytesRange, cancelPreviewDownload: vi.fn() } }))
@@ -81,5 +84,72 @@ describe("enterImageEdit on a TIFF", () => {
 
 		expect(outcome).toEqual({ status: "refused", messageKey: "previewImageSaveRefusedTooLarge" })
 		expect(renderRgba).not.toHaveBeenCalled()
+	})
+
+	it("waits for the viewer's engine still opening rather than open one of its own", async () => {
+		readFileBytesRange.mockResolvedValue(tiffHead(8, 4))
+		openMupdfReader.mockReset()
+
+		const item = linkedFileItem("scan.tif", { size: 4096n })
+		const { page, renderRgba } = shownPage({ width: 8, height: 4 }, 1)
+		let opened: (source: ImagePageSource | null) => void = () => undefined
+		const slot: ImagePageSlot = {
+			opening: new Promise(resolve => {
+				opened = resolve
+			})
+		}
+		const entering = enterImageEdit({
+			item,
+			frozenUuid: item.data.uuid,
+			cacheScope: null,
+			image: null,
+			page: slot,
+			signal: new AbortController().signal
+		})
+
+		await new Promise(resolve => setTimeout(resolve, 10))
+		opened(page)
+
+		const outcome = await entering
+
+		expect(outcome.status).toBe("ready")
+		expect(renderRgba).toHaveBeenCalledOnce()
+		expect(openMupdfReader).not.toHaveBeenCalled()
+
+		if (outcome.status === "ready") {
+			outcome.state.release()
+		}
+	})
+
+	it("opens an engine of its own where the viewer opened none", async () => {
+		readFileBytesRange.mockResolvedValue(tiffHead(8, 4))
+		openMupdfReader.mockReset()
+
+		const readerClose = vi.fn(() => Promise.resolve())
+
+		openMupdfReader.mockResolvedValue({
+			pageCount: 1,
+			imageExtent: () => Promise.resolve({ width: 8, height: 4 }),
+			renderPage: () => Promise.resolve({ rgba: new Uint8ClampedArray(8 * 4 * 4).fill(255), width: 8, height: 4 }),
+			close: readerClose
+		})
+
+		const item = linkedFileItem("scan.tif", { size: 4096n })
+		const outcome = await enterImageEdit({
+			item,
+			frozenUuid: item.data.uuid,
+			cacheScope: null,
+			image: null,
+			page: { opening: Promise.resolve(null) },
+			signal: new AbortController().signal
+		})
+
+		expect(outcome.status).toBe("ready")
+		expect(openMupdfReader).toHaveBeenCalledOnce()
+		expect(readerClose).toHaveBeenCalledOnce()
+
+		if (outcome.status === "ready") {
+			outcome.state.release()
+		}
 	})
 })

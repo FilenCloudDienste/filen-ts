@@ -55,7 +55,7 @@ import { recordOwnSave } from "@/features/preview/lib/ownSaves"
 import { imageSaveDeps, writeEditedCopy } from "@/features/preview/lib/editedCopy"
 import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor"
 import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdit/editSession"
-import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
@@ -299,7 +299,7 @@ export function PreviewOverlay({
 	// (what a save writes) and commands (the header's Revert).
 	const imageRef = useRef<HTMLImageElement | null>(null)
 	// The page a document engine shows instead (a TIFF's), which the image editor draws from that engine.
-	const imagePageRef = useRef<ImagePageSource | null>(null)
+	const imagePageRef = useRef<ImagePageSlot | null>(null)
 	const imageSaveRef = useRef<ImageExportSource | null>(null)
 	const imageCommandsRef = useRef<ImageEditorCommands | null>(null)
 	// The open video editor's commands (Mod+S opens its Save popover; the remote-change dialog's copy is its export).
@@ -2721,7 +2721,7 @@ interface PreviewBodyProps {
 	// The image viewer's shown <img> (the image editor starts from its pixels).
 	imageRef: RefObject<HTMLImageElement | null>
 	// The image viewer's page from a document engine (the image editor draws it there).
-	imagePageRef: RefObject<ImagePageSource | null>
+	imagePageRef: RefObject<ImagePageSlot | null>
 	// A save the user asked for in the viewer (a deck's File ▸ Save); true when one started.
 	onSave: () => boolean
 	// Idle autosave asks the overlay to save; true when a save started.

@@ -20,7 +20,8 @@ import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { mupdfImagePixels, openMupdfReader } from "@/lib/mupdf/reader"
-import { readerPageSource, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import { readerPageSource, type ImagePageSlot, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import { raceAbort } from "@/lib/abort"
 import { anyTranslucent } from "@/features/preview/lib/rasterCodecs/raster"
 
 // Entering the image editor: what the original is (sniffed from its own bytes, never its name), whether this device
@@ -193,16 +194,19 @@ async function heicSource(
 	}
 }
 
-// The engine's page drawn whole at its own resolution, from the viewer's engine (the page it shows) or, before that one
-// is open, from an engine of its own on the file's first page. Refused when the page is larger than the editor takes.
+// The engine's page drawn whole at its own resolution, from the viewer's engine (the page it shows, once it is open),
+// or from an engine of its own on the file's first page where the viewer has none (it refused or failed the file).
+// Refused when the page is larger than the editor takes.
 async function pageSourced(
 	item: DriveItem,
 	info: SourceInfo,
-	shown: ImagePageSource | null,
+	slot: ImagePageSlot | null,
 	maxPixels: number,
 	cacheScope: string | null,
 	signal: AbortSignal
 ): Promise<{ source: ImageEditSource; info: SourceInfo; pageOnly: boolean } | null> {
+	const shown = slot === null ? null : "opening" in slot ? await raceAbort(slot.opening, signal) : slot
+
 	if (shown !== null) {
 		return await drawPage(shown, info, maxPixels, signal)
 	}
@@ -270,7 +274,7 @@ async function enter(
 	frozenUuid: string,
 	cacheScope: string | null,
 	image: HTMLImageElement | null,
-	page: ImagePageSource | null,
+	page: ImagePageSlot | null,
 	signal: AbortSignal
 ): Promise<EnterImageEditOutcome> {
 	const name = driveItemName(item)
@@ -327,7 +331,7 @@ async function prepare(
 	opened: { session: EditSession; capabilities: EditCapabilities },
 	cacheScope: string | null,
 	image: HTMLImageElement | null,
-	page: ImagePageSource | null,
+	page: ImagePageSlot | null,
 	signal: AbortSignal
 ): Promise<EnterImageEditOutcome> {
 	const refuse = (messageKey: PreviewKey): EnterImageEditOutcome => {
@@ -414,7 +418,7 @@ export async function enterImageEdit(args: {
 	frozenUuid: string
 	cacheScope: string | null
 	image: HTMLImageElement | null
-	page?: ImagePageSource | null
+	page?: ImagePageSlot | null
 	signal: AbortSignal
 }): Promise<EnterImageEditOutcome> {
 	return await enter(args.item, args.frozenUuid, args.cacheScope, args.image, args.page ?? null, args.signal).catch((e: unknown) => {

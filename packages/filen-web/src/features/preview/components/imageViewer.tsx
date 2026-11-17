@@ -18,7 +18,7 @@ import { StreamablePreview } from "@/features/preview/components/streamablePrevi
 import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomableImage"
 import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
 import { TiffImage } from "@/features/preview/components/tiffImage"
-import type { ImagePageSource } from "@/features/preview/lib/imagePageSource"
+import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 
 export interface ImageViewerProps {
 	item: DriveItem
@@ -27,7 +27,7 @@ export interface ImageViewerProps {
 	// the file again. Not set for HEIC/HEIF (the editor decodes those itself).
 	imageRef?: RefObject<HTMLImageElement | null> | undefined
 	// Holds the page shown by a document engine (a TIFF's), for the image editor to draw from it.
-	pageSourceRef?: RefObject<ImagePageSource | null> | undefined
+	pageSourceRef?: RefObject<ImagePageSlot | null> | undefined
 }
 
 // Keyed by the buffer itself: a revisited slot gets the same cached Uint8Array back from
