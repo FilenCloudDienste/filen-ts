@@ -80,6 +80,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	iwork: "drivePreviewKindIwork",
 	font: "drivePreviewKindFont",
 	sqlite: "drivePreviewKindSqlite",
+	geo: "drivePreviewKindGeo",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -266,7 +267,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -380,7 +381,7 @@ describe("precedence tiers", () => {
 		}
 
 		// Grammars the code tier derives that an earlier tier keeps.
-		expect(overlaps).toEqual({ svg: "image", md: "markdown", markdown: "markdown", mkd: "markdown" })
+		expect(overlaps).toEqual({ svg: "image", md: "markdown", markdown: "markdown", mkd: "markdown", gpx: "geo", kml: "geo" })
 
 		for (const [extension, winner] of Object.entries(overlaps)) {
 			expect(previewCategoryForExtension(extension)).toBe(winner)
@@ -389,8 +390,8 @@ describe("precedence tiers", () => {
 
 	it("derives code from every grammar but the binary ones, keeping the shared code set", () => {
 		const derived = codeLanguageExtensions().filter(extension => !CODE_FILE_EXTENSIONS.has(extension))
-		// Kept by an earlier tier, or code already (TypeScript's module and CommonJS sources).
-		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts"])
+		// Kept by an earlier tier (GPX and KML by the geo viewer), or code already (TypeScript's module and CommonJS sources).
+		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts", "gpx", "kml"])
 
 		expect(CODE_DERIVATION_EXCLUSIONS).toEqual(new Set(["mo", "sig", "pgp", "p", "z80"]))
 		expect(CODE_EXTENSIONS.size).toBe(CODE_FILE_EXTENSIONS.size + derived.length - CODE_DERIVATION_EXCLUSIONS.size)
@@ -401,14 +402,14 @@ describe("precedence tiers", () => {
 
 		const newlyCode = derived.filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension) && !settled.has(extension))
 
-		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the five binary ones, plus GPX and KML.
-		expect(newlyCode).toHaveLength(179 - 1 - 5 + 2)
+		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the five binary ones.
+		expect(newlyCode).toHaveLength(179 - 1 - 5)
 
 		for (const extension of newlyCode) {
 			expect(previewCategoryForExtension(extension), extension).toBe("code")
 		}
 
-		expect(["gpx", "kml", "vhd", "yml", "pl", "mts", "cts"].map(previewCategoryForExtension)).toEqual(Array(7).fill("code"))
+		expect(["vhd", "yml", "pl", "mts", "cts"].map(previewCategoryForExtension)).toEqual(Array(5).fill("code"))
 	})
 
 	it("keeps a ZX Spectrum snapshot out of code, behind Open as text", () => {
@@ -534,5 +535,23 @@ describe("the sqlite row", () => {
 		expect(canPreview(fileNamed("app.db", 50n * 1024n * MIB))).toBe(true)
 		expect(previewKindLabelKey("sqlite")).toBe("drivePreviewKindSqlite")
 		expect(isPhotoCategory("sqlite")).toBe(false)
+	})
+})
+
+describe("the geo row", () => {
+	it.each(["ride.gpx", "places.kml", "places.kmz", "area.geojson"])("%s opens as a track up to the text cap, everywhere", name => {
+		expect(previewType(fileNamed(name, 1024n))).toBe("geo")
+		expect(canPreview(fileNamed(name, TEXT_MAX_BYTES))).toBe(true)
+		expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n))).toBe(false)
+		expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0)).toBe(true)
+	})
+
+	it("reads an extensionless track by its stored type, and keeps topojson and json elsewhere", () => {
+		expect(previewType(fileNamed("track", 1024n, "application/gpx+xml"))).toBe("geo")
+		expect(previewType(fileNamed("shapes", 1024n, "application/geo+json"))).toBe("geo")
+		expect(previewType(fileNamed("world.topojson", 1024n))).toBe("other")
+		expect(previewType(fileNamed("data.json", 1024n))).toBe("code")
+		expect(previewKindLabelKey("geo")).toBe("drivePreviewKindGeo")
 	})
 })

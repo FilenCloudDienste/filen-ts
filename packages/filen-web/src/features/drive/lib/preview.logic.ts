@@ -44,6 +44,7 @@ export type PreviewCategory =
 	| "iwork"
 	| "font"
 	| "sqlite"
+	| "geo"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -65,6 +66,9 @@ export const EBOOK_MAX_BYTES_MOBILE = 67_108_864n // 64 MiB
 export function ebookMaxBytes(profile: DeviceProfile): bigint {
 	return profile.mobile ? EBOOK_MAX_BYTES_MOBILE : PREVIEW_MAX_BYTES
 }
+
+// Track and shape files the geo viewer plots. topojson stays "other".
+export const GEO_EXTENSIONS: readonly string[] = ["gpx", "kml", "kmz", "geojson"]
 
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
@@ -381,6 +385,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindSqlite",
 		assistantKind: null
 	},
+	// GPS tracks and shapes, read whole into the geo worker (their caps equal the text cap, so View source reuses the
+	// held bytes).
+	geo: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindGeo",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -450,6 +470,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["sqlite", "sqlite3", "db3", "s3db", "sl3"], "sqlite"],
 	// Read by MuPDF, laid out to the view (azw3 and other Kindle formats stay downloads).
 	[["epub", "mobi", "fb2"], "ebook"],
+	// GPX and KML are XML (the code tier's grammar shows their source); a KMZ is a zipped KML.
+	[GEO_EXTENSIONS, "geo"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],

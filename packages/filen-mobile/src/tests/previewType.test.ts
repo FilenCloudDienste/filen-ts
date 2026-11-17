@@ -457,6 +457,14 @@ describe("getPreviewType — stored mime", () => {
 		expect(getPreviewType("clip.db", "video/mp4")).toBe("video")
 	})
 
+	// Before = after: track types name extensions this platform's tables lack.
+	it("keeps an extensionless track unknown, with no type extension", () => {
+		for (const mime of ["application/gpx+xml", "application/vnd.google-earth.kml+xml", "application/vnd.google-earth.kmz", "application/geo+json"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+			expect(fileTypeExtension("download", mime), mime).toBe("")
+		}
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

@@ -673,6 +673,8 @@ export const drive = {
 	drivePreviewKindFont: "Font",
 	/** Info panel — Kind row value: a SQLite database file */
 	drivePreviewKindSqlite: "SQLite database",
+	/** Info panel — Kind row value: a GPS track or map shapes file (gpx, kml, kmz, geojson) */
+	drivePreviewKindGeo: "Map track",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

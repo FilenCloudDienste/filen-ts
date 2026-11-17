@@ -354,10 +354,10 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("text")
 	})
 
-	it("reads a mailbox as code (its grammar), and geo and notebook JSON as nothing yet", () => {
+	it("reads a mailbox as code (its grammar), geo files as maps, and notebook JSON as nothing yet", () => {
 		expect(previewType(fileNamed("inbox.mbox"))).toBe("code")
-		expect(previewType(fileNamed("tracks.gpx"))).toBe("code")
-		expect(previewType(fileNamed("map.geojson"))).toBe("other")
+		expect(previewType(fileNamed("tracks.gpx"))).toBe("geo")
+		expect(previewType(fileNamed("map.geojson"))).toBe("geo")
 		expect(previewType(fileNamed("analysis.ipynb"))).toBe("other")
 	})
 

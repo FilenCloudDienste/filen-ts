@@ -93,6 +93,7 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
+import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
@@ -2948,6 +2949,8 @@ function PreviewBody({
 			return <FontViewer item={item} />
 		case "sqlite":
 			return <SqliteViewer item={item} />
+		case "geo":
+			return <GeoViewer item={item} />
 		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive
 		// switch's required fallback.
 		case "other":

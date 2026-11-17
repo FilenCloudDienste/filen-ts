@@ -13,6 +13,7 @@ import { RICH_FONT_FAMILY, RICH_SQLITE_ENTRY } from "./fixtures/rich"
 const [FONT_TTF, FONT_WOFF2] = FIXTURE_FILES["rich-fonts"]
 const [APP_DB, WAL_DB, NOT_DB] = FIXTURE_FILES["rich-sqlite"]
 const [DB_ARCHIVE] = FIXTURE_FILES["rich-sqlite-archive"]
+const [RIDE, PLACES_KML, PLACES_KMZ, AREA] = FIXTURE_FILES["rich-geo"]
 
 async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
@@ -121,6 +122,43 @@ test("a SQLite database is browsed read-only, from the drive and from an archive
 	await browser.row(RICH_SQLITE_ENTRY).dblclick()
 	await expectDatabase(page, browser.overlay)
 	await browser.close()
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a track is plotted from the file alone, with its figures, profile and references never fetched", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "rich-geo")
+	const dialog = previewOverlay(page)
+
+	await itemRow(listbox, RIDE).dblclick()
+	await expect(dialog.getByText(/↑ \d+ m ↓ \d+ m/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText(/120 points · 1 waypoint/)).toBeVisible()
+	await expect(dialog.getByLabel("Track plot")).toBeVisible()
+	await expect(dialog.getByRole("img", { name: "Elevation profile" })).toBeVisible()
+
+	// The source is the file's text, read-only.
+	await dialog.getByRole("button", { name: "Source", exact: true }).click()
+	await expect(dialog.getByText("Morning ride")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: "Plot", exact: true }).click()
+	await expect(dialog.getByLabel("Track plot")).toBeVisible()
+	await closePreview(page)
+
+	for (const name of [PLACES_KML, PLACES_KMZ]) {
+		await itemRow(listbox, name).dblclick()
+		await expect(dialog.getByText("2 network references not loaded")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expect(dialog.getByLabel("Track plot")).toBeVisible()
+		await closePreview(page)
+	}
+
+	await itemRow(listbox, AREA).dblclick()
+	await expect(dialog.getByText(/5 points · 1 waypoint/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await closePreview(page)
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])

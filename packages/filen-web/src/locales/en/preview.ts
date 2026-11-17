@@ -39,6 +39,7 @@ import { previewImageView } from "@/locales/en/previewImage/view"
 import { previewRichShell } from "@/locales/en/previewRich/shell"
 import { previewRichFont } from "@/locales/en/previewRich/font"
 import { previewRichSqlite } from "@/locales/en/previewRich/sqlite"
+import { previewRichGeo } from "@/locales/en/previewRich/geo"
 import { previewTextMetadata } from "@/locales/en/previewText/metadata"
 import { previewEbookReader } from "@/locales/en/previewEbook/reader"
 import { previewTextEncoding } from "@/locales/en/previewText/encoding"
@@ -880,6 +881,7 @@ export const preview = {
 	...previewRichShell,
 	...previewRichFont,
 	...previewRichSqlite,
+	...previewRichGeo,
 	...previewTextMetadata,
 	...previewEbookReader,
 	...previewTextEncoding,
