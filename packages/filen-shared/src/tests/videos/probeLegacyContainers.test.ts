@@ -354,6 +354,15 @@ describe("probeVideo — MPEG-PS", () => {
 		])
 	})
 
+	it("names 16-bit DVD LPCM, and leaves 20- and 24-bit LPCM unnamed", async () => {
+		const lpcm = (format: number): Uint8Array =>
+			Uint8Array.from([...pack(), ...pes(0xbd, 90_000, [0xa0, 1, 0, 1, 0, format, 0x80, 0, 0, 0, 0])])
+
+		expect((await probe(lpcm(0x01)))?.audio[0]).toMatchObject({ codec: "pcm", ch: 2, rate: 48000 })
+		expect((await probe(lpcm(0x81)))?.audio[0]).toMatchObject({ codec: null, ch: 2 })
+		expect((await probe(lpcm(0x41)))?.audio[0]?.codec).toBeNull()
+	})
+
 	it("tells MPEG-1 video by its missing sequence extension, and reads a tail blocks away", async () => {
 		expect((await probe(mpegPs(false, 3 * BLOCK_BYTES)))?.video?.codec).toBe("mpeg1")
 		expect(await probe(mpegPs(false, 3 * BLOCK_BYTES))).toMatchObject({ durationSec: 60 })
