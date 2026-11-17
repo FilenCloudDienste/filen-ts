@@ -71,6 +71,29 @@ describe("IworkPreview", () => {
 		expect(handle.release).toHaveBeenCalledOnce()
 	})
 
+	// The lease arrives after the view is gone: it must not hold the archive and its entry reader until sign-out.
+	it("lets a lease that arrives after unmount go", async () => {
+		const release = vi.fn()
+		let resolve: (opened: IworkPreviewEntry) => void = () => undefined
+
+		opener.openIworkPreview.mockImplementation(
+			() =>
+				new Promise(done => {
+					resolve = done
+				})
+		)
+
+		const view = renderPreview("report.pages")
+
+		view.unmount()
+		resolve(entry("image", release))
+
+		await waitFor(() => {
+			expect(release).toHaveBeenCalledOnce()
+		})
+		expect(handle.release).toHaveBeenCalledOnce()
+	})
+
 	it("shows an older document's PDF copy as a PDF", async () => {
 		opener.openIworkPreview.mockResolvedValue(entry("pdf"))
 		renderPreview("deck.key")

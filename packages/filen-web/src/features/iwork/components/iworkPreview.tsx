@@ -70,7 +70,10 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 			}
 		}).then(
 			opened => {
+				// The view went in the gap before this ran: the lease is no one's.
 				if (abort.signal.aborted) {
+					opened?.lease.release()
+
 					return
 				}
 
