@@ -37,6 +37,7 @@
 		"./desktopShellStrings": "./src/desktopShellStrings.ts",
 		"./languages": "./src/languages.ts",
 		"./textEncoding": "./src/textEncoding.ts",
+		"./torrent": "./src/torrent.ts",
 		"./session": "./src/session.ts",
 		"./legacySession": "./src/legacySession.ts"
 	},

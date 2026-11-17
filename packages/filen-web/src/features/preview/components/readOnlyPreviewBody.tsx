@@ -9,6 +9,7 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
+import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
@@ -91,6 +92,8 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 			)
 		case "font":
 			return <FontViewer item={item} />
+		case "torrent":
+			return <TorrentViewer item={item} />
 		case "sqlite":
 			return <SqliteViewer item={item} />
 		case "geo":

@@ -91,6 +91,7 @@ import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
+import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
@@ -2948,6 +2949,8 @@ function PreviewBody({
 			)
 		case "font":
 			return <FontViewer item={item} />
+		case "torrent":
+			return <TorrentViewer item={item} />
 		case "sqlite":
 			return <SqliteViewer item={item} />
 		case "geo":

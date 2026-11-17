@@ -107,6 +107,7 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["model/gltf-binary", "glb"],
 	["model/3mf", "3mf"],
 	["model/vnd.usdz+zip", "usdz"],
+	["application/x-bittorrent", "torrent"],
 	["application/vnd.sqlite3", "sqlite"],
 	["application/x-sqlite3", "sqlite"],
 	["application/epub+zip", "epub"],

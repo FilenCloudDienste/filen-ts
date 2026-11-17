@@ -410,6 +410,12 @@ describe("resolveFileIconKey", () => {
 		}
 	})
 
+	// Before = after: the torrent type names an extension this platform's tables lack.
+	it("keeps a torrent the generic icon", () => {
+		expect(resolveFileIconKey("download", "application/x-bittorrent")).toBe("other")
+		expect(resolveFileIconKey("linux.torrent")).toBe("other")
+	})
+
 	it("keeps a known extension's icon whatever the mime says", () => {
 		expect(resolveFileIconKey("photo.jpg", "video/mp4")).toBe("image")
 		expect(resolveFileIconKey("main.rs", "text/plain")).toBe("code")

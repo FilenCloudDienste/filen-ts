@@ -442,6 +442,13 @@ describe("getPreviewType — stored mime", () => {
 		}
 	})
 
+	// Before = after: the torrent type names an extension this platform's tables lack.
+	it("keeps an extensionless torrent unknown, with no type extension", () => {
+		expect(getPreviewType("download", "application/x-bittorrent")).toBe("unknown")
+		expect(fileTypeExtension("download", "application/x-bittorrent")).toBe("")
+		expect(getPreviewType("linux.torrent")).toBe("unknown")
+	})
+
 	// Before = after: a database type names an extension this platform's tables lack, and a .db (now an extension a
 	// read settles on web) still reads by its stored type alone here.
 	it("keeps an extensionless database unknown, and a .db to its stored type", () => {

@@ -677,6 +677,8 @@ export const drive = {
 	drivePreviewKindGeo: "Map track",
 	/** Info panel — Kind row value: a 3D model (stl, obj, gltf, glb, 3mf, ply) */
 	drivePreviewKindModel3d: "3D model",
+	/** Info panel — Kind row value: a BitTorrent metadata file (.torrent) */
+	drivePreviewKindTorrent: "Torrent",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

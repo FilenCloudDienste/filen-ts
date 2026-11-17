@@ -22,6 +22,7 @@ import {
 	PREVIEW_MAX_BYTES,
 	SPREADSHEET_MAX_BYTES,
 	TEXT_MAX_BYTES,
+	TORRENT_MAX_BYTES,
 	FONT_MAX_BYTES,
 	type PreviewCategory,
 	type StreamedCategory
@@ -83,6 +84,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	sqlite: "drivePreviewKindSqlite",
 	geo: "drivePreviewKindGeo",
 	model3d: "drivePreviewKindModel3d",
+	torrent: "drivePreviewKindTorrent",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -269,7 +271,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -587,5 +589,19 @@ describe("the model3d row", () => {
 		expect(previewType(fileNamed("main.obj", 1024n), "notWavefront")).toBe("other")
 		expect(previewKindLabelKey("model3d")).toBe("drivePreviewKindModel3d")
 		expect(isPhotoCategory("model3d")).toBe(false)
+	})
+})
+
+describe("the torrent row", () => {
+	it("opens a .torrent up to 16 MiB, on the drive, a link and in an archive, and by its stored type", () => {
+		expect(previewType(fileNamed("linux.torrent", 1024n))).toBe("torrent")
+		expect(previewType(fileNamed("download", 1024n, "application/x-bittorrent"))).toBe("torrent")
+		expect(canPreview(fileNamed("linux.torrent", TORRENT_MAX_BYTES))).toBe(true)
+		expect(canPreview(fileNamed("linux.torrent", TORRENT_MAX_BYTES + 1n))).toBe(false)
+		expect(anonPreviewability(fileNamed("linux.torrent", TORRENT_MAX_BYTES))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: "linux.torrent", access: DIRECT, size: Number(TORRENT_MAX_BYTES) }]), 0)).toBe(true)
+		expect(previewKindLabelKey("torrent")).toBe("drivePreviewKindTorrent")
+		expect(isPhotoCategory("torrent")).toBe(false)
+		expect(isTextCategory("torrent")).toBe(false)
 	})
 })

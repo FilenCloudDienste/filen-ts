@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto"
 import { scenarioModule } from "./scenarios"
 
-// The text family's read-only files (preview-text-read.spec.ts): a legacy-encoded text the detector has to name, and
-// markdown with math and images a preview must never fetch.
+// The text family's read-only files (preview-text-read.spec.ts): a legacy-encoded text the detector has to name,
+// markdown with math and images a preview must never fetch, and a torrent whose tracker must never be contacted.
 
 // Russian prose, long enough for the detector to settle on its codepage.
 export const LEGACY_CYRILLIC_TEXT =
@@ -46,13 +47,64 @@ export function encodeSingleByte(text: string, label: string): Buffer {
 	)
 }
 
+// A v1 torrent of two files with one tracker, bencoded by hand (keys sorted, strings length-prefixed).
+function bstring(value: string | Buffer): Buffer {
+	const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value
+
+	return Buffer.concat([Buffer.from(`${String(bytes.length)}:`), bytes])
+}
+
+const TORRENT_INFO = Buffer.concat([
+	Buffer.from("d"),
+	bstring("files"),
+	Buffer.from("l"),
+	Buffer.from("d"),
+	bstring("length"),
+	Buffer.from("i1000e"),
+	bstring("path"),
+	Buffer.from("l"),
+	bstring("01 Intro.flac"),
+	Buffer.from("e"),
+	Buffer.from("e"),
+	Buffer.from("d"),
+	bstring("length"),
+	Buffer.from("i2000e"),
+	bstring("path"),
+	Buffer.from("l"),
+	bstring("cover.jpg"),
+	Buffer.from("e"),
+	Buffer.from("e"),
+	Buffer.from("e"),
+	bstring("name"),
+	bstring("E2E Album"),
+	bstring("piece length"),
+	Buffer.from("i262144e"),
+	bstring("pieces"),
+	bstring(Buffer.alloc(20, 7)),
+	Buffer.from("e")
+])
+
+export const TORRENT_TRACKER = "udp://tracker.e2e-never-contacted.example:1337/announce"
+export const TORRENT_INFOHASH = createHash("sha1").update(TORRENT_INFO).digest("hex")
+
+const TORRENT_BYTES = Buffer.concat([
+	Buffer.from("d"),
+	bstring("announce"),
+	bstring(TORRENT_TRACKER),
+	bstring("info"),
+	TORRENT_INFO,
+	Buffer.from("e")
+])
+
 export const TEXT_SCENARIOS = scenarioModule(
 	{
 		"preview-text-legacy": ["cyrillic-notes.txt"],
-		"preview-markdown-math": ["formulas.md"]
+		"preview-markdown-math": ["formulas.md"],
+		"preview-torrent": ["album.torrent"]
 	},
 	() => ({
 		"cyrillic-notes.txt": { buffer: encodeSingleByte(LEGACY_CYRILLIC_TEXT, "windows-1251"), mimeType: "text/plain" },
-		"formulas.md": { buffer: Buffer.from(MATH_MARKDOWN_TEXT, "utf8"), mimeType: "text/markdown" }
+		"formulas.md": { buffer: Buffer.from(MATH_MARKDOWN_TEXT, "utf8"), mimeType: "text/markdown" },
+		"album.torrent": { buffer: TORRENT_BYTES, mimeType: "application/x-bittorrent" }
 	})
 )

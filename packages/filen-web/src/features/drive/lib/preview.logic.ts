@@ -48,6 +48,7 @@ export type PreviewCategory =
 	| "sqlite"
 	| "geo"
 	| "model3d"
+	| "torrent"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -62,6 +63,8 @@ export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 export const TEXT_MAX_BYTES = 33_554_432n // 32 MiB
 // A font is held whole twice (the cache for its FontFace, the face's own copy); real ones stay far below.
 export const FONT_MAX_BYTES = 67_108_864n // 64 MiB
+// A torrent is metadata: its info dictionary and piece hashes. Real ones stay far below.
+export const TORRENT_MAX_BYTES = 16_777_216n // 16 MiB
 // An e-book is read through ranges, but MuPDF keeps the parsed book (and a MOBI or FB2 whole) in its heap, which on a
 // phone is a quarter of a desktop's: the same bound as the other documents MuPDF reads whole there.
 export const EBOOK_MAX_BYTES_MOBILE = 67_108_864n // 64 MiB
@@ -416,6 +419,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindModel3d",
 		assistantKind: null
 	},
+	// Read whole in the text-family worker; its trackers are text, never contacted.
+	torrent: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TORRENT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindTorrent",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -490,6 +508,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[GEO_FORMATS, "geo"],
 	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
 	[MODEL_FORMATS, "model3d"],
+	[["torrent"], "torrent"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],

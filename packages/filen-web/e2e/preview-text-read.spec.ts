@@ -4,7 +4,13 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
-import { LEGACY_CYRILLIC_AS_KOI8_PREFIX, LEGACY_CYRILLIC_TEXT, MATH_REMOTE_IMAGES } from "./fixtures/text"
+import {
+	LEGACY_CYRILLIC_AS_KOI8_PREFIX,
+	LEGACY_CYRILLIC_TEXT,
+	MATH_REMOTE_IMAGES,
+	TORRENT_INFOHASH,
+	TORRENT_TRACKER
+} from "./fixtures/text"
 
 // Reading text-family files, from the shared fixture tree only: a legacy codepage named by the encoding detector (its
 // wasm loaded for real, under the page's isolation headers and CSP) and read again with another one; and markdown
@@ -12,6 +18,7 @@ import { LEGACY_CYRILLIC_AS_KOI8_PREFIX, LEGACY_CYRILLIC_TEXT, MATH_REMOTE_IMAGE
 
 const [CYRILLIC] = FIXTURE_FILES["preview-text-legacy"]
 const [FORMULAS] = FIXTURE_FILES["preview-markdown-math"]
+const [TORRENT] = FIXTURE_FILES["preview-torrent"]
 
 const MATHML = "http://www.w3.org/1998/Math/MathML"
 
@@ -96,6 +103,29 @@ test("markdown math renders as MathML and its remote images are never fetched", 
 	await close(page)
 
 	expect(imageRequests).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("a torrent shows its infohash, trackers and files, and its tracker is never contacted", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-torrent")
+
+	await listbox.getByRole("option", { name: TORRENT }).dblclick()
+
+	const dialog = page.getByRole("dialog")
+
+	await expect(dialog.getByText("E2E Album", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText(TORRENT_INFOHASH, { exact: true })).toBeVisible()
+	await expect(dialog.getByText(TORRENT_TRACKER, { exact: true })).toBeVisible()
+	await expect(dialog.getByText("E2E Album/01 Intro.flac", { exact: true })).toBeVisible()
+
+	await close(page)
+
 	expect(foreign).toEqual([])
 	expect(cspViolations).toEqual([])
 })

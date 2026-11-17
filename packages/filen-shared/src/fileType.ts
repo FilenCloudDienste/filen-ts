@@ -131,6 +131,7 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["model/gltf-binary", "glb", "both"],
 	["model/3mf", "3mf", "both"],
 	["model/vnd.usdz+zip", "usdz", "both"],
+	["application/x-bittorrent", "torrent", "both"],
 	["application/vnd.sqlite3", "sqlite", "both"],
 	["application/x-sqlite3", "sqlite", "toExt"],
 	["application/pdf", "pdf", "both"],
