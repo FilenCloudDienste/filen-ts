@@ -23,13 +23,19 @@ function networkUrl(request: Request): URL | null {
 	return url !== null && (url.protocol === "https:" || url.protocol === "http:") ? url : null
 }
 
+// A request the page's or a frame's Content Security Policy refused: never sent. Chromium still reports it as a request,
+// then fails it with this reason; Firefox and WebKit report none.
+const CSP_BLOCKED = /^csp$|ERR_BLOCKED_BY_CSP|content security policy/i
+
 // Collects every request that leaves the app's own origin and Filen's hosts, as "<resource type> <url>"; the array
 // fills in place, so assert it once the flow is done: `expect(foreign).toEqual([])`. strictPreview also collects any
 // image, stylesheet, font or media request to another origin, Filen's CDN and egest included: a preview draws its
-// pictures from bytes it already holds. The SDK's own downloads are fetches from its worker and stay out of it.
+// pictures from bytes it already holds. The SDK's own downloads are fetches from its worker and stay out of it. A
+// request a Content Security Policy blocked never left the browser and is taken out again once it fails so.
 export function trackForeignRequests(context: BrowserContext, { strictPreview }: { strictPreview: boolean }): string[] {
 	const appOrigin = new URL(e2eBaseUrl()).origin
 	const foreign: string[] = []
+	const tracked: Request[] = []
 
 	context.on("request", request => {
 		const url = networkUrl(request)
@@ -40,6 +46,15 @@ export function trackForeignRequests(context: BrowserContext, { strictPreview }:
 
 		if (!isFilenHost(url.hostname) || (strictPreview && PAINTED_TYPES.has(request.resourceType()))) {
 			foreign.push(`${request.resourceType()} ${url.href}`)
+			tracked.push(request)
+		}
+	})
+	context.on("requestfailed", request => {
+		const index = tracked.indexOf(request)
+
+		if (index !== -1 && CSP_BLOCKED.test(request.failure()?.errorText ?? "")) {
+			foreign.splice(index, 1)
+			tracked.splice(index, 1)
 		}
 	})
 
