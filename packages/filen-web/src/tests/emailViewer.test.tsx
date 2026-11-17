@@ -350,4 +350,34 @@ describe("EmailViewer", () => {
 		expect(screen.queryByText("Reply to")).toBeNull()
 		expect(screen.queryByText("Domain written as:", { exact: false })).toBeNull()
 	})
+
+	it("hides the picture the HTML shows, not another part with its Content-ID", async () => {
+		message.current = [
+			"Subject: Shared id",
+			'Content-Type: multipart/related; boundary="r"',
+			"",
+			"--r",
+			"Content-Type: text/html",
+			"",
+			'<p><img src="cid:same@x"></p>',
+			"--r",
+			'Content-Type: image/png; name="shown.png"',
+			"Content-ID: <same@x>",
+			"Content-Transfer-Encoding: base64",
+			"",
+			"iVBORw0KGgo=",
+			"--r",
+			'Content-Type: application/pdf; name="also.pdf"',
+			"Content-ID: <same@x>",
+			"",
+			"%PDF-1.7",
+			"--r--",
+			""
+		].join("\r\n")
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByText("Attachments (1)")).toBeTruthy()
+		expect(screen.getByText("also.pdf")).toBeTruthy()
+		expect(screen.queryByText("shown.png")).toBeNull()
+	})
 })

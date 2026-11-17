@@ -17,7 +17,7 @@ import { useLinkSaveable } from "@/features/publicLinks/queries/publicLink"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewDownloadable, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
-import { sanitizeEmailHtml } from "@/features/preview/lib/emailSanitizer"
+import { sanitizeBody, type CidPicture } from "@/features/preview/lib/emailBody"
 import type { EmailSanitizeResult } from "@filen/shared/dom"
 import { readEmailFile } from "@/features/preview/lib/textFamilyClient"
 import type { EmailAttachment, EmailMessage, EmailReading } from "@/features/preview/lib/emailReading"
@@ -45,17 +45,18 @@ const MAX_DEPTH = 3
 const FOLDED_RECIPIENTS = 2
 
 type ReadingState =
-	{ status: "pending" } | { status: "done"; reading: EmailReading; cidUrls: ReadonlyMap<string, string> } | { status: "failed" }
+	{ status: "pending" } | { status: "done"; reading: EmailReading; cidUrls: ReadonlyMap<string, CidPicture> } | { status: "failed" }
+
 type View = "html" | "text" | "source"
 
 // The message's inline pictures (cid:) as object URLs for its HTML: raster images only, each a blob of the type its
 // bytes say (the declared one never reaches a URL).
-function mintCidUrls(attachments: readonly EmailAttachment[]): Map<string, string> {
-	const made = new Map<string, string>()
+function mintCidUrls(attachments: readonly EmailAttachment[]): Map<string, CidPicture> {
+	const made = new Map<string, CidPicture>()
 
-	for (const attachment of attachments) {
+	for (const [part, attachment] of attachments.entries()) {
 		if (attachment.contentId !== null && attachment.imageType !== null && !made.has(attachment.contentId)) {
-			made.set(attachment.contentId, URL.createObjectURL(new Blob([attachment.blob], { type: attachment.imageType })))
+			made.set(attachment.contentId, { url: URL.createObjectURL(new Blob([attachment.blob], { type: attachment.imageType })), part })
 		}
 	}
 
@@ -68,7 +69,7 @@ function useEmailReading(bytes: Uint8Array): ReadingState {
 
 	useEffect(() => {
 		let live = true
-		let minted: ReadonlyMap<string, string> = new Map()
+		let minted: ReadonlyMap<string, CidPicture> = new Map()
 
 		readEmailFile(bytes).then(
 			reading => {
@@ -88,7 +89,7 @@ function useEmailReading(bytes: Uint8Array): ReadingState {
 		return () => {
 			live = false
 
-			for (const url of minted.values()) URL.revokeObjectURL(url)
+			for (const { url } of minted.values()) URL.revokeObjectURL(url)
 		}
 	}, [bytes])
 
@@ -332,20 +333,6 @@ function ViewSwitch({
 	)
 }
 
-// The HTML sanitized, and the parts it shows in place (each Content-ID its pictures resolved): those are not listed.
-function sanitizeBody(html: string, cidUrls: ReadonlyMap<string, string>): { sanitized: EmailSanitizeResult; shown: ReadonlySet<string> } {
-	const shown = new Set<string>()
-	const sanitized = sanitizeEmailHtml(html, id => {
-		const url = cidUrls.get(id) ?? null
-
-		if (url !== null) shown.add(id)
-
-		return url
-	})
-
-	return { sanitized, shown }
-}
-
 function HtmlBody({ sanitized, title }: { sanitized: EmailSanitizeResult; title: string }) {
 	const { t } = useTranslation("preview")
 
@@ -396,7 +383,7 @@ function TextBody({ text, truncated, alt }: { text: string; truncated: boolean; 
 	)
 }
 
-function MessageView({ item, message, cidUrls }: { item: DriveItem; message: EmailMessage; cidUrls: ReadonlyMap<string, string> }) {
+function MessageView({ item, message, cidUrls }: { item: DriveItem; message: EmailMessage; cidUrls: ReadonlyMap<string, CidPicture> }) {
 	const { t } = useTranslation("preview")
 	const depth = useContext(EmailDepthContext)
 	const downloadable = usePreviewDownloadable()
@@ -410,7 +397,7 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 	// Every part but the pictures the HTML shows in place: a part sent inline that is not one (a PDF, say) is listed.
 	const listed = message.attachments
 		.map((attachment, index) => ({ attachment, index }))
-		.filter(({ attachment }) => attachment.contentId === null || body?.shown.has(attachment.contentId) !== true)
+		.filter(({ index }) => body?.shown.has(index) !== true)
 	const date =
 		message.date === null ? null : Number.isNaN(Date.parse(message.date)) ? message.date : formatDateTime(Date.parse(message.date))
 	const openedAttachment = opened === null ? undefined : message.attachments[opened]
