@@ -76,4 +76,16 @@ describe("emailText", () => {
 		expect(emailText({ ...MESSAGE, text: null, html: "<p>Only <b>HTML</b></p>" }, 1000).endsWith("\n\nOnly HTML")).toBe(true)
 		expect(emailText({ ...MESSAGE, text: "z".repeat(10_000) }, 200)).toHaveLength(201)
 	})
+
+	it("keeps the headers to their share, lists cut and counted, so the body is always read", () => {
+		const to = Array.from({ length: 200 }, (_, index) => `person${String(index)}@example.com`)
+		const attachments = Array.from({ length: 1000 }, (_, index) => ({ name: `file-${String(index)}.pdf` }))
+		const extract = emailText({ ...MESSAGE, to, addressesOmitted: 50, attachments, text: "the body" }, 4000)
+		const [head = ""] = extract.split("\n\n")
+
+		expect(head.length).toBeLessThanOrEqual(1000)
+		expect(head).toMatch(/^To: person0@example.com, .* and \d+ more$/mu)
+		expect(head).toMatch(/^Attachments: file-0.pdf, .* and \d+ more$/mu)
+		expect(extract.endsWith("\n\nthe body")).toBe(true)
+	})
 })

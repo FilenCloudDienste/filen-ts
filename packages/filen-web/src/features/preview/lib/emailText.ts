@@ -141,26 +141,51 @@ export function htmlText(html: string, limit: number): string {
 		.trim()
 }
 
-export function emailText(message: EmailNames, limit: number): string {
-	const lines: string[] = []
-	const header = (label: string, value: string | null | readonly string[]): void => {
-		const shown = typeof value === "string" ? value : value === null ? "" : value.join(", ")
+// The headers' share of the extract: lists past their share are cut and counted, so the body always has room.
+const HEADER_CHARS = 1000
+const FIELD_CHARS = 200
+const LIST_CHARS = 300
 
-		if (shown !== "") lines.push(`${label}: ${shown}`)
+// "a, b and 3 more": entries while they fit LIST_CHARS, the rest (and `uncounted` not read at all) counted.
+function summary(values: readonly string[], uncounted: number): string {
+	let shown = ""
+	let count = 0
+
+	for (const value of values) {
+		const next = shown === "" ? value : `${shown}, ${value}`
+
+		if (next.length > LIST_CHARS) break
+
+		shown = next
+		count++
 	}
 
-	header("From", message.from)
-	header("Reply-To", message.replyTo)
-	header("To", message.to)
-	header("Cc", message.cc)
-	header("Date", message.date)
-	header("Subject", message.subject)
-	header(
+	const more = values.length - count + uncounted
+
+	return more > 0 ? `${shown}${shown === "" ? "" : " and "}${String(more)} more` : shown
+}
+
+export function emailText(message: EmailNames, limit: number): string {
+	const lines: string[] = []
+	const field = (label: string, value: string | null): void => {
+		if (value !== null && value !== "") lines.push(`${label}: ${value.slice(0, FIELD_CHARS)}`)
+	}
+	const list = (label: string, values: readonly string[], uncounted = 0): void => {
+		if (values.length + uncounted > 0) lines.push(`${label}: ${summary(values, uncounted)}`)
+	}
+
+	field("From", message.from)
+	list("Reply-To", message.replyTo)
+	list("To", message.to, message.addressesOmitted)
+	list("Cc", message.cc)
+	field("Date", message.date)
+	field("Subject", message.subject)
+	list(
 		"Attachments",
 		message.attachments.map(attachment => attachment.name)
 	)
 
-	const head = `${lines.join("\n")}\n\n`
+	const head = `${lines.join("\n").slice(0, HEADER_CHARS)}\n\n`
 	const room = Math.max(0, limit + 1 - head.length)
 	const text = message.text?.trim() ?? ""
 	const body =
