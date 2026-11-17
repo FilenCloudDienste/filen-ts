@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { MAX_EPSI_LINES, sniffEps } from "@/features/preview/lib/imageSniff/eps"
-import { sniffJxl, sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
+import { JXL_PREVIEW_SIZE, sniffJxl, sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
 import { MAX_PSD_RESOURCE_BLOCKS, sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 import { MAX_TIFF_IFDS, sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
@@ -106,15 +106,66 @@ describe("sniffJxlImage", () => {
 			[2, 2],
 			[3, 5],
 			[1, 3],
-			// no animation; 8 bits per sample, modular 16-bit sufficient, one extra channel
+			// no animation; 8 bits per sample, modular 16-bit sufficient, one extra channel: alpha by default
 			[0, 1],
 			[0, 1],
 			[0, 2],
 			[1, 1],
-			[1, 2]
+			[1, 2],
+			[1, 1]
 		])
 
 		expect(sniffJxlImage(head, head.length)).toEqual({ width: 1000, height: 750, orientation: 6, animated: false, hasAlpha: true })
+	})
+
+	// Not all-default, no extra fields; 8 bits per sample, modular 16-bit sufficient, then the extra channels.
+	function withChannels(channels: readonly (readonly [number, number])[]): Uint8Array {
+		return codestream([[0, 1], [0, 1], [0, 1], [0, 2], [1, 1], ...channels])
+	}
+
+	// An extra channel's fields after d_alpha: its type, 8 bits per sample, no dim shift, a name of `name` bytes.
+	function channel(type: readonly (readonly [number, number])[], name = 0): (readonly [number, number])[] {
+		return [
+			[0, 1],
+			...type,
+			[0, 1],
+			[0, 2],
+			[0, 2],
+			...(name === 0
+				? [[0, 2] as const]
+				: [[1, 2] as const, [name, 4] as const, ...Array.from({ length: name }, () => [0x61, 8] as const)])
+		]
+	}
+
+	it("tells a depth map or a spot colour from alpha, past a named channel", () => {
+		// two channels: depth (Enum Val(1)) named "aaa", then spot colour (Enum BitsOffset(4, 2): 0) with its four F16
+		const depthAndSpot = withChannels([
+			[2, 2],
+			[0, 4],
+			...channel([[1, 2]], 3),
+			...channel([
+				[2, 2],
+				[0, 4]
+			]),
+			[0, 32],
+			[0, 32]
+		])
+
+		expect(sniffJxlImage(depthAndSpot, depthAndSpot.length)?.hasAlpha).toBe(false)
+
+		// depth, then a non-default alpha (Enum Val(0)) with its alpha_associated bit
+		const depthAndAlpha = withChannels([[2, 2], [0, 4], ...channel([[1, 2]]), ...channel([[0, 2]]), [0, 1]])
+
+		expect(sniffJxlImage(depthAndAlpha, depthAndAlpha.length)?.hasAlpha).toBe(true)
+	})
+
+	it("reads the preview size table as the specification writes it", () => {
+		expect(JXL_PREVIEW_SIZE).toEqual([
+			[6, 1],
+			[8, 65],
+			[10, 321],
+			[12, 1065]
+		])
 	})
 
 	it("tells an animation", () => {

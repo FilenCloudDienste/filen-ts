@@ -10,7 +10,7 @@ export interface JxlHeader {
 }
 
 // What the image metadata after the size says: the Exif-style orientation (1 when not given), whether the image is an
-// animation, and whether it carries extra channels (alpha, in practice: an edited copy keeps them as PNG).
+// animation, and whether one of its extra channels is alpha (an edited copy keeps it as PNG).
 export interface JxlImage extends JxlHeader {
 	readonly orientation: number
 	readonly animated: boolean
@@ -116,11 +116,12 @@ const PREVIEW_DIV8: readonly (readonly [number, number])[] = [
 	[5, 1],
 	[9, 33]
 ]
-const PREVIEW_SIZE: readonly (readonly [number, number])[] = [
+// PreviewHeader's ysize/xsize (18181-1 A.6): BitsOffset(6, 1), BitsOffset(8, 65), BitsOffset(10, 321), BitsOffset(12, 1065).
+export const JXL_PREVIEW_SIZE: readonly (readonly [number, number])[] = [
 	[6, 1],
 	[8, 65],
 	[10, 321],
-	[12, 1]
+	[12, 1065]
 ]
 
 // PreviewHeader (18181-1 A.6): read only to step past it.
@@ -131,7 +132,7 @@ function skipPreview(read: BitReader): boolean {
 		return false
 	}
 
-	const distributions = div8 === 1 ? PREVIEW_DIV8 : PREVIEW_SIZE
+	const distributions = div8 === 1 ? PREVIEW_DIV8 : JXL_PREVIEW_SIZE
 
 	if (readU32(read, distributions) === null) {
 		return false
@@ -161,19 +162,123 @@ const EXTRA_CHANNELS: readonly (readonly [number, number])[] = [
 	[12, 1]
 ]
 
-// BitDepth and modular_16bit_buffer_sufficient, then num_extra_channels (18181-1 A.6, A.7).
-function readExtraChannels(read: BitReader): number | null {
+// Enum (18181-1 A.3): U32(Val(0), Val(1), BitsOffset(4, 2), BitsOffset(6, 18)).
+const ENUM: readonly (readonly [number, number])[] = [
+	[0, 0],
+	[0, 1],
+	[4, 2],
+	[6, 18]
+]
+const DIM_SHIFT: readonly (readonly [number, number])[] = [
+	[0, 0],
+	[0, 3],
+	[0, 4],
+	[3, 1]
+]
+const NAME_LENGTH: readonly (readonly [number, number])[] = [
+	[0, 0],
+	[4, 0],
+	[5, 16],
+	[10, 48]
+]
+const CFA_CHANNEL: readonly (readonly [number, number])[] = [
+	[0, 1],
+	[2, 0],
+	[4, 3],
+	[8, 19]
+]
+const EXTRA_CHANNEL_ALPHA = 0
+const EXTRA_CHANNEL_SPOT_COLOUR = 2
+const EXTRA_CHANNEL_CFA = 5
+// More extra channels than any image a person edits carries: past this the answer is left unknown.
+export const MAX_JXL_EXTRA_CHANNELS = 64
+
+// Steps past `bits` bits; false when the head ends first.
+function skip(read: BitReader, bits: number): boolean {
+	for (let left = bits; left > 0; left -= 16) {
+		if (read(Math.min(16, left)) === null) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// BitDepth (18181-1 A.7).
+function skipBitDepth(read: BitReader): boolean {
 	const float = read(1)
 
 	if (float === null || readU32(read, float === 1 ? FLOAT_BITS : BITS_PER_SAMPLE) === null) {
+		return false
+	}
+
+	return float === 0 || read(4) !== null
+}
+
+// One ExtraChannelInfo (18181-1 A.8): its type, every other field stepped past. Null when the head ends inside it.
+function readExtraChannelType(read: BitReader): number | null {
+	const defaultAlpha = read(1)
+
+	if (defaultAlpha === null) {
 		return null
 	}
 
-	if (float === 1 && read(4) === null) {
+	if (defaultAlpha === 1) {
+		return EXTRA_CHANNEL_ALPHA
+	}
+
+	const type = readU32(read, ENUM)
+
+	if (type === null || !skipBitDepth(read) || readU32(read, DIM_SHIFT) === null) {
 		return null
 	}
 
-	return read(1) === null ? null : readU32(read, EXTRA_CHANNELS)
+	const nameLength = readU32(read, NAME_LENGTH)
+
+	if (nameLength === null || !skip(read, 8 * nameLength)) {
+		return null
+	}
+
+	switch (type) {
+		case EXTRA_CHANNEL_ALPHA:
+			// alpha_associated
+			return read(1) === null ? null : type
+		case EXTRA_CHANNEL_SPOT_COLOUR:
+			// red, green, blue and solidity as F16
+			return skip(read, 64) ? type : null
+		case EXTRA_CHANNEL_CFA:
+			return readU32(read, CFA_CHANNEL) === null ? null : type
+		default:
+			return type
+	}
+}
+
+// BitDepth and modular_16bit_buffer_sufficient, then the extra channels (18181-1 A.6, A.8): whether one is alpha (a
+// depth map or a spot colour is not). Null when the head ends first or there are too many to read.
+function readHasAlpha(read: BitReader): boolean | null {
+	if (!skipBitDepth(read) || read(1) === null) {
+		return null
+	}
+
+	const count = readU32(read, EXTRA_CHANNELS)
+
+	if (count === null || count > MAX_JXL_EXTRA_CHANNELS) {
+		return null
+	}
+
+	let alpha = false
+
+	for (let channel = 0; channel < count; channel++) {
+		const type = readExtraChannelType(read)
+
+		if (type === null) {
+			return null
+		}
+
+		alpha ||= type === EXTRA_CHANNEL_ALPHA
+	}
+
+	return alpha
 }
 
 // ImageMetadata's leading fields (18181-1 A.6): all_default, then extra_fields with the orientation, an intrinsic size,
@@ -224,9 +329,9 @@ function readImage(read: BitReader, size: JxlHeader): JxlImage | null {
 		}
 	}
 
-	const extraChannels = readExtraChannels(read)
+	const hasAlpha = readHasAlpha(read)
 
-	return extraChannels === null ? null : { ...size, orientation, animated: false, hasAlpha: extraChannels > 0 }
+	return hasAlpha === null ? null : { ...size, orientation, animated: false, hasAlpha }
 }
 
 function readHeaders(bytes: Uint8Array, start: number): { size: JxlHeader; read: BitReader } | null {
