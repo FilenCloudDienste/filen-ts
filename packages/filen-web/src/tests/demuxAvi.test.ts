@@ -59,6 +59,8 @@ describe("AVI demuxer over a real file", () => {
 		expect(await video.getDecoderConfig()).toMatchObject({ codedWidth: 64, codedHeight: 36 })
 		expect((await video.getDecoderConfig())?.codec).toMatch(/^avc1\./)
 		expect(await audio.getCodec()).toBe("mp3")
+		// Numbered among the audio tracks, as the probe's audio list is, not by the stream's place in the file.
+		expect([video.number, audio.number]).toEqual([1, 1])
 		expect(await audio.getSampleRate()).toBe(22050)
 		expect(await input.getDurationFromMetadata()).toBeCloseTo(2, 1)
 	})

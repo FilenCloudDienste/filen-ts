@@ -213,7 +213,13 @@ export class PacketDemuxer implements Demuxer {
 	public async getTrackBackings(): Promise<InputTrackBacking[]> {
 		const reader = await this.open
 
-		return reader.tracks.map(track => (track.type === "video" ? new VideoBacking(this, track) : new AudioBacking(this, track)))
+		const counts = { video: 0, audio: 0 }
+
+		// mediabunny's track number is the track's place among the tracks of its type, which the probe's lists use too;
+		// the container's own track number stays the packets' key.
+		return reader.tracks.map(track =>
+			track.type === "video" ? new VideoBacking(this, track, ++counts.video) : new AudioBacking(this, track, ++counts.audio)
+		)
 	}
 
 	// The header's duration, else one estimated from the data's start at the file's average rate (never a read of the
@@ -735,16 +741,18 @@ const NO_DISPOSITION: TrackDisposition = {
 abstract class Backing<T extends DemuxTrack> {
 	protected readonly demuxer: PacketDemuxer
 	protected readonly track: T
+	private readonly ordinal: number
 
-	public constructor(demuxer: PacketDemuxer, track: T) {
+	public constructor(demuxer: PacketDemuxer, track: T, ordinal: number) {
 		this.demuxer = demuxer
 		this.track = track
+		this.ordinal = ordinal
 	}
 
 	public abstract getType(): "video" | "audio"
 
 	public getNumber(): number {
-		return this.track.number
+		return this.ordinal
 	}
 
 	public getInternalCodecId(): string | number | null {
