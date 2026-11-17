@@ -48,13 +48,16 @@ export interface PdfPageText {
 
 interface LineDraft {
 	str: string
+	// The first character's baseline origin (logical order: a right-to-left run's rightmost).
 	x: number
 	y: number
 	size: number
 	dx: number
 	dy: number
-	endX: number
-	endY: number
+	// The line's visual extent along its direction: the least and greatest projection of its characters' baseline
+	// corners, whatever order they came in.
+	start: number
+	end: number
 	// Characters at an odd bidi level, less those at an even one.
 	rtl: number
 }
@@ -82,13 +85,24 @@ export function structuredTextLines(text: Mupdf.StructuredText, bounds: Mupdf.Re
 			line = null
 		},
 		onChar: (c, origin, _font, size, quad, _color, bidi) => {
-			// The lower right corner of the character's quad: where the next one would start.
-			const endX = quad[6]
-			const endY = quad[7]
+			const [dx, dy] = direction
+			// The quad's baseline corners (lower left, lower right) along the line's direction.
+			const a = quad[4] * dx + quad[5] * dy
+			const b = quad[6] * dx + quad[7] * dy
 			const rtl = bidi % 2 === 1 ? 1 : -1
 
 			if (line === null) {
-				line = { str: c, x: origin[0], y: origin[1], size, dx: direction[0], dy: direction[1], endX, endY, rtl }
+				line = {
+					str: c,
+					x: origin[0],
+					y: origin[1],
+					size,
+					dx,
+					dy,
+					start: Math.min(a, b, origin[0] * dx + origin[1] * dy),
+					end: Math.max(a, b),
+					rtl
+				}
 
 				return
 			}
@@ -96,8 +110,8 @@ export function structuredTextLines(text: Mupdf.StructuredText, bounds: Mupdf.Re
 			line.rtl += rtl
 			line.str += c
 			line.size = Math.max(line.size, size)
-			line.endX = endX
-			line.endY = endY
+			line.start = Math.min(line.start, a, b)
+			line.end = Math.max(line.end, a, b)
 		},
 		endLine: () => {
 			const done: LineDraft | null = line
@@ -106,13 +120,16 @@ export function structuredTextLines(text: Mupdf.StructuredText, bounds: Mupdf.Re
 
 			if (done === null || done.str.trim().length === 0) return
 
-			// Page space is y down; the item's direction and origin are given y up.
-			const width = (done.endX - done.x) * done.dx + (done.endY - done.y) * done.dy
+			// The line's visual start on the first character's baseline: a right-to-left run's characters come in logical
+			// order, from the right, so its first origin is its right end. Page space is y down; the item's direction and
+			// origin are given y up.
+			const shift = done.start - (done.x * done.dx + done.y * done.dy)
+			const width = done.end - done.start
 
 			lines.push({
 				str: done.str,
-				x: done.x - bounds[0],
-				y: bounds[3] - done.y,
+				x: done.x + shift * done.dx - bounds[0],
+				y: bounds[3] - (done.y + shift * done.dy),
 				size: done.size,
 				dx: done.dx,
 				dy: done.dy === 0 ? 0 : -done.dy,

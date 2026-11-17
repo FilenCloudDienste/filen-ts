@@ -160,6 +160,55 @@ describe("the read role", () => {
 		expect(text.links).toContainEqual(expect.objectContaining({ page: 0 }))
 	})
 
+	it("places a right-to-left line at its visual extent, not from its logical first character", async () => {
+		const client = localEngine()
+		const book = makeEpub()
+
+		await openBytes(client, "epub", book)
+
+		const outline = await client.call("outline", { generation: 0 })
+		const hebrew = outline[2]?.dest?.[0] ?? -1
+		const text = await client.call("text", { page: hebrew, generation: 0 })
+		const line = text.lines.find(found => /^[\u05d0-\u05ea\s]+$/.test(found.str.trim()))
+
+		// The same line's box as MuPDF lays it out.
+		const document = mupdf.Document.openDocument(book, MUPDF_FORMATS.epub.magic)
+
+		document.layout(LAYOUT.width, LAYOUT.height, LAYOUT.em)
+
+		const page = document.loadPage(hebrew)
+		const bounds = page.getBounds()
+		const stext = page.toStructuredText("preserve-whitespace")
+		let box: readonly number[] | null = null
+		let current: readonly number[] = []
+		let chars = ""
+
+		stext.walk({
+			beginLine: bbox => {
+				current = bbox
+				chars = ""
+			},
+			onChar: c => {
+				chars += c
+			},
+			endLine: () => {
+				if (box === null && line !== undefined && chars === line.str) box = current
+			}
+		})
+		stext.destroy()
+		page.destroy()
+		document.destroy()
+
+		expect(line?.dir).toBe("rtl")
+		expect(box).not.toBeNull()
+
+		const [x0 = 0, , x1 = 0] = box ?? []
+
+		expect(line?.width ?? 0).toBeGreaterThan(0)
+		expect(Math.abs((line?.x ?? 0) - (x0 - bounds[0]))).toBeLessThan(1)
+		expect(Math.abs((line?.width ?? 0) - (x1 - x0))).toBeLessThan(1)
+	})
+
 	it("refuses a book locked by DRM, and opens one whose fonts are only obfuscated", async () => {
 		const locked = makeEpub({ encryption: ["http://www.w3.org/2001/04/xmlenc#aes128-cbc"] })
 		const obfuscated = makeEpub({ encryption: ["http://www.idpf.org/2008/embedding", "http://ns.adobe.com/pdf/enc#RC"] })
