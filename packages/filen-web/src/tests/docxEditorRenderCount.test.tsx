@@ -186,7 +186,11 @@ function typeAt(editor: PagedEditor, text: string): void {
 }
 
 describe("DocxEditView render counts", () => {
-	it("re-renders neither the toolbar nor its formatting controls on a keystroke", async () => {
+	let editor: PagedEditor
+
+	// Mounting the view and opening the document is the costly part (the first layout warms the engine up); it
+	// is the setup, not what the test counts, and takes seconds on a loaded runner.
+	beforeAll(async () => {
 		render(
 			createElement(DocxEditView, {
 				bytes: BYTES,
@@ -206,11 +210,14 @@ describe("DocxEditView render counts", () => {
 			throw new Error("no editing host")
 		}
 
-		const editor = await act(() => host.editor)
+		editor = await act(() => host.editor)
 
 		await waitFor(() => {
 			expect(screen.getByRole("combobox", { name: "Font" })).toBeTruthy()
 		})
+	}, 60_000)
+
+	it("re-renders neither the toolbar nor its formatting controls on a keystroke", async () => {
 		act(() => {
 			editor.selectParagraph(1)
 		})
