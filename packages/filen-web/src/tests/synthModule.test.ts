@@ -552,7 +552,7 @@ describe("module synthesizer", () => {
 		await unpacked.close()
 	})
 
-	it("keeps a module at the 32 MiB cap within libopenmpt's 256 MiB heap", async () => {
+	it("plays a module at the 32 MiB cap within the 96 MiB the instance is replaced past, with room for a second renderer", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
 		const bytes = largeXm(32 * 1024 * 1024 - 1024)
 		const source = serve(bytes)
@@ -562,7 +562,16 @@ describe("module synthesizer", () => {
 
 		expect(first?.sample.numberOfFrames).toBe(4096)
 		first?.sample.close()
-		expect(heap.lib?._filen_heap_bytes()).toBeLessThanOrEqual(256 * 1024 * 1024)
+		// About 79 MiB measured: the file copied in for the open, and its sample.
+		expect(heap.lib?._filen_heap_bytes()).toBeLessThanOrEqual(96 * 1024 * 1024)
+
+		// A second renderer (a seek cursor beside the playing one) still fits the capped heap.
+		const second = input.reader({} as never, () => false)
+		const beside = await second.first(0.05)
+
+		expect(beside?.sample.numberOfFrames).toBe(4096)
+		beside?.sample.close()
+		await second.close()
 		await reader.close()
 		await input.close()
 	}, 60_000)
