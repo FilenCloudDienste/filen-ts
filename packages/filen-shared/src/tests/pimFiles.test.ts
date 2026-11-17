@@ -221,6 +221,16 @@ describe("readContacts", () => {
 		})
 	})
 
+	// A long quoted parameter before a value continued by soft breaks on every line: decided once, joined in pieces.
+	it("joins quoted-printable soft breaks in time linear in the text", () => {
+		const text = `BEGIN:VCARD\nNOTE;ENCODING=QUOTED-PRINTABLE;X="${"a".repeat(60_000)}":=\n${"=\n".repeat(100_000)}x\nEND:VCARD`
+		const started = Date.now()
+		const file = readContacts(text)
+
+		expect(Date.now() - started).toBeLessThan(2000)
+		expect(file.contacts[0]?.note).toBe("x")
+	})
+
 	it("tells a vCard from other .vcf text by its first line", () => {
 		expect(startsVcard("﻿\r\n  BEGIN:VCARD\r\nVERSION:4.0")).toBe(true)
 		expect(startsVcard("begin:vcard")).toBe(true)

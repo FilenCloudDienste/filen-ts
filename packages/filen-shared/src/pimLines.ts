@@ -142,21 +142,54 @@ const LINE_BREAK = /\r\n|\r|\n/g
 // Each content line of `text`, unfolded, handed to `visit` as it is read, up to the caps (nothing is collected). A vCard
 // 2.1 quoted-printable value continues past a line that ends in `=` (a soft break).
 // `visit` returns false to stop. Whether the whole text was read: false when the line cap or `visit` stopped it.
+// Linear in the text: a logical line is kept as its physical pieces until it ends, and whether it is quoted-printable
+// is decided once, when its name and parameters have been read.
 export function eachContentLine(text: string, caps: ContentLineCaps, visit: (line: ContentLine) => boolean | void): boolean {
-	let current: string | null = null
-	let softBreak = false
+	const pieces: string[] = []
+	let length = 0
+	// Quoted-printable: null while undecided (no value colon read yet).
+	let quotedPrintable: boolean | null = null
 	let read = 0
 	let at = 0
 	let stopped = false
 
+	const append = (piece: string): void => {
+		const kept = piece.slice(0, Math.max(0, caps.lineChars - length))
+
+		if (kept.length > 0) {
+			pieces.push(kept)
+			length += kept.length
+		}
+	}
+
 	const flush = (): void => {
-		if (current !== null && !stopped) {
-			const line = parseLine(current)
+		if (pieces.length > 0 && !stopped) {
+			const line = parseLine(pieces.join(""))
 
 			if (line !== null && visit(line) === false) stopped = true
 		}
 
-		current = null
+		pieces.length = 0
+		length = 0
+		quotedPrintable = null
+	}
+
+	const softBreak = (): boolean => {
+		const last = pieces.at(-1)
+
+		if (last?.endsWith("=") !== true) {
+			return false
+		}
+
+		if (quotedPrintable === null) {
+			const head = pieces.length === 1 ? last : pieces.join("")
+			const colon = valueStart(head)
+
+			// No value yet at a soft break: not a property a soft break can continue.
+			quotedPrintable = colon > 0 && isQuotedPrintable(head)
+		}
+
+		return quotedPrintable
 	}
 
 	LINE_BREAK.lastIndex = 0
@@ -170,21 +203,22 @@ export function eachContentLine(text: string, caps: ContentLineCaps, visit: (lin
 		at = match === null ? text.length + 1 : match.index + match[0].length
 		read++
 
-		if (current !== null && softBreak) {
-			current = current.slice(0, -1) + raw
-		} else if (current !== null && (raw.startsWith(" ") || raw.startsWith("\t"))) {
-			current += raw.slice(1)
+		if (pieces.length > 0 && softBreak()) {
+			// The soft break's "=" goes; the next physical line continues the value.
+			const last = pieces.length - 1
+
+			pieces[last] = (pieces[last] ?? "").slice(0, -1)
+			length--
+			append(raw)
+		} else if (pieces.length > 0 && (raw.startsWith(" ") || raw.startsWith("\t"))) {
+			append(raw.slice(1))
 		} else {
 			flush()
 
 			if (raw.trim() === "") continue
 
-			current = raw
+			append(raw)
 		}
-
-		if (current.length > caps.lineChars) current = current.slice(0, caps.lineChars)
-
-		softBreak = current.endsWith("=") && isQuotedPrintable(current)
 	}
 
 	flush()
