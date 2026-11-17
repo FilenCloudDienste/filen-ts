@@ -22,7 +22,11 @@ export function isWebKitEngine(): boolean {
 	return isAppleMobile() || userAgent().browser === "Safari"
 }
 
-// A phone (an iPhone, or Android whose browser says "Mobile"), not a tablet: the smallest tab budgets.
+// A screen's short side at most this many CSS pixels is a phone's: the smallest iPad's is 744.
+const PHONE_SHORT_SIDE = 500
+
+// A phone, not a tablet: the smallest tab budgets. An iPhone, or Android whose browser says "Mobile"; or, for a phone
+// asking for desktop sites (whose user agent says Mac or Linux), a touch screen with a phone's short side.
 export function isPhone(): boolean {
-	return userAgent().device === "mobile"
+	return userAgent().device === "mobile" || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) <= PHONE_SHORT_SIDE)
 }
