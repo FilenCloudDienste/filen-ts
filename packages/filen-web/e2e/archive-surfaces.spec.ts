@@ -9,6 +9,7 @@ import {
 	bootTo,
 	createDirectoryViaDialog,
 	descendInto,
+	directoryListbox,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	uploadFiles,
@@ -282,10 +283,11 @@ test.describe("archives on links, chats and shares", () => {
 			// ---- the archive child: its hero offers Browse contents, which lists it ----
 			await visitLink(page, url)
 
-			const child = page.getByRole("listitem").getByRole("button", { name: namePattern(archiveName) })
+			// The link's listing is drive's listbox: a click selects, a double-click opens.
+			const child = directoryListbox(page).getByRole("option", { name: namePattern(archiveName) })
 
 			await expect(child).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-			await child.click()
+			await child.dblclick()
 			await page.getByRole("button", { name: "Browse contents", exact: true }).click()
 			await expectTreeRoot(linkArchiveBrowser(page).list)
 			await page.getByRole("button", { name: "Back to directory", exact: true }).click()
