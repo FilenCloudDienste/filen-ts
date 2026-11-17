@@ -27,15 +27,23 @@ const ROW_HEIGHT = 28
 const OVERSCAN = 8
 const KEYS = new Set<string>(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"])
 
-// Each document's resolved rows: item index to its 1-based page, null for one leading nowhere.
-const resolvedByDocument = new WeakMap<PdfDomDocument, Map<number, number | null>>()
+// Each document's resolved rows, per outline read from it: item index to its 1-based page, null for one leading
+// nowhere. Keyed by both, as a host can pair a new document (a relaid e-book) with the old one's outline for a moment.
+const resolvedByDocument = new WeakMap<PdfDomDocument, WeakMap<readonly PdfOutlineItem[], Map<number, number | null>>>()
 
-function resolvedOf(document: PdfDomDocument): Map<number, number | null> {
-	let resolved = resolvedByDocument.get(document)
+function resolvedOf(document: PdfDomDocument, outline: readonly PdfOutlineItem[]): Map<number, number | null> {
+	let byOutline = resolvedByDocument.get(document)
+
+	if (byOutline === undefined) {
+		byOutline = new WeakMap()
+		resolvedByDocument.set(document, byOutline)
+	}
+
+	let resolved = byOutline.get(outline)
 
 	if (resolved === undefined) {
 		resolved = new Map()
-		resolvedByDocument.set(document, resolved)
+		byOutline.set(outline, resolved)
 	}
 
 	return resolved
@@ -60,7 +68,7 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 	// Bumped as destinations resolve (the cache is outside React state).
 	const [, setResolvedCount] = useState(0)
 	const focusAfterRender = useRef(false)
-	const resolved = resolvedOf(document)
+	const resolved = resolvedOf(document, outline)
 	const rows = visibleRows(outline, collapsed)
 	const virtualizer = useVirtualizer({
 		count: rows.length,

@@ -111,4 +111,45 @@ describe("PdfOutlinePane", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Close outline" }))
 		expect(onClose).toHaveBeenCalledOnce()
 	})
+
+	it("resolves a new document's outline again, even after the previous outline was shown against it", async () => {
+		mockViewportHeight(element => element.getAttribute("role") === "tree", 280)
+
+		const before = outline(3)
+		const relaid = { numPages: 1000 } as unknown as PdfDomDocument
+		// The relaid book's outline: the same rows, other pages.
+		const after = before.map(item => ({ ...item, dest: [((item.dest as number[])[0] ?? 0) + 10] }))
+		const view = render(
+			<PdfOutlinePane
+				document={DOCUMENT}
+				outline={before}
+				page={1}
+				onGo={vi.fn()}
+			/>
+		)
+
+		await settle()
+		// The host pairs the new document with the old outline until the new one is read.
+		view.rerender(
+			<PdfOutlinePane
+				document={relaid}
+				outline={before}
+				page={12}
+				onGo={vi.fn()}
+			/>
+		)
+		await settle()
+		view.rerender(
+			<PdfOutlinePane
+				document={relaid}
+				outline={after}
+				page={12}
+				onGo={vi.fn()}
+			/>
+		)
+		await settle()
+
+		// Chapter 1 now starts on page 12: the current section follows the new outline.
+		expect(screen.getByRole("treeitem", { current: "location" }).textContent).toContain("Chapter 1")
+	})
 })
