@@ -89,4 +89,16 @@ describe("createEmailHtmlSanitizer", () => {
 		expect(asked).toEqual(["a@b", "c/d", "bad%zz"])
 		expect(result.remoteBlocked).toBe(0)
 	})
+
+	it("resolves SVG 2's href on <image> and <use> as their xlink:href, and drops a remote one", () => {
+		const sanitize = createEmailHtmlSanitizer(fakePurifier)
+		const result = sanitize(
+			"<svg><image href=\"cid:pic\"></image><use href=\"cid:missing\"></use><image href=\"https://x.y/a.png\"></image></svg>",
+			id => (id === "pic" ? "blob:local/pic" : null)
+		)
+
+		expect(result.html).toContain("<image href=\"blob:local/pic\"></image>")
+		expect(result.html).not.toContain("x.y")
+		expect(result.remoteBlocked).toBe(2)
+	})
 })

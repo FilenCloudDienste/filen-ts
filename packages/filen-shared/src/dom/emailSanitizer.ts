@@ -85,6 +85,8 @@ const FORBID_ATTR = ["srcdoc", "formaction", "action", "ping", "http-equiv", EMA
 
 // Attributes holding a URL the browser loads.
 const LOADING_ATTRIBUTES = ["src", "srcset", "background", "poster", "lowsrc", "dynsrc", "data", "xlink:href", "longdesc"]
+// SVG elements whose href (SVG 2) loads its target, lowercased.
+const SVG_HREF_LOADS: ReadonlySet<string> = new Set(["image", "use", "feimage"])
 // SVG presentation attributes: CSS values the browser parses, a url() among them loading its target.
 const PRESENTATION_ATTRIBUTES = ["fill", "stroke", "filter", "mask", "clip-path", "marker-start", "marker-mid", "marker-end", "cursor"]
 
@@ -168,6 +170,18 @@ function cleanAttributes(node: Element, run: Run): void {
 
 	node.removeAttribute("href")
 	node.removeAttribute("target")
+
+	// SVG 2's plain href on the elements that load it: resolved as their xlink:href is (a part of the message, or an
+	// inline image), else removed and counted.
+	if (href !== null && SVG_HREF_LOADS.has(tag)) {
+		const local = localUrl(href, run)
+
+		if (local === null) {
+			run.remoteBlocked++
+		} else {
+			node.setAttribute("href", local)
+		}
+	}
 
 	if (href !== null && (tag === "a" || tag === "area")) {
 		const safe = linkHref(href)
