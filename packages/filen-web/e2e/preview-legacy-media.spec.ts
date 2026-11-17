@@ -61,6 +61,9 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 	await controls.hover()
 	await controls.getByRole("button", { name: "Audio" }).click()
 	await page.getByRole("menuitemradio", { name: /German/ }).click()
+	// The menu stays open on a pick, which it marks; Escape closes it.
+	await expect(page.getByRole("menuitemradio", { name: /German/ })).toHaveAttribute("aria-checked", "true")
+	await page.keyboard.press("Escape")
 	await expect(page.getByRole("menuitemradio", { name: /German/ })).toHaveCount(0)
 
 	const video = dialog.locator("video")

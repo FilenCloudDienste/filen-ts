@@ -9,10 +9,11 @@ import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { waitForSwReady } from "./helpers/sw"
 
-// Synthesized audio in the preview, from the shared read-only tree only: tracker modules rendered by the libopenmpt
-// build (a 15-sample MOD named by its row alone) and a MIDI song rendered with the bundled SoundFont, each a decoded
-// WAV stream the service worker serves; and a `.mod` that is really an MPEG program stream opening as video. Nothing
-// is fetched from another host: the SoundFont comes from the app's own /assets/.
+// Synthesized audio, from the shared read-only tree: tracker modules rendered by the libopenmpt build (a 15-sample MOD
+// named by its row alone) and a MIDI song rendered with the bundled SoundFont, each opened from the drive into the
+// persistent player (drive audio never opens the preview), and a `.mod` that is really an MPEG program stream opening
+// in the preview as video once its head is read. A public link's page plays them as decoded WAV streams the service
+// worker serves. Nothing is fetched from another host: the SoundFont comes from the app's own /assets/.
 
 const SYNTH = FIXTURE_FILES["preview-synth"]
 const [CAMCORDER] = FIXTURE_FILES["preview-mod-video"]
@@ -50,21 +51,28 @@ function midiSong(notes: number): Buffer {
 	return Buffer.from([...header, ...length, ...events])
 }
 
-async function playsDecoded(page: Page, row: Locator): Promise<void> {
+// Opening the drive row `name` hands it to the persistent player, which plays it: its seek position advances.
+async function playsInPlayer(page: Page, row: Locator, name: string): Promise<void> {
 	await row.dblclick()
-	await playsStream(page.getByRole("dialog").locator("audio"))
 
-	await page.keyboard.press("Escape")
+	const bar = page.getByRole("region", { name: "Audio player" })
+
+	await expect(bar.locator(`[title="${name}"]`)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(bar.getByRole("button", { name: "Pause" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	const seek = bar.getByRole("slider", { name: "Seek" })
+
+	await expect(seek).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	const start = Number(await seek.inputValue())
+
+	await expect.poll(async () => Number(await seek.inputValue()), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(start)
 	await expect(page.getByRole("dialog")).toHaveCount(0)
 }
 
-test("tracker modules and a MIDI song play as decoded streams, with nothing fetched from elsewhere", async ({
-	page,
-	context,
-	browserName
-}) => {
+test("tracker modules and a MIDI song play in the player, with nothing fetched from elsewhere", async ({ page, context, browserName }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 	const soundFonts: string[] = []
 
 	context.on("request", request => {
@@ -79,11 +87,11 @@ test("tracker modules and a MIDI song play as decoded streams, with nothing fetc
 
 	await waitForSwReady(page)
 
-	for (const [index] of SYNTH.entries()) {
+	for (const [index, name] of SYNTH.entries()) {
 		const row = rows[index]
 
 		if (row !== undefined) {
-			await playsDecoded(page, row)
+			await playsInPlayer(page, row, name)
 		}
 	}
 
@@ -100,6 +108,7 @@ test("tracker modules and a MIDI song play as decoded streams, with nothing fetc
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a .mod whose head is an MPEG program stream opens as video", async ({ page }) => {
@@ -140,7 +149,7 @@ test.describe("public links", () => {
 			}
 
 			// From here on only the link pages load: anything they fetch off the app's origin is a failure.
-			const foreign = trackForeignRequests(context, { strictPreview: true })
+			const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 			try {
 				for (const link of links) {
@@ -155,6 +164,7 @@ test.describe("public links", () => {
 			}
 
 			expect(foreign).toEqual([])
+			expect(cspBlocked).toEqual([])
 		})
 
 		expect(cspViolations).toEqual([])
