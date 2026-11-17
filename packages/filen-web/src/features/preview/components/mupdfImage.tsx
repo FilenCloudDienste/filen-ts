@@ -247,6 +247,8 @@ export function MupdfDocument({ item, alt, format, pageSourceRef, source }: Mupd
 				<TiffPages
 					item={item}
 					alt={alt}
+					// The bytes read: an EPS file's TIFF section, not the whole file.
+					size={origin.kind === "bytes" ? origin.blob.size : Number(item.data.size)}
 					reader={current.reader}
 					pageSourceRef={pageSourceRef}
 				/>
@@ -393,11 +395,13 @@ function TiffPage({
 function TiffPages({
 	item,
 	alt,
+	size,
 	reader,
 	pageSourceRef
 }: {
 	item: DriveItem
 	alt: string
+	size: number
 	reader: MupdfReader
 	pageSourceRef: MupdfImageProps["pageSourceRef"]
 }) {
@@ -423,7 +427,7 @@ function TiffPages({
 			viewerDocument={reader.document}
 			edit={null}
 			alt={alt}
-			size={Number(item.data.size)}
+			size={size}
 			fullyRead={false}
 			ranged={false}
 			resident={false}

@@ -13,11 +13,11 @@ import "@/lib/i18n"
 // An EPS file is shown by the preview picture it carries, read by range: a DOS EPS's TIFF section in the MuPDF read
 // role, an EPSI preview in the raster decode pool, and a card for one with neither.
 
-const { openMupdfReader, displayRaster, file } = vi.hoisted(() => {
+const { openMupdfReader, displayRaster, file, shellSizes } = vi.hoisted(() => {
 	// The EPS file the byte reader serves.
 	const file: { bytes: Uint8Array } = { bytes: new Uint8Array(0) }
 
-	return { openMupdfReader: vi.fn(), displayRaster: vi.fn(), file }
+	return { openMupdfReader: vi.fn(), displayRaster: vi.fn(), file, shellSizes: [] as number[] }
 })
 
 vi.mock("@/lib/mupdf/reader", () => ({ openMupdfReader, mupdfImagePixels: () => 30_000_000 }))
@@ -26,6 +26,13 @@ vi.mock("@/features/preview/lib/rasterDecode", () => ({
 	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 70, epsi: 8 },
 	transformHeicBytes: vi.fn(),
 	transformHeicBytesOwned: vi.fn()
+}))
+vi.mock("@/features/preview/components/pdfReaderShell", () => ({
+	PdfReaderShell: (props: { size: number }) => {
+		shellSizes.push(props.size)
+
+		return null
+	}
 }))
 vi.mock("@/features/preview/lib/origin/byteReader", () => ({
 	openByteReader: (origin: { kind: string; blob?: Blob }) =>
@@ -47,6 +54,7 @@ function eps(uuid: LinkedFile["uuid"]): DriveItem {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	shellSizes.length = 0
 	cleanup()
 	HTMLCanvasElement.prototype.getContext = vi.fn(() => null)
 })
@@ -68,6 +76,22 @@ describe("ImageViewer on an EPS file", () => {
 		expect(options.format).toBe("tiff")
 		expect(options.origin.kind).toBe("bytes")
 		expect(new Uint8Array(await options.origin.blob.arrayBuffer())).toEqual(tiff)
+	})
+
+	it("gives a multi-page TIFF section's page column the section's size, not the EPS file's", async () => {
+		const tiff = encodeTiff([
+			{ width: 4, height: 2, rgb: [1, 2, 3] },
+			{ width: 4, height: 2, rgb: [3, 2, 1] }
+		])
+
+		file.bytes = dosEps(tiff)
+		openMupdfReader.mockResolvedValue({ pageCount: 2, document: {}, close: vi.fn(() => Promise.resolve()) })
+		render(createElement(ImageViewer, { item: eps("eeeeeeee-0000-0000-0000-000000000044"), alt: "figure" }))
+
+		await waitFor(() => {
+			expect(shellSizes.at(-1)).toBe(tiff.length)
+		})
+		expect(file.bytes.length).toBeGreaterThan(tiff.length)
 	})
 
 	it("decodes an EPSI preview in the pool", async () => {
