@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { buildStructTree } from "../react/pdf/structTree"
 import { pageStructTree } from "../dom/pdf/structGate"
+import { PdfFinder } from "../dom/pdf/find"
 
 // A tagged page's structure tree as the accessible tree in its canvas (react/pdf/structTree.ts), over the text layer's
 // marked content spans as pdf.js's TextLayer writes them.
@@ -159,5 +160,44 @@ describe("the structure tree", () => {
 		await pageStructTree(tagged, second)
 		await pageStructTree(tagged, first)
 		expect(read).toHaveBeenCalledTimes(2)
+	})
+
+	it("finds in a tagged document's text read with its marked content, as the text layer reads it", async () => {
+		// Read with marked content, the text splits into two items (a form XObject ended inside marked content).
+		const page = (tagged: boolean) => ({
+			getStructTree: () => Promise.resolve(tagged ? TREE : null),
+			getTextContent: vi.fn((params?: { readonly includeMarkedContent?: boolean }) =>
+				Promise.resolve({
+					items:
+						params?.includeMarkedContent === true
+							? [
+									{ type: "beginMarkedContentProps", id: "m0" },
+									{ str: "alpha be" },
+									{ str: "ta gamma" },
+									{ type: "endMarkedContent" }
+								]
+							: [{ str: "alpha beta gamma" }]
+				})
+			)
+		})
+		const finder = (tagged: boolean) => {
+			const pages = [page(tagged)]
+
+			return {
+				pages,
+				finder: new PdfFinder({ numPages: 1, getPage: () => Promise.resolve(pages[0]) } as never)
+			}
+		}
+		const tagged = finder(true)
+		const result = await tagged.finder.search("gamma", false, { aborted: false })
+
+		expect(tagged.pages[0]?.getTextContent).toHaveBeenCalledWith({ includeMarkedContent: true })
+		// Page 1, in the text layer's second span, characters 3 to 8.
+		expect(Array.from(result?.matches ?? [])).toEqual([1, 1, 3, 1, 8])
+
+		const plain = finder(false)
+
+		await plain.finder.search("gamma", false, { aborted: false })
+		expect(plain.pages[0]?.getTextContent).toHaveBeenCalledWith(undefined)
 	})
 })

@@ -62,7 +62,7 @@ export interface PdfPage<S = unknown> {
 	streamTextContent(params?: { readonly includeMarkedContent?: boolean }): S
 	// The page's structure tree (a tagged PDF's), null without one. pdf.js's documents only.
 	getStructTree?(): Promise<unknown>
-	getTextContent(): Promise<PdfTextContent>
+	getTextContent(params?: { readonly includeMarkedContent?: boolean }): Promise<PdfTextContent>
 	getAnnotations(params: { intent: "display" | "print" }): Promise<unknown[]>
 	cleanup(): unknown
 }

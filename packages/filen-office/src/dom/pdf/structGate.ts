@@ -1,7 +1,8 @@
 // Whether a document is tagged (has a structure tree), and each page's tree, read once. A document is tagged when its
 // first page asked has a tree (not by MarkInfo, which tagged files often lack): an untagged document pays that one
 // round trip, and none of its pages streams marked content or asks again. A page's tree is kept with the page object,
-// so a page coming back into view never asks the worker (or reads its struct elements) again.
+// so a page coming back into view never asks the worker (or reads its struct elements) again. The text layer and find
+// read the page's text the same way (with marked content exactly when the document is tagged), so their items agree.
 
 const taggedDocuments = new WeakMap<object, Promise<boolean>>()
 const pageTrees = new WeakMap<object, Promise<unknown>>()
@@ -36,6 +37,13 @@ export function pageStructTree(document: object, page: StructTreePage): Promise<
 	pageTrees.set(page, tree)
 
 	return tree
+}
+
+// Whether the document's text is read with its marked content: decided by its first page with a tree reader asked.
+export async function documentTagged(document: object, page: StructTreePage): Promise<boolean> {
+	if (page.getStructTree === undefined) return false
+
+	return (await pageStructTree(document, page)) !== null || ((await taggedDocuments.get(document)) ?? false)
 }
 
 // The document's id prefix, so two documents in the DOM never share an id.

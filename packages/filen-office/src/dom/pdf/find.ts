@@ -1,5 +1,6 @@
 import { SliceClock, type Slicing } from "../../core/slicing"
 import { nfcWithMap } from "../../core/text/nfc"
+import { documentTagged } from "./structGate"
 import type { PdfDocument } from "./types"
 
 // Find over a document's text content, the same items pdf.js's text layer draws one span each for, so a match
@@ -164,7 +165,10 @@ export class PdfFinder {
 		try {
 			const page = await this.document.getPage(pageNumber)
 
-			text = pdfPageText((await page.getTextContent()).items)
+			// As the text layer reads it: with marked content on a tagged document, whose items can split differently.
+			const marked = await documentTagged(this.document, page)
+
+			text = pdfPageText((await page.getTextContent(marked ? { includeMarkedContent: true } : undefined)).items)
 		} catch {
 			// A page whose text cannot be read has nothing to find; the rest of the document still searches.
 		}
