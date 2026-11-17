@@ -1,6 +1,7 @@
 import type { CompressFormat } from "@filen/sdk-rs"
 import { sanitizeFileName } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { log } from "@/lib/log"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
 
 // The SDK's archive helpers need wasm, which only the worker loads: each is a worker call, so their
@@ -199,14 +200,27 @@ const nameErrors = nameMemo((names: string[]) => sdkApi.itemNameErrors(names))
 export const cachedItemNameError = nameErrors.cached
 export const itemNameError = nameErrors.ask
 
+// Windows' reserved device names, which sanitizing keeps: the SDK refuses them, with or without an extension. Only
+// for when the SDK cannot be asked.
+const RESERVED_NAME = /^(?:con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(?:\.|$)/i
+
 // A name the SDK takes for `name`, which came from outside the drive (an attachment's, say): itself when it does, else
-// it sanitized, else that prefixed (a reserved device name such as CON survives sanitizing).
+// it sanitized, else that prefixed (a reserved device name such as CON survives sanitizing), cut again to 255 bytes.
+// When the SDK cannot be asked, the shared sanitizer's name, prefixed when it is a reserved one.
 export async function acceptedItemName(name: string): Promise<string> {
-	if ((await itemNameError(name)) === null) {
-		return name
-	}
-
 	const sanitized = sanitizeFileName(name)
+	// sanitizeFileName keeps a leading "_" and cuts to 255 bytes, its extension kept.
+	const prefixed = sanitizeFileName(`_${sanitized}`)
 
-	return (await itemNameError(sanitized)) === null ? sanitized : `_${sanitized}`
+	try {
+		if ((await itemNameError(name)) === null) {
+			return name
+		}
+
+		return (await itemNameError(sanitized)) === null ? sanitized : prefixed
+	} catch (e) {
+		log.error("drive", "checking a name with the SDK failed", e)
+
+		return RESERVED_NAME.test(sanitized) ? prefixed : sanitized
+	}
 }

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes, mimeForExtension, sanitizeFileName } from "@filen/shared"
+import { formatBytes, mimeForExtension } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { InfoIcon } from "lucide-react"
@@ -132,12 +132,7 @@ function Recipients({ label, list, muted }: { label: string; list: readonly stri
 
 // The attachment as a file to upload or download: a name the drive takes, its type from that name (as a picker gives).
 async function attachmentFile(attachment: EmailAttachment): Promise<File> {
-	const name = await acceptedItemName(attachment.name).catch((e: unknown) => {
-		log.error("preview", "checking an attachment's name failed", e)
-
-		// The shared rules, all but the SDK's reserved names.
-		return sanitizeFileName(attachment.name)
-	})
+	const name = await acceptedItemName(attachment.name)
 
 	return new File([attachment.blob], name, { type: mimeForExtension(extensionOf(name)) ?? "" })
 }

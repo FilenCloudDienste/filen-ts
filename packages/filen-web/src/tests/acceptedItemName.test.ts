@@ -42,4 +42,17 @@ describe("acceptedItemName", () => {
 		expect(new TextEncoder().encode(name).length).toBe(255)
 		expect(name.endsWith(".txt")).toBe(true)
 	})
+
+	it("keeps a prefixed reserved name within 255 bytes", async () => {
+		const name = await acceptedItemName(`CON.${"b".repeat(251)}`)
+
+		expect(name.startsWith("_CON.")).toBe(true)
+		expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(255)
+	})
+
+	it("still prefixes a reserved name when the SDK cannot be asked", async () => {
+		itemNameErrors.mockRejectedValueOnce(new Error("worker gone"))
+
+		expect(await acceptedItemName("NUL.txt")).toBe("_NUL.txt")
+	})
 })
