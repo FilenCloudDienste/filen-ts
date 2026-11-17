@@ -83,7 +83,8 @@ export interface MsgAttachment {
 	readonly contentId: string | null
 	// An embedded message, as a .msg file of its own.
 	readonly message: boolean
-	readonly bytes: Uint8Array
+	// Null when the reading was asked for names only (`parts: false`).
+	readonly bytes: Uint8Array | null
 }
 
 export interface MsgMessage {
@@ -172,9 +173,12 @@ class Reader {
 	// Bytes the embedded messages' own files take, together.
 	private produced = 0
 
-	constructor(cfb: CfbFile, maxSize: number) {
+	private readonly parts: boolean
+
+	constructor(cfb: CfbFile, maxSize: number, parts: boolean) {
 		this.cfb = cfb
 		this.maxSize = maxSize
+		this.parts = parts
 	}
 
 	private child(path: readonly string[], name: string): CfbEntry | undefined {
@@ -301,18 +305,19 @@ class Reader {
 			const at = [...path, storage.name]
 			const properties = await this.properties(at, ITEM_HEADER)
 			const method = properties.int32(ATTACH_METHOD) ?? METHOD_BY_VALUE
-			let bytes: Uint8Array | null = null
-
-			if (method === METHOD_EMBEDDED) {
-				const embedded = this.child(at, streamName(ATTACH_DATA, PT_OBJECT))
-
-				if (embedded?.kind === "storage") bytes = await this.standalone([...at, embedded.name])
-			} else {
-				bytes = await this.binary(at, ATTACH_DATA)
-			}
+			const data = this.child(at, streamName(ATTACH_DATA, method === METHOD_EMBEDDED ? PT_OBJECT : PT_BINARY))
 
 			// By reference, OLE and other methods carry nothing this can show.
-			if (bytes === null) continue
+			if (data?.kind !== (method === METHOD_EMBEDDED ? "storage" : "stream")) continue
+
+			// Names only: no part is read, no embedded message made a file.
+			const bytes = !this.parts
+				? null
+				: method === METHOD_EMBEDDED
+					? await this.standalone([...at, data.name])
+					: await this.cfb.read(data)
+
+			if (this.parts && bytes === null) continue
 
 			const name =
 				(await this.short(at, ATTACH_LONG_FILENAME, codepage)) ??
@@ -410,7 +415,11 @@ function decodeHtml(bytes: Uint8Array, codepage: number | null): string {
 	return isUtf8(bytes) ? decodeUtf8(bytes) : decodeCodepage(bytes, 0, bytes.length, 1252)
 }
 
-export async function readMsg(bytes: Uint8Array, options: { readonly maxSize?: number } = {}): Promise<MsgReading> {
+// `parts: false` reads attachments' names and types only (their bytes null), for a reader that needs no more.
+export async function readMsg(
+	bytes: Uint8Array,
+	options: { readonly maxSize?: number; readonly parts?: boolean } = {}
+): Promise<MsgReading> {
 	const maxSize = options.maxSize ?? MSG_DEFAULT_MAX_SIZE
 
 	if (bytes.length > maxSize) return { status: "tooLarge" }
@@ -418,7 +427,7 @@ export async function readMsg(bytes: Uint8Array, options: { readonly maxSize?: n
 	try {
 		const cfb = await CfbFile.open(bytesSource(bytes), { limits: { maxSize, maxEntries: MAX_ENTRIES } })
 
-		return { status: "ok", message: await new Reader(cfb, maxSize).message([], TOP_HEADER) }
+		return { status: "ok", message: await new Reader(cfb, maxSize, options.parts ?? true).message([], TOP_HEADER) }
 	} catch (e) {
 		if (
 			(e instanceof MsgError && e.code === "tooLarge") ||

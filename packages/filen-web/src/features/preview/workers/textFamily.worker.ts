@@ -5,7 +5,7 @@ import { readCalendar, type CalendarFile } from "@filen/shared/calendarFile"
 import { readContacts, type ContactFile } from "@filen/shared/contactFile"
 import { cmsSigner } from "@filen/office/core/pdfsign"
 import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
-import { readEmail, type EmailReading } from "@/features/preview/lib/emailReading"
+import { readEmail, readEmailNames, type EmailReading } from "@/features/preview/lib/emailReading"
 import { emailText } from "@/features/preview/lib/emailText"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
@@ -40,7 +40,7 @@ const api = {
 	email: (bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> => readEmail(bytes),
 	// A message as plain text (headers, body, attachment names), at most `limit` characters and one more.
 	emailText: async (bytes: Uint8Array<ArrayBuffer>, limit: number): Promise<EmailTextReading> => {
-		const reading = await readEmail(bytes)
+		const reading = await readEmailNames(bytes)
 
 		return reading.status === "ok" ? { status: "ok", text: emailText(reading, limit) } : reading
 	},

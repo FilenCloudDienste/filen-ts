@@ -7,7 +7,7 @@ vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
 	EMAIL_MAX_HTML_CHARS: 2048
 }))
 
-const { rasterImageType, readEmail } = await import("@/features/preview/lib/emailReading")
+const { rasterImageType, readEmail, readEmailNames } = await import("@/features/preview/lib/emailReading")
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
@@ -250,5 +250,35 @@ describe("readEmail", () => {
 
 		expect(await html(1000)).toMatchObject({ status: "ok", htmlTooLarge: false })
 		expect(await html(3000)).toMatchObject({ status: "ok", html: null, htmlTooLarge: true })
+	})
+
+	it("reads names alone for a text extract: no Blob, no embedded message copied", async () => {
+		const msg = await readEmailNames((await outlookMessage()) as Uint8Array<ArrayBuffer>)
+		const eml = await readEmailNames(
+			encode(
+				CRLF([
+					"Subject: Names",
+					'Content-Type: multipart/mixed; boundary="n"',
+					"",
+					"--n",
+					"Content-Type: text/plain",
+					"",
+					"body",
+					"--n",
+					'Content-Type: application/pdf; name="a.pdf"',
+					"",
+					"%PDF",
+					"--n--"
+				])
+			)
+		)
+
+		expect(msg).toMatchObject({ status: "ok", subject: "Status report", attachments: [{ name: "Earlier thread.msg" }] })
+		expect(eml).toMatchObject({ status: "ok", text: "body", attachments: [{ name: "a.pdf" }] })
+		expect(
+			[msg, eml].every(
+				reading => reading.status === "ok" && reading.attachments.every(attachment => Object.keys(attachment).length === 1)
+			)
+		).toBe(true)
 	})
 })

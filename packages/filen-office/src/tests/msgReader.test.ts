@@ -165,12 +165,22 @@ describe("readMsg", () => {
 		const file = await cfbBytes(entries)
 		const started = performance.now()
 		const message = ok(await readMsg(file))
-		const total = message.attachments.reduce((sum, attachment) => sum + attachment.bytes.length, 0)
+		const total = message.attachments.reduce((sum, attachment) => sum + (attachment.bytes?.length ?? 0), 0)
 
 		expect(message.attachments).toHaveLength(count)
 		// A few KiB each, not the mapping's 30 MiB.
 		expect(total).toBeLessThan(count * 8192)
 		expect(performance.now() - started).toBeLessThan(10_000)
+	})
+
+	it("reads names alone when asked: no part read, no embedded message made a file", async () => {
+		const message = ok(await readMsg(await msgBytes(SPEC), { parts: false }))
+
+		expect(message.attachments.map(({ name, bytes }) => [name, bytes])).toEqual([
+			["pic.png", null],
+			["report.pdf", null],
+			["Forwarded one.msg", null]
+		])
 	})
 
 	it("counts every embedded message's file against the size limit", async () => {

@@ -1,4 +1,4 @@
-import type { EmailMessage } from "@/features/preview/lib/emailReading"
+import type { EmailNames } from "@/features/preview/lib/emailReading"
 
 // A message as plain text for a reader that takes text (the assistant): its headers, its text body (or its HTML's
 // text), and its attachments' names; never a part's bytes. At most `limit` characters and one more, so a caller that
@@ -141,7 +141,7 @@ export function htmlText(html: string, limit: number): string {
 		.trim()
 }
 
-export function emailText(message: EmailMessage, limit: number): string {
+export function emailText(message: EmailNames, limit: number): string {
 	const lines: string[] = []
 	const header = (label: string, value: string | null | readonly string[]): void => {
 		const shown = typeof value === "string" ? value : value === null ? "" : value.join(", ")

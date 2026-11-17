@@ -1,6 +1,6 @@
 import PostalMime, { type Address, type Email } from "postal-mime"
 import { isCompoundFile } from "@filen/office/core/cfb"
-import { readMsg, type MsgAddress, type MsgMessage } from "@filen/office/core/msg"
+import { readMsg, type MsgAddress, type MsgAttachment, type MsgMessage } from "@filen/office/core/msg"
 import { withoutFormatControls } from "@filen/shared/formatControls"
 import { EMAIL_MAX_HTML_CHARS } from "@filen/shared/dom/emailSanitizer"
 import { EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
@@ -32,7 +32,8 @@ export interface EmailAttachment {
 	readonly imageType: string | null
 }
 
-export interface EmailMessage {
+// `A`: what an attachment is read as: a part with its bytes (the viewer's), or its name alone (EmailNames).
+export interface EmailMessage<A = EmailAttachment> {
 	readonly subject: string | null
 	readonly from: string | null
 	readonly to: readonly string[]
@@ -51,12 +52,16 @@ export interface EmailMessage {
 	// Cut at TEXT_CAP characters (textTruncated): the page never holds more of a body than a text file's.
 	readonly text: string | null
 	readonly textTruncated: boolean
-	readonly attachments: readonly EmailAttachment[]
+	readonly attachments: readonly A[]
 	// Whether the file is text a Source view can show (a .msg is not).
 	readonly hasSource: boolean
 }
 
 export type EmailReading = ({ readonly status: "ok" } & EmailMessage) | { readonly status: "tooLarge" }
+
+// A message with its attachments' names alone: no part made a Blob, no embedded message a file.
+export type EmailNames = EmailMessage<{ readonly name: string }>
+export type EmailNamesReading = ({ readonly status: "ok" } & EmailNames) | { readonly status: "tooLarge" }
 
 function startsWith(bytes: Uint8Array, signature: readonly number[], at = 0): boolean {
 	return signature.every((byte, k) => bytes[at + k] === byte)
@@ -168,7 +173,28 @@ function bodies(html: string | null, text: string | null): Pick<EmailMessage, "h
 	}
 }
 
-function readMessage(email: Email): EmailMessage {
+function emlName(attachment: Email["attachments"][number], index: number): string {
+	return display(attachment.filename) ?? `attachment-${String(index + 1)}${attachment.mimeType === "message/rfc822" ? ".eml" : ""}`
+}
+
+function emlPart(attachment: Email["attachments"][number], index: number): EmailAttachment {
+	const content = attachment.content
+	// arraybuffer encoding: an ArrayBuffer; a string only for an encoding this never asks for.
+	const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
+	const blob = new Blob([bytes], { type: attachment.mimeType })
+	const id = contentId(attachment.contentId)
+
+	return {
+		name: emlName(attachment, index),
+		mimeType: attachment.mimeType,
+		size: blob.size,
+		blob,
+		contentId: id,
+		imageType: id === null ? null : rasterImageType(bytes)
+	}
+}
+
+function readMessage<A>(email: Email, part: (attachment: Email["attachments"][number], index: number) => A): EmailMessage<A> {
 	const budget = { left: MAX_ADDRESSES, omitted: 0 }
 	const from = email.from === undefined ? null : (addresses([email.from], budget)[0] ?? null)
 	const to = addresses(email.to, budget)
@@ -184,24 +210,7 @@ function readMessage(email: Email): EmailMessage {
 		fromIdnDomain: idnDomain(email.from?.address),
 		date: display(email.date),
 		...bodies(email.html ?? null, email.text ?? null),
-		attachments: email.attachments.map((attachment, index) => {
-			const content = attachment.content
-			// arraybuffer encoding: an ArrayBuffer; a string only for an encoding this never asks for.
-			const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
-			const blob = new Blob([bytes], { type: attachment.mimeType })
-			const id = contentId(attachment.contentId)
-
-			return {
-				name:
-					display(attachment.filename) ??
-					`attachment-${String(index + 1)}${attachment.mimeType === "message/rfc822" ? ".eml" : ""}`,
-				mimeType: attachment.mimeType,
-				size: blob.size,
-				blob,
-				contentId: id,
-				imageType: id === null ? null : rasterImageType(bytes)
-			}
-		}),
+		attachments: email.attachments.map(part),
 		hasSource: true
 	}
 }
@@ -210,7 +219,27 @@ function msgMailbox(entry: MsgAddress): string {
 	return mailbox(entry.name ?? "", entry.address ?? "")
 }
 
-function readMsgMessage(message: MsgMessage): EmailMessage {
+function msgName(attachment: MsgAttachment, index: number): string {
+	return display(attachment.name) ?? `attachment-${String(index + 1)}${attachment.message ? ".msg" : ""}`
+}
+
+function msgPart(attachment: MsgAttachment, index: number): EmailAttachment {
+	const bytes = attachment.bytes ?? new Uint8Array(0)
+	const mimeType = attachment.mimeType ?? "application/octet-stream"
+	const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType })
+	const id = contentId(attachment.contentId ?? undefined)
+
+	return {
+		name: msgName(attachment, index),
+		mimeType,
+		size: blob.size,
+		blob,
+		contentId: id,
+		imageType: id === null ? null : rasterImageType(bytes)
+	}
+}
+
+function readMsgMessage<A>(message: MsgMessage, part: (attachment: MsgAttachment, index: number) => A): EmailMessage<A> {
 	const shown = (list: readonly MsgAddress[]): string[] => list.map(msgMailbox).filter(entry => entry !== "")
 	const from = message.from === null ? "" : msgMailbox(message.from)
 
@@ -225,33 +254,23 @@ function readMsgMessage(message: MsgMessage): EmailMessage {
 		fromIdnDomain: idnDomain(message.from?.address),
 		date: display(message.date),
 		...bodies(message.html, message.text),
-		attachments: message.attachments.map((attachment, index) => {
-			const mimeType = attachment.mimeType ?? "application/octet-stream"
-			const blob = new Blob([attachment.bytes as Uint8Array<ArrayBuffer>], { type: mimeType })
-			const id = contentId(attachment.contentId ?? undefined)
-
-			return {
-				name: display(attachment.name) ?? `attachment-${String(index + 1)}${attachment.message ? ".msg" : ""}`,
-				mimeType,
-				size: blob.size,
-				blob,
-				contentId: id,
-				imageType: id === null ? null : rasterImageType(attachment.bytes)
-			}
-		}),
+		attachments: message.attachments.map(part),
 		hasSource: false
 	}
 }
 
-export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> {
+type Parsed = { readonly kind: "eml"; readonly email: Email } | { readonly kind: "msg"; readonly message: MsgMessage } | null
+
+// The parse; null past a bound. `parts: false` asks a .msg for names only (an .eml's parts are decoded either way).
+async function parse(bytes: Uint8Array<ArrayBuffer>, parts: boolean): Promise<Parsed> {
 	if (bytes.length > EMAIL_MAX_BYTES) {
-		return { status: "tooLarge" }
+		return null
 	}
 
 	if (isCompoundFile(bytes)) {
-		const reading = await readMsg(bytes, { maxSize: EMAIL_MAX_BYTES })
+		const reading = await readMsg(bytes, { maxSize: EMAIL_MAX_BYTES, parts })
 
-		return reading.status === "ok" ? { status: "ok", ...readMsgMessage(reading.message) } : reading
+		return reading.status === "ok" ? { kind: "msg", message: reading.message } : null
 	}
 
 	try {
@@ -265,12 +284,34 @@ export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailRe
 			maxPartCount: MAX_PARTS
 		})
 
-		return { status: "ok", ...readMessage(email) }
+		return { kind: "eml", email }
 	} catch (e) {
 		if (e instanceof Error && "code" in e && typeof e.code === "string" && LIMIT_CODES.has(e.code)) {
-			return { status: "tooLarge" }
+			return null
 		}
 
 		throw e
+	}
+}
+
+export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> {
+	const parsed = await parse(bytes, true)
+
+	if (parsed === null) return { status: "tooLarge" }
+
+	return { status: "ok", ...(parsed.kind === "eml" ? readMessage(parsed.email, emlPart) : readMsgMessage(parsed.message, msgPart)) }
+}
+
+// The message with its attachments' names alone (for a text extract): no Blob made, no embedded message copied.
+export async function readEmailNames(bytes: Uint8Array<ArrayBuffer>): Promise<EmailNamesReading> {
+	const parsed = await parse(bytes, false)
+
+	if (parsed === null) return { status: "tooLarge" }
+
+	return {
+		status: "ok",
+		...(parsed.kind === "eml"
+			? readMessage(parsed.email, (attachment, index) => ({ name: emlName(attachment, index) }))
+			: readMsgMessage(parsed.message, (attachment, index) => ({ name: msgName(attachment, index) })))
 	}
 }

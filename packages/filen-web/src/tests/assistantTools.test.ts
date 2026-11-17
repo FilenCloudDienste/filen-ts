@@ -84,13 +84,13 @@ vi.mock("@/features/preview/lib/previewCache", async importOriginal => {
 // The text-family worker's message extract, run here: the same reader and extract the worker runs.
 vi.mock("@/features/preview/lib/textFamilyClient", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/preview/lib/textFamilyClient")>()
-	const { readEmail } = await import("@/features/preview/lib/emailReading")
+	const { readEmailNames } = await import("@/features/preview/lib/emailReading")
 	const { emailText } = await import("@/features/preview/lib/emailText")
 
 	return {
 		...actual,
 		readEmailText: async (bytes: Uint8Array, limit: number) => {
-			const reading = await readEmail(new Uint8Array(bytes))
+			const reading = await readEmailNames(new Uint8Array(bytes))
 
 			return reading.status === "ok" ? { status: "ok", text: emailText(reading, limit) } : reading
 		}
