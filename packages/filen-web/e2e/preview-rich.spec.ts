@@ -137,7 +137,7 @@ test("a SQLite database is browsed read-only, from the drive and from an archive
 
 test("a track is plotted from the file alone, with its figures, profile and references never fetched", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -172,6 +172,7 @@ test("a track is plotted from the file alone, with its figures, profile and refe
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 // A model drawn in the 3D worker, its figures in the information panel; where the engine gives a worker no WebGL, the
@@ -214,7 +215,7 @@ test("a 3D model is drawn in a worker from its own files, and references outside
 	browserName
 }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 	const webgl = WORKER_WEBGL[browserName]
 
 	await bootTo(page)
@@ -277,4 +278,5 @@ test("a 3D model is drawn in a worker from its own files, and references outside
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })

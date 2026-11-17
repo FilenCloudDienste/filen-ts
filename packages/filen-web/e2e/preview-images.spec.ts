@@ -46,7 +46,7 @@ const [TIFF_SINGLE, TIFF_PAGES, TIFF_BIG] = FIXTURE_FILES["images-tiff"]
 
 test("a QOI image is decoded and drawn", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -67,11 +67,12 @@ test("a QOI image is decoded and drawn", async ({ page, context }) => {
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a JPEG XL is shown by the browser where it decodes one, else decoded in the pool", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -102,11 +103,12 @@ test("a JPEG XL is shown by the browser where it decodes one, else decoded in th
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a gzipped SVG is inflated and shown as an SVG, and one inflating past the cap is refused", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -132,6 +134,7 @@ test("a gzipped SVG is inflated and shown as an SVG, and one inflating past the 
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a TIFF is read by the MuPDF engine: one page as a picture, several in the page column, BigTIFF refused", async ({
@@ -139,7 +142,7 @@ test("a TIFF is read by the MuPDF engine: one page as a picture, several in the 
 	context
 }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -178,11 +181,12 @@ test("a TIFF is read by the MuPDF engine: one page as a picture, several in the 
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("QOI, JPEG XL and TIFF entries of an archive open through the entry's bytes", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 	const [ARCHIVE] = FIXTURE_FILES["images-archive"]
 
 	await bootTo(page)
@@ -211,6 +215,7 @@ test("QOI, JPEG XL and TIFF entries of an archive open through the entry's bytes
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a PDF stamp takes a TIFF's and a QOI's picture from Filen, and is never offered a gzipped SVG", async ({ page }) => {
@@ -423,7 +428,7 @@ test("a Photoshop file shows its composite and its embedded thumbnail; without a
 	context
 }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 	const [FLAT, NO_COMPOSITE, LARGE] = FIXTURE_FILES["images-psd"]
 
 	await bootTo(page)
@@ -454,6 +459,7 @@ test("a Photoshop file shows its composite and its embedded thumbnail; without a
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("an Illustrator file saved PDF-compatible opens in the PDF viewer, view only; PostScript alone has no viewer", async ({
@@ -461,7 +467,7 @@ test("an Illustrator file saved PDF-compatible opens in the PDF viewer, view onl
 	context
 }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 	const [PDF_AI, POSTSCRIPT_AI] = FIXTURE_FILES["images-ai"]
 
 	await bootTo(page)
@@ -490,11 +496,12 @@ test("an Illustrator file saved PDF-compatible opens in the PDF viewer, view onl
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("an EPS file is shown by its preview picture, never by running its PostScript", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 	const [DOS, EPSI, PLAIN] = FIXTURE_FILES["images-eps"]
 
 	await bootTo(page)
@@ -523,6 +530,7 @@ test("an EPS file is shown by its preview picture, never by running its PostScri
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 // The rows' thumbnails done: no download request for two looks in a row.
