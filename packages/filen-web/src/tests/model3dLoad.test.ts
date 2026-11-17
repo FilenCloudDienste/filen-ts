@@ -237,6 +237,26 @@ describe("the texture budget", () => {
 		expect(budget.pixels).toBe(9000 * 9000 - 4096 * 4096)
 	})
 
+	it("reserves a GIF by its first frame where it reaches past its logical screen", async () => {
+		const gif = new Uint8Array(40)
+		const view = new DataView(gif.buffer)
+
+		gif.set(encode("GIF89a"))
+		view.setUint16(6, 1, true)
+		view.setUint16(8, 1, true)
+		// The image descriptor: a 4096 × 4096 frame on a 1 × 1 screen.
+		gif[13] = 0x2c
+		view.setUint16(18, 4096, true)
+		view.setUint16(20, 4096, true)
+		gif.set([2, 1, 0, 0x3b], 23)
+		files.set(`${REFERENCE_BASE}frame.gif`, gif)
+		budget.pixels = 1_000_000
+		decodes.length = 0
+
+		expect(await loadTexture(new ImageLoader() as never, `${REFERENCE_BASE}frame.gif`)).toBeNull()
+		expect(decodes).toHaveLength(0)
+	})
+
 	it("skips an image whose dimensions cannot be read, never decoding it", async () => {
 		budget.pixels = 1_000_000
 		decodes.length = 0

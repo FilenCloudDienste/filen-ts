@@ -1,5 +1,6 @@
 import { imageDimensions } from "@filen/office/core/opc"
-import { gifDimensions, ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/preflight.logic"
+import { ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/preflight.logic"
+import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 
 // Every texture a loader reads goes through one pixel budget, in the 3D worker. three's image paths are replaced, once
 // per worker: ImageLoader (an <img>, which a worker has none of: MTL, FBX, 3MF and USDZ textures), ImageBitmapLoader
@@ -109,7 +110,8 @@ export function installTextureShim(
 		if (!response.ok) return null
 
 		const bytes = new Uint8Array(await response.arrayBuffer())
-		const dimensions = gifDimensions(bytes) ?? imageDimensions(bytes) ?? null
+		// The image editor's sniff (its formats, a GIF's first frame), else the office reader's.
+		const dimensions = sniffImage(bytes, bytes.length) ?? imageDimensions(bytes) ?? null
 
 		if (dimensions === null) return null
 

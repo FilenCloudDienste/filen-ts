@@ -19,7 +19,6 @@ import {
 	fbxCosts,
 	preflightUsdaText,
 	textNumbers,
-	gifDimensions,
 	gltfMeshoptBytes,
 	ktx2Pixels,
 	objCounts,
@@ -315,26 +314,6 @@ describe("preflight", () => {
 		})
 		// A tiny entry may compress far: a ratio counts only past 1 MiB.
 		expect(preflightZip([{ compressed: 10, uncompressed: 100_000 }])).toEqual({ ok: true })
-	})
-
-	it("sizes a GIF by its first frame where it reaches past the logical screen", () => {
-		const gif = new Uint8Array(40)
-		const view = new DataView(gif.buffer)
-
-		gif.set(new TextEncoder().encode("GIF89a"))
-		view.setUint16(6, 1, true)
-		view.setUint16(8, 1, true)
-		gif[10] = 0
-		// A graphic control extension, then the image descriptor at 13 + 8.
-		gif.set([0x21, 0xf9, 0x04, 0, 0, 0, 0, 0], 13)
-		gif[21] = 0x2c
-		view.setUint16(22, 10, true)
-		view.setUint16(24, 0, true)
-		view.setUint16(26, 16384, true)
-		view.setUint16(28, 16384, true)
-
-		expect(gifDimensions(gif)).toEqual({ width: 16394, height: 16384 })
-		expect(gifDimensions(new TextEncoder().encode("GIF89a"))).toBeNull()
 	})
 
 	it("sizes a texture within the side cap", () => {

@@ -508,37 +508,6 @@ export function ktx2Pixels(bytes: Uint8Array): number | null {
 	return view.getUint32(40, true) === 1 ? base : Math.ceil((base * 4) / 3)
 }
 
-// A GIF's decoded size: its logical screen, grown to its first frame's bounds where that frame reaches past it (as the
-// browser's decoder does). Null when no frame is found.
-export function gifDimensions(bytes: Uint8Array): { width: number; height: number } | null {
-	if (bytes.length < 13 || new TextDecoder("latin1").decode(bytes.subarray(0, 3)) !== "GIF") return null
-
-	const u16 = (at: number): number => (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
-	const flags = bytes[10] ?? 0
-	let at = 13 + ((flags & 0x80) !== 0 ? 3 * 2 ** ((flags & 0x07) + 1) : 0)
-
-	while (at < bytes.length) {
-		const block = bytes[at]
-
-		if (block === 0x2c) {
-			if (at + 9 > bytes.length) return null
-
-			return { width: Math.max(u16(6), u16(at + 1) + u16(at + 5)), height: Math.max(u16(8), u16(at + 3) + u16(at + 7)) }
-		}
-
-		if (block !== 0x21) return null
-
-		// An extension: its label, then sub-blocks until an empty one.
-		at += 2
-
-		while (at < bytes.length && bytes[at] !== 0) at += 1 + (bytes[at] ?? 0)
-
-		at++
-	}
-
-	return null
-}
-
 export interface GpuFootprint {
 	// Bytes of every geometry attribute and index.
 	readonly attributes: number
