@@ -1639,6 +1639,188 @@ function tesseractNotices(): Collected[] {
 	]
 }
 
+/**
+ * jSquash's codec packages ship Emscripten builds of C libraries under their own Apache-2.0 notice (described with the
+ * npm tree): @jsquash/jxl's decoder module links libjxl and the libraries its build links beside it (brotli, Highway,
+ * skcms), @jsquash/jpeg's encoder module links MozJPEG. Each is read at the commit or tag the package's codec Makefile
+ * pins at the jSquash commit that released the installed version, its license file kept beside this script, except
+ * MozJPEG's, which the package ships itself (codec/LICENSE.codec.md, read from the installed package). A package
+ * installed at another version fails the generator: the pins below must be read again for it.
+ */
+const JSQUASH_LICENSES = "scripts/licenses/jsquash"
+const JSQUASH_REPOSITORY = "https://github.com/jamsinclair/jSquash"
+// tools/cpp.Dockerfile's EMSDK_VERSION at the release commits.
+const JSQUASH_EMSCRIPTEN = "2.0.34"
+
+interface JsquashPackage {
+	readonly name: string
+	readonly version: string
+	// The jSquash commit that released it.
+	readonly commit: string
+	readonly module: string
+	readonly components: readonly JsquashComponent[]
+}
+
+interface JsquashComponent {
+	readonly name: string
+	readonly license: string
+	readonly copyright: readonly string[]
+	readonly repository: string
+	// The commit (or tag) the codec Makefile, or libjxl's third_party/ submodule, pins.
+	readonly commit: string
+	readonly pinnedBy: string
+	readonly what: string
+	// Under JSQUASH_LICENSES, or `package:` for a file the installed package ships.
+	readonly files: readonly string[]
+}
+
+const LIBJXL_COMMIT = "9f544641ec83f6abd9da598bdd08178ee8a003e0"
+
+const JSQUASH_PACKAGES: readonly JsquashPackage[] = [
+	{
+		name: "@jsquash/jxl",
+		version: "1.3.0",
+		commit: "1338a8896bffcfe99790ca60d4562ea6dd80abdd",
+		module: "codec/dec/jxl_dec.wasm (the JPEG XL decoder the image preview falls back to)",
+		components: [
+			{
+				name: "libjxl",
+				license: "BSD-3-Clause",
+				copyright: ["Copyright (c) the JPEG XL Project Authors. All rights reserved."],
+				repository: "https://github.com/libjxl/libjxl",
+				commit: LIBJXL_COMMIT,
+				pinnedBy: "packages/jxl/codec/Makefile CODEC_VERSION",
+				what: "The JPEG XL reference implementation, with its additional patent grant.",
+				files: ["libjxl-LICENSE", "libjxl-PATENTS"]
+			},
+			{
+				name: "Brotli",
+				license: "MIT",
+				copyright: ["Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors."],
+				repository: "https://github.com/google/brotli",
+				commit: "35ef5c554d888bef217d449346067de05e269b30",
+				pinnedBy: "libjxl's third_party/brotli submodule",
+				what: "The Brotli decoder, for JPEG XL's compressed metadata boxes.",
+				files: ["brotli-LICENSE"]
+			},
+			{
+				name: "Highway",
+				license: "Apache-2.0",
+				copyright: ["Copyright the Highway Project Authors"],
+				repository: "https://github.com/google/highway",
+				commit: "e69083a12a05caf037cabecdf1b248b7579705a5",
+				pinnedBy: "libjxl's third_party/highway submodule",
+				what: "The Highway portable SIMD library.",
+				files: ["highway-LICENSE"]
+			},
+			{
+				name: "skcms",
+				license: "BSD-3-Clause",
+				copyright: ["Copyright (c) 2018 Google Inc. All rights reserved."],
+				repository: "https://skia.googlesource.com/skcms",
+				commit: "64374756e03700d649f897dbd98c95e78c30c7da",
+				pinnedBy: "libjxl's third_party/skcms submodule",
+				what: "Skia's colour management library.",
+				files: ["skcms-LICENSE"]
+			}
+		]
+	},
+	{
+		name: "@jsquash/jpeg",
+		version: "1.6.0",
+		commit: "1f62015f53e28bd18b2d7c8a3ca3326577efc445",
+		module: "codec/enc/mozjpeg_enc.wasm (the JPEG encoder the image editor saves with)",
+		components: [
+			{
+				name: "MozJPEG",
+				license: "IJG AND BSD-3-Clause AND Zlib",
+				copyright: [
+					"Copyright (C) 1991-2016, Thomas G. Lane, Guido Vollbeding.",
+					"Copyright (C) 2009-2018 D. R. Commander.",
+					"Copyright (C) 2014, Mozilla Corporation."
+				],
+				repository: "https://github.com/mozilla/mozjpeg",
+				commit: "v3.3.1",
+				pinnedBy: "packages/jpeg/codec/Makefile CODEC_URL",
+				what: "This software is based in part on the work of the Independent JPEG Group. MozJPEG, built on libjpeg-turbo; its license roll-up (as the package ships it) and the IJG README's legal section follow.",
+				files: ["package:codec/LICENSE.codec.md", "mozjpeg-README.ijg"]
+			}
+		]
+	}
+]
+
+function jsquashNotices(): Collected[] {
+	const runtime = [
+		vendoredNotice(
+			{
+				name: "Emscripten",
+				version: JSQUASH_EMSCRIPTEN,
+				license: "MIT OR NCSA",
+				copyright: ["Copyright (c) 2010-2014 Emscripten authors"],
+				repository: "https://github.com/emscripten-core/emscripten",
+				terms: [
+					`The Emscripten runtime, linked into the jSquash codec WebAssembly modules (${JSQUASH_PACKAGES.map(pkg => pkg.name).join(", ")}; built with Emscripten ${JSQUASH_EMSCRIPTEN}, tools/cpp.Dockerfile).`,
+					readFileSync(`${FFMPEG_DIR}/licenses/emscripten-LICENSE`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "musl",
+				version: `Emscripten ${JSQUASH_EMSCRIPTEN}`,
+				license: "MIT",
+				copyright: ["Copyright © 2005-2020 Rich Felker, et al."],
+				repository: "https://git.musl-libc.org/cgit/musl",
+				terms: [
+					`The musl C library, as bundled with Emscripten ${JSQUASH_EMSCRIPTEN}, linked into the jSquash codec WebAssembly modules.`,
+					readFileSync(`${FFMPEG_DIR}/licenses/musl-COPYRIGHT`, "utf8")
+				]
+			},
+			"vendored"
+		)
+	]
+
+	return [
+		...runtime,
+		...JSQUASH_PACKAGES.flatMap(pkg => {
+			const installedVersion = requireJson(`node_modules/${pkg.name}/package.json`)["version"]
+
+			if (installedVersion !== pkg.version) {
+				throw new Error(
+					`${pkg.name} is installed at ${String(installedVersion)}, its codec pins are read for ${pkg.version}: read them again`
+				)
+			}
+
+			const release = `${JSQUASH_REPOSITORY}/tree/${pkg.commit}`
+
+			return pkg.components.map(component =>
+				vendoredNotice(
+					{
+						name: component.name,
+						version: component.commit.startsWith("v") ? component.commit.slice(1) : `git ${component.commit.slice(0, 12)}`,
+						license: component.license,
+						copyright: [...component.copyright],
+						repository: component.repository,
+						terms: [
+							`${component.what} Compiled into ${pkg.name} ${pkg.version}'s ${pkg.module}. Source: ${component.repository} at ${component.commit}, which ${component.pinnedBy} pins at the jSquash commit that released ${pkg.name} ${pkg.version} (${release}).`,
+							...component.files.map(file =>
+								readFileSync(
+									file.startsWith("package:")
+										? `node_modules/${pkg.name}/${file.slice("package:".length)}`
+										: `${JSQUASH_LICENSES}/${file}`,
+									"utf8"
+								)
+							)
+						]
+					},
+					"vendored"
+				)
+			)
+		})
+	]
+}
+
 const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
@@ -1667,7 +1849,8 @@ const encodingDetectCrates = wasmCrateNotices(
 const dictionaries = spellcheckDictionaryNotices()
 const mupdf = mupdfNotices()
 const tesseract = tesseractNotices()
-const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries, ...mupdf, ...tesseract]
+const jsquash = jsquashNotices()
+const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries, ...mupdf, ...tesseract, ...jsquash]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...encodingDetectCrates, ...vendored]
 
 // Vendored entries promise their files verbatim (dictionaries ship them byte for byte). Texts sorted: the payload ships
@@ -1695,6 +1878,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 //   @filen/office: ${office.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${OFFICE_REPO_DIR}/assets/fonts/manifest.json, ${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md)
 //   mupdf wasm: ${mupdf.map(entry => `${entry.name} ${entry.version}`).join(", ")} (MuPDF ${MUPDF_VERSION} thirdparty/, ${MUPDF_LICENSES})
 //   tesseract.js-core wasm and OCR models: ${tesseract.map(entry => `${entry.name} ${entry.version}`).join(", ")} (tesseract.js-core v${TESSERACT_CORE_VERSION} third_party/, ${TESSERACT_LICENSES})
+//   jSquash codec wasm: ${jsquash.map(entry => `${entry.name} ${entry.version}`).join(", ")} (codec Makefile pins, ${JSQUASH_LICENSES})
 //   @filen/spellcheck: ${[...spellcheckCrates, ...dictionaries].map(entry => `${entry.name} ${entry.version}`).join(", ")} (${SPELLCHECK_REPO_DIR}/crate/Cargo.lock, ${SPELLCHECK_REPO_DIR}/dictionaries/manifest.json)
 //   @filen/encoding-detect: ${encodingDetectCrates.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${ENCODING_DETECT_REPO_DIR}/crate/Cargo.lock)
 //
