@@ -5,10 +5,12 @@
 // Grid tiles (TILE_ROWS × TILE_COLS of @filen/office's sheet protocol).
 export const SQLITE_TILE_ROWS = 64
 export const SQLITE_TILE_COLS = 32
-// Rows each counting step covers: one step is O(chunk) however sparse the keys are. The first step covers fewer, so the
-// grid draws its first rows before a large chunk has walked the table.
+// Rows each counting step covers: one step is O(chunk) however sparse the keys are. The first step runs before the grid
+// draws, at once: it covers the first tile's data rows (its first grid row is the header) and nothing past them, so it
+// reads only the pages that tile reads anyway. Rows of large values spread a table's leaf pages over the file; a ranged
+// read of each is a block download of its own.
 export const SQLITE_COUNT_CHUNK = 50_000
-export const SQLITE_FIRST_COUNT_CHUNK = 1_000
+export const SQLITE_FIRST_COUNT_CHUNK = SQLITE_TILE_ROWS - 1
 // The shared interrupt flag's slots (an Int32Array the page and the worker both hold): tile requests with an id at or
 // below slot 0 are stale; the count with slot 1's id stops; the check with slot 2's id stops.
 export const INTERRUPT_TILES = 0

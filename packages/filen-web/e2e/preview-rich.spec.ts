@@ -20,17 +20,19 @@ async function closePreview(page: Page): Promise<void> {
 }
 
 // The database viewer's users table, its integrity checked by itself (the file is under 256 MiB, read whole once), and
-// the first data row's first cell in the selection bar after one step down the grid.
+// the first two data rows' first cells in the selection bar as the keyboard walks the grid.
 async function expectDatabase(page: Page, dialog: Locator): Promise<void> {
 	// The list is by name: `audit` is selected first.
 	await dialog.getByRole("button", { name: "users", exact: true }).click({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText("Checked", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText(/70,000 rows|≥ 50,000 rows/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-	// A click selects the cell under the pointer, wherever the grid has scrolled to: back to the first cell first.
+	// A click selects the cell under the pointer, wherever the grid has scrolled to. Mod+Home then goes to the first cell
+	// below the frozen header row, as Excel does with frozen panes: the first data row.
 	await dialog.getByLabel("Table rows").click()
 	await page.keyboard.press("ControlOrMeta+Home")
-	await page.keyboard.press("ArrowDown")
 	await expect(dialog.getByText("users.id, row 1", { exact: true })).toBeVisible()
+	await page.keyboard.press("ArrowDown")
+	await expect(dialog.getByText("users.id, row 2", { exact: true })).toBeVisible()
 	// Views and virtual tables are listed with their SQL and never run.
 	await dialog.getByRole("button", { name: "notes", exact: true }).click()
 	await expect(dialog.getByText("Virtual table — not browsed.")).toBeVisible()

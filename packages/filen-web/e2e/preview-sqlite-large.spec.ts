@@ -12,8 +12,11 @@ import { RICH_SQLITE_BIG_BYTES, writeBigDatabase } from "./fixtures/richSqlite"
 // chunks, not the file. "Check integrity" then reads the whole file through the check's own small bridge, while the
 // grid stays usable, and ends "Checked". A write-lane spec: it uploads the file into a scratch directory of its own.
 
-// Opening and drawing the first rows: the header, the schema and the first table's pages.
-const OPEN_CHUNKS = 16
+// Opening and drawing the first rows: the block holding the header, the schema and `users`, and the leaf pages of
+// `blobs`' first tile. Three 1 MiB rows fit a leaf and each leaf follows its rows' overflow pages, so the tile's 63 rows
+// span 20 blocks (counted through the range VFS: 21 blocks in all). One block of slack: the open's own requests, which
+// the run that read all of `blobs` counted one above the VFS (101 against 100).
+const OPEN_CHUNKS = 22
 const CHECK_TIMEOUT_MS = 600_000
 
 test("a 300 MiB database opens unchecked in ranges and checks its integrity when asked", async ({ page, context, browserName }) => {

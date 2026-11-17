@@ -299,6 +299,45 @@ describe("SqliteBrowser", () => {
 		browser.close()
 	})
 
+	it("counts first only the rows the first tile reads, so opening a table of large values reads no page past it", async () => {
+		const pageBytes = 4096
+		// Each row's value overflows: a few rows per leaf page, the leaves spread over the file between overflow chains.
+		const bytes = database(db => {
+			db.exec(`
+				CREATE TABLE blobs (id INTEGER PRIMARY KEY, payload BLOB);
+				WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300)
+				INSERT INTO blobs (payload) SELECT zeroblob(65536) FROM n;
+			`)
+		})
+		const pages = new Set<number>()
+		const reader = memoryReader(bytes)
+		const read = reader.read.bind(reader)
+
+		reader.read = (target, offset, length, position) => {
+			for (let page = Math.floor(position / pageBytes); page <= Math.floor((position + length - 1) / pageBytes); page++)
+				pages.add(page)
+
+			return read(target, offset, length, position)
+		}
+
+		const browser = await open({ kind: "ranged", reader })
+
+		expect(browser.countStep(0, 1)).toEqual({ rows: SQLITE_FIRST_COUNT_CHUNK, exact: false })
+
+		const counted = pages.size
+		const tile = only(browser.tiles(0, 0, Uint32Array.of(0, 0), 1)[0])
+
+		// The tile's last data row is the count's last.
+		expect(texts(tile).get(`${String(SQLITE_FIRST_COUNT_CHUNK)}:0`)).toBe(String(SQLITE_FIRST_COUNT_CHUNK))
+		expect(pages.size).toBe(counted)
+
+		// The whole count reads every leaf, far more than the first step did.
+		while (!browser.countStep(0, 1).exact);
+
+		expect(pages.size).toBeGreaterThan(counted * 3)
+		browser.close()
+	})
+
 	it("reads a WAL-mode file as rollback mode and says so, without changing the bytes", async () => {
 		const bytes = database(APP, { wal: true })
 
