@@ -135,11 +135,14 @@ export class PreviewVideo {
 	private ladderGeneration = 0
 	private disposed = false
 	private readonly embedded = new EmbeddedCues()
-	// What the direct start's gap check read, kept for a later ladder open: a public link's probe is cached nowhere
-	// else. Outside the snapshot, so the direct start's UI stays as it was.
-	private directProbe: Extract<PreviewProbeResult, { status: "probed" }> | null = null
-	// The engagement probe in flight.
-	private probing: Promise<void> | null = null
+	// The probe, read at most once per open and shared by the controls' engagement, the gap check and the ladder (a
+	// public link's is cached nowhere else); one that failed is read again only by Retry.
+	private probeRead: Promise<PreviewProbeResult> | null = null
+	private probeFailed = false
+	// Whether the controls were engaged: their probe is asked for once.
+	private engaged = false
+	// The audio track the user picked, which a ladder opened later plays; null while they picked none.
+	private wantedAudio: number | null = null
 
 	public readonly subscribe = (listener: () => void): (() => void) => this.changes.subscribe(listener)
 
@@ -148,15 +151,22 @@ export class PreviewVideo {
 	public constructor(options: PreviewVideoOptions) {
 		this.options = options
 		this.lastTime = options.startTime
+
+		const held = options.deps.peek?.() ?? null
+
 		this.snapshot = {
 			status: "active",
 			route: options.route,
-			probe: options.deps.peek?.() ?? null,
+			probe: held,
 			decision: null,
 			silentCodec: null,
 			embeddedVersion: 0,
 			audioIndex: -1,
 			nativeAudio: null
+		}
+
+		if (held !== null) {
+			this.snapshot = { ...this.snapshot, ...this.directAudio(held) }
 		}
 	}
 
@@ -188,8 +198,26 @@ export class PreviewVideo {
 			return
 		}
 
+		if (this.probeFailed) {
+			this.probeRead = null
+			this.probeFailed = false
+		}
+
 		this.update({ status: "active" })
 		void this.openLadder({ time: this.position(), play: true, allowDirect: !this.escalated })
+	}
+
+	private readProbe(): Promise<PreviewProbeResult> {
+		this.probeRead ??= this.options.deps
+			.probe(this.abort.signal)
+			.catch((): PreviewProbeResult => ({ status: "unavailable" }))
+			.then(result => {
+				this.probeFailed = result.status === "unavailable"
+
+				return result
+			})
+
+		return this.probeRead
 	}
 
 	// The subtitle kind shown: an embedded text track needs the remux rung, which a direct start moves to.
@@ -210,27 +238,37 @@ export class PreviewVideo {
 	// Reads the probe, for the audio and chapter menus, once per open: called on the first engagement with the controls,
 	// so a video nobody reaches for costs no read. A hidden page waits until it is visible.
 	public ensureProbe(): void {
-		if (this.snapshot.probe !== null || this.probing !== null || this.disposed) {
+		if (this.snapshot.probe !== null || this.engaged || this.disposed) {
 			return
 		}
 
-		this.probing = this.whenVisible().then(async () => {
-			const result =
-				this.directProbe ??
-				(await this.options.deps.probe(this.abort.signal).catch((): PreviewProbeResult => ({ status: "unavailable" })))
-
-			if (this.isDisposed() || result.status !== "probed") {
-				this.probing = null
-
+		this.engaged = true
+		void this.whenVisible().then(async () => {
+			if (this.isDisposed()) {
 				return
 			}
 
-			this.directProbe = result
+			const result = await this.readProbe()
 
-			if (this.snapshot.probe === null && result.probe !== null) {
-				this.update({ probe: result.probe })
+			if (!this.isDisposed() && result.status === "probed" && result.probe !== null && this.snapshot.probe === null) {
+				this.update({ probe: result.probe, ...this.directAudio(result.probe) })
 			}
 		})
+	}
+
+	// On a direct start whose element names no tracks of its own, the track it plays is the probe's default (else its
+	// first): what the audio menu marks as playing.
+	private directAudio(probe: VideoProbe): Partial<PreviewVideoSnapshot> {
+		if (this.snapshot.route !== "direct" || this.escalated || this.snapshot.audioIndex >= 0 || probe.audio.length === 0) {
+			return {}
+		}
+
+		return {
+			audioIndex: Math.max(
+				0,
+				probe.audio.findIndex(track => track.def)
+			)
+		}
 	}
 
 	private whenVisible(): Promise<void> {
@@ -253,11 +291,14 @@ export class PreviewVideo {
 	}
 
 	// Plays the probe's audio track `index`: in place where the element switches its own tracks (WebKit's direct
-	// stream), through the ladder's own switch once it plays, else by moving a direct start to the ladder.
+	// stream) and plays that track's codec, through the ladder's own switch once it plays, else by moving a direct
+	// start to the ladder. A pick made while the ladder opens is the track it plays.
 	public selectAudio(index: number): void {
 		if (index === this.snapshot.audioIndex || this.disposed || this.snapshot.status !== "active") {
 			return
 		}
+
+		this.wantedAudio = index
 
 		const playback = this.playback
 
@@ -270,14 +311,39 @@ export class PreviewVideo {
 		}
 
 		if (this.snapshot.route === "direct" && !this.escalated) {
-			if (enableAudioTrack(this.video, index)) {
-				this.update({ audioIndex: index })
-
-				return
-			}
-
-			void this.escalate(index)
+			void this.switchDirectAudio(index)
 		}
+	}
+
+	private async switchDirectAudio(index: number): Promise<void> {
+		const video = this.video
+		const native = this.snapshot.nativeAudio
+
+		if (video === null || native === null) {
+			await this.escalate(index)
+
+			return
+		}
+
+		const result = this.snapshot.probe === null ? await this.readProbe() : { status: "probed" as const, probe: this.snapshot.probe }
+
+		if (this.isDisposed() || this.escalated || this.wantedAudio !== index) {
+			return
+		}
+
+		const probe = result.status === "probed" ? result.probe : null
+		const codec = probe?.audio[index]?.codec ?? null
+		const canPlay = browserCanPlay(video)
+		// The element's tracks are the probe's, in order, only where it lists as many.
+		const inPlace = probe !== null && probe.audio.length === native.length && codec !== null && canPlay(CODECS[codec].query)
+
+		if (inPlace && enableAudioTrack(video, index)) {
+			this.update({ audioIndex: index })
+
+			return
+		}
+
+		await this.escalate(index)
 	}
 
 	// The embedded cues of `track` read so far; null before any. Rebuilt only when that track got cues; `_version`
@@ -507,13 +573,11 @@ export class PreviewVideo {
 	}
 
 	private async checkGap(video: HTMLVideoElement, kinds: ReturnType<typeof undecodedKinds>): Promise<void> {
-		const result = await this.options.deps.probe(this.abort.signal).catch((): PreviewProbeResult => ({ status: "unavailable" }))
+		const result = await this.readProbe()
 
 		if (this.isDisposed() || result.status !== "probed") {
 			return
 		}
-
-		this.directProbe = result
 
 		if (result.probe === null) {
 			return
@@ -607,11 +671,7 @@ export class PreviewVideo {
 		this.update({ route: "ladder", status: "active" })
 
 		const known = this.snapshot.probe
-		const result: PreviewProbeResult =
-			known !== null
-				? { status: "probed", probe: known }
-				: (this.directProbe ??
-					(await this.options.deps.probe(this.abort.signal).catch((): PreviewProbeResult => ({ status: "unavailable" }))))
+		const result: PreviewProbeResult = known !== null ? { status: "probed", probe: known } : await this.readProbe()
 
 		if (superseded()) {
 			return
@@ -631,7 +691,9 @@ export class PreviewVideo {
 			return
 		}
 
-		const chosen = params.audioIndex ?? (this.snapshot.audioIndex >= 0 ? this.snapshot.audioIndex : null)
+		// The track asked for, else the one the user picked; otherwise the ladder's own choice (a playable one in the
+		// user's language), not whichever the element had enabled.
+		const chosen = params.audioIndex ?? this.wantedAudio
 		const audioIndex =
 			chosen !== null && chosen < probe.audio.length
 				? chosen
@@ -699,6 +761,13 @@ export class PreviewVideo {
 			this.syncPlayback()
 		})
 		this.syncPlayback()
+
+		// A track picked while it opened.
+		if (this.wantedAudio !== null && this.wantedAudio !== audioIndex && this.wantedAudio < probe.audio.length) {
+			void playback.selectAudio(this.wantedAudio).catch((error: unknown) => {
+				log.warn("preview.video", "switching the audio track failed", error)
+			})
+		}
 	}
 
 	private syncPlayback(): void {

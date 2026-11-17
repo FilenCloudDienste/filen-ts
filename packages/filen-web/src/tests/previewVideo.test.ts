@@ -118,6 +118,8 @@ function setUp(options: {
 	// Registration resolves only when this settles.
 	registration?: Promise<void>
 	poster?: Promise<string | null>
+	// Playback opens only when this settles.
+	openGate?: Promise<void>
 }): Harness {
 	const video = new DecodingVideo()
 
@@ -162,7 +164,7 @@ function setUp(options: {
 	const open = vi.fn<typeof openPlayback>((_video, _file, _probe, _selection, openOptions) => {
 		onTextCues = openOptions.onTextCues
 
-		return Promise.resolve(fake)
+		return (options.openGate ?? Promise.resolve()).then(() => fake)
 	})
 	const goneListeners: (() => void)[] = []
 	const playbackDeps = vi.fn((allowDirect: boolean) => ({ directAvailable: () => allowDirect }))
@@ -655,7 +657,7 @@ describe("PreviewVideo — audio tracks", () => {
 
 	it("names the element's own audio tracks on a direct stream, and switches them in place", async () => {
 		const audioTracks = twoTracks()
-		const harness = setUp({ route: "direct", audioTracks })
+		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "aac"]) })
 
 		await flush()
 		harness.video.loadMetadata()
@@ -678,6 +680,81 @@ describe("PreviewVideo — audio tracks", () => {
 		expect(harness.controller.getSnapshot()).toMatchObject({ route: "direct", audioIndex: 1 })
 		expect(harness.open).not.toHaveBeenCalled()
 		expect(harness.video.loads).toBe(loads)
+	})
+
+	it("moves to the ladder rather than switch in place to a track the element cannot decode", async () => {
+		const audioTracks = twoTracks()
+		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "dts"]) })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(audioTracks.map(track => track.enabled)).toEqual([true, false])
+		expect(harness.open).toHaveBeenCalledOnce()
+		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 1, subtitle: "none" })
+	})
+
+	it("marks the track a direct stream plays without a list of its own, and picking it again changes nothing", async () => {
+		const held = probeOf(["aac", "aac"])
+		const harness = setUp({ route: "direct", peek: held })
+
+		expect(harness.controller.getSnapshot().audioIndex).toBe(0)
+
+		harness.controller.selectAudio(0)
+		await flush()
+
+		expect(harness.open).not.toHaveBeenCalled()
+	})
+
+	it("lets the ladder choose the track when a direct start fails, not whichever the element had enabled", async () => {
+		const harness = setUp({
+			route: "direct",
+			probe: probeOf(["aac", "aac"]),
+			audioTracks: [
+				{ enabled: false, label: "Main", language: "en" },
+				{ enabled: true, label: "Second", language: "en" }
+			]
+		})
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		harness.video.emit("error")
+		await flush()
+
+		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 0, subtitle: "none" })
+	})
+
+	it("plays the track picked while the ladder opens", async () => {
+		const gate = Promise.withResolvers<undefined>()
+		const harness = setUp({ route: "ladder", probe: probeOf(["aac", "aac"]), openGate: gate.promise })
+
+		await flush()
+		harness.controller.selectAudio(1)
+		gate.resolve(undefined)
+		await flush()
+
+		expect(harness.playback.selectAudio).toHaveBeenCalledWith(1)
+	})
+
+	it("reads a probe that failed once per open, whatever engages the controls or checks a gap, and again on Retry", async () => {
+		const harness = setUp({ route: "ladder", probe: "unavailable" })
+
+		await flush()
+		harness.controller.ensureProbe()
+		harness.controller.ensureProbe()
+		await flush()
+
+		expect(harness.probe).toHaveBeenCalledOnce()
+		expect(harness.controller.getSnapshot().status).toBe("failed")
+
+		harness.controller.retry()
+		await flush()
+
+		expect(harness.probe).toHaveBeenCalledTimes(2)
 	})
 
 	it("moves a direct start to the ladder with the track asked for, where the element switches none itself", async () => {
