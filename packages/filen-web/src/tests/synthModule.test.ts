@@ -56,7 +56,7 @@ vi.mock("@/workers/synth/module.worker.ts?worker", () => ({ default: InProcessWo
 
 // The heap's allocations as the module worker makes them, failing while `full` is set: what a capped heap that has no
 // room answers.
-const heap = { full: false }
+const heap: { full: boolean; reported: number | null } = { full: false, reported: null }
 
 vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/vendor/libopenmpt/libopenmpt.js")>()
@@ -66,7 +66,10 @@ vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
 			const lib = await actual.default(options)
 			const malloc = lib._malloc.bind(lib)
 
+			const heapBytes = lib._filen_heap_bytes.bind(lib)
+
 			lib._malloc = size => (heap.full ? 0 : malloc(size))
+			lib._filen_heap_bytes = () => heap.reported ?? heapBytes()
 
 			return lib
 		}
@@ -142,6 +145,8 @@ describe("module synthesizer", () => {
 		const second = first === null ? null : await reader.next(first)
 
 		expect(second?.timestamp).toBeCloseTo((first?.timestamp ?? 0) + (first?.duration ?? 0), 6)
+		first?.sample.close()
+		second?.sample.close()
 
 		await reader.close()
 		await input.close()
@@ -185,7 +190,9 @@ describe("module synthesizer", () => {
 		const first = reader.first(0)
 
 		await reader.close()
-		await first.catch(() => null)
+		const landed = await first.catch(() => null)
+
+		landed?.sample.close()
 		await vi.waitFor(() => {
 			const opened = posted.slice(from).filter(request => request.type === "open").length
 			const closed = posted.slice(from).filter(request => request.type === "close").length
@@ -229,6 +236,7 @@ describe("module synthesizer", () => {
 		const first = await reader.first(0)
 
 		expect(first?.sample.numberOfFrames).toBe(4096)
+		first?.sample.close()
 		expect(scope.closed).toBe(false)
 		await reader.close()
 		await input.close()
@@ -253,6 +261,57 @@ describe("module synthesizer", () => {
 				spy.mockRestore()
 			}
 		}
+	})
+
+	it("hands a read's buffer over whole rather than copying it, and copies only a view into a larger one", async () => {
+		const { standalone } = await import("@/workers/remux/synthAudioInput")
+		const whole = new Uint8Array(64)
+		const view = new Uint8Array(new ArrayBuffer(128), 16, 64)
+
+		expect(standalone(whole)).toBe(whole.buffer)
+		expect(standalone(view)).not.toBe(view.buffer)
+		expect(standalone(view).byteLength).toBe(64)
+	})
+
+	it("replaces an instance whose heap grew far once nothing renders on it, keeping it for the inputs it has", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const bytes = tinyMod()
+		const grown = serve(bytes)
+		const input = await synthAudioInput(grown.port, grown.size, "audio", { kind: "module", key: "grown" })
+		const reader = input.reader({} as never, () => false)
+
+		const start = await reader.first(0)
+
+		start?.sample.close()
+		heap.reported = 200 * 1024 * 1024
+
+		try {
+			await reader.close()
+			await vi.waitFor(() => {
+				expect(posted.at(-1)?.type).toBe("close")
+			})
+			await new Promise(resolve => setTimeout(resolve, 10))
+		} finally {
+			heap.reported = null
+		}
+
+		// The old instance still serves the input it has.
+		const again = input.reader({} as never, () => false)
+
+		const replay = await again.first(0)
+
+		expect(replay?.timestamp).toBe(0)
+		replay?.sample.close()
+		await again.close()
+
+		const before = loads.filter(key => key === "grown").length
+		const fresh = serve(bytes)
+		const next = await synthAudioInput(fresh.port, fresh.size, "audio", { kind: "module", key: "grown" })
+
+		// A fresh instance: the key is loaded into it anew.
+		expect(loads.filter(key => key === "grown").length - before).toBe(1)
+		await next.close()
+		await input.close()
 	})
 
 	it("refuses what libopenmpt does not read as unsupported audio, and a lost key as a read failure", async () => {

@@ -33,6 +33,17 @@ const RENDER_FRAMES = 4096
 const LOAD_TIMEOUT_MS = 20_000
 const OPEN_TIMEOUT_MS: Readonly<Record<AudioSynthKind, number>> = { module: 20_000, midi: 60_000 }
 const RENDER_TIMEOUT_MS = 5_000
+// A wasm heap never shrinks: an instance whose heap grew past this is replaced once nothing renders on it, which a
+// playlist of modules otherwise never lets happen.
+const RECYCLE_HEAP_BYTES = 96 * 1024 * 1024
+
+// The buffer behind `bytes`, transferable as it is when they span it whole (a range read hands its bytes over that
+// way), else a copy of them.
+export function standalone(bytes: Uint8Array): ArrayBuffer {
+	return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
+		? bytes.buffer
+		: bytes.slice().buffer
+}
 
 // A file key the synthesizer worker holds, and how many inputs use it there.
 interface Held {
@@ -110,7 +121,7 @@ class Synth {
 				entry.users++
 			} else {
 				const load = async (): Promise<number> => {
-					const data = (await read()).slice().buffer
+					const data = standalone(await read())
 					const { duration } = await this.nested.request(worker, { type: "load", key, data }, [data], LOAD_TIMEOUT_MS)
 
 					if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
@@ -143,11 +154,24 @@ class Synth {
 			this.held.delete(key)
 
 			if (this.nested.current(worker)) {
-				this.nested.request(worker, { type: "unload", key }).catch(() => undefined)
+				this.nested
+					.request(worker, { type: "unload", key })
+					.then(response => {
+						this.recycle(worker, response)
+					})
+					.catch(() => undefined)
 			}
 		}
 
 		this.nested.release(worker)
+	}
+
+	// Retires an instance that answered a heap grown past RECYCLE_HEAP_BYTES with nothing rendering: the next input
+	// starts a fresh one, and this one ends with the inputs it has.
+	public recycle(worker: Worker, response: SynthResponse): void {
+		if ((response.heap ?? 0) > RECYCLE_HEAP_BYTES) {
+			this.nested.retire(worker)
+		}
 	}
 }
 
@@ -237,7 +261,12 @@ function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () 
 			opening
 				?.then(handle => {
 					if (synth.nested.current(worker)) {
-						synth.nested.request(worker, { type: "close", handle }).catch(() => undefined)
+						synth.nested
+							.request(worker, { type: "close", handle })
+							.then(response => {
+								synth.recycle(worker, response)
+							})
+							.catch(() => undefined)
 					}
 				})
 				.catch(() => undefined)
