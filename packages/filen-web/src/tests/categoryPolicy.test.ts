@@ -81,6 +81,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	font: "drivePreviewKindFont",
 	sqlite: "drivePreviewKindSqlite",
 	geo: "drivePreviewKindGeo",
+	model3d: "drivePreviewKindModel3d",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -267,7 +268,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -553,5 +554,30 @@ describe("the geo row", () => {
 		expect(previewType(fileNamed("world.topojson", 1024n))).toBe("other")
 		expect(previewType(fileNamed("data.json", 1024n))).toBe("code")
 		expect(previewKindLabelKey("geo")).toBe("drivePreviewKindGeo")
+	})
+})
+
+describe("the model3d row", () => {
+	const CAP = 128n * MIB
+
+	it.each(["part.stl", "mesh.obj", "scene.gltf", "scene.glb", "print.3mf", "rig.fbx", "scan.ply", "scene.usdz"])(
+		"%s opens as a model up to 128 MiB, everywhere",
+		name => {
+			expect(previewType(fileNamed(name, 1024n))).toBe("model3d")
+			expect(canPreview(fileNamed(name, CAP))).toBe(true)
+			expect(canPreview(fileNamed(name, CAP + 1n))).toBe(false)
+			expect(anonPreviewability(fileNamed(name, CAP))).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(CAP) }]), 0)).toBe(true)
+		}
+	)
+
+	it("reads an extensionless model by its stored type, and a .obj whose head is not text as nothing", () => {
+		expect(previewType(fileNamed("part", 1024n, "model/stl"))).toBe("model3d")
+		expect(previewType(fileNamed("scene", 1024n, "model/gltf-binary"))).toBe("model3d")
+		expect(previewType(fileNamed("scene", 1024n, "model/vnd.usdz+zip"))).toBe("model3d")
+		expect(previewType(fileNamed("mesh.obj", 1024n), "wavefront")).toBe("model3d")
+		expect(previewType(fileNamed("main.obj", 1024n), "notWavefront")).toBe("other")
+		expect(previewKindLabelKey("model3d")).toBe("drivePreviewKindModel3d")
+		expect(isPhotoCategory("model3d")).toBe(false)
 	})
 })

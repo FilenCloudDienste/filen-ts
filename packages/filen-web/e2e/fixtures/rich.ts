@@ -4,10 +4,11 @@ import { gunzipSync } from "node:zlib"
 import { buildZip } from "../helpers/archiveFixtures"
 import { appDatabase, walDatabase } from "./richSqlite"
 import { RICH_GEO_JSON, RICH_GEO_KML, placesKmz, rideGpx } from "./richGeo"
+import { RICH_MODELS_PASSWORD, checkerPng, cubeStl, meshMtl, meshObj, modelGlb, modelsZip, print3mf, sceneUsdz } from "./richModels"
 import { scenarioModule } from "./scenarios"
 
 // The rich viewers' files (preview-rich.spec.ts): fonts from the office package's own assets, SQLite databases written
-// by node:sqlite (fixtures/richSqlite.ts).
+// by node:sqlite (fixtures/richSqlite.ts), tracks (fixtures/richGeo.ts) and 3D models (fixtures/richModels.ts).
 
 const FONTS = fileURLToPath(new URL("../../../filen-office/assets/fonts/arimo/", import.meta.url))
 
@@ -22,7 +23,21 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-sqlite": ["rich-app.sqlite", "rich-wal.sqlite", "rich-not-db.db"],
 		// The same database as an archive's entry: read whole into sqlite's memory.
 		"rich-sqlite-archive": ["rich-databases.zip"],
-		"rich-geo": ["rich-ride.gpx", "rich-places.kml", "rich-places.kmz", "rich-area.geojson"]
+		"rich-geo": ["rich-ride.gpx", "rich-places.kml", "rich-places.kmz", "rich-area.geojson"],
+		// The OBJ's MTL and texture beside it.
+		"rich-models": [
+			"rich-cube.stl",
+			"rich-mesh.obj",
+			"rich-mesh.mtl",
+			"rich-mesh-tex.png",
+			"rich-model.glb",
+			"rich-print.3mf",
+			"rich-scene.usdz"
+		],
+		// An OBJ whose MTL is nowhere.
+		"rich-models-lone": ["rich-lone.obj"],
+		// The OBJ trio as archive entries, its texture in a subdirectory; the second archive encrypted.
+		"rich-models-archive": ["rich-models.zip", "rich-models-locked.zip"]
 	},
 	() => ({
 		"rich-font.ttf": { generate: () => gunzipSync(readFileSync(`${FONTS}Arimo-Regular.ttf.gz`)) },
@@ -40,6 +55,17 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-places.kml": { generate: () => Buffer.from(RICH_GEO_KML, "utf8") },
 		"rich-places.kmz": { generate: placesKmz },
 		"rich-area.geojson": { generate: () => Buffer.from(RICH_GEO_JSON, "utf8") },
-		"rich-databases.zip": { generate: () => buildZip([{ name: RICH_SQLITE_ENTRY, data: appDatabase() }]) }
+		"rich-databases.zip": { generate: () => buildZip([{ name: RICH_SQLITE_ENTRY, data: appDatabase() }]) },
+		// Every model file is generated, as every scenario's files take one payload kind.
+		"rich-cube.stl": { generate: cubeStl },
+		"rich-mesh.obj": { generate: () => Buffer.from(meshObj("rich-mesh.mtl"), "utf8") },
+		"rich-mesh.mtl": { generate: () => Buffer.from(meshMtl("rich-mesh-tex.png"), "utf8") },
+		"rich-mesh-tex.png": { generate: checkerPng },
+		"rich-model.glb": { generate: modelGlb },
+		"rich-print.3mf": { generate: print3mf },
+		"rich-scene.usdz": { generate: sceneUsdz },
+		"rich-lone.obj": { generate: () => Buffer.from(meshObj("rich-lone.mtl"), "utf8") },
+		"rich-models.zip": { generate: () => modelsZip() },
+		"rich-models-locked.zip": { generate: () => modelsZip(RICH_MODELS_PASSWORD) }
 	})
 )

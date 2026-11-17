@@ -32,7 +32,8 @@ export type ContentVerdict = "transportStream" | "notTransportStream" | "video" 
 
 // What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not;
 // of a `.vhd`: a Virtual Hard Disk or not; of a `.key`: a Keynote package (a zip) or not; of a `.db`: a SQLite
-// database or not; of an `.ai`: a PDF inside or not. Kept apart from the media verdicts the apps persist.
+// database or not; of an `.ai`: a PDF inside or not; of a `.obj`: a Wavefront model (text) or not. Kept apart from the
+// media verdicts the apps persist.
 export type DocumentVerdict =
 	| "wordBinary"
 	| "notWordBinary"
@@ -46,6 +47,8 @@ export type DocumentVerdict =
 	| "notSqlite"
 	| "pdfCompatible"
 	| "notPdfCompatible"
+	| "wavefront"
+	| "notWavefront"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -58,10 +61,17 @@ export type FileVerdict = ContentVerdict | DocumentVerdict
 //   iworkPackage          key     iworkPackage / notIworkPackage
 //   sqlite                db      sqlite / notSqlite
 //   pdfCompatible         ai      pdfCompatible / notPdfCompatible
-// Reserved, added with their readers: wavefront (obj), vobsub (sub), vcard (vcf), mpegPs (mod), executable (no
-// extension).
+//   wavefront             obj     wavefront / notWavefront
+// Reserved, added with their readers: vobsub (sub), vcard (vcf), mpegPs (mod), executable (no extension).
 export type SniffId =
-	"transportStream" | "wordTemplate" | "presentationTemplate" | "virtualDisk" | "iworkPackage" | "sqlite" | "pdfCompatible"
+	| "transportStream"
+	| "wordTemplate"
+	| "presentationTemplate"
+	| "virtualDisk"
+	| "iworkPackage"
+	| "sqlite"
+	| "pdfCompatible"
+	| "wavefront"
 
 // Each read's verdicts: what it found, what it did not.
 export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
@@ -71,7 +81,8 @@ export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdi
 	virtualDisk: ["virtualDisk", "notVirtualDisk"],
 	iworkPackage: ["iworkPackage", "notIworkPackage"],
 	sqlite: ["sqlite", "notSqlite"],
-	pdfCompatible: ["pdfCompatible", "notPdfCompatible"]
+	pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
+	wavefront: ["wavefront", "notWavefront"]
 }
 
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
@@ -116,6 +127,8 @@ export interface Ambiguity {
 	notSqlite?: string | null
 	pdfCompatible?: string | null
 	notPdfCompatible?: string | null
+	wavefront?: string | null
+	notWavefront?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
@@ -163,7 +176,9 @@ const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	["db", { fallback: null, sqlite: "sqlite", notSqlite: null, mimeHint: true, sniff: "sqlite" }],
 	// Illustrator saves a PDF inside an `.ai` unless "Create PDF Compatible File" was off (PostScript only, which nothing
 	// here renders). Only a read of its head tells; neither is the usual meaning.
-	["ai", { fallback: null, pdfCompatible: "pdf", notPdfCompatible: null, mimeHint: false, sniff: "pdfCompatible" }]
+	["ai", { fallback: null, pdfCompatible: "pdf", notPdfCompatible: null, mimeHint: false, sniff: "pdfCompatible" }],
+	// A Wavefront model is text; a compiled object file under the same extension is not, and has no kind its name gives.
+	["obj", { fallback: "obj", wavefront: "obj", notWavefront: null, mimeHint: true, sniff: "wavefront" }]
 ])
 
 function lowerName(name: string): string {
@@ -230,6 +245,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.pdfCompatible
 		case "notPdfCompatible":
 			return ambiguity.notPdfCompatible
+		case "wavefront":
+			return ambiguity.wavefront
+		case "notWavefront":
+			return ambiguity.notWavefront
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

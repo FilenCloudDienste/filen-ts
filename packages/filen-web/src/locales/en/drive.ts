@@ -675,6 +675,8 @@ export const drive = {
 	drivePreviewKindSqlite: "SQLite database",
 	/** Info panel — Kind row value: a GPS track or map shapes file (gpx, kml, kmz, geojson) */
 	drivePreviewKindGeo: "Map track",
+	/** Info panel — Kind row value: a 3D model (stl, obj, gltf, glb, 3mf, fbx, ply, usdz) */
+	drivePreviewKindModel3d: "3D model",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

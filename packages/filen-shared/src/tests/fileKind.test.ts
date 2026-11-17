@@ -290,7 +290,8 @@ describe("content sniffs", () => {
 			virtualDisk: ["virtualDisk", "notVirtualDisk"],
 			iworkPackage: ["iworkPackage", "notIworkPackage"],
 			sqlite: ["sqlite", "notSqlite"],
-			pdfCompatible: ["pdfCompatible", "notPdfCompatible"]
+			pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
+			wavefront: ["wavefront", "notWavefront"]
 		})
 	})
 
@@ -302,6 +303,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("key")).toEqual([null, "key", null])
 		expect(sniffCandidates("db")).toEqual([null, "sqlite", null])
 		expect(sniffCandidates("ai")).toEqual([null, "pdf", null])
+		expect(sniffCandidates("obj")).toEqual(["obj", "obj", null])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 

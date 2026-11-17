@@ -1,5 +1,6 @@
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { FileVerdict, SniffId } from "@filen/shared"
+import { looksLikeText } from "@filen/shared/textEncoding"
 import { SQLITE_HEADER, isSqliteHeader } from "@/features/preview/lib/sqliteBrowse.logic"
 
 // How each content read (@filen/shared's SniffId) runs. Pure, for the gates (preview.logic.ts); the reads themselves are
@@ -48,6 +49,9 @@ export function hasPdfHeader(head: Uint8Array): boolean {
 	return false
 }
 
+// A Wavefront model is text from its first byte; a compiled object file is not.
+export const WAVEFRONT_HEAD_BYTES = 8192
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
@@ -76,6 +80,11 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: PDF_HEADER_HEAD_BYTES,
 		decide: head => (hasPdfHeader(head) ? "pdfCompatible" : "notPdfCompatible")
+	},
+	wavefront: {
+		mode: "head",
+		headBytes: WAVEFRONT_HEAD_BYTES,
+		decide: head => (looksLikeText(head) ? "wavefront" : "notWavefront")
 	}
 }
 

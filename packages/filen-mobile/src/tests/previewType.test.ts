@@ -465,6 +465,18 @@ describe("getPreviewType — stored mime", () => {
 		}
 	})
 
+	// Before = after: 3D model types name extensions this platform's tables lack, and a .obj stays unknown whatever a
+	// read of it would say.
+	it("keeps an extensionless 3D model and a .obj unknown", () => {
+		for (const mime of ["model/stl", "model/obj", "model/gltf+json", "model/gltf-binary", "model/3mf", "model/vnd.usdz+zip"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+			expect(fileTypeExtension("download", mime), mime).toBe("")
+		}
+
+		expect(getPreviewType("mesh.obj")).toBe("unknown")
+		expect(getPreviewType("mesh.obj", "text/plain")).toBe("text")
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

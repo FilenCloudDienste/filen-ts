@@ -10,7 +10,11 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { PreviewByteOriginProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { PreviewByteOriginProvider, PreviewDownloadableProvider, usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { PreviewReferenceSourceContext } from "@/features/preview/lib/referenceResolver"
+import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
+import type { EntryStore } from "@/features/archive/lib/entryStore"
+import { entryReferences } from "@/features/archive/lib/entryReferences"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
 import { PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
@@ -43,6 +47,8 @@ export interface ArchiveEntryViewerProps {
 	// Null where the entry may not be saved (a link allowing no downloads).
 	onDownload: (() => void) | null
 	onBack: () => void
+	// The archive's listing, where the entry's references (a model's textures) are found.
+	listing: { source: ArchiveSource; store: EntryStore }
 }
 
 // The entry's viewer: the one its name picked, else the one its content read found.
@@ -78,7 +84,8 @@ export function ArchiveEntryViewer({
 	password: listingPassword,
 	onPasswordAccepted,
 	onDownload,
-	onBack
+	onBack,
+	listing
 }: ArchiveEntryViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
@@ -109,6 +116,7 @@ export function ArchiveEntryViewer({
 		}
 	})
 	const readerRequest = useEffectEvent(() => ({ request, password }))
+	const access = usePreviewAccessMode()
 
 	// A layout effect: it runs before the viewer's own effects start reading through the reader.
 	useLayoutEffect(() => {
@@ -219,22 +227,26 @@ export function ArchiveEntryViewer({
 						key={attempt}
 						origin={origin}
 					>
-						<PreviewDownloadableProvider
-							downloadable={onDownload !== null}
-							onDownload={onDownload}
+						<PreviewReferenceSourceContext
+							value={entryReferences(listing.source, listing.store, request.params.entry.index, password, access)}
 						>
-							<ContentSniffGate
-								item={item}
-								asText={false}
-								render={() => (
-									<EntryBody
-										item={item}
-										category={entry.category}
-										alt={request.name}
-									/>
-								)}
-							/>
-						</PreviewDownloadableProvider>
+							<PreviewDownloadableProvider
+								downloadable={onDownload !== null}
+								onDownload={onDownload}
+							>
+								<ContentSniffGate
+									item={item}
+									asText={false}
+									render={() => (
+										<EntryBody
+											item={item}
+											category={entry.category}
+											alt={request.name}
+										/>
+									)}
+								/>
+							</PreviewDownloadableProvider>
+						</PreviewReferenceSourceContext>
 					</PreviewByteOriginProvider>
 				)}
 				{waiting && ask === null ? (

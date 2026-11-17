@@ -10,6 +10,7 @@ import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { encodingDetectAsset } from "./vite/encoding-detect-plugin"
 import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
+import { threeAssets } from "./vite/three-assets-plugin"
 import { ocrAssets } from "./vite/ocr-assets-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
@@ -212,6 +213,7 @@ export default defineConfig(({ mode }) => ({
 		spellcheckAssets(),
 		encodingDetectAsset(),
 		pdfjsAssets(),
+		threeAssets(),
 		ocrAssets(),
 		assistantModelDev()
 	],
@@ -286,7 +288,7 @@ export default defineConfig(({ mode }) => ({
 	// for the page build: ~70 KB of comments across the workers.
 	worker: {
 		format: "es",
-		plugins: () => [officeFonts(), officeHyphenation(), ocrAssets({ emit: false })],
+		plugins: () => [officeFonts(), officeHyphenation(), ocrAssets({ emit: false }), threeAssets({ emit: false })],
 		rolldownOptions: { output: { codeSplitting: false, comments: { annotation: false } } }
 	}
 }))

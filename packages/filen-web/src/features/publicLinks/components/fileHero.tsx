@@ -18,6 +18,7 @@ import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
 import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
+import type { ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { PublicArchiveActions, PublicArchiveBrowser } from "@/features/publicLinks/components/publicArchive"
 import { DownloadTooLargeNote } from "@/features/publicLinks/components/publicLinkStates"
@@ -46,7 +47,8 @@ export function FileHero({
 	onBack,
 	saveItem,
 	archiveFile,
-	siblings
+	siblings,
+	references
 }: {
 	item: DriveItem
 	downloadEnabled: boolean
@@ -59,6 +61,8 @@ export function FileHero({
 	archiveFile?: AnyFile | undefined
 	// The other files of its directory (a video's subtitles are among them).
 	siblings?: readonly DriveItem[] | undefined
+	// Where a model's referenced files are found (a directory link's listings).
+	references?: ReferenceSourceFactory | undefined
 }) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
@@ -202,6 +206,7 @@ export function FileHero({
 							linkScope={linkScope}
 							downloadable={downloadEnabled}
 							siblings={siblings}
+							references={references}
 						/>
 					)}
 				</div>

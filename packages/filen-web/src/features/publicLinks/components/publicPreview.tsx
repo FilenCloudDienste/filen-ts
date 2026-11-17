@@ -4,6 +4,7 @@ import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider, PreviewSiblingsProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
+import { PreviewReferenceSourceContext, type ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 
 const NO_SIBLINGS: readonly DriveItem[] = []
 
@@ -20,12 +21,15 @@ export function PublicPreview({
 	item,
 	linkScope,
 	downloadable,
-	siblings
+	siblings,
+	references
 }: {
 	item: DriveItem
 	linkScope: string
 	downloadable: boolean
 	siblings?: readonly DriveItem[] | undefined
+	// Where a model's referenced files are found; none on a single file's link.
+	references?: ReferenceSourceFactory | undefined
 }) {
 	const base = asDirectoryOrFile(item)
 
@@ -42,19 +46,21 @@ export function PublicPreview({
 		>
 			<PreviewDownloadableProvider downloadable={downloadable}>
 				<PreviewSiblingsProvider siblings={siblings ?? NO_SIBLINGS}>
-					<div className="size-full">
-						<ContentSniffGate
-							item={item}
-							asText={false}
-							render={() => (
-								<ReadOnlyPreviewBody
-									item={item}
-									category={previewType(item)}
-									alt={alt}
-								/>
-							)}
-						/>
-					</div>
+					<PreviewReferenceSourceContext value={references ?? null}>
+						<div className="size-full">
+							<ContentSniffGate
+								item={item}
+								asText={false}
+								render={() => (
+									<ReadOnlyPreviewBody
+										item={item}
+										category={previewType(item)}
+										alt={alt}
+									/>
+								)}
+							/>
+						</div>
+					</PreviewReferenceSourceContext>
 				</PreviewSiblingsProvider>
 			</PreviewDownloadableProvider>
 		</PreviewAccessModeProvider>

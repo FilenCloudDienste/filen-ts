@@ -633,6 +633,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 							: null
 					}
 					onBack={entries.closeViewer}
+					listing={{ source, store }}
 				/>
 				{entries.dialogs}
 			</>

@@ -43,6 +43,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
+import { linkReferences } from "@/features/publicLinks/lib/linkReferences"
 import { SaveToDriveButton, SaveToDriveDialog } from "@/features/publicLinks/components/saveToDrive"
 import { SaveAsArchiveButton } from "@/features/publicLinks/components/publicArchive"
 import { BrowseList, type BrowseListHandle, type BrowseResume } from "@/features/publicLinks/components/browseList"
@@ -269,6 +270,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				saveItem={saveable ? selected.file : undefined}
 				archiveFile={selected.file}
 				siblings={sorted.map(entry => entry.item)}
+				references={linkReferences(sorted, link)}
 			/>
 		)
 	}

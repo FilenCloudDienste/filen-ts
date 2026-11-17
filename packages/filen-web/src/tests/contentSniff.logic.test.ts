@@ -280,6 +280,21 @@ describe("SNIFFERS", () => {
 		}
 	})
 
+	it("finds a Wavefront model by a text head of up to 8 KiB, and a compiled object file by a binary one", () => {
+		const sniffer = SNIFFERS.wavefront
+		const model = new TextEncoder().encode("# Blender\nmtllib mesh.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+		// An ELF relocatable object.
+		const elf = Uint8Array.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x3e, 0x00])
+
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(8192)
+		expect(["file", "linkedFile", "entry", "bytes"].every(origin => gateRunsSniffer(sniffer, origin as "file"))).toBe(true)
+
+		if (sniffer.mode === "head") {
+			expect(sniffer.decide(model, model.length)).toBe("wavefront")
+			expect(sniffer.decide(elf, elf.length)).toBe("notWavefront")
+		}
+	})
+
 	it("opens no iWork document inside an archive yet", () => {
 		const DIRECT = { type: "direct", packedBytes: 10n } as const
 

@@ -6,6 +6,8 @@ import { archiveBrowser, itemRow, previewOverlay } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { RICH_FONT_FAMILY, RICH_SQLITE_ENTRY } from "./fixtures/rich"
+import { RICH_CUBE_TRIANGLES, RICH_MODEL_ENTRY, RICH_MODELS_PASSWORD } from "./fixtures/richModels"
+import { WORKER_WEBGL } from "./helpers/workerWebgl"
 
 // The rich viewers on files of the shared fixture tree: what each shows, read from the file alone (no request leaves
 // the app and Filen's hosts).
@@ -14,6 +16,9 @@ const [FONT_TTF, FONT_WOFF2] = FIXTURE_FILES["rich-fonts"]
 const [APP_DB, WAL_DB, NOT_DB] = FIXTURE_FILES["rich-sqlite"]
 const [DB_ARCHIVE] = FIXTURE_FILES["rich-sqlite-archive"]
 const [RIDE, PLACES_KML, PLACES_KMZ, AREA] = FIXTURE_FILES["rich-geo"]
+const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF, SCENE_USDZ] = FIXTURE_FILES["rich-models"]
+const [LONE_OBJ] = FIXTURE_FILES["rich-models-lone"]
+const [MODELS_ZIP, MODELS_LOCKED_ZIP] = FIXTURE_FILES["rich-models-archive"]
 
 async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
@@ -159,6 +164,109 @@ test("a track is plotted from the file alone, with its figures, profile and refe
 	await itemRow(listbox, AREA).dblclick()
 	await expect(dialog.getByText(/5 points · 1 waypoint/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await closePreview(page)
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+// A model drawn in the 3D worker, its figures in the information panel; where the engine gives a worker no WebGL, the
+// card saying so, with View source for a text format.
+async function expectModel(
+	dialog: Locator,
+	webgl: boolean,
+	figures: { triangles: number; textures?: number; text: boolean }
+): Promise<void> {
+	if (!webgl) {
+		await expect(dialog.getByText("This browser can't display 3D models here.")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expect(dialog.getByRole("button", { name: "View source", exact: true })).toHaveCount(figures.text ? 1 : 0)
+
+		return
+	}
+
+	await expect(dialog.getByLabel("3D model", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: "Info", exact: true }).click()
+
+	const panel = dialog.getByRole("complementary")
+
+	await expect(panel.getByText("Triangles", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(panel.getByText(String(figures.triangles), { exact: true }).first()).toBeVisible()
+
+	if (figures.textures !== undefined) {
+		await expect(panel.getByText("Textures", { exact: true })).toBeVisible()
+	}
+
+	await expect(dialog.getByText(/referenced files? not loaded/)).toHaveCount(0)
+}
+
+test("a 3D model is drawn in a worker from its own files, and references outside them never fetched", async ({
+	page,
+	context,
+	browserName
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const webgl = WORKER_WEBGL[browserName]
+
+	await bootTo(page)
+
+	let listbox = await gotoFixture(page, "rich-models")
+	const dialog = previewOverlay(page)
+
+	await itemRow(listbox, CUBE_STL).dblclick()
+	await expectModel(dialog, webgl, { triangles: RICH_CUBE_TRIANGLES, text: false })
+	await closePreview(page)
+
+	// The MTL and its texture beside the OBJ are found; its source is a button away.
+	await itemRow(listbox, MESH_OBJ).dblclick()
+	await expectModel(dialog, webgl, { triangles: 2, textures: 1, text: true })
+	await dialog.getByRole("button", { name: "View source", exact: true }).click()
+	await expect(dialog.getByText("mtllib rich-mesh.mtl")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await closePreview(page)
+
+	// Draco geometry and an embedded texture (the decoders served from 'self'), a 3MF's mesh, a USDZ's textured quad.
+	await itemRow(listbox, MODEL_GLB).dblclick()
+	await expectModel(dialog, webgl, { triangles: RICH_CUBE_TRIANGLES, textures: 1, text: false })
+	await closePreview(page)
+	await itemRow(listbox, PRINT_3MF).dblclick()
+	await expectModel(dialog, webgl, { triangles: RICH_CUBE_TRIANGLES, text: false })
+	await closePreview(page)
+	await itemRow(listbox, SCENE_USDZ).dblclick()
+	await expectModel(dialog, webgl, { triangles: 2, textures: 1, text: false })
+	await closePreview(page)
+
+	listbox = await gotoFixture(page, "rich-models-lone")
+	await itemRow(listbox, LONE_OBJ).dblclick()
+
+	if (webgl) {
+		await expect(dialog.getByText("1 referenced file not loaded")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await dialog.getByRole("button", { name: "Info", exact: true }).click()
+		await expect(dialog.getByRole("complementary").getByText("rich-lone.mtl", { exact: true })).toBeVisible()
+	} else {
+		await expectModel(dialog, webgl, { triangles: 2, text: true })
+	}
+
+	await closePreview(page)
+
+	// An archive's entry finds its MTL beside it and its texture in a subdirectory of the archive, an encrypted one with
+	// the password the entry took.
+	listbox = await gotoFixture(page, "rich-models-archive")
+
+	for (const archive of [MODELS_ZIP, MODELS_LOCKED_ZIP]) {
+		await itemRow(listbox, archive).dblclick()
+
+		const browser = archiveBrowser(page)
+
+		await expect(browser.row(RICH_MODEL_ENTRY)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await browser.row(RICH_MODEL_ENTRY).dblclick()
+
+		if (archive === MODELS_LOCKED_ZIP) {
+			await browser.overlay.getByRole("button", { name: "Enter password", exact: true }).click()
+			await browser.unlock(RICH_MODELS_PASSWORD)
+		}
+
+		await expectModel(browser.overlay, webgl, { triangles: 2, textures: 1, text: true })
+		await browser.close()
+	}
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])

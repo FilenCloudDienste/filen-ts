@@ -22,6 +22,7 @@ import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { HEIC_EXTENSIONS, IMAGE_FORMATS, pendingProbe, streamsNatively, type ImageDecode } from "@/features/preview/lib/imageFormat"
 import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
+import { MODEL_MAX_BYTES } from "@/features/preview/lib/model3d/preflight.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 
@@ -45,6 +46,7 @@ export type PreviewCategory =
 	| "font"
 	| "sqlite"
 	| "geo"
+	| "model3d"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -401,6 +403,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindGeo",
 		assistantKind: null
 	},
+	// 3D models, read whole into the 3D worker with the files they reference, within one cap.
+	model3d: {
+		streamed: false,
+		ranged: false,
+		bufferCap: BigInt(MODEL_MAX_BYTES),
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindModel3d",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -472,6 +489,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["epub", "mobi", "fb2"], "ebook"],
 	// GPX and KML are XML (the code tier's grammar shows their source); a KMZ is a zipped KML.
 	[GEO_EXTENSIONS, "geo"],
+	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
+	[["stl", "obj", "gltf", "glb", "3mf", "fbx", "ply", "usdz"], "model3d"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
