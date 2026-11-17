@@ -980,8 +980,9 @@ const PSD_THUMB_HEAD_BYTES = 64 * 1024
 const PSD_THUMB_RESOURCES_MAX = 16 * 1024 * 1024
 
 // A Photoshop file (PSB too): the JPEG thumbnail Photoshop 5.0 and later embed (image resource 1036), found from range
-// reads (the head, then up to the image resources section's end, at most 16 MiB) and decoded by the SDK. Nothing is
-// decoded of the image itself; one without that resource has none. Photoshop 4.0's BGR thumbnail (1033) is not used.
+// reads (the head, then on to the image resources section's end, at most 16 MiB in all) and decoded by the SDK.
+// Nothing is decoded of the image itself; one without that resource has none. Photoshop 4.0's BGR thumbnail (1033) is
+// not used.
 export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 	const size = Number(item.data.size)
 
@@ -993,7 +994,13 @@ export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 			const reach = Math.min(size, PSD_THUMB_RESOURCES_MAX, psd.resourcesEnd ?? PSD_THUMB_RESOURCES_MAX)
 
 			if (reach > head.length) {
-				head = await readFileRange(item, 0, reach, signal)
+				// On from the head's end: the head is not read again.
+				const rest = await readFileRange(item, head.length, reach, signal)
+				const whole = new Uint8Array(head.length + rest.length)
+
+				whole.set(head)
+				whole.set(rest, head.length)
+				head = whole
 				psd = sniffPsd(head, size)
 			}
 		}

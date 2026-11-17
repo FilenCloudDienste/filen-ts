@@ -897,8 +897,12 @@ describe("generatePsdThumb", () => {
 		serve(file)
 
 		await expect(generatePsdThumb(psdItem(file.length), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
-		expect(readFileBytesRangeMock.mock.calls.map(call => call.slice(1, 3))[0]).toEqual([0, 64 * 1024])
-		expect(readFileBytesRangeMock.mock.calls.length).toBeGreaterThan(1)
+		const reads = readFileBytesRangeMock.mock.calls.map(call => call.slice(1, 3))
+
+		expect(reads[0]).toEqual([0, 64 * 1024])
+		// On from the head's end, never from 0 again.
+		expect(reads[1]?.[0]).toBe(64 * 1024)
+		expect(new Uint8Array((await makeSdkThumbnailFromFileMock.mock.calls[0]?.[0].arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(JPEG)
 	})
 
 	it("has none without a Photoshop 5 thumbnail (none, or only the BGR one of Photoshop 4)", async () => {
