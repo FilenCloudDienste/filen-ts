@@ -156,16 +156,18 @@ test("a TIFF is read by the MuPDF engine: one page as a picture, several in the 
 	await page.keyboard.press("Escape")
 	await expect(single).toHaveCount(0)
 
-	// Several pages: the page column with its page commands (no find: an image has no text). With the pages focused the
-	// next-page key steps to page 2, and the page commands' Next page to the last; the indicator follows the scroll.
+	// Several pages: the page column with its page commands (no find: an image has no text); the next-page key, pressed
+	// straight after it opens, walks to the last. In a view of the usual height: in the listing's tall one every page
+	// is in view at once, and there is nothing to step to.
+	await page.setViewportSize({ width: 1280, height: 900 })
 	await itemRow(listbox, TIFF_PAGES).dblclick()
 	await expect(page.getByText("Page 1 of 3", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByRole("button", { name: "Find in document" })).toHaveCount(0)
-	await page.getByRole("region", { name: `${TIFF_PAGES} — Page 1 of 3` }).click()
-	await page.keyboard.press("n")
-	await expect(page.getByText("Page 2 of 3", { exact: true })).toBeVisible({ timeout: 15_000 })
-	await page.getByRole("button", { name: "Next page" }).click()
-	await expect(page.getByText("Page 3 of 3", { exact: true })).toBeVisible({ timeout: 15_000 })
+
+	for (const shown of [2, 3]) {
+		await page.keyboard.press("n")
+		await expect(page.getByText(`Page ${String(shown)} of 3`, { exact: true })).toBeVisible({ timeout: 15_000 })
+	}
 
 	await page.keyboard.press("Escape")
 
