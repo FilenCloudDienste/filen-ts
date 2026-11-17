@@ -48,6 +48,8 @@ export const previewTextEmail = {
 	previewEmailBack: "Back to the message",
 	/** Email preview — the message is past what the preview reads */
 	previewEmailTooLarge: "This message is too large to show here.",
+	/** Email preview — above a text body cut at the text viewers' size limit */
+	previewEmailTextTruncated: "This text is longer than can be shown here; only its start is shown.",
 	/** Email preview — reading the message failed */
 	previewEmailFailed: "The message could not be read."
 }

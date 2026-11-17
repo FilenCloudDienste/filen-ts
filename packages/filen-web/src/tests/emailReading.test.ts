@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest"
-import { rasterImageType, readEmail } from "@/features/preview/lib/emailReading"
+import { describe, expect, it, vi } from "vitest"
+// A small text cap, so bodies past it stay small here.
+vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
+
+const { rasterImageType, readEmail } = await import("@/features/preview/lib/emailReading")
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
@@ -171,5 +174,30 @@ describe("readEmail", () => {
 			subject: "Earlier thread",
 			text: "Inner text"
 		})
+	})
+
+	it("cuts a text body at the text cap and refuses an HTML body past it", async () => {
+		const long = "x".repeat(5000)
+		const reading = await readEmail(
+			encode(
+				CRLF([
+					"Subject: Long",
+					'Content-Type: multipart/alternative; boundary="a"',
+					"",
+					"--a",
+					"Content-Type: text/plain",
+					"",
+					long,
+					"--a",
+					"Content-Type: text/html",
+					"",
+					`<p>${long}</p>`,
+					"--a--"
+				])
+			)
+		)
+
+		expect(reading).toMatchObject({ status: "ok", html: null, htmlTooLarge: true, textTruncated: true })
+		expect(reading.status === "ok" && reading.text?.length).toBe(4096)
 	})
 })

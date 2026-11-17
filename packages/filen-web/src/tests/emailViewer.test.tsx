@@ -34,6 +34,8 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 
 const { message } = vi.hoisted((): { message: { current: string | Uint8Array } } => ({ message: { current: "" } }))
 
+// A small text cap, so bodies and files past it stay small here.
+vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
@@ -291,5 +293,38 @@ describe("EmailViewer", () => {
 		expect(screen.getByText("notes.txt")).toBeTruthy()
 		expect(linkSaveAsks.length).toBeGreaterThan(0)
 		expect(linkSaveAsks.every(uuid => uuid === ITEM.data.uuid)).toBe(true)
+	})
+
+	it("shows a cut text body under a notice, an HTML body past the cap as too large, and no source past the text cap", async () => {
+		const long = "y".repeat(5000)
+
+		message.current = [
+			"Subject: Long",
+			'Content-Type: multipart/alternative; boundary="a"',
+			"",
+			"--a",
+			"Content-Type: text/plain",
+			"",
+			long,
+			"--a",
+			"Content-Type: text/html",
+			"",
+			`<p>${long}</p>`,
+			"--a--",
+			""
+		].join("\r\n")
+		render(<EmailViewer item={{ ...ITEM, data: { ...ITEM.data, size: 20_000n } } as typeof ITEM} />, {
+			wrapper: queryClientWrapper(createTestQueryClient())
+		})
+
+		expect(await screen.findByText("This formatted content is too large to show.")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Text" }))
+
+		expect(await screen.findByText("This text is longer than can be shown here; only its start is shown.")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Source" }))
+
+		expect(await screen.findByText("This file is too large to show as text.")).toBeTruthy()
 	})
 })

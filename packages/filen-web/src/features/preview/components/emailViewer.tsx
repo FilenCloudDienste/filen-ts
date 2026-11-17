@@ -9,7 +9,7 @@ import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { cachedOwnChain } from "@/features/drive/lib/ownAncestry"
 import { startUploads } from "@/features/drive/lib/upload"
 import { acceptedItemName } from "@/features/drive/lib/archiveHelpers"
-import { extensionOf } from "@/features/drive/lib/preview.logic"
+import { extensionOf, TEXT_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
@@ -24,6 +24,8 @@ import type { EmailAttachment, EmailMessage, EmailReading } from "@/features/pre
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
 import { SafeHtmlDocument } from "@/features/preview/components/safeHtmlDocument"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { CodeSurface } from "@/features/preview/components/codeSurface"
+import { detectLineEnding, type TextFile } from "@/features/preview/lib/textFile"
 import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { bytesOrigin } from "@/lib/sdk/byteOrigin"
 import { downloadBlob } from "@/lib/downloadBlob"
@@ -367,17 +369,43 @@ function HtmlBody({ sanitized, title }: { sanitized: EmailSanitizeResult; title:
 	)
 }
 
+// The text body in the read-only editor (it lays out only the lines in view), under a notice when it was cut.
+function TextBody({ text, truncated, alt }: { text: string; truncated: boolean; alt: string }) {
+	const { t } = useTranslation("preview")
+	const file: TextFile = { text, encoding: "utf-8", bom: false, lineEnding: detectLineEnding(text), editableAsIs: false, lossy: false }
+
+	return (
+		<div className="flex size-full flex-col">
+			{truncated ? (
+				<p className="flex items-center gap-2 border-b border-border/50 px-4 py-2 text-xs text-muted-foreground">
+					<InfoIcon className="size-4 shrink-0" />
+					{t("previewEmailTextTruncated")}
+				</p>
+			) : null}
+			<div className="min-h-0 flex-1">
+				<CodeSurface
+					file={file}
+					tag=""
+					alt={alt}
+					editable={false}
+					locked={false}
+				/>
+			</div>
+		</div>
+	)
+}
+
 function MessageView({ item, message, cidUrls }: { item: DriveItem; message: EmailMessage; cidUrls: ReadonlyMap<string, string> }) {
 	const { t } = useTranslation("preview")
 	const depth = useContext(EmailDepthContext)
 	const downloadable = usePreviewDownloadable()
-	const hasHtml = message.html !== null && message.html.trim() !== ""
+	const hasHtml = message.htmlTooLarge || (message.html !== null && message.html.trim() !== "")
 	const hasText = message.text !== null && message.text.trim() !== ""
 	const [view, setView] = useState<View>(hasHtml ? "html" : "text")
 	const [opened, setOpened] = useState<number | null>(null)
 	const title = message.subject ?? t("previewEmailNoSubject")
 	// Sanitized once per message and set of parts (the compiler keeps it).
-	const body = hasHtml ? sanitizeBody(message.html, cidUrls) : null
+	const body = message.html !== null && hasHtml ? sanitizeBody(message.html, cidUrls) : null
 	// Every part but the pictures the HTML shows in place: a part sent inline that is not one (a PDF, say) is listed.
 	const listed = message.attachments
 		.map((attachment, index) => ({ attachment, index }))
@@ -452,19 +480,35 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 			</header>
 			<div className="min-h-0 flex-1">
 				{view === "source" && message.hasSource ? (
-					<TextViewer
-						item={item}
+					item.data.size > TEXT_MAX_BYTES ? (
+						<PreviewUnsupportedState
+							item={item}
+							message={t("previewTextTooLarge")}
+						/>
+					) : (
+						<TextViewer
+							item={item}
+							alt={title}
+						/>
+					)
+				) : view === "html" && hasHtml ? (
+					body === null || body.sanitized.tooLarge ? (
+						<PreviewUnsupportedState
+							item={item}
+							message={t("previewHtmlTooLarge")}
+						/>
+					) : (
+						<HtmlBody
+							sanitized={body.sanitized}
+							title={title}
+						/>
+					)
+				) : hasText ? (
+					<TextBody
+						text={message.text}
+						truncated={message.textTruncated}
 						alt={title}
 					/>
-				) : view === "html" && body !== null ? (
-					<HtmlBody
-						sanitized={body.sanitized}
-						title={title}
-					/>
-				) : hasText ? (
-					<pre className="size-full overflow-auto p-4 font-sans text-sm break-words whitespace-pre-wrap select-text">
-						<bdi>{message.text}</bdi>
-					</pre>
 				) : (
 					<p className="p-4 text-sm text-muted-foreground">{t("previewEmailNoBody")}</p>
 				)}

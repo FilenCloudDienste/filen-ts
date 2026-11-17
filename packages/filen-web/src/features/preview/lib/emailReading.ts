@@ -2,7 +2,7 @@ import PostalMime, { type Address, type Email } from "postal-mime"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import { readMsg, type MsgAddress, type MsgMessage } from "@filen/office/core/msg"
 import { withoutFormatControls } from "@filen/shared/formatControls"
-import { EMAIL_MAX_BYTES } from "@/features/preview/lib/emailLimits"
+import { EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
 
 // A message (.eml, or Outlook's .msg) read for its viewer, in the text-family worker: headers as display text, its HTML and text bodies,
 // and its attachments as Blobs (outside the JS heap, shared with the page without a copy). Nothing it names is fetched.
@@ -40,8 +40,12 @@ export interface EmailMessage {
 	readonly addressesOmitted: number
 	// ISO 8601, or the header as written when it does not parse; null for none.
 	readonly date: string | null
+	// Null past TEXT_CAP characters too (htmlTooLarge): cut HTML is not a document.
 	readonly html: string | null
+	readonly htmlTooLarge: boolean
+	// Cut at TEXT_CAP characters (textTruncated): the page never holds more of a body than a text file's.
 	readonly text: string | null
+	readonly textTruncated: boolean
 	readonly attachments: readonly EmailAttachment[]
 	// Whether the file is text a Source view can show (a .msg is not).
 	readonly hasSource: boolean
@@ -110,6 +114,18 @@ function contentId(value: string | undefined): string | null {
 	return id === undefined || id === "" ? null : id
 }
 
+function bodies(html: string | null, text: string | null): Pick<EmailMessage, "html" | "htmlTooLarge" | "text" | "textTruncated"> {
+	const htmlTooLarge = html !== null && html.length > TEXT_CAP
+	const textTruncated = text !== null && text.length > TEXT_CAP
+
+	return {
+		html: htmlTooLarge ? null : html,
+		htmlTooLarge,
+		text: textTruncated ? text.slice(0, TEXT_CAP) : text,
+		textTruncated
+	}
+}
+
 function readMessage(email: Email): EmailMessage {
 	const budget = { left: MAX_ADDRESSES, omitted: 0 }
 	const from = email.from === undefined ? null : (addresses([email.from], budget)[0] ?? null)
@@ -123,8 +139,7 @@ function readMessage(email: Email): EmailMessage {
 		cc,
 		addressesOmitted: budget.omitted,
 		date: display(email.date),
-		html: email.html ?? null,
-		text: email.text ?? null,
+		...bodies(email.html ?? null, email.text ?? null),
 		attachments: email.attachments.map((attachment, index) => {
 			const content = attachment.content
 			// arraybuffer encoding: an ArrayBuffer; a string only for an encoding this never asks for.
@@ -162,8 +177,7 @@ function readMsgMessage(message: MsgMessage): EmailMessage {
 		cc: shown(message.cc),
 		addressesOmitted: message.recipientsOmitted,
 		date: display(message.date),
-		html: message.html,
-		text: message.text,
+		...bodies(message.html, message.text),
 		attachments: message.attachments.map((attachment, index) => {
 			const mimeType = attachment.mimeType ?? "application/octet-stream"
 			const blob = new Blob([attachment.bytes as Uint8Array<ArrayBuffer>], { type: mimeType })
@@ -194,7 +208,9 @@ export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailRe
 	}
 
 	try {
-		const email = await PostalMime.parse(bytes, {
+		// The whole buffer when the bytes are all of it (a transferred copy is): a view would be copied again.
+		const input = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes
+		const email = await PostalMime.parse(input, {
 			attachmentEncoding: "arraybuffer",
 			forceRfc822Attachments: true,
 			maxRfc822NestingDepth: 0,

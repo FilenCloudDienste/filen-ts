@@ -27,7 +27,7 @@ import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.l
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 import { VIDEO_CONTAINERS, type VideoContainer } from "@filen/shared/videos"
-import { EMAIL_MAX_BYTES } from "@/features/preview/lib/emailLimits"
+import { EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -65,9 +65,8 @@ export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 // A grid holds every cell's view in memory, several times the file's own size (an .xlsx is zipped), so
 // spreadsheets stop well below the other whole-buffer previews.
 export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
-// Text viewers hold the file as a string (UTF-16, twice its bytes) plus the editor's own document model,
-// and real text files are far smaller, so text, code, markdown and open-as-text stop lower still.
-export const TEXT_MAX_BYTES = 33_554_432n // 32 MiB
+// The text viewers' cap (previewCaps.ts).
+export const TEXT_MAX_BYTES = BigInt(TEXT_CAP)
 // A font is held whole twice (the cache for its FontFace, the face's own copy); real ones stay far below.
 export const FONT_MAX_BYTES = 67_108_864n // 64 MiB
 // A torrent is metadata: its info dictionary and piece hashes. Real ones stay far below.
