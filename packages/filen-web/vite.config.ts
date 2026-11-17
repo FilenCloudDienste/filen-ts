@@ -7,6 +7,7 @@ import babel from "@rolldown/plugin-babel"
 import { sdkArtifacts, COI_HEADERS, SDK_ARTIFACTS } from "./vite/sdk-artifacts-plugin"
 import { officeFonts, OFFICE_FONTS_BASE } from "./vite/office-fonts-plugin"
 import { officeHyphenation } from "./vite/office-hyphenation-plugin"
+import { encodingDetectAsset } from "./vite/encoding-detect-plugin"
 import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
 import { ocrAssets } from "./vite/ocr-assets-plugin"
@@ -209,6 +210,7 @@ export default defineConfig(({ mode }) => ({
 		officeFonts(),
 		officeHyphenation(),
 		spellcheckAssets(),
+		encodingDetectAsset(),
 		pdfjsAssets(),
 		ocrAssets(),
 		assistantModelDev()

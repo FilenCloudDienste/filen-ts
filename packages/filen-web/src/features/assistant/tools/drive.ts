@@ -28,7 +28,7 @@ import { WATCHDOG_MS } from "@/features/drive/lib/searchStatus.logic"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { spreadsheetFileKind } from "@/features/spreadsheet/lib/fileKind"
 import { loadDriveFileBytes } from "@/features/preview/lib/fileBytes"
-import { readTextFile } from "@/features/preview/lib/textFile"
+import { readTextFileDetected } from "@/features/preview/lib/encodingGuess"
 import { assistantRouter, navigateChecked } from "@/features/assistant/tools/navigation"
 import { navigateToRoute } from "@/features/assistant/tools/routes"
 import {
@@ -652,7 +652,7 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 		throw new AssistantToolError(`"${name}" is not a text file`)
 	}
 
-	const { text, truncated } = clipText(readTextFile(bytes).text, TEXT_FILE_MAX_CHARS)
+	const { text, truncated } = clipText((await readTextFileDetected(bytes)).text, TEXT_FILE_MAX_CHARS)
 
 	return {
 		value: {

@@ -64,10 +64,14 @@ export function detectLineEnding(text: string): LineEnding {
 	return cr > lf && cr > crlf ? "cr" : "lf"
 }
 
-// Never throws. Bytes that are not Unicode are read with the codepage of the browser's first language; `encoding`
-// (a label of TEXT_ENCODINGS) reads them with that one instead.
-export function readTextFile(bytes: Uint8Array, encoding?: string | null): TextFile {
-	const decoded = decodeTextBytes(bytes, { languageHint: navigator.languages[0] ?? null, encoding: encoding ?? null })
+// Never throws. Bytes that are not Unicode are read with `guess` (the detector's label, guessTextEncoding), else the
+// codepage of the browser's first language; `encoding` (a label of TEXT_ENCODINGS) reads them with that one instead.
+export function readTextFile(bytes: Uint8Array, options?: { encoding?: string | null; guess?: string | null }): TextFile {
+	const decoded = decodeTextBytes(bytes, {
+		languageHint: navigator.languages[0] ?? null,
+		encoding: options?.encoding ?? null,
+		guess: options?.guess ?? null
+	})
 
 	return {
 		text: decoded.text,
@@ -106,4 +110,9 @@ const ENCODING_NAMES: ReadonlyMap<string, string> = new Map(
 // The encoding's short name ("Windows-1251", "UTF-16 LE"), as the status shows it.
 export function encodingShortName(label: string): string {
 	return ENCODING_NAMES.get(label) ?? label.toUpperCase()
+}
+
+// Read without a choice, the bytes were not Unicode: only a codepage fallback reads as a non-UTF encoding.
+export function readAsLegacy(file: TextFileFormat): boolean {
+	return !file.encoding.startsWith("utf-")
 }

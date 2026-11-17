@@ -49,6 +49,12 @@ vi.mock("@/features/drive/components/extractDestinationDialog", () => ({
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: previewBytes.current, refetch: vi.fn() })
 }))
+// The detector's wasm is not loaded here: what it guesses is set per test (null keeps the language's codepage).
+const { detected } = vi.hoisted(() => ({ detected: { current: null as string | null } }))
+
+vi.mock("@/features/preview/lib/encodingGuess", () => ({
+	guessLegacyEncoding: () => Promise.resolve(detected.current)
+}))
 vi.mock("@/features/preview/components/codeSurface", () => ({
 	CodeSurface: ({ file, editable }: { file: { text: string }; editable: boolean }) =>
 		createElement("pre", { "data-testid": "source", "data-editable": String(editable) }, file.text)
@@ -81,6 +87,7 @@ function named(name: string) {
 
 afterEach(() => {
 	cleanup()
+	detected.current = null
 	overlayProps.current = null
 	archiveDialogs.length = 0
 })
@@ -267,24 +274,25 @@ describe("TextViewer — editing only what a save writes back", () => {
 		["strict UTF-8", new TextEncoder().encode("café"), "utf-8"],
 		["latin-1", Uint8Array.of(0x63, 0x61, 0x66, 0xe9), "windows-1252"],
 		["UTF-16", Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00), "utf-16le"]
-	])("keeps %s editable: a save writes it back in its own encoding", (_, bytes, encoding) => {
+	])("keeps %s editable: a save writes it back in its own encoding", async (_, bytes, encoding) => {
 		const onTextState = vi.fn()
 
 		renderEditable(bytes, onTextState)
 
-		expect(screen.getByTestId("source").dataset["editable"]).toBe("true")
+		expect((await screen.findByTestId("source")).dataset["editable"]).toBe("true")
 		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding })
 	})
 
-	it.each([["UTF-8 with a stray byte", Uint8Array.of(...new TextEncoder().encode("Grüße, Köln, schön"), 0xff)]])(
-		"opens %s read-only and tells the overlay",
-		(_, bytes) => {
-			const onTextState = vi.fn()
+	it.each([
+		["UTF-8 with a stray byte", Uint8Array.of(...new TextEncoder().encode("Grüße, Köln, schön"), 0xff), null],
+		["Shift JIS, as the detector guesses", Uint8Array.of(0x82, 0xa0, 0x82, 0xa2, 0x93, 0xfa, 0x96, 0x7b), "shift_jis"]
+	])("opens %s read-only and tells the overlay", async (_, bytes, guess) => {
+		const onTextState = vi.fn()
 
-			renderEditable(bytes, onTextState)
+		detected.current = guess
+		renderEditable(bytes, onTextState)
 
-			expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
-			expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
-		}
-	)
+		expect((await screen.findByTestId("source")).dataset["editable"]).toBe("false")
+		expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
+	})
 })

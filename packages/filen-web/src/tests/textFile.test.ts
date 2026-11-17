@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { EditorState, Text } from "@codemirror/state"
-import { detectLineEnding, encodeTextFile, readTextFile, utf8Format, writeTextFile } from "@/features/preview/lib/textFile"
+import { detectLineEnding, encodeTextFile, readAsLegacy, readTextFile, utf8Format, writeTextFile } from "@/features/preview/lib/textFile"
 
 // Saving a text file changes only what was edited: its byte order mark and its line ending (which the editor does
 // not keep, splitting lines on any ending) come back on save.
@@ -83,8 +83,22 @@ describe("text file fidelity", () => {
 		expect(readTextFile(Uint8Array.of(...bytes("Grüße, Köln, schön"), 0xff))).toMatchObject({ encoding: "utf-8", editableAsIs: false })
 	})
 
+	it("reads bytes that are not Unicode with the detector's guess, a choice over it", () => {
+		expect(readTextFile(Uint8Array.of(0xcf, 0xf0, 0xe8), { guess: "windows-1251" })).toMatchObject({
+			text: "При",
+			encoding: "windows-1251"
+		})
+		expect(readTextFile(bytes("plain"), { guess: "windows-1251" }).encoding).toBe("utf-8")
+		expect(readTextFile(Uint8Array.of(0xcf), { guess: "windows-1251", encoding: "koi8-r" }).encoding).toBe("koi8-r")
+		expect(readAsLegacy(readTextFile(Uint8Array.of(0xcf)))).toBe(true)
+		expect(readAsLegacy(readTextFile(bytes("plain")))).toBe(false)
+	})
+
 	it("reads the bytes with a chosen encoding", () => {
-		expect(readTextFile(Uint8Array.of(0xcf, 0xf0, 0xe8), "windows-1251")).toMatchObject({ text: "При", encoding: "windows-1251" })
+		expect(readTextFile(Uint8Array.of(0xcf, 0xf0, 0xe8), { encoding: "windows-1251" })).toMatchObject({
+			text: "При",
+			encoding: "windows-1251"
+		})
 	})
 
 	it("refuses a character the encoding cannot hold, and converts to UTF-8 without another encoding's mark", () => {

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config"
 import { SINGLETONS } from "./vite/singletons"
 import { officeFonts } from "./vite/office-fonts-plugin"
 import { officeHyphenation } from "./vite/office-hyphenation-plugin"
+import { encodingDetectAsset } from "./vite/encoding-detect-plugin"
 import { spellcheckAssets } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
 import { ocrAssets } from "./vite/ocr-assets-plugin"
@@ -9,7 +10,7 @@ import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
 export default defineConfig({
 	// virtual:office-fonts (the viewer's font URLs), virtual:office-hyphenation, virtual:spellcheck-assets,
 	// virtual:pdfjs-assets and virtual:ocr-assets resolve in tests as in the app.
-	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets(), pdfjsAssets(), ocrAssets()],
+	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets(), encodingDetectAsset(), pdfjsAssets(), ocrAssets()],
 	// The same single copies the app build resolves (vite.config.ts): tests render @filen/office's components.
 	resolve: { alias: [{ find: "@", replacement: new URL("./src", import.meta.url).pathname }, MUPDF_WASM_ALIAS], dedupe: SINGLETONS },
 	test: {

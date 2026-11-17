@@ -12,7 +12,9 @@ import type { TextBuffer } from "@/features/preview/lib/textFile"
 // (never over unsaved edits, never remembered), Convert to UTF-8 (a read-only file becomes editable and dirty), and a
 // save refused for a character the file's encoding cannot hold.
 
-const { previewBytes, frames } = vi.hoisted(() => ({
+const { previewBytes, frames, detected } = vi.hoisted(() => ({
+	// What the detector guesses for bytes that are not Unicode (its wasm is not loaded here).
+	detected: { current: null as string | null },
 	previewBytes: { current: new Uint8Array(0) },
 	frames: [] as FrameRequestCallback[]
 }))
@@ -21,6 +23,9 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
 	kvDelete: () => Promise.resolve()
+}))
+vi.mock("@/features/preview/lib/encodingGuess", () => ({
+	guessLegacyEncoding: () => Promise.resolve(detected.current)
 }))
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: previewBytes.current, refetch: vi.fn() })
@@ -45,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup()
+	detected.current = null
 	vi.unstubAllGlobals()
 })
 
@@ -73,7 +79,7 @@ function editorView(): EditorView {
 	return view
 }
 
-function mount(bytes: Uint8Array<ArrayBuffer>) {
+async function mount(bytes: Uint8Array<ArrayBuffer>) {
 	previewBytes.current = bytes
 
 	const contentRef = createRef<TextBuffer | null>() as { current: TextBuffer | null }
@@ -91,6 +97,9 @@ function mount(bytes: Uint8Array<ArrayBuffer>) {
 		/>
 	)
 
+	// Bytes that are not Unicode wait for the detector first.
+	await screen.findByRole("button", { name: /^Encoding: / })
+
 	return { contentRef, onDirtyChange, onTextState }
 }
 
@@ -105,8 +114,18 @@ const STRAY = Uint8Array.of(...new TextEncoder().encode("Grüße, Köln"), 0xff)
 const CYRILLIC = Uint8Array.of(0xcf, 0xf0, 0xe8)
 
 describe("the encoding menu", () => {
+	it("reads bytes that are not Unicode with the detector's guess", async () => {
+		detected.current = "windows-1251"
+		const { onTextState } = await mount(CYRILLIC)
+
+		expect(editorView().state.doc.toString()).toBe("При")
+		await openMenu(/Encoding: Windows-1251/)
+		expect(screen.getByText("Detected: Windows-1251")).toBeTruthy()
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "windows-1251" })
+	})
+
 	it("says what was detected and reopens the held bytes with another encoding", async () => {
-		const { onTextState } = mount(CYRILLIC)
+		const { onTextState } = await mount(CYRILLIC)
 
 		expect(editorView().state.doc.toString()).toBe("Ïðè")
 		await openMenu(/Encoding: Windows-1252/)
@@ -121,7 +140,7 @@ describe("the encoding menu", () => {
 	})
 
 	it("converts a file a save would change to UTF-8: editable, and unsaved until saved", async () => {
-		const { contentRef, onDirtyChange, onTextState } = mount(STRAY)
+		const { contentRef, onDirtyChange, onTextState } = await mount(STRAY)
 
 		expect(onTextState).toHaveBeenLastCalledWith({ writable: false, encoding: "utf-8" })
 		expect(screen.getByText("Read-only")).toBeTruthy()
@@ -137,14 +156,14 @@ describe("the encoding menu", () => {
 	})
 
 	it("does not offer Convert for a file that is UTF-8 as is", async () => {
-		mount(new TextEncoder().encode("plain"))
+		await mount(new TextEncoder().encode("plain"))
 
 		await openMenu(/Encoding: UTF-8/)
 		expect(screen.queryByRole("menuitem", { name: "Convert to UTF-8" })).toBeNull()
 	})
 
 	it("refuses a save the encoding cannot hold, and converts from the refusal", async () => {
-		const { contentRef, onDirtyChange } = mount(Uint8Array.of(0x63, 0x61, 0x66, 0xe9))
+		const { contentRef, onDirtyChange } = await mount(Uint8Array.of(0x63, 0x61, 0x66, 0xe9))
 		const view = editorView()
 
 		act(() => {
@@ -167,7 +186,7 @@ describe("the encoding menu", () => {
 	})
 
 	it("blocks Reopen while there are unsaved edits", async () => {
-		mount(CYRILLIC)
+		await mount(CYRILLIC)
 		const view = editorView()
 
 		act(() => {
