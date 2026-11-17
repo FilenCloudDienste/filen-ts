@@ -1,5 +1,5 @@
 import { parseXml } from "@filen/office/core/xml"
-import { ZipArchive, ZipError, bytesSource } from "@filen/office/core/opc"
+import { ZipArchive, bytesSource } from "@filen/office/core/opc"
 import { entryFits } from "@/features/preview/lib/zipBudget.logic"
 import { GEO_MAX_BYTES, type GeoFileFormat } from "@/features/preview/lib/geo/formats.logic"
 import {
@@ -38,19 +38,14 @@ export class GeoTooLargeError extends Error {
 	}
 }
 
-// A KMZ's document: the first .kml at its root, else the first anywhere, within the geo cap. No entry may declare more,
-// so nothing inflates past it.
+// A KMZ's document: the first .kml at its root, else the first anywhere. Only that entry is judged against the geo cap
+// and the zip ratio (other entries, a large photo overlay, are never read), and its inflating is cut off at the size
+// it declares.
 async function kmzDocument(bytes: Uint8Array): Promise<Uint8Array> {
-	let archive: ZipArchive
-
-	try {
-		archive = await ZipArchive.open(bytesSource(bytes), { limits: { maxEntryUncompressed: GEO_MAX_BYTES } })
-	} catch (error) {
-		if (error instanceof ZipError && error.code === "tooLarge") throw new GeoTooLargeError()
-
-		throw error
-	}
-
+	// Declared sizes allocate nothing: the archive opens whatever its other entries declare.
+	const archive = await ZipArchive.open(bytesSource(bytes), {
+		limits: { maxEntryUncompressed: Number.MAX_SAFE_INTEGER, maxTotalUncompressed: Number.MAX_SAFE_INTEGER }
+	})
 	const kml = archive.entries.filter(entry => entry.name.toLowerCase().endsWith(".kml"))
 	const entry = kml.find(candidate => !candidate.name.includes("/")) ?? kml[0]
 

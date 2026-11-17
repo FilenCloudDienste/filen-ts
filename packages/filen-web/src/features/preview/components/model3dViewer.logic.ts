@@ -1,11 +1,9 @@
 import type { ReferenceResolver } from "@/features/preview/lib/referenceResolver"
-import { nameKey, referenceSegments } from "@/features/preview/lib/referenceResolver.logic"
+import { MAX_REFERENCES, referenceKey } from "@/features/preview/lib/referenceResolver.logic"
 
 // The 3D viewer's pure parts: how the worker's references are served and what became of each, and the animation menu's
 // entries.
 
-// Distinct files a model may reference; the rest are not looked up.
-export const MAX_REFERENCES = 256
 // Paths of each kind the information panel lists before it counts the rest.
 export const PANEL_REFERENCES = 50
 
@@ -60,8 +58,7 @@ export function referenceServer(
 	}
 
 	return path => {
-		const segments = referenceSegments(path)
-		const key = segments === null ? path : segments.map(nameKey).join("/")
+		const key = referenceKey(path)
 		const known = served.get(key)
 
 		if (known !== undefined) return known

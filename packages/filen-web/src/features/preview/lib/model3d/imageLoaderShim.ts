@@ -1,16 +1,18 @@
 import { imageDimensions } from "@filen/office/core/opc"
-import { ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/preflight.logic"
+import { gifDimensions, ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/preflight.logic"
 
 // Every texture a loader reads goes through one pixel budget, in the 3D worker. three's image paths are replaced, once
 // per worker: ImageLoader (an <img>, which a worker has none of: MTL, FBX, 3MF and USDZ textures), ImageBitmapLoader
 // (glTF's) and KTX2Loader's transcode.
 //   An image is read whole and its dimensions taken from its header (a JPEG's frame header may sit past large APPn
-//   segments). One whose dimensions cannot be read is skipped, never decoded.
-//   Its full size is reserved against the budget at once, with the check, before anything awaits: textures requested
-//   in the same tick cannot all pass. One that does not fit is skipped.
+//   segments; a GIF is as large as its first frame reaches). One whose dimensions cannot be read is skipped, never
+//   decoded.
+//   Once its bytes are in, its full size is reserved against the budget in the same step as the check (nothing awaits
+//   between them): textures requested together cannot all pass. One that does not fit is skipped.
 //   Decodes run one at a time, each to an ImageBitmap at its drawn size; the full-size raster the decode makes first
 //   is what was reserved, and only the drawn size stays charged once it is done.
-//   A KTX2's base-level pixels (every layer and face) are reserved from its header before it transcodes.
+//   A KTX2's pixels (every layer, face and mip level) are reserved from its header before it transcodes, and given back
+//   when the transcode fails.
 // ImageLoader's callers build textures with the default flipY, which WebGL ignores for an ImageBitmap, so those
 // bitmaps are decoded flipped; ImageBitmapLoader keeps the options its caller set.
 
@@ -107,9 +109,9 @@ export function installTextureShim(
 		if (!response.ok) return null
 
 		const bytes = new Uint8Array(await response.arrayBuffer())
-		const dimensions = imageDimensions(bytes)
+		const dimensions = gifDimensions(bytes) ?? imageDimensions(bytes) ?? null
 
-		if (dimensions === undefined) return null
+		if (dimensions === null) return null
 
 		const full = dimensions.width * dimensions.height
 
@@ -185,7 +187,12 @@ export function installTextureShim(
 			return Promise.reject(new TextureSkippedError("ktx2"))
 		}
 
-		return transcode.call(this, buffer, config)
+		// A transcode that fails gives its pixels back.
+		return transcode.call(this, buffer, config).catch((error: unknown) => {
+			options.budget.pixels += pixels
+
+			throw error
+		})
 	}
 
 	return {

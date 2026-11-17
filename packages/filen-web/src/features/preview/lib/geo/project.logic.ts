@@ -59,6 +59,10 @@ export function toCanvas(view: GeoView, width: number, height: number, x: number
 	return { x: (x - view.x) * view.scale + width / 2, y: (y - view.y) * view.scale + height / 2 }
 }
 
+// The image viewer's pan and zoom (imageViewer.logic.ts) do not fit a plot: they clamp the scale to 0.25–8× of an image
+// contained in its box and its pan to the image's edges, in CSS pixels; a plot zooms 0.25–4096× of the fitted track
+// and pans freely over world metres. Only the wheel's sensitivity is shared.
+
 // Panned by a drag of (dx, dy) canvas pixels.
 export function panView(view: GeoView, dx: number, dy: number): GeoView {
 	return { ...view, x: view.x - dx / view.scale, y: view.y - dy / view.scale }

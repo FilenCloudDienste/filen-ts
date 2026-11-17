@@ -25,13 +25,10 @@ import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js"
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js"
 import { USDLoader } from "three/examples/jsm/loaders/USDLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js"
-import { ZipArchive, bytesSource } from "@filen/office/core/opc"
+import { ZipArchive, ZipError, bytesSource } from "@filen/office/core/opc"
 import { THREE_ASSETS } from "virtual:three-assets"
-import { AllocationRefusedError, withAllocationBudget } from "@/features/preview/lib/model3d/allocationBudget"
 import {
 	MODEL_MAX_UNPACKED_BYTES,
-	PARSE_MAX_ALLOCATION,
-	PARSE_MAX_TOTAL,
 	preflightFbx,
 	preflightGltf,
 	preflightObj,
@@ -99,10 +96,30 @@ function geometryObject(geometry: BufferGeometry): Object3D {
 	)
 }
 
-async function zipPreflight(bytes: Uint8Array): Promise<void> {
-	const archive = await ZipArchive.open(bytesSource(bytes))
+// A 3MF's or USDZ's parts, unpacked by our zip reader rather than three's (whose unzipSync trusts the last end record
+// it finds and inflates without limit): within the unpacked cap in all and the ratio per entry, checked from the central
+// directory before anything inflates, each entry cut off at its declared size. The loaders take them through the
+// `unzip` the patched loaders accept, in the archive's order (USDZ's first entry is its layer).
+async function unpack(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
+	let archive: ZipArchive
+
+	try {
+		archive = await ZipArchive.open(bytesSource(bytes), {
+			limits: { maxEntryUncompressed: MODEL_MAX_UNPACKED_BYTES, maxTotalUncompressed: MODEL_MAX_UNPACKED_BYTES }
+		})
+	} catch (error) {
+		throw new ModelRefusedError(error instanceof ZipError && error.code === "tooLarge" ? "tooLarge" : "malformed")
+	}
 
 	refuse(preflightZip(archive.entries.map(entry => ({ compressed: entry.compressedSize, uncompressed: entry.uncompressedSize }))))
+
+	const parts: Record<string, Uint8Array> = {}
+
+	for (const entry of archive.entries) {
+		if (!entry.name.endsWith("/")) parts[entry.name] = await archive.read(entry)
+	}
+
+	return parts
 }
 
 // The MTL files an OBJ names, relative to it, in order and once each. A line may list several (`mtllib a.mtl b.mtl`)
@@ -137,9 +154,9 @@ function directoryOf(path: string): string {
 }
 
 async function loadObj(bytes: Uint8Array, fetchText: (url: string) => Promise<string | null>): Promise<LoadedModel> {
-	refuse(preflightObj(bytes))
-
 	const source = text(bytes)
+
+	refuse(preflightObj(source))
 	const loader = new OBJLoader()
 	// Read together; the materials only as the faces use them, so an unused material's textures are never fetched.
 	const libraries = await Promise.all(
@@ -192,26 +209,6 @@ function loadGltf(bytes: Uint8Array, binary: boolean, renderer: WebGLRenderer | 
 		})
 }
 
-// Parses `bytes` as `format`. Rejects with ModelRefusedError when a preflight refuses it or the parse asks for more
-// memory than it may (allocationBudget.ts: a USDZ's buffers each within the unpacked cap), with the loader's error when
-// it does not parse.
-export async function loadModel(
-	bytes: Uint8Array,
-	format: ModelFormat,
-	renderer: WebGLRenderer | null,
-	fetchText: (url: string) => Promise<string | null>
-): Promise<LoadedModel> {
-	const limits = { each: format === "usdz" ? MODEL_MAX_UNPACKED_BYTES : PARSE_MAX_ALLOCATION, total: PARSE_MAX_TOTAL }
-
-	try {
-		return await withAllocationBudget(limits, () => parseModel(bytes, format, renderer, fetchText))
-	} catch (error) {
-		if (error instanceof AllocationRefusedError) throw new ModelRefusedError("tooLarge")
-
-		throw error
-	}
-}
-
 // Frees the file's bytes once the scene is built: every loader copies what it keeps (GLTFLoader slices its body and
 // buffer views), so nothing of the scene points into them. A transfer detaches the buffer at once, whatever still
 // holds the array (the call that delivered it).
@@ -222,7 +219,10 @@ export function releaseSource(bytes: Uint8Array): void {
 	if (source instanceof ArrayBuffer && "transfer" in source && !source.detached) source.transfer(0)
 }
 
-async function parseModel(
+// Parses `bytes` as `format`. Rejects with ModelRefusedError when a preflight refuses it, with the loader's error when
+// it does not parse (the patched loaders' own limits included: an FBX array inflating past its declared length, a USDC
+// buffer past the unpacked cap).
+export async function loadModel(
 	bytes: Uint8Array,
 	format: ModelFormat,
 	renderer: WebGLRenderer | null,
@@ -243,10 +243,14 @@ async function parseModel(
 			return await loadGltf(bytes, false, renderer)
 		case "glb":
 			return await loadGltf(bytes, true, renderer)
-		case "3mf":
-			await zipPreflight(bytes)
+		case "3mf": {
+			const parts = await unpack(bytes)
+			const loader = new ThreeMFLoader()
 
-			return { root: new ThreeMFLoader().parse(buffer(bytes)), animations: [] }
+			loader.unzip = () => parts
+
+			return { root: loader.parse(new ArrayBuffer(0)), animations: [] }
+		}
 		case "fbx": {
 			refuse(preflightFbx(bytes))
 
@@ -254,10 +258,15 @@ async function parseModel(
 
 			return { root, animations: root.animations }
 		}
-		case "usdz":
-			await zipPreflight(bytes)
+		case "usdz": {
+			const parts = await unpack(bytes)
+			const loader = new USDLoader()
 
-			return { root: new USDLoader().parse(buffer(bytes), REFERENCE_BASE), animations: [] }
+			loader.unzip = () => parts
+
+			// USDLoader tells a package by its zip signature; the parts come through `unzip`.
+			return { root: loader.parse(buffer(bytes.subarray(0, 4)), REFERENCE_BASE), animations: [] }
+		}
 	}
 }
 

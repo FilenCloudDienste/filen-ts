@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest"
-import { zipSync, strToU8 } from "fflate"
+import { deflateSync, strToU8, zipSync } from "fflate"
 import { ImageBitmapLoader, ImageLoader, type Texture } from "three"
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js"
 import {
@@ -9,7 +9,7 @@ import {
 	type Ktx2LoaderLike,
 	type TextureShim
 } from "@/features/preview/lib/model3d/imageLoaderShim"
-import { AllocationRefusedError, withAllocationBudget } from "@/features/preview/lib/model3d/allocationBudget"
+import { doubleArray, fbxFile } from "@/tests/support/fbx"
 import { installModelGlobals } from "@/features/preview/lib/model3d/workerGlobals"
 import { XmlDomParser } from "@/features/preview/lib/model3d/xmlDom"
 import { ModelRefusedError, REFERENCE_BASE, loadModel, modelInfo, mtlLibraries, releaseSource } from "@/features/preview/lib/model3d/load"
@@ -276,75 +276,167 @@ describe("the texture budget", () => {
 	})
 })
 
-describe("the parse's allocation budget", () => {
-	it("refuses a typed array over the limit before allocating it, and restores the constructors", async () => {
-		const real = Float32Array
+// A GLB of `json` and a binary chunk.
+function glbOf(json: unknown, bin: Uint8Array): Uint8Array {
+	const text = JSON.stringify(json)
+	const body = encode(text.padEnd(Math.ceil(text.length / 4) * 4, " "))
+	const padded = Math.ceil(bin.length / 4) * 4
+	const glb = new Uint8Array(12 + 8 + body.length + 8 + padded)
+	const view = new DataView(glb.buffer)
 
-		await expect(
-			withAllocationBudget({ each: 1024, total: 4096 }, () => Promise.resolve(new Float32Array(1024)))
-		).rejects.toBeInstanceOf(AllocationRefusedError)
-		await expect(
-			withAllocationBudget({ each: 1024, total: 2048 }, () => {
-				const first = new Uint8Array(1000)
+	view.setUint32(0, 0x46546c67, true)
+	view.setUint32(4, 2, true)
+	view.setUint32(8, glb.length, true)
+	view.setUint32(12, body.length, true)
+	view.setUint32(16, 0x4e4f534a, true)
+	glb.set(body, 20)
+	view.setUint32(20 + body.length, padded, true)
+	view.setUint32(24 + body.length, 0x004e4942, true)
+	glb.set(bin, 28 + body.length)
 
-				// A view over an existing buffer allocates nothing; the third allocation takes the total past 2048.
-				new Float32Array(first.buffer)
-				new Uint8Array(1000)
+	return glb
+}
 
-				return Promise.resolve(new ArrayBuffer(100))
-			})
-		).rejects.toBeInstanceOf(AllocationRefusedError)
-		await expect(withAllocationBudget({ each: 1024, total: 4096 }, () => Promise.resolve(new Uint8Array(10).length))).resolves.toBe(10)
-		expect(Float32Array).toBe(real)
-		expect(new Float32Array(2) instanceof Float32Array).toBe(true)
+// A quantized glTF (KHR_mesh_quantization, as gltfpack writes): one triangle with normalized UNSIGNED_SHORT positions,
+// and an animation whose rotation output is normalized SHORT.
+function quantizedGlb(): Uint8Array {
+	const bin = new Uint8Array(64)
+	const view = new DataView(bin.buffer)
+
+	// Positions at 0: three VEC3 of uint16, each padded to 8 bytes.
+	;[
+		[0, 0, 0],
+		[65535, 0, 0],
+		[0, 65535, 0]
+	].forEach(([x, y, z], i) => {
+		view.setUint16(i * 8, x ?? 0, true)
+		view.setUint16(i * 8 + 2, y ?? 0, true)
+		view.setUint16(i * 8 + 4, z ?? 0, true)
+	})
+	// Times at 24: two floats; rotations at 32: two VEC4 of int16 (identity, then a quarter turn about y).
+	view.setFloat32(24, 0, true)
+	view.setFloat32(28, 1, true)
+	;[0, 0, 0, 32767, 0, 23170, 0, 23170].forEach((value, i) => {
+		view.setInt16(32 + i * 2, value, true)
 	})
 
-	it("refuses a USDZ whose layer asks for a buffer past the unpacked cap", async () => {
-		// A USDC crate whose LZ4 token block declares 4 GiB uncompressed is caught where it allocates.
-		const refused = withAllocationBudget({ each: 1024, total: 1024 }, () => Promise.resolve(new Uint8Array(2 ** 32 - 1)))
-
-		await expect(refused).rejects.toBeInstanceOf(AllocationRefusedError)
-	})
-
-	it("turns a refused allocation into a too-large model, the loader's own wrapping included", async () => {
-		// Within the preflight's meshopt cap, past what one allocation may take: GLTFLoader's new ArrayBuffer(count ×
-		// stride) is refused before it allocates 720 MB.
-		const gltf = {
+	return glbOf(
+		{
 			asset: { version: "2.0" },
-			extensionsUsed: ["EXT_meshopt_compression"],
-			buffers: [{ byteLength: 4 }],
+			extensionsUsed: ["KHR_mesh_quantization"],
+			extensionsRequired: ["KHR_mesh_quantization"],
+			buffers: [{ byteLength: 64 }],
 			bufferViews: [
-				{
-					buffer: 0,
-					byteLength: 4,
-					extensions: {
-						EXT_meshopt_compression: { buffer: 0, byteLength: 4, count: 45_000_000, byteStride: 16, mode: "ATTRIBUTES" }
-					}
-				}
+				{ buffer: 0, byteOffset: 0, byteLength: 24, byteStride: 8 },
+				{ buffer: 0, byteOffset: 24, byteLength: 8 },
+				{ buffer: 0, byteOffset: 32, byteLength: 16 }
 			],
-			accessors: [{ bufferView: 0, componentType: 5126, count: 1, type: "VEC4" }],
+			accessors: [
+				{ bufferView: 0, componentType: 5123, normalized: true, count: 3, type: "VEC3", min: [0, 0, 0], max: [65535, 65535, 0] },
+				{ bufferView: 1, componentType: 5126, count: 2, type: "SCALAR", min: [0], max: [1] },
+				{ bufferView: 2, componentType: 5122, normalized: true, count: 2, type: "VEC4" }
+			],
 			meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
 			nodes: [{ mesh: 0 }],
-			scenes: [{ nodes: [0] }]
+			scenes: [{ nodes: [0] }],
+			animations: [{ channels: [{ sampler: 0, target: { node: 0, path: "rotation" } }], samplers: [{ input: 1, output: 2 }] }]
+		},
+		bin
+	)
+}
+
+describe("bounded loaders", () => {
+	it("reads a quantized glTF with normalized positions and a normalized animation", async () => {
+		const loaded = await loadModel(quantizedGlb(), "glb", null, () => Promise.resolve(null))
+
+		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 1, vertices: 3 })
+		expect(loaded.animations).toHaveLength(1)
+	})
+
+	it("stops an FBX array inflating past its declared length, in FBXLoader itself", async () => {
+		// Declares 10 doubles (80 bytes); its stream inflates to 8 MB. The preflight sees 80 bytes; the patched loader
+		// stops at them.
+		const bomb = fbxFile([{ name: "Geometry", properties: [doubleArray(10, new Uint8Array(8_000_000))] }])
+
+		await expect(loadModel(bomb, "fbx", null, () => Promise.resolve(null))).rejects.toThrow(/inflates past its declared length/)
+	})
+
+	it("unpacks a 3MF with its own zip reader, never three's: a trailing fake end record's bomb is never read", async () => {
+		const model = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>`
+		const benign = zipSync({
+			"_rels/.rels": strToU8(
+				'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>'
+			),
+			"3D/3dmodel.model": strToU8(model)
+		})
+		const bomb = deflateSync(new Uint8Array(30 * 1024 * 1024))
+		const parts: Uint8Array[] = [benign]
+		const local = new Uint8Array(30 + 1)
+		const localView = new DataView(local.buffer)
+		const bombOffset = benign.length
+
+		localView.setUint32(0, 0x04034b50, true)
+		localView.setUint16(8, 8, true)
+		localView.setUint32(18, bomb.length, true)
+		localView.setUint32(22, 30 * 1024 * 1024, true)
+		localView.setUint16(26, 1, true)
+		local[30] = 0x78
+		parts.push(local, bomb)
+
+		const directoryOffset = bombOffset + local.length + bomb.length
+		const records = 400
+
+		for (let i = 0; i < records; i++) {
+			const record = new Uint8Array(46 + 4)
+			const view = new DataView(record.buffer)
+
+			view.setUint32(0, 0x02014b50, true)
+			view.setUint16(10, 8, true)
+			view.setUint32(20, bomb.length, true)
+			view.setUint32(24, 30 * 1024 * 1024, true)
+			view.setUint16(28, 4, true)
+			view.setUint32(42, bombOffset, true)
+			record.set(encode(`b${String(i).padStart(3, "0")}`), 46)
+			parts.push(record)
 		}
 
-		const json = encode(JSON.stringify(gltf).padEnd(Math.ceil(JSON.stringify(gltf).length / 4) * 4, " "))
-		const glb = new Uint8Array(12 + 8 + json.length + 8 + 4)
-		const view = new DataView(glb.buffer)
+		const end = new Uint8Array(22)
+		const endView = new DataView(end.buffer)
 
-		view.setUint32(0, 0x46546c67, true)
-		view.setUint32(4, 2, true)
-		view.setUint32(8, glb.length, true)
-		view.setUint32(12, json.length, true)
-		view.setUint32(16, 0x4e4f534a, true)
-		glb.set(json, 20)
-		view.setUint32(20 + json.length, 4, true)
-		view.setUint32(24 + json.length, 0x004e4942, true)
+		endView.setUint32(0, 0x06054b50, true)
+		endView.setUint16(8, records, true)
+		endView.setUint16(10, records, true)
+		endView.setUint32(12, 0xfffffff0, true)
+		endView.setUint32(16, directoryOffset, true)
+		parts.push(end)
 
-		await expect(loadModel(glb, "glb", null, () => Promise.resolve(null))).rejects.toMatchObject({
-			name: "ModelRefused",
-			reason: "tooLarge"
-		})
+		const file = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+		let at = 0
+
+		for (const part of parts) {
+			file.set(part, at)
+			at += part.length
+		}
+
+		const loaded = await loadModel(file, "3mf", null, () => Promise.resolve(null))
+
+		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 1 })
+	})
+
+	it("gives a KTX2's pixels back when its transcode fails", async () => {
+		const header = new Uint8Array(80)
+
+		header.set([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a])
+		new DataView(header.buffer).setUint32(20, 4, true)
+		new DataView(header.buffer).setUint32(24, 4, true)
+		new DataView(header.buffer).setUint32(40, 1, true)
+		budget.pixels = 1_000_000
+
+		const loader = new KTX2Loader() as unknown as { _createTexture: (buffer: ArrayBuffer) => Promise<Texture> }
+
+		// No transcoder in a test: the transcode fails after the reserve.
+		await expect(loader._createTexture(header.buffer)).rejects.toBeDefined()
+		expect(budget.pixels).toBe(1_000_000)
 	})
 
 	it("frees the file's bytes once parsed, the scene intact", async () => {

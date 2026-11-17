@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
-import { nameKey, referenceSegments, referenceWalker, type ReferenceListing } from "@/features/preview/lib/referenceResolver.logic"
+import {
+	MAX_REFERENCES,
+	nameKey,
+	onceEach,
+	referenceSegments,
+	referenceWalker,
+	type ReferenceListing
+} from "@/features/preview/lib/referenceResolver.logic"
 
 interface Dir {
 	readonly id: string
@@ -94,5 +101,20 @@ describe("referenceWalker", () => {
 		)
 
 		expect(await lookup("mesh.mtl")).toEqual({ status: "missing" })
+	})
+})
+
+describe("onceEach", () => {
+	it("asks once per file however it is spelled, and only counts the files past the limit", async () => {
+		const ask = vi.fn((path: string) => Promise.resolve(path))
+		const references = onceEach(ask)
+
+		expect(await Promise.all(["a/B.png", "./a/b.png", "a%2Fb.png"].map(references.ask))).toEqual(["a/B.png", "a/B.png", "a/B.png"])
+		expect(ask).toHaveBeenCalledOnce()
+
+		for (let i = 0; i < MAX_REFERENCES + 4; i++) await references.ask(`x${String(i)}.png`)
+
+		expect(ask).toHaveBeenCalledTimes(MAX_REFERENCES)
+		expect(references.unlisted()).toBe(5)
 	})
 })

@@ -57,7 +57,7 @@ const INFO = {
 }
 
 function outcome(status: ModelLoad["status"], overrides: Partial<ModelLoad> = {}): ModelLoad {
-	return { status, info: status === "ready" ? INFO : null, animations: [], skippedTextures: 0, blocked: 0, ...overrides }
+	return { status, info: status === "ready" ? INFO : null, animations: [], skippedTextures: 0, blocked: 0, unlisted: 0, ...overrides }
 }
 
 afterEach(() => {
@@ -128,6 +128,17 @@ describe("Model3dViewer", () => {
 
 		expect(await screen.findByText(message)).toBeTruthy()
 		expect(screen.getByRole("button", { name: "View source" })).toBeTruthy()
+	})
+
+	it("counts the referenced files past the limit among those not loaded, listing none of them", async () => {
+		scene.next = () => Promise.resolve(outcome("ready", { unlisted: 3 }))
+		await renderViewer("mesh.obj")
+
+		expect(await screen.findByText("3 referenced files not loaded")).toBeTruthy()
+
+		screen.getByRole("button", { name: "Info" }).click()
+
+		expect(await screen.findByText("and 3 more")).toBeTruthy()
 	})
 
 	it("offers no source for a binary format", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { zlibSync } from "fflate"
+import { charArray, doubleArray, fbxFile, int32 } from "@/tests/support/fbx"
 import {
 	cameraPosition,
 	fitOrbit,
@@ -11,14 +11,14 @@ import {
 	zoomOrbit
 } from "@/features/preview/lib/model3d/orbit.logic"
 import {
-	FBX_MAX_ARRAY_BYTES,
+	FBX_MAX_HEAP_BYTES,
 	MODEL_MAX_BYTES,
 	MODEL_MAX_TRIANGLES,
 	MODEL_MAX_UNPACKED_BYTES,
-	OBJ_MAX_TRIANGLES,
-	fbxArrays,
+	OBJ_MAX_CORNERS,
+	fbxHeapBytes,
+	gifDimensions,
 	gltfMeshoptBytes,
-	inflatesWithin,
 	ktx2Pixels,
 	objCounts,
 	preflightFbx,
@@ -36,8 +36,8 @@ import {
 	textureSize
 } from "@/features/preview/lib/model3d/preflight.logic"
 import { bitmapOptions } from "@/features/preview/lib/model3d/imageLoaderShim"
+import { MAX_REFERENCES } from "@/features/preview/lib/referenceResolver.logic"
 import {
-	MAX_REFERENCES,
 	animationEntries,
 	referenceOutcomes,
 	referenceServer,
@@ -47,45 +47,6 @@ import {
 import type { ResolvedReference } from "@/features/preview/lib/referenceResolver"
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
-const deflate = (bytes: Uint8Array): Uint8Array => zlibSync(bytes)
-
-// A binary FBX (7.4, 32-bit records) with one top-level node holding one zlib-encoded double array per entry.
-function fbx(arrays: readonly { count: number; data: Uint8Array }[]): Uint8Array {
-	const name = encode("Geometry")
-	const properties = arrays.map(({ count, data }) => {
-		const property = new Uint8Array(13 + data.length)
-		const view = new DataView(property.buffer)
-
-		property[0] = 0x64
-		view.setUint32(1, count, true)
-		view.setUint32(5, 1, true)
-		view.setUint32(9, data.length, true)
-		property.set(data, 13)
-
-		return property
-	})
-	const propertyBytes = properties.reduce((sum, property) => sum + property.length, 0)
-	const nodeLength = 13 + name.length + propertyBytes
-	const bytes = new Uint8Array(27 + nodeLength + 13)
-	const view = new DataView(bytes.buffer)
-
-	bytes.set(encode("Kaydara FBX Binary  \0\x1a\0"))
-	view.setUint32(23, 7400, true)
-	view.setUint32(27, 27 + nodeLength, true)
-	view.setUint32(31, arrays.length, true)
-	view.setUint32(35, propertyBytes, true)
-	bytes[39] = name.length
-	bytes.set(name, 40)
-
-	let at = 40 + name.length
-
-	for (const property of properties) {
-		bytes.set(property, at)
-		at += property.length
-	}
-
-	return bytes
-}
 
 function binaryStl(triangles: number, declared = triangles): Uint8Array {
 	const bytes = new Uint8Array(84 + triangles * 50)
@@ -224,39 +185,70 @@ describe("preflight", () => {
 		expect(preflightGltf(glb(meshopt(100_000_000)), true)).toEqual({ ok: false, reason: "tooLarge" })
 	})
 
-	it("counts an OBJ's vertices and the triangles its faces fan into, before parsing", () => {
-		expect(objCounts(encode("v 0 0 0\nv 1 0 0\n  v 0 1 0\nvt 0 0\nvn 0 0 1\nf 1 2 3\nf 1/1 2/1 3/1 1/1\n# f 1 2 3\n"))).toEqual({
+	it("counts an OBJ's vertices and the corners its faces, lines and points copy, before parsing", () => {
+		expect(
+			objCounts("v 0 0 0\nv 1 0 0\n  v 0 1 0\nvt 0 0\nvn 0 0 1\nvp 1\nf 1 2 3\nf 1/1 2/1 3/1 1/1\nl 1 2 3\np 1 2\n# f 1 2 3\n")
+		).toEqual({
 			vertices: 3,
-			triangles: 3
+			corners: 3 + 6 + 3 + 2
 		})
-		// One face line with a million corners: a million triangles, refused before OBJLoader copies them.
-		const fan = encode(`v 0.5 0.5 0.5\nf ${"1 ".repeat(OBJ_MAX_TRIANGLES + 3)}\n`)
-
-		expect(preflightObj(fan)).toEqual({ ok: false, reason: "tooLarge" })
-		expect(preflightObj(encode("v 0 0 0\nf 1 1 1\n"))).toEqual({ ok: true })
+		// One face line with a million corners: refused before OBJLoader copies them.
+		expect(preflightObj(`v 0.5 0.5 0.5\nf ${"1 ".repeat(OBJ_MAX_CORNERS)}\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightObj("v 0 0 0\nf 1 1 1\n")).toEqual({ ok: true })
 	})
 
-	it("walks a binary FBX's arrays, refusing one that inflates past what it declares or past the cap", () => {
-		const honest = fbx([{ count: 1000, data: deflate(new Uint8Array(8000)) }])
-		const lying = fbx([{ count: 10, data: deflate(new Uint8Array(8_000_000)) }])
-		const huge = fbx([{ count: FBX_MAX_ARRAY_BYTES / 8 + 1, data: deflate(new Uint8Array(8)) }])
+	it("reads lines as OBJLoader does: a continued face, a bare CR inside a line, CRLF, l and p lines", () => {
+		const tokens = "1 ".repeat(OBJ_MAX_CORNERS + 1)
 
-		expect(fbxArrays(honest)?.total).toBe(8000)
+		// A backslash before the line feed joins the next line onto the face.
+		expect(preflightObj(`f 1 1 \\\n${tokens}\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightObj(`f 1 1 \\\r\n${tokens}\r\nv 0 0 0\r\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		// With no CRLF anywhere, a CR is a space inside its line.
+		expect(preflightObj(`f 1\r${tokens}\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightObj(`l ${tokens}\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightObj(`p ${tokens}\n`)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(objCounts("f 1 2 3\r\nf 1 2 3\r\n")).toEqual({ vertices: 0, corners: 6 })
+		expect(objCounts("v 1 2 3\u00a0\nvv 1\n\u3000v 1\n")).toEqual({ vertices: 2, corners: 0 })
+	})
+
+	it("walks a binary FBX as FBXLoader reads it, counting the JS heap its arrays become", () => {
+		const honest = fbxFile([{ name: "Geometry", properties: [doubleArray(1000, new Uint8Array(8000))] }])
+
+		expect(fbxHeapBytes(honest)).toBeGreaterThan(1000 * 8)
 		expect(preflightFbx(honest)).toEqual({ ok: true })
-		expect(preflightFbx(lying)).toEqual({ ok: false, reason: "tooLarge" })
-		expect(preflightFbx(huge)).toEqual({ ok: false, reason: "tooLarge" })
-		expect(preflightFbx(fbx([{ count: 4, data: Uint8Array.from([1, 2, 3]) }]))).toEqual({ ok: false, reason: "malformed" })
-		expect(preflightFbx(honest.subarray(0, honest.length - 40))).toEqual({ ok: false, reason: "malformed" })
+		// A boolean array of type 'c' is one FBXLoader reads.
+		expect(preflightFbx(fbxFile([{ name: "Flags", properties: [charArray([1, 0, 1])] }]))).toEqual({ ok: true })
+		// A stored array declaring more than the file holds: FBXLoader's read would run past the end.
+		expect(
+			preflightFbx(fbxFile([{ name: "Geometry", properties: [doubleArray(1_000_000, new Uint8Array(8), { compressed: false })] }]))
+		).toEqual({
+			ok: false,
+			reason: "malformed"
+		})
 		expect(preflightFbx(encode("; FBX 7.4.0 project file\n"))).toEqual({ ok: true })
 	})
 
-	it("stops inflating once a stream outgrows its limit", () => {
-		expect(inflatesWithin(deflate(new Uint8Array(100)), 100)).toBe("ok")
-		expect(inflatesWithin(deflate(new Uint8Array(100_000_000)), 1000)).toBe("over")
-		expect(inflatesWithin(Uint8Array.from([1, 2, 3]), 1000)).toBe("corrupt")
+	it("finds an array hidden after a null record, nested or at the top level", () => {
+		const huge = doubleArray(FBX_MAX_HEAP_BYTES / 8, new Uint8Array(8))
+
+		expect(
+			preflightFbx(fbxFile([{ name: "Objects", properties: [], children: [null, { name: "Geometry", properties: [huge] }] }]))
+		).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightFbx(fbxFile([{ name: "A", properties: [int32(1)] }, null, { name: "Geometry", properties: [huge] }]))).toEqual({
+			ok: false,
+			reason: "tooLarge"
+		})
 	})
 
-	it("reads a KTX2's base-level pixels from its header", () => {
+	it("steps over a stored array by its element count, whatever its length field says", () => {
+		const stored = doubleArray(10, new Uint8Array(80), { compressed: false, lengthField: 0 })
+		const huge = doubleArray(FBX_MAX_HEAP_BYTES / 8, new Uint8Array(8))
+
+		expect(preflightFbx(fbxFile([{ name: "Geometry", properties: [stored, huge] }]))).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightFbx(fbxFile([{ name: "Geometry", properties: [stored, int32(5)] }]))).toEqual({ ok: true })
+	})
+
+	it("reads a KTX2's pixels from its header, its mip chain included", () => {
 		const header = new Uint8Array(80)
 		const view = new DataView(header.buffer)
 
@@ -264,8 +256,13 @@ describe("preflight", () => {
 		view.setUint32(20, 1024, true)
 		view.setUint32(24, 512, true)
 		view.setUint32(36, 6, true)
+		view.setUint32(40, 1, true)
 
 		expect(ktx2Pixels(header)).toBe(1024 * 512 * 6)
+
+		// Levels to generate (0), or a chain: a third more.
+		view.setUint32(40, 0, true)
+		expect(ktx2Pixels(header)).toBe(Math.ceil((1024 * 512 * 6 * 4) / 3))
 		expect(ktx2Pixels(new Uint8Array(80))).toBeNull()
 	})
 
@@ -281,6 +278,26 @@ describe("preflight", () => {
 		})
 		// A tiny entry may compress far: a ratio counts only past 1 MiB.
 		expect(preflightZip([{ compressed: 10, uncompressed: 100_000 }])).toEqual({ ok: true })
+	})
+
+	it("sizes a GIF by its first frame where it reaches past the logical screen", () => {
+		const gif = new Uint8Array(40)
+		const view = new DataView(gif.buffer)
+
+		gif.set(new TextEncoder().encode("GIF89a"))
+		view.setUint16(6, 1, true)
+		view.setUint16(8, 1, true)
+		gif[10] = 0
+		// A graphic control extension, then the image descriptor at 13 + 8.
+		gif.set([0x21, 0xf9, 0x04, 0, 0, 0, 0, 0], 13)
+		gif[21] = 0x2c
+		view.setUint16(22, 10, true)
+		view.setUint16(24, 0, true)
+		view.setUint16(26, 16384, true)
+		view.setUint16(28, 16384, true)
+
+		expect(gifDimensions(gif)).toEqual({ width: 16394, height: 16384 })
+		expect(gifDimensions(new TextEncoder().encode("GIF89a"))).toBeNull()
 	})
 
 	it("sizes a texture within the side cap", () => {

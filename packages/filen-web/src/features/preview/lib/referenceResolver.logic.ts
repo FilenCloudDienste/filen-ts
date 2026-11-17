@@ -40,6 +40,48 @@ export function referenceSegments(raw: string): string[] | null {
 	return segments.length === 0 ? null : segments
 }
 
+// Distinct files a model may reference; the rest are not looked up.
+export const MAX_REFERENCES = 256
+
+// One key per file however a model spells its path: normalised, in one case and Unicode form.
+export function referenceKey(path: string): string {
+	const segments = referenceSegments(path)
+
+	return segments === null ? path : segments.map(nameKey).join("/")
+}
+
+// A loader's references, each file asked for once however often it is named, at most MAX_REFERENCES of them; the rest
+// are counted and not asked for.
+export function onceEach<T>(ask: (path: string) => Promise<T | null>): {
+	readonly ask: (path: string) => Promise<T | null>
+	readonly unlisted: () => number
+} {
+	const asked = new Map<string, Promise<T | null>>()
+	let unlisted = 0
+
+	return {
+		ask: path => {
+			const key = referenceKey(path)
+			const known = asked.get(key)
+
+			if (known !== undefined) return known
+
+			if (asked.size >= MAX_REFERENCES) {
+				unlisted++
+
+				return Promise.resolve(null)
+			}
+
+			const asking = ask(path)
+
+			asked.set(key, asking)
+
+			return asking
+		},
+		unlisted: () => unlisted
+	}
+}
+
 // Names compare case-insensitively (exporters and file systems disagree on case) and in one Unicode form.
 export function nameKey(name: string): string {
 	return name.normalize("NFC").toLowerCase()

@@ -164,6 +164,17 @@ describe("geo extraction", () => {
 		await expect(loadGeo(bomb, "kmz")).rejects.toBeInstanceOf(GeoTooLargeError)
 	})
 
+	it("judges only a KMZ's KML: a large photo overlay beside a small one does not refuse it", async () => {
+		// 40 MiB of incompressible bytes, stored: past the geo cap, never read.
+		const photo = new Uint8Array(40 * 1024 * 1024)
+
+		for (let i = 0; i < photo.length; i += 4096) photo[i] = i % 251
+
+		const kmz = zipSync({ "doc.kml": encode(KML), "files/photo.jpg": [photo, { level: 0 }] })
+
+		expect((await loadGeo(kmz, "kmz")).points?.lon).toHaveLength(5)
+	})
+
 	it("only sums a file past the point cap, allocating no arrays", () => {
 		const emit = vi.fn((points: Parameters<GeoSource["emit"]>[0], _waypoints: Parameters<GeoSource["emit"]>[1]) => {
 			points.segment()

@@ -92,6 +92,8 @@ function InfoPanel({ item, scene }: { item: DriveItem; scene: SceneLoad }) {
 		...listed(summary.missing, t("previewModelInfoMissing")),
 		...listed(summary.unreadable, t("previewModelInfoUnreadable")),
 		...listed(summary.refused, t("previewModelInfoRefused")),
+		// Past the files a model may reference: counted, never looked up.
+		...(load.unlisted > 0 ? [{ label: t("previewModelInfoRefused"), value: t("previewModelInfoMore", { count: load.unlisted }) }] : []),
 		...(load.blocked > 0 ? [{ label: t("previewModelInfoBlocked"), value: number(load.blocked) }] : []),
 		...(load.skippedTextures > 0 ? [{ label: t("previewModelInfoSkipped"), value: number(load.skippedTextures) }] : [])
 	]
@@ -296,7 +298,7 @@ function ModelScene({
 	}
 
 	const missing = referenceSummary(scene?.references ?? [])
-	const notFound = missing.missing.length + missing.unreadable.length + missing.refused.length
+	const notFound = missing.missing.length + missing.unreadable.length + missing.refused.length + (scene?.load.unlisted ?? 0)
 	const toggle = (on: boolean): void => {
 		setWireframe(on)
 		void owned.run(remote => remote.wireframe(on)).catch(() => undefined)
@@ -406,7 +408,7 @@ function ModelScene({
 	)
 }
 
-const FAILED: ModelLoad = { status: "failed", info: null, animations: [], skippedTextures: 0, blocked: 0 }
+const FAILED: ModelLoad = { status: "failed", info: null, animations: [], skippedTextures: 0, blocked: 0, unlisted: 0 }
 
 const STATE_MESSAGES = {
 	tooLarge: "previewModelTooLarge",

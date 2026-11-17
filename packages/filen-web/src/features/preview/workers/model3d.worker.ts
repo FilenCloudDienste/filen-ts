@@ -2,6 +2,7 @@
 // Installed below, before any model is parsed: the fetch shim, the globals loaders read (window, DOMParser) and the
 // worker's ImageLoader.
 import { installResourceSandbox } from "@/lib/workers/resourceSandbox"
+import { onceEach } from "@/features/preview/lib/referenceResolver.logic"
 import { THREE_ASSETS } from "virtual:three-assets"
 import { MODEL_MAX_BYTES, MODEL_MAX_GPU_BYTES, gpuBytes, type ModelFormat } from "@/features/preview/lib/model3d/preflight.logic"
 import { installModelGlobals } from "@/features/preview/lib/model3d/workerGlobals"
@@ -75,9 +76,13 @@ export interface ModelLoad {
 	readonly skippedTextures: number
 	// External references refused.
 	readonly blocked: number
+	// Referenced files past MAX_REFERENCES, not looked up.
+	readonly unlisted: number
 }
 
 let resolveReference: ((path: string) => Promise<Blob | null>) | null = null
+// Each file asked of the page once per load however often a loader asks (one Comlink round trip each).
+const references = onceEach(path => (resolveReference === null ? Promise.resolve(null) : resolveReference(path)))
 const textures = { pixels: 0 }
 // Textures are drawn at most this large a side, whatever the GPU allows.
 const MAX_TEXTURE_SIDE = 4096
@@ -88,7 +93,7 @@ let skipped = 0
 // The only assets fetched are the decoders.
 const sandbox = installResourceSandbox({
 	assets: [THREE_ASSETS.base],
-	resolve: path => (resolveReference === null ? Promise.resolve(null) : resolveReference(path)),
+	resolve: references.ask,
 	budget: MODEL_MAX_BYTES * 2
 })
 installModelGlobals()
@@ -329,7 +334,8 @@ const api = {
 			info,
 			animations,
 			skippedTextures: skipped,
-			blocked: sandbox.blocked()
+			blocked: sandbox.blocked(),
+			unlisted: references.unlisted()
 		})
 		const built = await rendererReady.promise
 

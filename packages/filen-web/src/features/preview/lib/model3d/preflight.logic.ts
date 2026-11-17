@@ -1,4 +1,3 @@
-import { Unzlib } from "fflate"
 import { zipFits, type ZipEntrySize } from "@/features/preview/lib/zipBudget.logic"
 
 // Checks a model file before a loader allocates anything for it: counts read from headers or a byte scan (a binary
@@ -10,17 +9,15 @@ import { zipFits, type ZipEntrySize } from "@/features/preview/lib/zipBudget.log
 export const MODEL_MAX_BYTES = 128 * 1024 * 1024
 export const MODEL_MAX_TRIANGLES = 10_000_000
 export const MODEL_MAX_VERTICES = 30_000_000
-// OBJLoader copies every face corner into plain JS arrays (a position, a normal and a uv each), about eight times a
-// typed array's footprint: an OBJ gets a tenth of the triangles.
-export const OBJ_MAX_TRIANGLES = 1_000_000
+// OBJLoader keeps every vertex and copies every face, line and point corner into plain JS arrays (a position, a normal,
+// a uv and a colour each), about eight times a typed array's footprint: an OBJ gets a tenth of the corners and vertices.
+export const OBJ_MAX_CORNERS = 3_000_000
+export const OBJ_MAX_VERTICES = 3_000_000
 // What a 3MF or USDZ may unpack to in all (the model cap), each entry also within the zip ratio.
 export const MODEL_MAX_UNPACKED_BYTES = MODEL_MAX_BYTES
-// The arrays a binary FBX declares, inflated, together.
-export const FBX_MAX_ARRAY_BYTES = 512 * 1024 * 1024
-// What a parse may allocate in typed arrays: one, and all of them (allocationBudget.ts). A USDZ's buffers are held to
-// the unpacked cap each.
-export const PARSE_MAX_ALLOCATION = 512 * 1024 * 1024
-export const PARSE_MAX_TOTAL = 1024 * 1024 * 1024
+// The JS heap a binary FBX's parse builds: FBXLoader turns every array into a plain JS array (8 bytes an element, a
+// boolean as much as a double), every node into an object and every property into a value.
+export const FBX_MAX_HEAP_BYTES = 512 * 1024 * 1024
 // The GPU memory a scene may take: attributes, textures with mipmaps, the framebuffer.
 export const MODEL_MAX_GPU_BYTES = 768 * 1024 * 1024
 // A texture's decoded RGBA bytes per pixel before resizing (W2's pixel budget figure).
@@ -68,55 +65,107 @@ export function preflightStl(bytes: Uint8Array): Preflight {
 	return triangles > MODEL_MAX_TRIANGLES ? { ok: false, reason: "tooLarge" } : OK
 }
 
-function isLineSpace(byte: number | undefined): boolean {
-	return byte === 0x20 || byte === 0x09
+// JavaScript's \s, which OBJLoader splits its tokens on.
+function isSpace(code: number): boolean {
+	return (
+		code === 0x20 ||
+		(code >= 0x09 && code <= 0x0d) ||
+		code === 0xa0 ||
+		code === 0x1680 ||
+		(code >= 0x2000 && code <= 0x200a) ||
+		code === 0x2028 ||
+		code === 0x2029 ||
+		code === 0x202f ||
+		code === 0x205f ||
+		code === 0x3000 ||
+		code === 0xfeff
+	)
 }
 
-// An OBJ's vertex lines and the triangles its faces fan into (a face of n corners is n − 2), by one scan over the
-// bytes: what OBJLoader would copy, counted before it parses.
-export function objCounts(bytes: Uint8Array): { vertices: number; triangles: number } {
+// An OBJ's vertices and the corners its faces (fanned into triangles: n − 2 of them, three corners each), lines and
+// points copy, counted on OBJLoader's own line model without building its strings: CRLF reads as LF where the text has
+// any, a backslash before a line feed joins the next line, lines split on LF alone (a lone CR is a space), a line's
+// first character picks what it is, and its tokens split on any whitespace.
+export function objCounts(text: string): { vertices: number; corners: number } {
+	const crlf = text.includes("\r\n")
 	let vertices = 0
-	let triangles = 0
-	let at = 0
+	let corners = 0
+	// The current line: its first character, its first token so far (for "v"), and its tokens after the first character.
+	let first = -1
+	let head = ""
+	let tokens = 0
+	let inToken = false
+	let headDone = false
 
-	while (at < bytes.length) {
-		while (isLineSpace(bytes[at])) at++
+	const end = (): void => {
+		if (first === 0x76 && head === "v") vertices++
+		else if (first === 0x66) corners += 3 * Math.max(0, tokens - 2)
+		else if (first === 0x6c || first === 0x70) corners += tokens
 
-		const first = bytes[at]
-		const second = bytes[at + 1]
-
-		if (first === 0x76 && isLineSpace(second)) vertices++
-
-		if (first === 0x66 && isLineSpace(second)) {
-			let corners = 0
-
-			at += 1
-
-			while (at < bytes.length && bytes[at] !== 0x0a && bytes[at] !== 0x0d) {
-				while (isLineSpace(bytes[at])) at++
-
-				if (at >= bytes.length || bytes[at] === 0x0a || bytes[at] === 0x0d) break
-
-				corners++
-
-				while (at < bytes.length && !isLineSpace(bytes[at]) && bytes[at] !== 0x0a && bytes[at] !== 0x0d) at++
-			}
-
-			triangles += Math.max(0, corners - 2)
-		}
-
-		while (at < bytes.length && bytes[at] !== 0x0a) at++
-
-		at++
+		first = -1
+		head = ""
+		tokens = 0
+		inToken = false
+		headDone = false
 	}
 
-	return { vertices, triangles }
+	for (let at = 0; at < text.length; at++) {
+		let code = text.charCodeAt(at)
+
+		if (code === 0x0d && crlf && text.charCodeAt(at + 1) === 0x0a) {
+			at++
+			code = 0x0a
+		}
+
+		if (code === 0x5c) {
+			const next = text.charCodeAt(at + 1)
+
+			// A continuation: the backslash and its line feed vanish.
+			if (next === 0x0a || (crlf && next === 0x0d && text.charCodeAt(at + 2) === 0x0a)) {
+				at += next === 0x0a ? 1 : 2
+
+				continue
+			}
+		}
+
+		if (code === 0x0a) {
+			end()
+
+			continue
+		}
+
+		if (first === -1) {
+			// Leading whitespace is trimmed; the first other character is the line's kind, its tokens counted after it.
+			if (isSpace(code)) continue
+
+			first = code
+			head = String.fromCharCode(code)
+
+			continue
+		}
+
+		const space = isSpace(code)
+
+		if (!headDone) {
+			if (space) headDone = true
+			else if (head.length < 2) head += String.fromCharCode(code)
+			else head = "vv"
+		}
+
+		if (!space && !inToken) tokens++
+
+		inToken = !space
+	}
+
+	end()
+
+	return { vertices, corners }
 }
 
-export function preflightObj(bytes: Uint8Array): Preflight {
-	const counts = objCounts(bytes)
+export function preflightObj(text: string): Preflight {
+	const counts = objCounts(text)
 
-	return counts.vertices > MODEL_MAX_VERTICES || counts.triangles > OBJ_MAX_TRIANGLES ? { ok: false, reason: "tooLarge" } : OK
+	return counts.vertices > OBJ_MAX_VERTICES || counts.corners > OBJ_MAX_CORNERS ? { ok: false, reason: "tooLarge" } : OK
 }
 
 // A PLY header's element counts ("element vertex N", "element face N"), read up to "end_header".
@@ -197,6 +246,31 @@ export function gltfMeshoptBytes(json: unknown): number {
 	return total
 }
 
+const GLTF_COMPONENTS: Readonly<Record<string, number>> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 }
+const GLTF_COMPONENT_BYTES: Readonly<Record<number, number>> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }
+
+// The bytes every accessor's elements take (count × components × component size): what GLTFLoader allocates for an
+// accessor with no buffer view, and what its attributes hold.
+export function gltfAccessorBytes(json: unknown): number {
+	const accessors = typeof json === "object" && json !== null ? (json as { accessors?: unknown }).accessors : undefined
+
+	if (!Array.isArray(accessors)) return 0
+
+	let total = 0
+
+	for (const accessor of accessors as unknown[]) {
+		if (typeof accessor !== "object" || accessor === null) continue
+
+		const { count, type, componentType } = accessor as { count?: unknown; type?: unknown; componentType?: unknown }
+		const components = typeof type === "string" ? (GLTF_COMPONENTS[type] ?? 16) : 16
+		const bytes = typeof componentType === "number" ? (GLTF_COMPONENT_BYTES[componentType] ?? 4) : 4
+
+		total += typeof count === "number" && Number.isFinite(count) && count > 0 ? count * components * bytes : 0
+	}
+
+	return total
+}
+
 // The elements every accessor declares, summed: what the loader would allocate for vertices and indices.
 export function gltfElements(json: unknown): number {
 	const accessors = typeof json === "object" && json !== null ? (json as { accessors?: unknown }).accessors : undefined
@@ -234,138 +308,132 @@ export function preflightZip(entries: readonly ZipEntrySize[]): Preflight {
 }
 
 const FBX_MAGIC = "Kaydara FBX Binary  \0"
-// Element sizes of the array property types.
-const FBX_ARRAY_SIZES: Readonly<Record<string, number>> = { f: 4, d: 8, l: 8, i: 4, b: 1 }
-const FBX_SCALAR_SIZES: Readonly<Record<string, number>> = { Y: 2, C: 1, I: 4, F: 4, D: 8, L: 8 }
-const FBX_MAX_DEPTH = 64
-
-export interface FbxArray {
-	// The zlib stream, and the bytes it must inflate to.
-	readonly offset: number
-	readonly length: number
-	readonly inflated: number
-}
+// Element sizes of the array property types ('c' is a boolean array as 'b' is).
+const FBX_ARRAY_SIZES: Readonly<Record<string, number>> = { b: 1, c: 1, d: 8, f: 4, i: 4, l: 8 }
+const FBX_SCALAR_SIZES: Readonly<Record<string, number>> = { C: 1, D: 8, F: 4, I: 4, L: 8, Y: 2 }
+// Records nested deeper than this are refused (FBXLoader recurses).
+const FBX_MAX_DEPTH = 1024
+// What the parse builds in the JS heap: a plain array's element, a node object, a property value.
+const JS_ELEMENT_BYTES = 8
+const JS_NODE_BYTES = 256
+const JS_PROPERTY_BYTES = 16
 
 export function isBinaryFbx(bytes: Uint8Array): boolean {
 	return bytes.length >= 27 && new TextDecoder("latin1").decode(bytes.subarray(0, FBX_MAGIC.length)) === FBX_MAGIC
 }
 
-// A binary FBX's arrays, walked through its node records without reading them: what they inflate to together, and
-// each compressed one. Null when the records do not hold together.
-export function fbxArrays(bytes: Uint8Array): { total: number; compressed: FbxArray[] } | null {
+class FbxEnd extends Error {}
+
+// A binary FBX walked exactly as FBXLoader's BinaryParser reads it, reading no array: top-level records until its end of
+// content (the footer's 160 bytes and alignment); a record's properties, then its children while its end offset lies
+// ahead (null records included, and records past them); an uncompressed array taking its element count's bytes
+// whatever its length field says, a compressed one its compressed length (which the patched loader inflates into its
+// declared size, never past it). Returns the JS heap the parse would build, or null when the bytes would not parse.
+export function fbxHeapBytes(bytes: Uint8Array): number | null {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-	const version = view.getUint32(23, true)
+	const size = bytes.length
+	let offset = 23
+	let heap = 0
+
+	const need = (count: number): void => {
+		if (count < 0 || offset + count > size) throw new FbxEnd()
+	}
+	const uint8 = (): number => {
+		need(1)
+
+		return view.getUint8(offset++)
+	}
+	const uint32 = (): number => {
+		need(4)
+
+		const value = view.getUint32(offset, true)
+
+		offset += 4
+
+		return value
+	}
+	const uint64 = (): number => {
+		const low = uint32()
+
+		return uint32() * 0x1_0000_0000 + low
+	}
+	const skip = (count: number): void => {
+		need(count)
+		offset += count
+	}
+
+	const version = uint32()
+
+	if (version < 6400) return null
+
 	const wide = version >= 7500
-	const compressed: FbxArray[] = []
-	let total = 0
+	const endOfContent = (): boolean => (size % 16 === 0 ? ((offset + 160 + 16) & ~0xf) >= size : offset + 160 + 16 >= size)
 
-	const word = (at: number): number =>
-		wide ? view.getUint32(at, true) + view.getUint32(at + 4, true) * 0x1_0000_0000 : view.getUint32(at, true)
-	const header = wide ? 25 : 13
+	const node = (depth: number): void => {
+		if (depth > FBX_MAX_DEPTH) throw new FbxEnd()
 
-	// The records from `start` until a null record or `end`; false when one does not fit.
-	const walk = (start: number, end: number, depth: number): boolean => {
-		let at = start
+		const endOffset = wide ? uint64() : uint32()
+		const properties = wide ? uint64() : uint32()
 
-		if (depth > FBX_MAX_DEPTH) return false
+		if (wide) uint64()
+		else uint32()
 
-		while (at + header <= end) {
-			const endOffset = word(at)
-			const properties = word(at + (wide ? 8 : 4))
-			const nameLength = view.getUint8(at + (wide ? 24 : 12))
+		skip(uint8())
+		heap += JS_NODE_BYTES
 
-			// The null record closing a list.
-			if (endOffset === 0) return true
-			if (endOffset <= at || endOffset > end) return false
+		if (endOffset === 0) return
 
-			let cursor = at + header + nameLength
+		for (let p = 0; p < properties; p++) {
+			const type = String.fromCharCode(uint8())
+			const scalar = FBX_SCALAR_SIZES[type]
+			const element = FBX_ARRAY_SIZES[type]
 
-			for (let p = 0; p < properties; p++) {
-				if (cursor + 1 > endOffset) return false
+			heap += JS_PROPERTY_BYTES
 
-				const type = String.fromCharCode(view.getUint8(cursor))
+			if (scalar !== undefined) {
+				skip(scalar)
+			} else if (type === "R" || type === "S") {
+				const length = uint32()
 
-				cursor++
+				skip(length)
+				heap += length
+			} else if (element !== undefined) {
+				const count = uint32()
+				const encoding = uint32()
+				const compressed = uint32()
 
-				const scalar = FBX_SCALAR_SIZES[type]
-				const element = FBX_ARRAY_SIZES[type]
-
-				if (scalar !== undefined) {
-					cursor += scalar
-				} else if (element !== undefined) {
-					if (cursor + 12 > endOffset) return false
-
-					const count = view.getUint32(cursor, true)
-					const encoding = view.getUint32(cursor + 4, true)
-					const length = view.getUint32(cursor + 8, true)
-
-					cursor += 12
-					total += count * element
-
-					if (encoding === 1) compressed.push({ offset: cursor, length, inflated: count * element })
-
-					cursor += length
-				} else if (type === "S" || type === "R") {
-					if (cursor + 4 > endOffset) return false
-
-					cursor += 4 + view.getUint32(cursor, true)
-				} else {
-					return false
-				}
+				skip(encoding === 0 ? count * element : compressed)
+				heap += count * JS_ELEMENT_BYTES + (encoding === 0 ? 0 : count * element)
+			} else {
+				throw new FbxEnd()
 			}
 
-			if (cursor > endOffset) return false
-			if (cursor < endOffset && !walk(cursor, endOffset, depth + 1)) return false
-
-			at = endOffset
+			if (heap > FBX_MAX_HEAP_BYTES) return
 		}
 
-		return true
+		while (endOffset > offset && heap <= FBX_MAX_HEAP_BYTES) node(depth + 1)
 	}
-
-	return walk(27, bytes.length, 0) ? { total, compressed } : null
-}
-
-// Input fed to the inflater at a time: deflate expands at most about 1032:1, so one step yields a few MiB at most.
-const INFLATE_STEP = 4096
-
-// Whether a zlib stream inflates to no more than `limit` bytes, counted as it inflates and stopped once past it ("over"),
-// or does not inflate ("corrupt"): the loader's own inflate is unbounded, so its arrays are checked before it runs.
-export function inflatesWithin(stream: Uint8Array, limit: number): "ok" | "over" | "corrupt" {
-	const state = { produced: 0, over: false }
-	const inflater = new Unzlib(chunk => {
-		state.produced += chunk.length
-		state.over ||= state.produced > limit
-	})
 
 	try {
-		for (let at = 0; at < stream.length && !state.over; at += INFLATE_STEP) {
-			inflater.push(stream.subarray(at, at + INFLATE_STEP), at + INFLATE_STEP >= stream.length)
-		}
-	} catch {
-		return state.over ? "over" : "corrupt"
+		while (!endOfContent() && heap <= FBX_MAX_HEAP_BYTES) node(0)
+	} catch (error) {
+		if (error instanceof FbxEnd || error instanceof RangeError) return null
+
+		throw error
 	}
 
-	return state.over ? "over" : "ok"
+	return heap
 }
 
 export function preflightFbx(bytes: Uint8Array): Preflight {
 	// ASCII FBX: its arrays are its text, bounded by the cap.
 	if (!isBinaryFbx(bytes)) return OK
 
-	const arrays = fbxArrays(bytes)
+	const heap = fbxHeapBytes(bytes)
 
-	if (arrays === null) return { ok: false, reason: "malformed" }
-	if (arrays.total > FBX_MAX_ARRAY_BYTES) return { ok: false, reason: "tooLarge" }
+	if (heap === null) return { ok: false, reason: "malformed" }
 
-	for (const array of arrays.compressed) {
-		if (array.offset + array.length > bytes.length) return { ok: false, reason: "malformed" }
-		const inflated = inflatesWithin(bytes.subarray(array.offset, array.offset + array.length), array.inflated)
-
-		if (inflated !== "ok") return { ok: false, reason: inflated === "over" ? "tooLarge" : "malformed" }
-	}
-
-	return OK
+	return heap > FBX_MAX_HEAP_BYTES ? { ok: false, reason: "tooLarge" } : OK
 }
 
 // How large a texture of `width` × `height` is drawn: within `maxSide` a side. Null for no size.
@@ -377,7 +445,8 @@ export function textureSize(width: number, height: number, maxSide: number): { w
 	return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) }
 }
 
-// A KTX2 texture's pixels at its base level, every layer and face, from its header; null when it is no KTX2.
+// A KTX2 texture's pixels, every layer and face, its mip chain included (a third more) when it has one or asks for one
+// to be generated (levelCount 0); null when it is no KTX2.
 export function ktx2Pixels(bytes: Uint8Array): number | null {
 	const identifier = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]
 
@@ -385,8 +454,40 @@ export function ktx2Pixels(bytes: Uint8Array): number | null {
 
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 	const side = (at: number): number => Math.max(1, view.getUint32(at, true))
+	const base = view.getUint32(20, true) * side(24) * side(28) * side(32) * side(36)
 
-	return view.getUint32(20, true) * side(24) * side(28) * side(32) * side(36)
+	return view.getUint32(40, true) === 1 ? base : Math.ceil((base * 4) / 3)
+}
+
+// A GIF's decoded size: its logical screen, grown to its first frame's bounds where that frame reaches past it (as the
+// browser's decoder does). Null when no frame is found.
+export function gifDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+	if (bytes.length < 13 || new TextDecoder("latin1").decode(bytes.subarray(0, 3)) !== "GIF") return null
+
+	const u16 = (at: number): number => (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
+	const flags = bytes[10] ?? 0
+	let at = 13 + ((flags & 0x80) !== 0 ? 3 * 2 ** ((flags & 0x07) + 1) : 0)
+
+	while (at < bytes.length) {
+		const block = bytes[at]
+
+		if (block === 0x2c) {
+			if (at + 9 > bytes.length) return null
+
+			return { width: Math.max(u16(6), u16(at + 1) + u16(at + 5)), height: Math.max(u16(8), u16(at + 3) + u16(at + 7)) }
+		}
+
+		if (block !== 0x21) return null
+
+		// An extension: its label, then sub-blocks until an empty one.
+		at += 2
+
+		while (at < bytes.length && bytes[at] !== 0) at += 1 + (bytes[at] ?? 0)
+
+		at++
+	}
+
+	return null
 }
 
 export interface GpuFootprint {

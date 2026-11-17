@@ -180,3 +180,8 @@ patchedDependencies:
   # on, when its list unmounted or lost focus to another element: it closed a menu opening at that moment.
   # Restores only when focus is lost. Drop once upstream does the same.
   sonner@2.0.8: patches/sonner@2.0.8.patch
+  # The 3D viewer parses untrusted models: FBXLoader inflates a compressed array into its declared length and stops
+  # once it would outgrow it (unzlibSync grows without limit); ThreeMFLoader and USDLoader take an `unzip` the caller
+  # supplies (the app unpacks with its own capped zip reader); USDCParser checks every buffer size the crate declares
+  # before allocating it. Re-author on every bump.
+  three@0.187.0: patches/three@0.187.0.patch
