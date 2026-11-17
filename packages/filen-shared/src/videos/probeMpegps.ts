@@ -16,11 +16,15 @@ const AUDIO_PREFIX_BYTES = 256
 const PTS_MODULUS = 2 ** 33
 const PTS_HZ = 90_000
 
-const PACK = 0xba
+export const MPEG_PS_PACK = 0xba
+const PACK = MPEG_PS_PACK
 const MAP = 0xbc
-const PRIVATE_1 = 0xbd
+export const MPEG_PS_PRIVATE_1 = 0xbd
+const PRIVATE_1 = MPEG_PS_PRIVATE_1
 
-interface Stream {
+// One elementary stream as the head's payloads named it. `key` is its stream id, and for private stream 1 its
+// sub-stream id too (0xbd << 8 | sub).
+export interface MpegPsStream {
 	key: number
 	kind: "video" | "audio"
 	codec: MediaCodec | null
@@ -33,6 +37,8 @@ interface Stream {
 	buffer: Uint8Array | null
 	length: number
 }
+
+type Stream = MpegPsStream
 
 interface Walk {
 	streams: Map<number, Stream>
@@ -75,12 +81,12 @@ function mpeg1Pes(bytes: Uint8Array, at: number, end: number): { pts: number | n
 }
 
 // A PES packet's stream key (private stream 1 by its sub-stream id too), PTS and where its data starts.
-function packetKey(bytes: Uint8Array, id: number, data: number): number {
+export function mpegPsStreamKey(bytes: Uint8Array, id: number, data: number): number {
 	return id === PRIVATE_1 ? (PRIVATE_1 << 8) | (bytes[data] ?? 0) : id
 }
 
 // A PES packet's PTS and where its data starts, MPEG-2 or MPEG-1 syntax.
-function pesHeader(bytes: Uint8Array, at: number, end: number): { pts: number | null; data: number } | null {
+export function mpegPsPes(bytes: Uint8Array, at: number, end: number): { pts: number | null; data: number } | null {
 	if (((bytes[at + 6] ?? 0) & 0xc0) === 0x80) {
 		const pes = pesStart(bytes.subarray(at, end))
 
@@ -240,14 +246,14 @@ function inspect(stream: Stream, complete: boolean): void {
 
 function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 	const id = bytes[at + 3] ?? 0
-	const pes = pesHeader(bytes, at, end)
+	const pes = mpegPsPes(bytes, at, end)
 
 	if (pes === null || pes.data > end) {
 		return
 	}
 
 	const sub = id === PRIVATE_1 ? (bytes[pes.data] ?? 0) : 0
-	const key = packetKey(bytes, id, pes.data)
+	const key = mpegPsStreamKey(bytes, id, pes.data)
 	let stream = walk.streams.get(key)
 
 	if (stream === undefined) {
@@ -289,9 +295,9 @@ function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 	inspect(stream, false)
 }
 
-// Each pack and PES packet within `bytes` from `start`, in order; resyncs on the next pack start where a packet does
-// not line up.
-function forEachPacket(bytes: Uint8Array, start: number, visit: (id: number, at: number, end: number) => void): void {
+// Each pack and PES packet within `bytes` from `start`, in order, until `visit` returns false; resyncs on the next
+// pack start where a packet does not line up.
+export function forEachMpegPsUnit(bytes: Uint8Array, start: number, visit: (id: number, at: number, end: number) => boolean | void): void {
 	for (let at = start; at + 6 <= bytes.length;) {
 		if (bytes[at] !== 0 || bytes[at + 1] !== 0 || bytes[at + 2] !== 1 || (bytes[at + 3] ?? 0) < PACK) {
 			const next = bytes.indexOf(1, at + 1)
@@ -308,7 +314,10 @@ function forEachPacket(bytes: Uint8Array, start: number, visit: (id: number, at:
 			return
 		}
 
-		visit(id, at, end)
+		if (visit(id, at, end) === false) {
+			return
+		}
+
 		at = end
 	}
 }
@@ -333,15 +342,10 @@ function videoTrack(stream: Stream): ParsedTrack {
 	}
 }
 
-// The duration is the timing stream's PTS span, head to tail, across one 33-bit wrap. There is no index: a player
-// finds a time by interpolating over the file's size.
-export async function walkMpegPs(source: BlockSource, result: ParsedContainer): Promise<void> {
-	const head = await readBytes(source, 0, Math.min(source.size, HEAD_BYTES))
+function headWalk(head: Uint8Array): Walk {
 	const walk: Walk = { streams: new Map(), types: new Map(), firstPts: new Map() }
 
-	result.index = "none"
-
-	forEachPacket(head, 0, (id, at, end) => {
+	forEachMpegPsUnit(head, 0, (id, at, end) => {
 		if (id === MAP) {
 			readMap(walk, head, at, end)
 		} else if (id !== PACK && id !== 0xbb && id !== 0xbe && id !== 0xbf) {
@@ -349,11 +353,29 @@ export async function walkMpegPs(source: BlockSource, result: ParsedContainer): 
 		}
 	})
 
+	for (const stream of walk.streams.values()) {
+		inspect(stream, true)
+	}
+
+	return walk
+}
+
+// The streams the head of a program stream holds, in the order their first payloads came.
+export function readMpegPsStreams(head: Uint8Array): MpegPsStream[] {
+	return [...headWalk(head).streams.values()]
+}
+
+// The duration is the timing stream's PTS span, head to tail, across one 33-bit wrap. There is no index: a player
+// finds a time by interpolating over the file's size.
+export async function walkMpegPs(source: BlockSource, result: ParsedContainer): Promise<void> {
+	const head = await readBytes(source, 0, Math.min(source.size, HEAD_BYTES))
+	const walk = headWalk(head)
+
+	result.index = "none"
+
 	let firstAudio = true
 
 	for (const stream of walk.streams.values()) {
-		inspect(stream, true)
-
 		if (stream.kind === "video") {
 			result.tracks.push(videoTrack(stream))
 
@@ -394,10 +416,10 @@ export async function walkMpegPs(source: BlockSource, result: ParsedContainer): 
 	const tail = tailStart === 0 ? head : await readBytes(source, tailStart, source.size - tailStart)
 	let span = -1
 
-	forEachPacket(tail, 0, (id, at, end) => {
-		const pes = id === PACK || id === MAP ? null : pesHeader(tail, at, end)
+	forEachMpegPsUnit(tail, 0, (id, at, end) => {
+		const pes = id === PACK || id === MAP ? null : mpegPsPes(tail, at, end)
 
-		if (pes === null || packetKey(tail, id, pes.data) !== timing.key) {
+		if (pes === null || mpegPsStreamKey(tail, id, pes.data) !== timing.key) {
 			return
 		}
 

@@ -425,15 +425,14 @@ describe("ignore rules", () => {
 })
 
 describe("VIDEO_CONTAINERS", () => {
-	it("keeps fail-by-name containers out of the drive's video, Photos, thumbnails and the editor", () => {
-		for (const extension of ["asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
-			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: false, photo: false, keyframes: false, editorReads: false })
+	it("plays the containers only the app demuxes in the drive, outside Photos, thumbnails and the editor", () => {
+		for (const extension of ["flv", "avi", "divx", "asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
+			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false })
 		}
 
-		// Played through the app's own demuxer: a drive and library video, still out of Photos, thumbnails and the editor.
-		for (const extension of ["flv", "avi"]) {
-			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: true, library: "video", photo: false, keyframes: false, editorReads: false })
-		}
+		expect(VIDEO_CONTAINERS.get("flv")?.library).toBe("video")
+		expect(VIDEO_CONTAINERS.get("avi")?.library).toBe("video")
+		expect(VIDEO_CONTAINERS.get("wmv")?.library).toBe("unsupportedVideo")
 
 		expect(VIDEO_CONTAINERS.get("ogv")).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false, probe: "ogg" })
 	})

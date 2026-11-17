@@ -22,13 +22,13 @@ const HEADER_EXTENSION = guid("b503bf5f2ea9cf118ee300c00c205365")
 const EXTENDED_STREAM_PROPERTIES = guid("14e68a292226174cb935dae07ee9289c")
 const AUDIO_MEDIA = guid("409e69f84d5bcf11a8fd00805f5c442b")
 const VIDEO_MEDIA = guid("c0ef19bc4d5bcf11a8fd00805f5c442b")
-const SIMPLE_INDEX = guid("90080033b1e5cf1189f400a0c90349cb")
+export const ASF_SIMPLE_INDEX = guid("90080033b1e5cf1189f400a0c90349cb")
 
-function isGuid(bytes: Uint8Array, at: number, id: Uint8Array): boolean {
+export function isGuid(bytes: Uint8Array, at: number, id: Uint8Array): boolean {
 	return id.every((byte, i) => bytes[at + i] === byte)
 }
 
-function uint64le(bytes: Uint8Array, at: number): number {
+export function uint64le(bytes: Uint8Array, at: number): number {
 	return uint32le(bytes, at) + uint32le(bytes, at + 4) * 0x100000000
 }
 
@@ -56,7 +56,13 @@ function objects(bytes: Uint8Array, start: number, end: number): AsfObject[] {
 	return found
 }
 
-type Stream = { number: number; video: ProbeVideo } | { number: number; audio: Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate"> }
+// A stream the header declares; `specific` is its type-specific data (a WAVEFORMATEX, or the picture size and a
+// BITMAPINFOHEADER), for a demuxer.
+export type AsfStream = { number: number; specific: Uint8Array } & (
+	{ video: ProbeVideo } | { audio: Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate"> }
+)
+
+type Stream = AsfStream
 
 // A Stream Properties object's data at `at`: its type GUID, stream number and type-specific data (WAVEFORMATEX, or the
 // picture size then a BITMAPINFOHEADER).
@@ -69,13 +75,15 @@ function streamProperties(bytes: Uint8Array, at: number, end: number): Stream | 
 		return null
 	}
 
+	const data = bytes.subarray(specific, specific + length)
+
 	if (isGuid(bytes, at, AUDIO_MEDIA) && length >= 16) {
-		return { number, audio: waveFormatAudio(bytes, specific, length) }
+		return { number, specific: data, audio: waveFormatAudio(bytes, specific, length) }
 	}
 
 	// Encoded width (4), height (4), flags (1), format data size (2), then the BITMAPINFOHEADER.
 	if (isGuid(bytes, at, VIDEO_MEDIA) && length >= 11 + 20) {
-		return { number, video: bitmapVideo(bytes, specific + 11) }
+		return { number, specific: data, video: bitmapVideo(bytes, specific + 11) }
 	}
 
 	return null
@@ -103,44 +111,102 @@ function embeddedStream(bytes: Uint8Array, object: AsfObject): Stream | null {
 		: null
 }
 
-// The duration is the file properties' play duration less the preroll. The index is "simple" when a Simple Index
-// object follows the data object.
-export async function walkAsf(source: BlockSource, result: ParsedContainer): Promise<void> {
-	const bytes = await readBytes(source, 0, Math.min(source.size, HEAD_BYTES))
+// The data object's header (GUID, size, file id, packet count, reserved) before its first data packet.
+export const ASF_DATA_HEADER_BYTES = 50
+
+export interface AsfHeader {
+	// Where the data object starts.
+	headerSize: number
+	// The data packets' fixed size (the file properties' minimum and maximum agree); null when they do not.
+	packetSize: number | null
+	packets: number
+	// Seconds, the preroll taken off; null when unknown.
+	duration: number | null
+	preroll: number
+	streams: AsfStream[]
+	// Each stream's average time per frame, seconds, from its extended stream properties.
+	frameTime: Map<number, number>
+	// The header lies within `bytes`.
+	complete: boolean
+}
+
+// The header object at the start of `bytes`.
+export function parseAsfHeader(bytes: Uint8Array): AsfHeader {
 	const headerSize = uint64le(bytes, 16)
 	const headerEnd = Math.min(headerSize, bytes.length)
-	const streams: Stream[] = []
-
-	result.index = "none"
+	const header: AsfHeader = {
+		headerSize,
+		packetSize: null,
+		packets: 0,
+		duration: null,
+		preroll: 0,
+		streams: [],
+		frameTime: new Map(),
+		complete: headerSize <= bytes.length
+	}
 
 	for (const object of objects(bytes, 30, headerEnd)) {
-		if (isGuid(bytes, object.at, FILE_PROPERTIES) && object.start + 64 <= headerEnd) {
-			const play = uint64le(bytes, object.start + 40) / 1e7 - uint64le(bytes, object.start + 56) / 1000
+		if (isGuid(bytes, object.at, FILE_PROPERTIES) && object.start + 80 <= headerEnd) {
+			const minimum = uint32le(bytes, object.start + 68)
 
-			result.durationSec = play > 0 && Number.isFinite(play) ? seconds(play) : null
+			header.preroll = uint64le(bytes, object.start + 56) / 1000
+			header.packets = uint64le(bytes, object.start + 32)
+			header.packetSize = minimum > 0 && minimum === uint32le(bytes, object.start + 72) ? minimum : null
+
+			const play = uint64le(bytes, object.start + 40) / 1e7 - header.preroll
+
+			header.duration = play > 0 && Number.isFinite(play) ? play : null
 		} else if (isGuid(bytes, object.at, STREAM_PROPERTIES)) {
 			const stream = streamProperties(bytes, object.start, Math.min(object.end, headerEnd))
 
-			if (stream !== null && streams.length < MAX_STREAMS) {
-				streams.push(stream)
+			if (stream !== null && header.streams.length < MAX_STREAMS) {
+				header.streams.push(stream)
 			}
 		} else if (isGuid(bytes, object.at, HEADER_EXTENSION)) {
 			for (const inner of objects(bytes, object.start + 22, Math.min(object.end, headerEnd))) {
-				const stream = isGuid(bytes, inner.at, EXTENDED_STREAM_PROPERTIES) ? embeddedStream(bytes, inner) : null
+				if (!isGuid(bytes, inner.at, EXTENDED_STREAM_PROPERTIES) || inner.start + 60 > inner.end) {
+					continue
+				}
 
-				if (stream !== null && streams.length < MAX_STREAMS && !streams.some(known => known.number === stream.number)) {
-					streams.push(stream)
+				const frame = uint64le(bytes, inner.start + 52) / 1e7
+
+				if (frame > 0) {
+					header.frameTime.set(uint16le(bytes, inner.start + 48), frame)
+				}
+
+				const stream = embeddedStream(bytes, inner)
+
+				if (
+					stream !== null &&
+					header.streams.length < MAX_STREAMS &&
+					!header.streams.some(known => known.number === stream.number)
+				) {
+					header.streams.push(stream)
 				}
 			}
 		}
 	}
 
-	result.tracksFound = headerSize <= bytes.length
+	header.streams.sort((a, b) => a.number - b.number)
+
+	return header
+}
+
+// The duration is the file properties' play duration less the preroll. The index is "simple" when a Simple Index
+// object follows the data object.
+export async function walkAsf(source: BlockSource, result: ParsedContainer): Promise<void> {
+	const bytes = await readBytes(source, 0, Math.min(source.size, HEAD_BYTES))
+	const header = parseAsfHeader(bytes)
+	const { headerSize } = header
+
+	result.index = "none"
+	result.durationSec = header.duration === null ? null : seconds(header.duration)
+	result.tracksFound = header.complete
 	result.partial = !result.tracksFound
 
 	let firstAudio = true
 
-	for (const stream of streams.sort((a, b) => a.number - b.number)) {
+	for (const stream of header.streams) {
 		if ("video" in stream) {
 			result.tracks.push({ kind: "video", enabled: true, video: stream.video })
 		} else {
@@ -158,6 +224,6 @@ export async function walkAsf(source: BlockSource, result: ParsedContainer): Pro
 	const indexAt = headerSize + dataSize
 
 	if (dataSize > 0 && indexAt + 16 <= source.size) {
-		result.index = isGuid(await readBytes(source, indexAt, 16), 0, SIMPLE_INDEX) ? "simple" : "none"
+		result.index = isGuid(await readBytes(source, indexAt, 16), 0, ASF_SIMPLE_INDEX) ? "simple" : "none"
 	}
 }

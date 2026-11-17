@@ -464,7 +464,12 @@ export interface AvcPocParams {
 	separateColourPlane: boolean
 }
 
-export type AvcSps = SpsPicture & Pick<AvcConfig, "profile" | "compatibility" | "level"> & { poc: AvcPocParams }
+export type AvcSps = SpsPicture &
+	Pick<AvcConfig, "profile" | "compatibility" | "level"> & {
+		poc: AvcPocParams
+		// A frame's duration from the VUI's timing info; null when it does not say.
+		frameSeconds: number | null
+	}
 
 export type HevcSps = SpsPicture & Omit<HevcConfig, "bitDepth">
 
@@ -510,7 +515,16 @@ const SAMPLE_ASPECT_RATIOS: readonly (readonly [number, number])[] = [
 ]
 
 // The start both VUI syntaxes share: aspect ratio, overscan, then the video signal type's colour description.
-function readVui(bits: BitReader): { par: number; transfer: number | null } {
+interface Vui {
+	par: number
+	transfer: number | null
+	// AVC only: a frame's duration from timing_info (two ticks a frame); null when the VUI does not say.
+	frameSeconds: number | null
+}
+
+// The VUI fields read: the sample aspect ratio, the transfer characteristics and, for AVC (`avc`), whose timing info
+// follows the chroma location directly, the frame duration.
+function readVui(bits: BitReader, avc: boolean): Vui {
 	let par = 1
 
 	if (bits.read(1) === 1) {
@@ -533,19 +547,38 @@ function readVui(bits: BitReader): { par: number; transfer: number | null } {
 		bits.read(1)
 	}
 
-	if (bits.read(1) !== 1) {
-		return { par, transfer: null }
+	let transfer: number | null = null
+
+	// video_signal_type: format and range, then colour description.
+	if (bits.read(1) === 1) {
+		bits.read(4)
+
+		if (bits.read(1) === 1) {
+			bits.read(8)
+			transfer = bits.read(8)
+			bits.read(8)
+		}
 	}
 
-	bits.read(4)
-
-	if (bits.read(1) !== 1) {
-		return { par, transfer: null }
+	if (!avc) {
+		return { par, transfer, frameSeconds: null }
 	}
 
-	bits.read(8)
+	if (bits.read(1) === 1) {
+		bits.ue()
+		bits.ue()
+	}
 
-	return { par, transfer: bits.read(8) }
+	let frameSeconds: number | null = null
+
+	if (bits.read(1) === 1) {
+		const units = bits.read(32)
+		const scale = bits.read(32)
+
+		frameSeconds = units !== null && scale !== null && units > 0 && scale > 0 ? (2 * units) / scale : null
+	}
+
+	return { par, transfer, frameSeconds }
 }
 
 // Cropped picture size; null for one no decoder would produce.
@@ -714,7 +747,7 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 		return null
 	}
 
-	const vui = bits.read(1) === 1 ? readVui(bits) : { par: 1, transfer: null }
+	const vui = bits.read(1) === 1 ? readVui(bits, true) : { par: 1, transfer: null, frameSeconds: null }
 
 	return {
 		profile,
@@ -1003,7 +1036,7 @@ export function parseHevcSps(nal: Uint8Array): HevcSps | null {
 		return null
 	}
 
-	const vui = skipToHevcVui(bits, maxSubLayersMinus1) ? readVui(bits) : { par: 1, transfer: null }
+	const vui = skipToHevcVui(bits, maxSubLayersMinus1) ? readVui(bits, false) : { par: 1, transfer: null, frameSeconds: null }
 
 	return {
 		profileSpace: first >> 6,
@@ -1015,7 +1048,8 @@ export function parseHevcSps(nal: Uint8Array): HevcSps | null {
 		width: size[0],
 		height: size[1],
 		bitDepth: luma + 8,
-		...vui
+		par: vui.par,
+		transfer: vui.transfer
 	}
 }
 

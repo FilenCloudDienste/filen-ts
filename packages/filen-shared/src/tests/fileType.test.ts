@@ -126,7 +126,10 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["image/vnd.adobe.photoshop", "psd"],
 	["video/ogg", "ogv"],
 	["video/x-flv", "flv"],
-	["video/x-msvideo", "avi"]
+	["video/x-msvideo", "avi"],
+	["video/x-ms-asf", "asf"],
+	["video/x-ms-wmv", "wmv"],
+	["video/mpeg", "mpg"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.

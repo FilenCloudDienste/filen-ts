@@ -3,21 +3,24 @@ import {
 	annexBNal,
 	avcConfigCodecString,
 	aviFirstChunk,
-	avcPictureOrderCount,
 	avcPpsPocPresent,
-	avcSliceHeader,
 	aviLists,
-	freshPocState,
 	mpegAudioHeader,
 	parseAvcSps,
 	parseAviHeader,
-	type AvcPocState,
-	type AvcSps,
 	type AviStream,
 	type MediaCodec,
 	type ByteRange,
 	type ReadAt
 } from "@filen/shared/videos"
+import {
+	avcPicture,
+	cloneTimeline,
+	withParameterSets,
+	freshTimeline,
+	type AvcParameters,
+	type AvcTimelineState
+} from "@/lib/media/demux/avcTimeline"
 import { blockCacheOf } from "@/lib/media/demux/inputCache"
 import { MAX_PARTS, PacketDemuxer, readAt, type ContainerReader, type DemuxPacket, type DemuxTrack } from "@/lib/media/demux/packetDemuxer"
 
@@ -61,54 +64,23 @@ function chunkStream(id: string): number | null {
 	return Number(id.slice(0, 2))
 }
 
-// A stream's decoding state at a chunk: ticks of each stream before it, the H.264 order count and its last key
-// picture, and an MP3 frame cut by the chunk before.
+// The decoding state at a chunk: ticks of each stream before it, the H.264 picture order count, and an MP3 frame cut
+// by the chunk before.
 interface AviState {
 	ticks: number[]
-	poc: AvcPocState
-	lastKey: { dts: number; poc: number } | null
+	timeline: AvcTimelineState
 	carry: Map<number, { bytes: Uint8Array; pts: number }>
 }
 
 function cloneState(state: AviState): AviState {
-	return { ticks: [...state.ticks], poc: { ...state.poc }, lastKey: state.lastKey, carry: new Map(state.carry) }
+	return { ticks: [...state.ticks], timeline: cloneTimeline(state.timeline), carry: new Map(state.carry) }
 }
 
-interface AvcStream {
-	sps: AvcSps
-	pocPresent: boolean
+interface AvcStream extends AvcParameters {
 	// Length-prefixed NAL units (an avcC in strf) rather than Annex B.
 	lengthSize: number | null
-}
-
-// The NAL units of an H.264 sample, Annex B or length-prefixed.
-function* nalUnits(data: Uint8Array, lengthSize: number | null): Generator<Uint8Array> {
-	if (lengthSize !== null) {
-		for (let at = 0; at + lengthSize <= data.length;) {
-			let length = 0
-
-			for (let i = 0; i < lengthSize; i++) {
-				length = length * 256 + (data[at + i] ?? 0)
-			}
-
-			yield data.subarray(at + lengthSize, Math.min(data.length, at + lengthSize + length))
-			at += lengthSize + length
-		}
-
-		return
-	}
-
-	for (let at = 0; at + 3 < data.length;) {
-		const nal = annexBNal(data.subarray(at), () => true)
-
-		if (nal === null) {
-			return
-		}
-
-		yield nal
-
-		at = nal.byteOffset - data.byteOffset + nal.length
-	}
+	// Annex B parameter sets kept in strf, put in front of key pictures that carry none.
+	parameterSets: Uint8Array | null
 }
 
 interface Track {
@@ -238,7 +210,7 @@ class AviReader implements ContainerReader {
 		const span = timing === null || timing.stream.rate === 0 ? null : (timing.stream.length * timing.stream.scale) / timing.stream.rate
 
 		this.duration = span === null || !Number.isFinite(span) || span <= 0 ? null : span
-		this.initial = { ticks: streams.map(() => 0), poc: freshPocState(), lastKey: null, carry: new Map() }
+		this.initial = { ticks: streams.map(() => 0), timeline: freshTimeline(), carry: new Map() }
 		this.remember(movi.start, this.initial)
 	}
 
@@ -461,36 +433,19 @@ class AviReader implements ContainerReader {
 		let key = true
 		let pts = dts
 
+		let payload: Uint8Array | null = null
+
 		if (avc !== null) {
 			const head = window ?? (await readAt(this.input, at + 8, Math.min(size, PICTURE_HEAD_BYTES))) ?? new Uint8Array()
-			let slice = null
+			const picture = avcPicture(head, avc.lengthSize, avc, state.timeline, dts, false, frame)
 
-			key = false
+			key = picture.key
+			pts = picture.pts ?? dts
 
-			for (const nal of nalUnits(head, avc.lengthSize)) {
-				const type = (nal[0] ?? 0) & 0x1f
+			if (key && !picture.parameterSets && avc.parameterSets !== null && out !== null) {
+				const data = window !== null && window.length >= size ? window : await readAt(this.input, at + 8, size)
 
-				if (type === 7) {
-					avc.sps = parseAvcSps(nal) ?? avc.sps
-				} else if (type === 8) {
-					avc.pocPresent = avcPpsPocPresent(nal) ?? avc.pocPresent
-				} else if (type === 1 || type === 5) {
-					key ||= type === 5
-					slice = avcSliceHeader(nal, avc.sps, avc.pocPresent)
-
-					break
-				}
-			}
-
-			if (slice !== null) {
-				const poc = avcPictureOrderCount(slice, avc.sps, state.poc)
-
-				// An I picture that starts a read counts as its key, so later ones have an order to count from.
-				if (key || state.lastKey === null) {
-					state.lastKey = { dts, poc }
-				}
-
-				pts = state.lastKey.dts + ((poc - state.lastKey.poc) / 2) * frame
+				payload = data === null ? null : withParameterSets(avc.parameterSets, data.subarray(0, size))
 			}
 
 			// A key picture is where a later read can start: the state before it (this chunk's tick taken back).
@@ -498,11 +453,21 @@ class AviReader implements ContainerReader {
 				const ticks = [...state.ticks]
 
 				ticks[track.index] = (ticks[track.index] ?? 1) - 1
-				this.remember(at, { ticks, poc: freshPocState(), lastKey: null, carry: state.carry })
+				this.remember(at, { ticks, timeline: freshTimeline(), carry: state.carry })
 			}
 		}
 
-		out?.push({ track: track.index + 1, pts, duration: frame, key, unit: at, part: 0, pos: at + 8, size })
+		out?.push({
+			track: track.index + 1,
+			pts,
+			duration: frame,
+			key,
+			unit: at,
+			part: 0,
+			pos: at + 8,
+			size,
+			...(payload === null ? {} : { payload })
+		})
 	}
 
 	public resync(): Promise<number | null> {
@@ -546,7 +511,7 @@ class AviReader implements ContainerReader {
 			return this.movi.start
 		}
 
-		this.remember(position, { ticks: [...ticks], poc: freshPocState(), lastKey: null, carry: new Map() })
+		this.remember(position, { ticks: [...ticks], timeline: freshTimeline(), carry: new Map() })
 
 		return position
 	}
@@ -665,7 +630,7 @@ class AviReader implements ContainerReader {
 			ticks[track.index] = track === video ? key.tick : await this.ticksBefore(track, key.position, this.seconds(video, key.tick))
 		}
 
-		this.remember(key.position, { ticks, poc: freshPocState(), lastKey: null, carry: new Map() })
+		this.remember(key.position, { ticks, timeline: freshTimeline(), carry: new Map() })
 
 		return key.position
 	}
@@ -781,7 +746,9 @@ async function openAvi(input: Input): Promise<ContainerReader> {
 
 		if (stream.kind === "vids" && stream.video !== null) {
 			const strf = stream.strf ?? new Uint8Array()
-			const extradata = strf.length > 40 ? strf.subarray(Math.max(40, uint32le(strf, 0)), strf.length) : null
+			// The BITMAPINFOHEADER's size counts the extra data after its 40 bytes.
+			const biSize = uint32le(strf, 0)
+			const extradata = strf.length > 40 ? strf.subarray(40, biSize > 40 ? Math.min(biSize, strf.length) : strf.length) : null
 			const avcC = extradata !== null && extradata[0] === 1 ? extradata : null
 
 			if (stream.video.codec === "h264") {
@@ -802,7 +769,8 @@ async function openAvi(input: Input): Promise<ContainerReader> {
 						: {
 								sps,
 								pocPresent: ppsNal === null ? false : (avcPpsPocPresent(ppsNal) ?? false),
-								lengthSize: avcC === null ? null : ((avcC[4] ?? 3) & 0x03) + 1
+								lengthSize: avcC === null ? null : ((avcC[4] ?? 3) & 0x03) + 1,
+								parameterSets: avcC === null && extradata !== null && spsNal !== null ? extradata : null
 							}
 			}
 

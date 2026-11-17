@@ -11,6 +11,7 @@ function sps(poc: Partial<AvcPocParams>): AvcSps {
 		bitDepth: 8,
 		par: 1,
 		transfer: null,
+		frameSeconds: null,
 		poc: {
 			log2MaxFrameNum: 4,
 			pocType: 0,

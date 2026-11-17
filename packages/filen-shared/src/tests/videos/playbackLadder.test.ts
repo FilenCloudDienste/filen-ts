@@ -275,14 +275,14 @@ describe("rung B: remux", () => {
 	})
 
 	it("accepts the other remux input containers and rejects the rest", () => {
-		for (const container of ["mp4", "mov", "webm", "ts", "matroska", "flv", "avi"]) {
+		for (const container of ["mp4", "mov", "webm", "ts", "matroska", "flv", "avi", "asf", "ps"]) {
 			expect(decidePlayback(probe(container, H264, AAC), sel(), caps(base)).path).not.toBe("unsupported")
 		}
 
-		const asf = decidePlayback(probe("asf", H264, AAC), sel(), caps(base))
+		const ogg = decidePlayback(probe("ogg", H264, AAC), sel(), caps(base))
 
-		expect(asf.path).toBe("unsupported")
-		expect(asf.reasons).toContain("container-unsupported")
+		expect(ogg.path).toBe("unsupported")
+		expect(ogg.reasons).toContain("container-unsupported")
 	})
 
 	it("needs MediaSource", () => {

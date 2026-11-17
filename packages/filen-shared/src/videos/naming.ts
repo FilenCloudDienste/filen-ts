@@ -67,12 +67,12 @@ export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<str
 	["flv", demuxed("flv", "video", true)],
 	// Adobe's MP4: mediabunny and the MP4 walker read it; outside Photos (R26) and the editor.
 	["f4v", { drive: true, transportStream: false, editorReads: false, photo: false, probe: "mp4", keyframes: true }],
-	["asf", demuxed("asf", undefined, false)],
-	["wmv", demuxed("asf", "unsupportedVideo", false)],
-	["mpg", demuxed("ps", "unsupportedVideo", false)],
-	["mpeg", demuxed("ps", "unsupportedVideo", false)],
-	["vob", demuxed("ps", "unsupportedVideo", false)],
-	["m2v", demuxed("ps", undefined, false)]
+	["asf", demuxed("asf", undefined, true)],
+	["wmv", demuxed("asf", "unsupportedVideo", true)],
+	["mpg", demuxed("ps", "unsupportedVideo", true)],
+	["mpeg", demuxed("ps", "unsupportedVideo", true)],
+	["vob", demuxed("ps", "unsupportedVideo", true)],
+	["m2v", demuxed("ps", undefined, true)]
 ])
 
 const FILE_KINDS = new Map<string, VideoFileKind>([
