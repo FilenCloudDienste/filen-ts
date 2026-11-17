@@ -41,7 +41,11 @@ export const MEDIA_CODECS = [
 	"amr",
 	"amrwb",
 	"pcm",
+	// DVD LPCM of 20 or 24 bits, packed in sample groups (16-bit DVD LPCM is plain "pcm").
+	"lpcm",
 	"adpcm",
+	// Flash's own ADPCM, which is not the WAV ADPCM of "adpcm".
+	"adpcmswf",
 	"speex"
 ] as const
 

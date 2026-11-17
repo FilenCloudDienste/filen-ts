@@ -34,7 +34,9 @@ enum {
 	CODEC_AMRNB = 12,
 	CODEC_AMRWB = 13,
 	CODEC_ADPCM_MS = 14,
-	CODEC_ADPCM_IMA_WAV = 15
+	CODEC_ADPCM_IMA_WAV = 15,
+	CODEC_ADPCM_SWF = 16,
+	CODEC_PCM_DVD = 17
 };
 
 static enum AVCodecID codec_id_of(int codec) {
@@ -71,6 +73,10 @@ static enum AVCodecID codec_id_of(int codec) {
 		return AV_CODEC_ID_ADPCM_MS;
 	case CODEC_ADPCM_IMA_WAV:
 		return AV_CODEC_ID_ADPCM_IMA_WAV;
+	case CODEC_ADPCM_SWF:
+		return AV_CODEC_ID_ADPCM_SWF;
+	case CODEC_PCM_DVD:
+		return AV_CODEC_ID_PCM_DVD;
 	default:
 		return AV_CODEC_ID_NONE;
 	}

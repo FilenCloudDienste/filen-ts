@@ -34,7 +34,9 @@ const FFMPEG_CODEC_NAMES = [
 	"amrnb",
 	"amrwb",
 	"adpcm_ms",
-	"adpcm_ima_wav"
+	"adpcm_ima_wav",
+	"adpcm_swf",
+	"pcm_dvd"
 ] as const
 
 export type FfmpegCodec = (typeof FFMPEG_CODEC_NAMES)[number]

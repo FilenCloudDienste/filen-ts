@@ -225,7 +225,7 @@ describe("FLV demuxer", () => {
 		expect(reads.reduce((sum, [start, end]) => sum + end - start, 0)).toBeLessThan(bytes.length / 4)
 	})
 
-	it("plays PCM sound, and lists no track for sound it cannot cut into packets", async () => {
+	it("cuts PCM and Flash ADPCM sound into packets", async () => {
 		// Audio-only FLVs: 10 tags of 1764 bytes of 16-bit stereo PCM at 44.1 kHz (10 ms each), or Flash ADPCM.
 		const audioOnly = (flags: number): Uint8Array =>
 			Uint8Array.from([
@@ -249,9 +249,16 @@ describe("FLV demuxer", () => {
 		expect(packets[3]?.duration).toBeCloseTo(0.01, 6)
 		expect(packets[3]?.data[0]).toBe(3)
 
-		const adpcm = new Input({ formats: [FLV], source: new BufferSource(audioOnly(0x1f)) })
+		// Flash ADPCM: no codec mediabunny names, but its tags' bytes after the flags, for FFmpeg's decoder.
+		const adpcm = defined(await new Input({ formats: [FLV], source: new BufferSource(audioOnly(0x1f)) }).getPrimaryAudioTrack())
+		const adpcmPackets = await all(new EncodedPacketSink(adpcm))
 
-		expect(await adpcm.getPrimaryAudioTrack()).toBeNull()
+		expect(await adpcm.getCodec()).toBeNull()
+		expect(adpcmPackets).toHaveLength(10)
+		expect(adpcmPackets[2]?.data.length).toBe(1764)
+
+		// Nellymoser: neither cut nor listed.
+		expect(await new Input({ formats: [FLV], source: new BufferSource(audioOnly(0x6f)) }).getPrimaryAudioTrack()).toBeNull()
 	})
 
 	it("survives truncated and hostile files", async () => {

@@ -41,7 +41,9 @@ export const CODECS = {
 	amr: { kind: "audio", label: "AMR", query: 'audio/3gpp; codecs="samr"' },
 	amrwb: { kind: "audio", label: "AMR-WB", query: 'audio/3gpp; codecs="sawb"' },
 	pcm: { kind: "audio", label: "PCM", query: 'audio/wav; codecs="1"' },
+	lpcm: { kind: "audio", label: "DVD LPCM", query: "audio/x-dvd-lpcm" },
 	adpcm: { kind: "audio", label: "ADPCM", query: 'audio/wav; codecs="2"' },
+	adpcmswf: { kind: "audio", label: "Flash ADPCM", query: 'audio/x-flv; codecs="adpcm"' },
 	speex: { kind: "audio", label: "Speex", query: 'audio/ogg; codecs="speex"' }
 } as const satisfies Record<MediaCodec, { kind: TrackKind; label: string; query: string }>
 

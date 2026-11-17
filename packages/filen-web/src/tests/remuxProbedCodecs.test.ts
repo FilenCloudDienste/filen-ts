@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { ALL_FORMATS, BufferSource, Input } from "mediabunny"
+import { readFileSync } from "node:fs"
+import { ALL_FORMATS, BufferSource, Input, type InputFormat } from "mediabunny"
 import { BlockCache } from "@/lib/media/blockCache"
+import { PLAYBACK_INPUT_FORMATS } from "@/lib/media/blockInput"
 import { mpegLayerCodec, probedCodecFor, probedCodecs, waveProbedCodec } from "@/workers/remux/audioInput"
 import {
 	FTYP,
@@ -37,9 +39,12 @@ function cacheOf(bytes: Uint8Array): BlockCache {
 }
 
 // Each audio track as mediabunny lists it, with the walked codec it is matched to.
-async function matched(bytes: Uint8Array): Promise<{ id: number; number: number; codec: string | null; walked: string | null }[]> {
+async function matched(
+	bytes: Uint8Array,
+	formats: InputFormat[] = ALL_FORMATS
+): Promise<{ id: number; number: number; codec: string | null; walked: string | null }[]> {
 	const probed = await probedCodecs(cacheOf(bytes))
-	const input = new Input({ source: new BufferSource(bytes), formats: ALL_FORMATS })
+	const input = new Input({ source: new BufferSource(bytes), formats })
 
 	try {
 		const tracks = await input.getAudioTracks()
@@ -183,6 +188,17 @@ function mpegAudio(header: number[], bytes: number, frames: number): Uint8Array 
 
 	return out
 }
+
+describe("probedCodecs — sound only FFmpeg decodes, in the app's own containers", () => {
+	it.each([
+		["lpcm24-stereo.vob", "pcm_dvd"],
+		["adpcm-swf-mono.flv", "adpcm_swf"]
+	])("routes %s's unnamed track to %s", async (file, codec) => {
+		const bytes = new Uint8Array(readFileSync(new URL(`./fixtures/ffmpeg-decoders/${file}`, import.meta.url)))
+
+		expect(await matched(bytes, [...PLAYBACK_INPUT_FORMATS])).toEqual([{ id: 1, number: 1, codec: null, walked: codec }])
+	})
+})
 
 describe("mpegLayerCodec", () => {
 	it("picks MP2 or MP1 by the first frame of what mediabunny calls MP3, and leaves MP3 to its own decoder", async () => {

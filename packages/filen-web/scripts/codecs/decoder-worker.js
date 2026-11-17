@@ -33,7 +33,9 @@
 		amrnb: 12,
 		amrwb: 13,
 		adpcm_ms: 14,
-		adpcm_ima_wav: 15
+		adpcm_ima_wav: 15,
+		adpcm_swf: 16,
+		pcm_dvd: 17
 	}
 	// Indexed by AVSampleFormat: [AudioSampleFormat, bytes per sample, planar]. Doubles and 64-bit integers
 	// have no AudioSampleFormat, and none of these decoders produces them.

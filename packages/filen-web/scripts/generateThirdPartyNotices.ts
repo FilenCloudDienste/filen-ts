@@ -395,7 +395,9 @@ const FFMPEG_DECODER_NAMES: Readonly<Record<string, string>> = {
 	amrnb: "AMR-NB",
 	amrwb: "AMR-WB",
 	adpcm_ms: "Microsoft ADPCM",
-	adpcm_ima_wav: "IMA ADPCM"
+	adpcm_ima_wav: "IMA ADPCM",
+	adpcm_swf: "Flash ADPCM",
+	pcm_dvd: "DVD LPCM"
 }
 
 // "A, B and C" from the configure line's --enable-decoder list.

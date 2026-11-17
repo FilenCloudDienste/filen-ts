@@ -203,11 +203,11 @@ describe("probeVideo — FLV", () => {
 		expect((await probe(file))?.video).toMatchObject({ codec: "h263", codecString: null })
 	})
 
-	it("names PCM, and leaves Flash's own ADPCM unnamed: it is not the WAV ADPCM decoded here", async () => {
+	it("names PCM, and Flash's own ADPCM apart from WAV ADPCM", async () => {
 		const sound = (flags: number): Uint8Array => concat(text("FLV"), [1, 0x04, ...be(9, 4), 0, 0, 0, 0], flvTag(8, 0, [flags, 0, 0]))
 
 		expect((await probe(sound(0x3f)))?.audio[0]).toMatchObject({ codec: "pcm", ch: 2, rate: 44100 })
-		expect((await probe(sound(0x1f)))?.audio[0]?.codec).toBeNull()
+		expect((await probe(sound(0x1f)))?.audio[0]?.codec).toBe("adpcmswf")
 	})
 
 	it("survives hostile metadata", async () => {
@@ -354,13 +354,13 @@ describe("probeVideo — MPEG-PS", () => {
 		])
 	})
 
-	it("names 16-bit DVD LPCM, and leaves 20- and 24-bit LPCM unnamed", async () => {
+	it("names 16-bit DVD LPCM as PCM, and 20- and 24-bit LPCM as the grouped DVD form", async () => {
 		const lpcm = (format: number): Uint8Array =>
 			Uint8Array.from([...pack(), ...pes(0xbd, 90_000, [0xa0, 1, 0, 1, 0, format, 0x80, 0, 0, 0, 0])])
 
 		expect((await probe(lpcm(0x01)))?.audio[0]).toMatchObject({ codec: "pcm", ch: 2, rate: 48000 })
-		expect((await probe(lpcm(0x81)))?.audio[0]).toMatchObject({ codec: null, ch: 2 })
-		expect((await probe(lpcm(0x41)))?.audio[0]?.codec).toBeNull()
+		expect((await probe(lpcm(0x81)))?.audio[0]).toMatchObject({ codec: "lpcm", ch: 2 })
+		expect((await probe(lpcm(0x41)))?.audio[0]?.codec).toBe("lpcm")
 	})
 
 	it("tells MPEG-1 video by its missing sequence extension, and reads a tail blocks away", async () => {

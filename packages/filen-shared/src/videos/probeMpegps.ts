@@ -272,7 +272,7 @@ function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 	}
 
 	// LPCM's header: sub-stream id, frame count, first access unit (2), emphasis, then quantisation, rate and channels.
-	// Only 16-bit samples are plain big-endian PCM; 20- and 24-bit ones are packed in groups nothing here reads.
+	// Only 16-bit samples are plain big-endian PCM; 20- and 24-bit ones are packed in sample groups.
 	if (stream.codec === "pcm" && stream.rate === null) {
 		const format = bytes[pes.data + 5] ?? 0
 
@@ -280,7 +280,7 @@ function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 		stream.ch = (format & 0x07) + 1
 
 		if (format >> 6 !== 0) {
-			stream.codec = null
+			stream.codec = "lpcm"
 		}
 	}
 

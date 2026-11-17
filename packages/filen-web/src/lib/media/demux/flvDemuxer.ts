@@ -161,6 +161,15 @@ function videoTrack(data: Uint8Array, meta: FlvMetaData | null): DemuxTrack {
 	}
 }
 
+// SoundFormat 1, Flash's own ADPCM: no codec mediabunny knows, packetised all the same for FFmpeg's decoder, which the
+// probe's walk names.
+const SOUND_ADPCM = 1
+
+// Whether the demuxer cuts an audio track's tags into packets.
+function packetised(track: DemuxTrack): boolean {
+	return track.type === "audio" && (track.codec !== null || track.internalCodecId === SOUND_ADPCM)
+}
+
 // PCM's sample format: the flags' size bit says 8-bit (unsigned) or 16-bit (little-endian: SoundFormat 3 says so,
 // and 0, "platform endian", was written by little-endian machines).
 function pcmFormat(flags: number): AudioCodec {
@@ -208,7 +217,7 @@ function tagPacket(bytes: Uint8Array, at: number, unit: number, tracks: Map<numb
 	if (type === 8) {
 		const track = tracks.get(AUDIO_TRACK)
 
-		if (track?.type !== "audio" || track.codec === null) {
+		if (track?.type !== "audio" || !packetised(track)) {
 			return null
 		}
 
@@ -221,8 +230,16 @@ function tagPacket(bytes: Uint8Array, at: number, unit: number, tracks: Map<numb
 
 		const header = track.codec === "mp3" ? mpegAudioHeader(bytes, dataAt + 1) : null
 		const pcmBytes = track.codec === "pcm-s16" ? 2 : track.codec === "pcm-u8" ? 1 : 0
+		// ADPCM: a 2-bit code size, then per channel a 22-bit start and the codes of the samples after it.
+		const adpcmBits = track.codec === null ? (((bytes[dataAt + 1] ?? 0) >> 6) & 0x03) + 2 : 0
 		const samples =
-			pcmBytes > 0 ? (size - skip) / (pcmBytes * track.channels) : track.codec === "aac" ? 1024 : (header?.samples ?? 1152)
+			pcmBytes > 0
+				? (size - skip) / (pcmBytes * track.channels)
+				: adpcmBits > 0
+					? Math.max(0, ((size - skip) * 8 - 2) / track.channels - 22) / adpcmBits + 1
+					: track.codec === "aac"
+						? 1024
+						: (header?.samples ?? 1152)
 
 		return {
 			track: AUDIO_TRACK,
@@ -297,7 +314,7 @@ async function openFlv(input: Input): Promise<ContainerReader> {
 	// Only sound this cuts into packets is listed: a track that never yields one would be searched for to the end.
 	const audio = head.audio === null ? null : audioTrack(head.audio)
 
-	if (audio?.type === "audio" && audio.codec !== null) {
+	if (audio !== null && packetised(audio)) {
 		tracks.set(AUDIO_TRACK, audio)
 	}
 

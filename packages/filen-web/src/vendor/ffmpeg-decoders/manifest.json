@@ -1,10 +1,10 @@
 {
-	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR and ADPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
+	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR, ADPCM and DVD LPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
 	"ffmpeg": {
 		"tag": "n9.0.2",
 		"tarball": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
 		"sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
-		"configure": ["--target-os=none", "--arch=x86_32", "--enable-cross-compile", "--disable-asm", "--disable-inline-asm", "--disable-x86asm", "--disable-programs", "--disable-doc", "--disable-debug", "--disable-network", "--disable-autodetect", "--disable-pthreads", "--disable-runtime-cpudetect", "--disable-all", "--disable-everything", "--enable-small", "--enable-avcodec", "--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav"],
+		"configure": ["--target-os=none", "--arch=x86_32", "--enable-cross-compile", "--disable-asm", "--disable-inline-asm", "--disable-x86asm", "--disable-programs", "--disable-doc", "--disable-debug", "--disable-network", "--disable-autodetect", "--disable-pthreads", "--disable-runtime-cpudetect", "--disable-all", "--disable-everything", "--enable-small", "--enable-avcodec", "--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav,adpcm_swf,pcm_dvd"],
 		"cflags": ["-Oz", "-flto", "-msimd128", "-DNDEBUG", "-ffile-prefix-map=<ffmpeg source>=ffmpeg"]
 	},
 	"emcc": "7.0.0-git",
@@ -21,14 +21,14 @@
 	},
 	"link": ["-Oz", "-flto", "-msimd128", "-DNDEBUG", "-ffile-prefix-map=<ffmpeg source>=ffmpeg", "-ffile-prefix-map=<scripts/codecs>=codecs", "-sMODULARIZE=1", "-sEXPORT_NAME=createFfmpegDecoders", "-sENVIRONMENT=worker", "-sSINGLE_FILE=1", "-sSINGLE_FILE_BINARY_ENCODE=0", "-sDYNAMIC_EXECUTION=0", "-sALLOW_MEMORY_GROWTH=1", "-sFILESYSTEM=0", "-sMALLOC=emmalloc", "-sSUPPORT_LONGJMP=0", "-sINCOMING_MODULE_JS_API=[]", "-sEXPORTED_RUNTIME_METHODS=HEAPU8", "-sEXPORTED_FUNCTIONS=_decoder_log_level,_decoder_extradata,_decoder_open,_decoder_packet,_decoder_send,_decoder_drain,_decoder_receive,_decoder_reset,_decoder_format,_decoder_channels,_decoder_channel_mask,_decoder_sample_rate,_decoder_frames,_decoder_plane,_decoder_timestamp,_decoder_close"],
 	"sources": {
-		"build-ffmpeg-decoders.sh": "943257b71e9d1f06e503059d5b8fadfe16fedfec675ad69fff919129d0e2a564",
-		"bridge.c": "ffd601a47d096720d57918e87c49acfd38287c67f01b928b3dfa4e2ddc73530b",
-		"decoder-worker.js": "915f7cc3a2d5d89a8cd9c7b3ce9fab9727515858ec4f2b95a4d9ee4e6fa3d139"
+		"build-ffmpeg-decoders.sh": "9636d1bb4ad7aa2c8b9acfaa4425e7f20e21339d688f7591c0a14875d6a57ddb",
+		"bridge.c": "912f612596fec45e98853e381b6a2ce6a38664f73d49b3268fd9b17ef9519791",
+		"decoder-worker.js": "5ba67e008edb5eaacd3ddb519d7801cdb8b644d23109671aa52d4612d7ceb5e1"
 	},
 	"output": {
 		"decoders.worker.js": {
-			"bytes": 1046326,
-			"sha256": "164cc1d47ed1a52f5df3a1afb2ac95af5a1776befdb0b5c494361a8eb1585b1f"
+			"bytes": 1050058,
+			"sha256": "7687712fbc12def7be2e1284f80d1852066bf2387178da2ed26241580708d870"
 		}
 	}
 }

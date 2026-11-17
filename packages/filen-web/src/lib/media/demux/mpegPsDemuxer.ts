@@ -593,13 +593,16 @@ class MpegPsReader implements ContainerReader {
 
 		if (entry.lpcm || entry.frames === null) {
 			const part = inWindow && pts !== null ? partOf(unit) : null
-			const rate = entry.demux.type === "audio" ? entry.demux.sampleRate * entry.demux.channels * 2 : 1
+			// 20/24-bit DVD LPCM keeps its 3-byte header (quantisation, rate, channels), which FFmpeg's decoder reads.
+			const grouped = entry.stream.codec === "lpcm"
+			const bits = grouped ? 16 + (((data[1] ?? 0) >> 6) & 0x03) * 4 : 16
+			const rate = entry.demux.type === "audio" ? (entry.demux.sampleRate * entry.demux.channels * bits) / 8 : 1
 
 			if (part !== null && pts !== null) {
 				out.push({
 					track: entry.number,
 					pts: pts / PTS_HZ,
-					duration: data.length / rate,
+					duration: (grouped ? Math.max(0, data.length - 3) : data.length) / rate,
 					key: true,
 					unit,
 					part,

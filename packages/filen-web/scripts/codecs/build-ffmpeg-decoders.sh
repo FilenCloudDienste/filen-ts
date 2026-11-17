@@ -59,7 +59,7 @@ CONFIGURE_FLAGS=(
 	# either way.
 	--enable-small
 	--enable-avcodec
-	--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav
+	--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav,adpcm_swf,pcm_dvd
 )
 OPT_FLAGS=(-Oz -flto -msimd128 -DNDEBUG)
 EXPORTS="_decoder_log_level,_decoder_extradata,_decoder_open,_decoder_packet,_decoder_send,_decoder_drain,_decoder_receive,_decoder_reset,_decoder_format,_decoder_channels,_decoder_channel_mask,_decoder_sample_rate,_decoder_frames,_decoder_plane,_decoder_timestamp,_decoder_close"
@@ -221,7 +221,7 @@ json_array() {
 
 cat > "${OUT_DIR}/manifest.json" << EOF
 {
-	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR and ADPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
+	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR, ADPCM and DVD LPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
 	"ffmpeg": {
 		"tag": "${FFMPEG_TAG}",
 		"tarball": "${FFMPEG_URL}",

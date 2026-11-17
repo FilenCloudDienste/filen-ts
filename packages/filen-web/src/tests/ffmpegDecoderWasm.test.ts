@@ -5,6 +5,8 @@ import { BufferSource, EncodedPacketSink, Input } from "mediabunny"
 import { mpegAudioHeader, parseAsfHeader } from "@filen/shared/videos"
 import WORKER_SOURCE from "@/vendor/ffmpeg-decoders/decoders.worker.js?raw"
 import { ASF } from "@/lib/media/demux/asfDemuxer"
+import { FLV } from "@/lib/media/demux/flvDemuxer"
+import { MPEG_PS } from "@/lib/media/demux/mpegPsDemuxer"
 import { waveProbedCodec, type ProbedCodec } from "@/workers/remux/audioInput"
 import type { DecodedFrame } from "@/workers/remux/ffmpegDecoder"
 
@@ -12,7 +14,9 @@ import type { DecodedFrame } from "@/workers/remux/ffmpegDecoder"
 // loop exercised on real AC-3, E-AC-3 and DTS frames (synthetic tones, three 1536-sample AC-3 frames, three
 // E-AC-3, two 512-sample DTS, all 5.1), and on ffmpeg-encoded tones of the codecs that need the container's format
 // fields: half a second of mono 22.05 kHz WMA 2 in ASF, Microsoft and IMA ADPCM in WAVE, and a quarter second of
-// stereo 48 kHz MP2.
+// stereo 48 kHz MP2. Flash ADPCM in FLV is ffmpeg's (`-c:a adpcm_swf`, half a second of a 440 Hz tone at 22.05 kHz).
+// ffmpeg writes DVD LPCM of 16 bits only, so the 24-bit one is a quarter second of 440/660 Hz stereo at 48 kHz grouped
+// as libavcodec/pcm-dvd.c reads it, in packs and PES of private stream 1; ffmpeg decodes it back to its source.
 
 interface Answer {
 	id: number
@@ -285,6 +289,47 @@ describe("FFmpeg decoders module", () => {
 		expect(result.frames.every(frame => frame.sampleRate === 48_000 && frame.channels === 2)).toBe(true)
 		expect(result.samples).toBe(packets.length * 1152)
 		expect(result.peak).toBeGreaterThan(0.05)
+	})
+
+	async function packetsOf(input: Input): Promise<Uint8Array[]> {
+		const packets: Uint8Array[] = []
+
+		for await (const packet of new EncodedPacketSink(defined(await input.getPrimaryAudioTrack())).packets()) {
+			packets.push(packet.data)
+		}
+
+		return packets
+	}
+
+	it("decodes 24-bit DVD LPCM from a program stream, sample groups and all", async () => {
+		const input = new Input({ formats: [MPEG_PS], source: new BufferSource(fixture("lpcm24-stereo.vob")) })
+		const probed = defined(waveProbedCodec("lpcm", null, 48_000, 2))
+		const result = await decodeAll(probed, await packetsOf(input))
+		const samples = result.frames.flatMap(frame => Array.from(new Int32Array(frame.data, 0, frame.frames * frame.channels)))
+
+		expect(probed.codec).toBe("pcm_dvd")
+		expect(result.frames.every(frame => frame.format === "s32" && frame.sampleRate === 48_000 && frame.channels === 2)).toBe(true)
+		expect(samples.length).toBeGreaterThan(11_000 * 2)
+
+		// Both channels' tones, to 24 bits (the low byte of a 32-bit sample is 0).
+		for (let i = 0; i < samples.length / 2; i += 97) {
+			const t = i / 48_000
+
+			expect(Math.abs((samples[i * 2] ?? 0) / 2 ** 31 - 0.5 * Math.sin(2 * Math.PI * 440 * t))).toBeLessThan(1e-5)
+			expect(Math.abs((samples[i * 2 + 1] ?? 0) / 2 ** 31 - 0.5 * Math.sin(2 * Math.PI * 660 * t))).toBeLessThan(1e-5)
+			expect((samples[i * 2] ?? 0) & 0xff).toBe(0)
+		}
+	})
+
+	it("decodes Flash ADPCM from an FLV", async () => {
+		const input = new Input({ formats: [FLV], source: new BufferSource(fixture("adpcm-swf-mono.flv")) })
+		const probed = defined(waveProbedCodec("adpcmswf", null, 22_050, 1))
+		const result = await decodeAll(probed, await packetsOf(input))
+
+		expect(probed.codec).toBe("adpcm_swf")
+		expect(result.frames.every(frame => frame.sampleRate === 22_050 && frame.channels === 1)).toBe(true)
+		expect(Math.abs(result.samples - 11_025)).toBeLessThan(4096)
+		expect(result.peak).toBeGreaterThan(0.4)
 	})
 
 	it("opens the decoders no fixture here encodes, given their format fields", async () => {

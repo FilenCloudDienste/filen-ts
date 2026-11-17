@@ -565,6 +565,8 @@ export function waveProbedCodec(
 
 // The walk's codec names (by WAVEFORMATEX flavour for WMA and ADPCM) of the decoders FFmpeg runs for them.
 const WALKED_CODECS: Readonly<Record<string, FfmpegCodec>> = {
+	lpcm: "pcm_dvd",
+	adpcmswf: "adpcm_swf",
 	wmav1: "wmav1",
 	wmav2: "wmav2",
 	wmapro: "wmapro",

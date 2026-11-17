@@ -130,8 +130,16 @@ function numberOf(value: AmfValue | undefined): number | null {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
 }
 
-// Flash's own ADPCM (1) is not the WAV ADPCM the decoders here read: left unnamed, like Nellymoser.
-const SOUND_FORMATS: Readonly<Record<number, MediaCodec>> = { 0: "pcm", 2: "mp3", 3: "pcm", 10: "aac", 11: "speex", 14: "mp3" }
+// Flash's own ADPCM (1) is not the WAV ADPCM of "adpcm".
+const SOUND_FORMATS: Readonly<Record<number, MediaCodec>> = {
+	0: "pcm",
+	1: "adpcmswf",
+	2: "mp3",
+	3: "pcm",
+	10: "aac",
+	11: "speex",
+	14: "mp3"
+}
 const SOUND_RATES = [5512, 11025, 22050, 44100]
 const VIDEO_CODECS: Readonly<Record<number, MediaCodec>> = { 2: "h263", 4: "vp6", 5: "vp6", 7: "h264", 12: "hevc" }
 // Enhanced RTMP video FourCCs.

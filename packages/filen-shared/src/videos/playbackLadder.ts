@@ -120,7 +120,9 @@ const WASM_AUDIO_DECODERS: ReadonlySet<string> = new Set([
 	"mp2",
 	"amr",
 	"amrwb",
-	"adpcm"
+	"adpcm",
+	"adpcmswf",
+	"lpcm"
 ])
 const TARGET_BITRATE = 128_000
 

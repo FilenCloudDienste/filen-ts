@@ -426,7 +426,7 @@ describe("vendored FFmpeg decoders module", () => {
 		expect(manifest.ffmpeg.configure).not.toContain("--enable-gpl")
 		expect(manifest.ffmpeg.configure).not.toContain("--enable-nonfree")
 		expect(manifest.ffmpeg.configure).toContain(
-			"--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav"
+			"--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac,wmav1,wmav2,wmapro,wmalossless,mp1,mp2,amrnb,amrwb,adpcm_ms,adpcm_ima_wav,adpcm_swf,pcm_dvd"
 		)
 	})
 })
