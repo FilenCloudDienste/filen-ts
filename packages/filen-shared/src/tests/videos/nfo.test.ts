@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { MAX_NFO_CHARS, parseNfo } from "@filen/shared/videos"
 
 const MOVIE = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -175,10 +175,23 @@ describe("parseNfo", () => {
 
 	it("skips runs of declarations without rescanning the rest of the text", () => {
 		const text = `<movie><title>x</title>${"<!a>".repeat(65_000)}</movie>`
-		const started = performance.now()
+		// The characters every search walks (counted, not timed: a busy machine never fails a linear scan). Rescanning the
+		// rest of the text for each declaration would walk it about 32 000 times over.
+		const indexOf = String.prototype.indexOf
+		let walked = 0
+
+		vi.spyOn(String.prototype, "indexOf").mockImplementation(function (this: string, search: string, position?: number) {
+			const from = Math.max(0, position ?? 0)
+			const at = indexOf.call(this, search, from)
+
+			walked += (at === -1 ? this.length : at) - from
+
+			return at
+		})
 
 		expect(parseNfo(text)?.title).toBe("x")
-		expect(performance.now() - started).toBeLessThan(100)
+		expect(walked).toBeLessThan(2 * text.length)
+		vi.restoreAllMocks()
 		expect(parseNfo("<!DOCTYPE movie [<!ENTITY a \"<title>no</title>\">]><movie><title>yes</title></movie>")?.title).toBe("yes")
 	})
 
