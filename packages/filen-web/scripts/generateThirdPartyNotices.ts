@@ -377,6 +377,36 @@ const FFMPEG_DIR = "src/vendor/ffmpeg-decoders"
 const FFMPEG_MANIFEST = `${FFMPEG_DIR}/manifest.json`
 const CODECS_SOURCE = "packages/filen-web/scripts/codecs"
 const FFMPEG_REPOSITORY = "https://git.ffmpeg.org/ffmpeg.git"
+// The decoders' names in the notice, by their FFmpeg names (an unknown one keeps its own).
+const FFMPEG_DECODER_NAMES: Readonly<Record<string, string>> = {
+	ac3: "AC-3",
+	eac3: "E-AC-3",
+	dca: "DTS",
+	truehd: "TrueHD",
+	mlp: "MLP",
+	alac: "ALAC",
+	flac: "FLAC",
+	wmav1: "WMA 1",
+	wmav2: "WMA 2",
+	wmapro: "WMA Pro",
+	wmalossless: "WMA Lossless",
+	mp1: "MP1",
+	mp2: "MP2",
+	amrnb: "AMR-NB",
+	amrwb: "AMR-WB",
+	adpcm_ms: "Microsoft ADPCM",
+	adpcm_ima_wav: "IMA ADPCM"
+}
+
+// "A, B and C" from the configure line's --enable-decoder list.
+function ffmpegDecoderList(configure: readonly string[]): string {
+	const names = configure
+		.filter(flag => flag.startsWith("--enable-decoder="))
+		.flatMap(flag => flag.slice("--enable-decoder=".length).split(","))
+		.map(name => FFMPEG_DECODER_NAMES[name] ?? name)
+
+	return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`
+}
 
 function ffmpegModuleNotices(): Collected[] {
 	const manifest = requireJson(FFMPEG_MANIFEST)
@@ -400,7 +430,7 @@ function ffmpegModuleNotices(): Collected[] {
 				repository: FFMPEG_REPOSITORY,
 				terms: [
 					[
-						`FFmpeg's AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC and FLAC decoders (libavcodec, libavutil), built to WebAssembly from the FFmpeg ${tag} release and licensed under the GNU Lesser General Public License, version 2.1 or later.`,
+						`FFmpeg's ${ffmpegDecoderList(stringsField(ffmpeg, "configure", FFMPEG_MANIFEST))} decoders (libavcodec, libavutil), built to WebAssembly from the FFmpeg ${tag} release and licensed under the GNU Lesser General Public License, version 2.1 or later.`,
 						`Corresponding source of the library: the FFmpeg release tarball ${stringField(ffmpeg, "tarball", FFMPEG_MANIFEST)} (SHA-256 ${stringField(ffmpeg, "sha256", FFMPEG_MANIFEST)}), unmodified, the release tagged ${tag} in ${FFMPEG_REPOSITORY}.`,
 						`Configured with: ${stringsField(ffmpeg, "configure", FFMPEG_MANIFEST).join(" ")}.`,
 						`Built with Emscripten ${emcc}. The rest of the module's source and its build recipe, in the filen-ts repository (${FILEN_TS_REPOSITORY}): ${sourceList}.`,
