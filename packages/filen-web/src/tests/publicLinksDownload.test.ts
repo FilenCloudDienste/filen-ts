@@ -87,7 +87,7 @@ describe("anonPreviewability", () => {
 	})
 
 	it("marks an unknown-category file unpreviewable", () => {
-		expect(anonPreviewability(linkedFileItem("setup.exe", { size: 1024n }))).toBe("unpreviewable")
+		expect(anonPreviewability(linkedFileItem("setup.msi", { size: 1024n }))).toBe("unpreviewable")
 	})
 
 	// Never an inline preview: a signed-in visitor browses it on request, at any size.

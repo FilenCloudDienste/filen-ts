@@ -95,6 +95,7 @@ import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
 import { ContactViewer } from "@/features/preview/components/contactViewer"
+import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
@@ -2993,6 +2994,8 @@ function PreviewBody({
 			return <FontViewer item={item} />
 		case "torrent":
 			return <TorrentViewer item={item} />
+		case "binaryInfo":
+			return <BinaryInfoViewer item={item} />
 		case "sqlite":
 			return <SqliteViewer item={item} />
 		case "geo":

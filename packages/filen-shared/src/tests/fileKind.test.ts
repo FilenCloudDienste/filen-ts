@@ -449,6 +449,20 @@ describe("resolveFileKind for a well-known file name", () => {
 		expect(resolveFileKind({ name: "card", mime: "text/directory" }, withVcf)).toMatchObject({ kind: "contact", extension: "vcf" })
 	})
 
+	// Executable and disk image types read as their extensions; a table without them still gives such a file no kind.
+	it("gives an executable or disk image type no kind on a table without them", () => {
+		for (const mime of [
+			"application/x-msdownload",
+			"application/vnd.microsoft.portable-executable",
+			"application/x-executable",
+			"application/x-sharedlib",
+			"application/x-apple-diskimage",
+			"application/x-iso9660-image"
+		]) {
+			expect(resolveFileKind({ name: "program", mime }, kindOf), mime).toMatchObject({ kind: null, extension: "" })
+		}
+	})
+
 	it.each(["sub", "vcf"])("leaves .%s as before on a table without it", extension => {
 		const without = (candidate: string) => (candidate === extension ? null : kindOf(candidate))
 		const before: AmbiguityTable = new Map()

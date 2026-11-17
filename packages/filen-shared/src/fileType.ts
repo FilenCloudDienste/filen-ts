@@ -158,6 +158,13 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["text/vcard", "vcf", "both"],
 	["text/x-vcard", "vcf", "toExt"],
 	["text/directory", "vcf", "toExt"],
+	// Executables and disk images: read for their headers only, never served as these types.
+	["application/x-msdownload", "exe", "toExt"],
+	["application/vnd.microsoft.portable-executable", "exe", "toExt"],
+	["application/x-executable", "elf", "toExt"],
+	["application/x-sharedlib", "so", "toExt"],
+	["application/x-apple-diskimage", "dmg", "toExt"],
+	["application/x-iso9660-image", "iso", "toExt"],
 	["message/rfc822", "eml", "both"],
 	["application/mbox", "mbox", "both"],
 	["application/json", "json", "both"],

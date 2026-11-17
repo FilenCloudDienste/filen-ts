@@ -7,6 +7,8 @@ import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { PreviewErrorState, PreviewLoading, PreviewNotTextState } from "@/features/preview/components/previewErrorState"
+import { HeldBinaryInfo } from "@/features/preview/components/binaryInfoViewer"
+import { isExecutableHead } from "@/features/preview/lib/binaryInfo/read"
 
 export interface TextViewerProps {
 	item: DriveItem
@@ -54,7 +56,13 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 				/>
 			)
 		case "notText":
-			return (
+			// An executable without the name that says so (an extensionless ELF or Mach-O): its headers, from the bytes held.
+			return text.bytes !== null && isExecutableHead(text.bytes) ? (
+				<HeldBinaryInfo
+					item={item}
+					bytes={text.bytes}
+				/>
+			) : (
 				<PreviewNotTextState
 					item={item}
 					onShowAnyway={text.showAnyway}

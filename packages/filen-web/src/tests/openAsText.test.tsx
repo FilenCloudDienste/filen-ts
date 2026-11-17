@@ -163,7 +163,7 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 
 describe("TextViewer — binary guard", () => {
 	function renderBinary(name: string, onTextState?: (state: { writable: boolean; encoding: string }) => void) {
-		previewBytes.current = Uint8Array.of(0x7f, 0x45, 0x4c, 0x46, 0x02, 0x00, 0x01)
+		previewBytes.current = Uint8Array.of(0x00, 0x00, 0x01, 0x02, 0x03, 0xff, 0x00)
 
 		render(
 			<PreviewDownloadableProvider

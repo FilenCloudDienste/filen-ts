@@ -269,7 +269,7 @@ describe("FileHero — a linked archive", () => {
 	})
 
 	it("asks nothing about the visitor for a file that isn't an archive", async () => {
-		await renderHero("setup.exe", true, true)
+		await renderHero("setup.msi", true, true)
 
 		expect(queryButton("Browse contents")).toBeNull()
 		expect(hasClient).not.toHaveBeenCalled()

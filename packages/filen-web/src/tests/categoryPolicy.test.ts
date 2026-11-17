@@ -23,6 +23,7 @@ import {
 	SPREADSHEET_MAX_BYTES,
 	TEXT_MAX_BYTES,
 	TORRENT_MAX_BYTES,
+	BINARY_ENTRY_MAX_BYTES,
 	FONT_MAX_BYTES,
 	type PreviewCategory,
 	type StreamedCategory
@@ -88,6 +89,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	subtitle: "drivePreviewKindSubtitle",
 	calendar: "drivePreviewKindCalendar",
 	contact: "drivePreviewKindContact",
+	binaryInfo: "drivePreviewKindBinaryInfo",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -268,13 +270,24 @@ const NAMES = [
 	"script.js",
 	"readme.md",
 	"bundle.zip",
-	"setup.exe"
+	"setup.msi"
 ]
 const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent", "subtitle", "calendar", "contact"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
+	"font",
+	"sqlite",
+	"ebook",
+	"geo",
+	"model3d",
+	"torrent",
+	"subtitle",
+	"calendar",
+	"contact",
+	"binaryInfo"
+])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -606,6 +619,25 @@ describe("the torrent row", () => {
 		expect(previewKindLabelKey("torrent")).toBe("drivePreviewKindTorrent")
 		expect(isPhotoCategory("torrent")).toBe(false)
 		expect(isTextCategory("torrent")).toBe(false)
+	})
+})
+
+describe("the binaryInfo row", () => {
+	// Headers read in ranges: any size on the drive and a link; an archive's entry is read whole up to 8 MiB.
+	it("opens executables and disk images at any size, and inside an archive up to 8 MiB", () => {
+		for (const name of ["setup.exe", "foo.dll", "driver.sys", "boot.efi", "libfoo.so", "libfoo.dylib", "app.dmg", "ubuntu.iso"]) {
+			expect(previewType(fileNamed(name, 1024n)), name).toBe("binaryInfo")
+			expect(canPreview(fileNamed(name, 50n * 1024n * MIB)), name).toBe(true)
+			expect(anonPreviewability(fileNamed(name, 50n * 1024n * MIB)), name).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(BINARY_ENTRY_MAX_BYTES) }]), 0), name).toBe(true)
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(BINARY_ENTRY_MAX_BYTES) + 1 }]), 0), name).toBe(false)
+		}
+
+		expect(previewType(fileNamed("installer.msi", 1024n))).toBe("other")
+		expect(previewType(fileNamed("program", 1024n, "application/x-msdownload"))).toBe("binaryInfo")
+		expect(previewKindLabelKey("binaryInfo")).toBe("drivePreviewKindBinaryInfo")
+		expect(isTextCategory("binaryInfo")).toBe(false)
+		expect(CATEGORY_POLICY.binaryInfo).toMatchObject({ textFamily: false, editsAsText: false, assistantKind: null })
 	})
 })
 

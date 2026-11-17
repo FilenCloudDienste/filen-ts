@@ -28,6 +28,7 @@ export {
 } from "./cmsBuild"
 export { importPkcs12, PdfPkcs12Error, type ImportPkcs12Options, type PdfLegacyCiphers, type PdfPkcs12Failure } from "./pkcs12"
 export { certificateInfo } from "./certificate"
+export { cmsSigner, type CmsSignerSummary } from "./cmsSigner"
 export {
 	BYTE_RANGE_SENTINEL,
 	locatePlaceholder,

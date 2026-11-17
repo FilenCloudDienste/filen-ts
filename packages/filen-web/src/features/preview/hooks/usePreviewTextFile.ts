@@ -22,8 +22,9 @@ export interface TextEncodingControls {
 
 export type PreviewTextFile =
 	| Exclude<UsePreviewBytesResult, { status: "success" }>
-	// The bytes do not look like text: nothing is decoded until the user asks to see them anyway, read-only.
-	| { status: "notText"; showAnyway: () => void }
+	// The bytes do not look like text: nothing is decoded until the user asks to see them anyway, read-only. `bytes` are
+	// the file's, for a viewer that reads a binary's head (an executable's headers).
+	| { status: "notText"; bytes: Uint8Array | null; showAnyway: () => void }
 	// `writable`: a save writes back the bytes the file came from (or, converted, the same text as UTF-8).
 	| { status: "success"; bytes: Uint8Array; file: TextFile; writable: boolean; encoding: TextEncodingControls }
 
@@ -110,6 +111,7 @@ export function usePreviewTextFile(
 	if (file === null || read === null || bytes === null) {
 		return {
 			status: "notText",
+			bytes,
 			showAnyway: () => {
 				setShownAnyway(true)
 			}

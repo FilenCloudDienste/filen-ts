@@ -52,6 +52,7 @@ export type PreviewCategory =
 	| "subtitle"
 	| "calendar"
 	| "contact"
+	| "binaryInfo"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -70,6 +71,9 @@ export const FONT_MAX_BYTES = 67_108_864n // 64 MiB
 export const TORRENT_MAX_BYTES = 16_777_216n // 16 MiB
 // Subtitles up to this many bytes open as a cue table; above it, as their text (the parsers' own cap, in characters).
 export const SUBTITLE_TABLE_MAX_BYTES = 8_388_608n // 8 MiB
+// An executable or disk image inside an archive is read whole until entries read in ranges: its headers are what is
+// shown, so a larger one is not opened there.
+export const BINARY_ENTRY_MAX_BYTES = 8_388_608n // 8 MiB
 // An e-book is read through ranges, but MuPDF keeps the parsed book (and a MOBI or FB2 whole) in its heap, which on a
 // phone is a quarter of a desktop's: the same bound as the other documents MuPDF reads whole there.
 export const EBOOK_MAX_BYTES_MOBILE = 67_108_864n // 64 MiB
@@ -484,6 +488,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindContact",
 		assistantKind: "document"
 	},
+	// Its headers read in ranges (a handful of small reads); never run, mounted or extracted.
+	binaryInfo: {
+		streamed: false,
+		ranged: true,
+		bufferCap: BINARY_ENTRY_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindBinaryInfo",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -565,6 +584,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["ics", "ical", "ifb"], "calendar"],
 	// A `.vcf` is a vCard until a read of its first line finds other text (a Variant Call Format file).
 	[["vcf", "vcard"], "contact"],
+	// Executables and disk images, shown by their headers (an installer package, `.msi`, stays a download).
+	[["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"], "binaryInfo"],
 	// E-mail reads as plain text until a viewer of its own takes it.
 	[["txt", "log", "eml"], "text"],
 	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],

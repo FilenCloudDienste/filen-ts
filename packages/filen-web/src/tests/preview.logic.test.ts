@@ -301,7 +301,11 @@ describe("previewType — extension category map", () => {
 	})
 
 	// An unknown extension with no mime hint lands here. rar and pkg have the archive icon but no reader.
-	it.each(["exe", "rar", "pkg"])("%s -> other", ext => {
+	it.each(["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"])("%s -> binaryInfo", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("binaryInfo")
+	})
+
+	it.each(["msi", "rar", "pkg"])("%s -> other", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("other")
 	})
 
@@ -594,7 +598,7 @@ describe("canPreview", () => {
 	})
 
 	it("is false for an 'other' category — no viewer exists, ever", () => {
-		expect(canPreview(fileNamed("setup.exe"))).toBe(false)
+		expect(canPreview(fileNamed("setup.msi"))).toBe(false)
 	})
 
 	it("is false for a whole-buffer-only category over the size cap", () => {
@@ -721,14 +725,14 @@ describe("previewableSiblings", () => {
 	it("filters to only previewable items, preserving order", () => {
 		const a = fileNamed("a.jpg")
 		const b = dirItem()
-		const c = fileNamed("c.exe")
+		const c = fileNamed("c.msi")
 		const d = fileNamed("d.png")
 
 		expect(previewableSiblings([a, b, c, d])).toEqual([a, d])
 	})
 
 	it("returns an empty array when nothing is previewable", () => {
-		expect(previewableSiblings([dirItem(), fileNamed("a.exe")])).toEqual([])
+		expect(previewableSiblings([dirItem(), fileNamed("a.msi")])).toEqual([])
 	})
 
 	// The preview arrows step onto an archive and open its browser.

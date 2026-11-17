@@ -3,6 +3,7 @@ import * as Comlink from "comlink"
 import { readTorrent, torrentHashes, torrentMagnet, TorrentError, type TorrentHashes, type TorrentInfo } from "@filen/shared/torrent"
 import { readCalendar, type CalendarFile } from "@filen/shared/calendarFile"
 import { readContacts, type ContactFile } from "@filen/shared/contactFile"
+import { cmsSigner, type CmsSignerSummary } from "@filen/office/core/pdfsign"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
@@ -40,7 +41,9 @@ const api = {
 	// The text the page decoded, read as iCalendar: its events and to-dos.
 	calendar: (text: string): CalendarFile => readCalendar(text),
 	// The text the page decoded, read as vCards.
-	contacts: (text: string): ContactFile => readContacts(text)
+	contacts: (text: string): ContactFile => readContacts(text),
+	// Who signed a code signature's CMS (parsed with pkijs, which stays off the page), never verified.
+	codeSigner: (der: Uint8Array): CmsSignerSummary | null => cmsSigner(der)
 }
 
 export type TextFamilyWorkerApi = typeof api

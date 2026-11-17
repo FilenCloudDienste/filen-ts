@@ -77,9 +77,9 @@ describe("FilenLinkCard for an archive", () => {
 	})
 
 	it("keeps the new-tab link shell for a file nothing previews", () => {
-		renderCard("setup.exe")
+		renderCard("setup.msi")
 
-		const card = screen.getByRole("link", { name: "Open setup.exe" })
+		const card = screen.getByRole("link", { name: "Open setup.msi" })
 
 		expect(card.getAttribute("href")).toBe(URL)
 		expect(card.getAttribute("target")).toBe("_blank")

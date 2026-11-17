@@ -685,6 +685,8 @@ export const drive = {
 	drivePreviewKindCalendar: "Calendar",
 	/** Info dialog "Kind" value — a contact file (vcf) */
 	drivePreviewKindContact: "Contacts",
+	/** Info dialog "Kind" value — an executable or a disk image (exe, dll, so, dylib, dmg, iso) */
+	drivePreviewKindBinaryInfo: "Program or disk image",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */
