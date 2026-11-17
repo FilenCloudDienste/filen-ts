@@ -426,7 +426,7 @@ describe("ignore rules", () => {
 
 describe("VIDEO_CONTAINERS", () => {
 	it("plays the containers only the app demuxes in the drive, outside Photos, thumbnails and the editor", () => {
-		for (const extension of ["flv", "avi", "divx", "asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
+		for (const extension of ["flv", "avi", "divx", "asf", "wmv", "mpg", "mpeg", "vob"]) {
 			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false })
 		}
 
@@ -435,6 +435,8 @@ describe("VIDEO_CONTAINERS", () => {
 		expect(VIDEO_CONTAINERS.get("wmv")?.library).toBe("unsupportedVideo")
 
 		expect(VIDEO_CONTAINERS.get("ogv")).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false, probe: "ogg" })
+		// An elementary MPEG-2 video stream, which no walker or demuxer reads.
+		expect(VIDEO_CONTAINERS.has("m2v")).toBe(false)
 	})
 
 	it("gives the mp4 and Matroska families what mp4 and mkv have", () => {

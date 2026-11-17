@@ -71,8 +71,7 @@ export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<str
 	["wmv", demuxed("asf", "unsupportedVideo", true)],
 	["mpg", demuxed("ps", "unsupportedVideo", true)],
 	["mpeg", demuxed("ps", "unsupportedVideo", true)],
-	["vob", demuxed("ps", "unsupportedVideo", true)],
-	["m2v", demuxed("ps", undefined, true)]
+	["vob", demuxed("ps", "unsupportedVideo", true)]
 ])
 
 const FILE_KINDS = new Map<string, VideoFileKind>([
