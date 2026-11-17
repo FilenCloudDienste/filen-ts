@@ -64,6 +64,10 @@ export const previewTextCalendar = {
 	previewCalendarExtraDates_other: "{{count}} extra dates",
 	/** Calendar preview — a time with the zone it is written in; {{time}} is the time, {{zone}} the zone's name (Europe/Berlin) */
 	previewCalendarZone: "{{time}} ({{zone}})",
+	/** Calendar preview — a time in a zone that could not be converted; {{time}} is the time as written, {{zone}} the zone's name as the file gives it */
+	previewCalendarZoneUnconverted: "{{time}} (time zone: {{zone}}, not converted)",
+	/** Calendar preview — under an agenda time, a zone that could not be converted; {{zone}} is the zone's name as the file gives it */
+	previewCalendarZoneUnconvertedShort: "time zone: {{zone}} (not converted)",
 	/** Calendar preview — a recurrence: every N seconds */
 	previewCalendarEverySecond_one: "Every second",
 	/** Calendar preview — a recurrence: every N seconds */

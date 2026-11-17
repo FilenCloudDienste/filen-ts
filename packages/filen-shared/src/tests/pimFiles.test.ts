@@ -93,6 +93,13 @@ describe("readCalendar", () => {
 
 	it("parses times, durations and rules strictly", () => {
 		expect(parseCalendarTime("20241301T000000", null)).toBeNull()
+		expect(
+			["20250231", "20250431", "20230229", "20240301T240000", "20240301T106000", "20240301T100061"].map(value =>
+				parseCalendarTime(value, null)
+			)
+		).toEqual([null, null, null, null, null, null])
+		expect(parseCalendarTime("20240229T235960Z", null)).toEqual({ date: "2024-02-29", time: "23:59:60", utc: true, tzid: null })
+		expect(parseCalendarTime("00500101", null)?.date).toBe("0050-01-01")
 		expect(parseCalendarTime("2024-03-01", null)).toBeNull()
 		expect(parseCalendarTime("20240301T090000Z", "Europe/Berlin")).toEqual({
 			date: "2024-03-01",

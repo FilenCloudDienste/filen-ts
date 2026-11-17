@@ -87,6 +87,18 @@ const MAX_ZONE_DATES = 64
 
 const TIME = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/
 
+// The day exists: 1-12 months, and the month's own days (29 February in leap years only).
+function validDate(year: number, month: number, day: number): boolean {
+	if (month < 1 || month > 12 || day < 1) {
+		return false
+	}
+
+	const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+	const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 31
+
+	return day <= days
+}
+
 export function parseCalendarTime(value: string, tzid: string | null): CalendarTime | null {
 	const match = TIME.exec(value.trim())
 
@@ -98,7 +110,12 @@ export function parseCalendarTime(value: string, tzid: string | null): CalendarT
 	const date = `${year ?? ""}-${month ?? ""}-${day ?? ""}`
 	const time = hour === undefined ? null : `${hour}:${minute ?? "00"}:${second ?? "00"}`
 
-	if (Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > 31) {
+	if (!validDate(Number(year), Number(month), Number(day))) {
+		return null
+	}
+
+	// A leap second (60) is allowed, as RFC 5545 §3.3.12 does.
+	if (hour !== undefined && (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 60)) {
 		return null
 	}
 

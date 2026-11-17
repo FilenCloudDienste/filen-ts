@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest"
 import { readCalendar, type CalendarEntry, type CalendarTime } from "@filen/shared/calendarFile"
-import { agendaDays, agendaTime, instantOf, wallMs, zoneTable } from "@/features/preview/lib/calendarAgenda.logic"
+import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
+import {
+	agendaDays,
+	cachedZoneCount,
+	agendaTime,
+	dayMs,
+	instantOf,
+	previousDay,
+	shownEnd,
+	wallMs,
+	zoneKnown,
+	zoneTable
+} from "@/features/preview/lib/calendarAgenda.logic"
 
 // Times as written in their own zone, the viewer's own where that zone differs (the test's Kiritimati time differs
 // from any machine's but one at UTC+14); days in order, whole days first.
@@ -41,6 +53,27 @@ describe("instantOf", () => {
 		expect(instantOf(time("2024-07-15", "10:00:00"))).toBeNull()
 		expect(instantOf(time("2024-07-15", null))).toBeNull()
 		expect(instantOf(time("2024-07-15", "10:00:00", { tzid: "Nowhere/Unknown" }))).toBeNull()
+	})
+
+	// RFC 5545 §3.3.5: a time clocks skip moves forward by the gap; a time they repeat is its first occurrence.
+	it("reads times at a change of offset as RFC 5545 says, east and west of UTC", () => {
+		expect(instantOf(time("2025-03-09", "02:30:00", { tzid: "America/New_York" }))).toBe(Date.UTC(2025, 2, 9, 7, 30))
+		expect(instantOf(time("2025-11-02", "01:30:00", { tzid: "America/New_York" }))).toBe(Date.UTC(2025, 10, 2, 5, 30))
+		expect(instantOf(time("2025-03-30", "02:30:00", { tzid: "Europe/Berlin" }))).toBe(Date.UTC(2025, 2, 30, 1, 30))
+		expect(instantOf(time("2025-10-26", "02:30:00", { tzid: "Europe/Berlin" }))).toBe(Date.UTC(2025, 9, 26, 0, 30))
+		// Lord Howe moves its clocks by half an hour.
+		expect(instantOf(time("2025-10-05", "02:15:00", { tzid: "Australia/Lord_Howe" }))).toBe(Date.UTC(2025, 9, 4, 15, 45))
+	})
+
+	it("reads Mozilla's prefixed TZIDs, and knows which zones it cannot convert", () => {
+		expect(instantOf(time("2024-07-15", "10:00:00", { tzid: "/mozilla.org/20050126_1/Europe/Berlin" }))).toBe(Date.UTC(2024, 6, 15, 8))
+		expect(zoneKnown("/mozilla.org/20070129_1/America/Argentina/Buenos_Aires")).toBe(true)
+		expect(zoneKnown("Nowhere/Unknown")).toBe(false)
+		expect(agendaTime(time("2024-07-15", "10:00:00", { tzid: "Nowhere/Unknown" }))).toMatchObject({
+			zone: "Nowhere/Unknown",
+			yourMs: null,
+			unconverted: true
+		})
 	})
 
 	it("reads a Windows zone name through CLDR's table", () => {
@@ -101,6 +134,9 @@ describe("instantOf", () => {
 		expect(instantOf(time("2024-01-15", "10:00:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 0, 15, 9))
 		// 2024's changes: 31 March and 27 October.
 		expect(instantOf(time("2024-03-31", "01:30:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 2, 31, 0, 30))
+		// Skipped: read in the offset before the gap. Repeated: the first occurrence.
+		expect(instantOf(time("2024-03-31", "02:30:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 2, 31, 1, 30))
+		expect(instantOf(time("2024-10-27", "02:30:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 9, 27, 0, 30))
 		expect(instantOf(time("2024-03-31", "03:30:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 2, 31, 1, 30))
 		expect(instantOf(time("2024-10-27", "04:00:00", { tzid: "Custom Central" }), DEFINED)).toBe(Date.UTC(2024, 9, 27, 3))
 		// The older form: the weekday among a week of month days (US rules before 2007).
@@ -140,5 +176,37 @@ describe("agendaDays", () => {
 			["2024-03-05", ["allday", "morning", "late"]],
 			["", ["undated"]]
 		])
+	})
+})
+
+describe("days and ends", () => {
+	it("reads years 0-99 as written, and gives a malformed day no date", () => {
+		expect(new Date(wallMs(time("0050-03-01", "12:00:00"))).getUTCFullYear()).toBe(50)
+		expect(new Date(dayMs("0099-12-31")).getUTCFullYear()).toBe(99)
+		expect(dayMs("2025-2-3")).toBeNaN()
+		expect(previousDay("2024-03-01")).toBe("2024-02-29")
+		expect(previousDay("0001-01-01")).toBe("0000-12-31")
+	})
+
+	// A whole-day DTEND is exclusive: a one-day event shows no end, a longer one its last day.
+	it("shows a whole-day event's last day, not its exclusive end", () => {
+		expect(shownEnd(time("2024-01-01", null), time("2024-01-02", null))).toBeNull()
+		expect(shownEnd(time("2024-01-01", null), time("2024-01-04", null))).toMatchObject({ date: "2024-01-03" })
+		expect(shownEnd(time("2024-01-01", "10:00:00"), time("2024-01-01", "11:00:00"))).toMatchObject({
+			date: "2024-01-01",
+			time: "11:00:00"
+		})
+	})
+})
+
+describe("the zone cache", () => {
+	it("keeps at most 256 zone names, and none past sign-out", () => {
+		for (let index = 0; index < 600; index++) instantOf(time("2024-07-15", "10:00:00", { tzid: `Fake/Zone${String(index)}` }))
+
+		expect(cachedZoneCount()).toBeLessThanOrEqual(256)
+
+		runPreviewDisposers()
+
+		expect(cachedZoneCount()).toBe(0)
 	})
 })

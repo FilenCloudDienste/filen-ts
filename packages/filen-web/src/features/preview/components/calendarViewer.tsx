@@ -14,6 +14,8 @@ import {
 	agendaDays,
 	agendaTime,
 	wallMs,
+	dayMs,
+	shownEnd,
 	zoneTable,
 	type ZoneTable,
 	type AgendaDay,
@@ -117,6 +119,11 @@ function timeText(t: TFunction<"preview">, time: CalendarTime, zones: ZoneTable)
 	}
 
 	const written = WALL_DATE_TIME.format(shown.shownMs)
+
+	if (shown.unconverted && shown.zone !== null) {
+		return t("previewCalendarZoneUnconverted", { time: written, zone: shown.zone })
+	}
+
 	const zoned = shown.zone === null ? written : t("previewCalendarZone", { time: written, zone: shown.zone })
 
 	return shown.yourMs === null ? zoned : `${zoned} · ${t("previewCalendarYourTime", { time: LOCAL_DATE_TIME.format(shown.yourMs) })}`
@@ -136,7 +143,13 @@ function detailFields(t: TFunction<"preview">, entry: CalendarEntry, zones: Zone
 	}
 
 	add(t("previewCalendarStarts"), entry.start === null ? null : timeText(t, entry.start, zones))
-	add(t(entry.kind === "todo" ? "previewCalendarDue" : "previewCalendarEnds"), entry.end === null ? null : timeText(t, entry.end, zones))
+	if (entry.kind === "todo") {
+		add(t("previewCalendarDue"), entry.end === null ? null : timeText(t, entry.end, zones))
+	} else {
+		const end = entry.end === null ? null : shownEnd(entry.start, entry.end)
+
+		add(t("previewCalendarEnds"), end === null ? null : timeText(t, end, zones))
+	}
 	add(t("previewCalendarDuration"), entry.durationSeconds === null ? null : duration(entry.durationSeconds))
 
 	if (entry.recurrence !== null) {
@@ -174,7 +187,11 @@ function TimeColumn({ time }: { time: AgendaTime | null }) {
 	return (
 		<span className="flex flex-col">
 			<span className="tabular-nums">{WALL_TIME.format(time.shownMs)}</span>
-			{time.zone === null ? null : <span className="truncate text-xs text-muted-foreground">{time.zone}</span>}
+			{time.zone === null ? null : (
+				<span className="truncate text-xs text-muted-foreground">
+					{time.unconverted ? t("previewCalendarZoneUnconvertedShort", { zone: time.zone }) : time.zone}
+				</span>
+			)}
 			{time.yourMs === null ? null : (
 				<span className="text-xs text-muted-foreground">
 					{t("previewCalendarYourTime", { time: LOCAL_TIME.format(time.yourMs) })}
@@ -239,6 +256,13 @@ function omittedNote(t: TFunction<"preview">, count: number, truncated: boolean)
 	return count > 0 ? ` · ${t("previewCalendarOmitted", { count })}` : null
 }
 
+// A day heading; a day that is no date (never from the parser, which checks them) is shown as written.
+function dayHeading(day: string): string {
+	const ms = dayMs(day)
+
+	return Number.isFinite(ms) ? WALL_DAY.format(ms) : day
+}
+
 // Only the rows in view are mounted; rows measure themselves (an expanded one holds its details).
 function AgendaRows({ rows, zones }: { rows: readonly Row[]; zones: ZoneTable }) {
 	const { t } = useTranslation("preview")
@@ -274,9 +298,7 @@ function AgendaRows({ rows, zones }: { rows: readonly Row[]; zones: ZoneTable })
 						>
 							{row === undefined ? null : row.kind === "day" ? (
 								<h3 className="bg-muted/40 px-4 py-2 text-xs font-semibold text-muted-foreground">
-									{row.day.day === ""
-										? t("previewCalendarUndated")
-										: WALL_DAY.format(Date.parse(`${row.day.day}T00:00:00Z`))}
+									{row.day.day === "" ? t("previewCalendarUndated") : dayHeading(row.day.day)}
 								</h3>
 							) : (
 								<AgendaRow
