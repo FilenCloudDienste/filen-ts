@@ -5,6 +5,7 @@ import {
 	aviFirstChunk,
 	avcPpsPocPresent,
 	aviLists,
+	BLOCK_BYTES,
 	mpegAudioHeader,
 	parseAvcSps,
 	parseAviHeader,
@@ -38,8 +39,18 @@ const IDX1_ENTRY_BYTES = 16
 const AVIIF_KEYFRAME = 0x10
 // An OpenDML standard index entry's size flag: set on a chunk that is not a keyframe.
 const ODML_DELTA = 0x80000000
-// Audio-only files get a checkpoint about this often.
-const AUDIO_CHECKPOINT_SECONDS = 1
+// The key index keeps at most one position this often (an audio-only file's, too), and at most this many: past it,
+// every other one goes and the spacing doubles.
+const KEY_INDEX_SECONDS = 1
+const MAX_KEY_INDEX_ENTRIES = 8192
+// Decoding states kept for later reads: a key picture's only this far past the one before it, and at most this many
+// (past it, every other one goes).
+const CHECKPOINT_SPACING_BYTES = 1024 * 1024
+const MAX_CHECKPOINTS = 512
+// A chunk larger than this is no frame this plays: skipped.
+const MAX_CHUNK_BYTES = 32 * 1024 * 1024
+// The most of one OpenDML standard index read.
+const MAX_STANDARD_INDEX_BYTES = 1024 * 1024
 
 const VIDEO_CODECS: Partial<Record<MediaCodec, VideoCodec>> = { h264: "avc", hevc: "hevc", vp8: "vp8", vp9: "vp9", av1: "av1" }
 
@@ -194,7 +205,7 @@ class AviReader implements ContainerReader {
 	private readonly checkpoints = new Map<number, AviState>()
 	private readonly checkpointOrder: number[] = []
 	private readonly initial: AviState
-	private keyIndex: { positions: number[]; ticks: number[][] } | null | undefined
+	private keyIndex: KeyIndex | null | undefined
 
 	public constructor(input: Input, size: number, movi: ByteRange, idx1: ByteRange | null, streams: Track[]) {
 		this.input = input
@@ -220,6 +231,19 @@ class AviReader implements ContainerReader {
 		}
 
 		this.checkpoints.set(pos, cloneState(state))
+
+		if (this.checkpointOrder.length > MAX_CHECKPOINTS) {
+			// Every other one goes; the data's start and the one just kept stay.
+			const kept = this.checkpointOrder.filter((at, i) => i % 2 === 0 || at === pos || at === this.movi.start)
+
+			for (const at of this.checkpointOrder) {
+				if (!kept.includes(at)) {
+					this.checkpoints.delete(at)
+				}
+			}
+
+			this.checkpointOrder.splice(0, this.checkpointOrder.length, ...kept)
+		}
 	}
 
 	// Index in checkpointOrder of the latest position at or before `pos`, -1 for none.
@@ -327,6 +351,10 @@ class AviReader implements ContainerReader {
 		const sampleSize = track.stream.sampleSize
 
 		state.ticks[track.index] = ticks + (sampleSize > 0 ? Math.floor(size / sampleSize) : 1)
+
+		if (size > MAX_CHUNK_BYTES) {
+			return
+		}
 
 		if (track.video !== null) {
 			if (size > 0) {
@@ -448,8 +476,9 @@ class AviReader implements ContainerReader {
 				payload = data === null ? null : withParameterSets(avc.parameterSets, data.subarray(0, size))
 			}
 
-			// A key picture is where a later read can start: the state before it (this chunk's tick taken back).
-			if (key) {
+			// A key picture is where a later read can start: the state before it (this chunk's tick taken back), kept
+			// where no other is close before it.
+			if (key && at - (this.checkpointOrder[this.atOrBefore(at)] ?? -Infinity) >= CHECKPOINT_SPACING_BYTES) {
 				const ticks = [...state.ticks]
 
 				ticks[track.index] = (ticks[track.index] ?? 1) - 1
@@ -494,31 +523,39 @@ class AviReader implements ContainerReader {
 			return null
 		}
 
-		let found = -1
+		const streams = this.streams.length
+		let low = 0
+		let high = index.positions.length - 1
 
-		for (let i = 0; i < index.positions.length; i++) {
-			if (this.seconds(timing, index.ticks[i]?.[timing.index] ?? 0) > t) {
-				break
+		// The latest entry at or before `t`, by binary search on the timing stream's ticks.
+		while (low <= high) {
+			const middle = (low + high) >> 1
+
+			if (this.seconds(timing, index.ticks[middle * streams + timing.index] ?? 0) <= t) {
+				low = middle + 1
+			} else {
+				high = middle - 1
 			}
-
-			found = i
 		}
 
-		const position = index.positions[found]
-		const ticks = index.ticks[found]
+		const position = index.positions[high]
 
-		if (position === undefined || ticks === undefined) {
+		if (position === undefined) {
 			return this.movi.start
 		}
 
-		this.remember(position, { ticks: [...ticks], timeline: freshTimeline(), carry: new Map() })
+		this.remember(position, {
+			ticks: Array.from(index.ticks.subarray(high * streams, (high + 1) * streams)),
+			timeline: freshTimeline(),
+			carry: new Map()
+		})
 
 		return position
 	}
 
-	// idx1, walked once in slices read past the block cache: the key pictures' chunk positions and every stream's
-	// ticks before each (for an audio-only file, a position about every second).
-	private async loadKeyIndex(): Promise<{ positions: number[]; ticks: number[][] } | null> {
+	// idx1, walked once in slices read past the block cache: key picture chunk positions (for an audio-only file, any
+	// of its chunks) about once a second, with every stream's ticks before each.
+	private async loadKeyIndex(): Promise<KeyIndex | null> {
 		if (this.keyIndex !== undefined || this.idx1 === null) {
 			return this.keyIndex ?? null
 		}
@@ -526,24 +563,23 @@ class AviReader implements ContainerReader {
 		const { start, end } = this.idx1
 		const cache = blockCacheOf(this.input)
 		const read: ReadAt = (from, length) => (cache === null ? readAt(this.input, from, length) : cache.readThrough(from, from + length))
+		const streams = this.streams.length
 		const ticks = this.streams.map(() => 0)
-		const positions: number[] = []
-		const snapshots: number[][] = []
-		const audioOnly = this.video === null ? this.streams.find(track => track.audio !== null) : undefined
+		const timing = this.video ?? this.streams.find(track => track.audio !== null)
+		const index = new KeyIndexBuilder(streams)
 		let base: number | null = null
-		let nextAudioCheckpoint = 0
 
-		for (let at = start; at + IDX1_ENTRY_BYTES <= end;) {
+		for (let at = start; timing !== undefined && at + IDX1_ENTRY_BYTES <= end;) {
 			const length = Math.min(IDX1_SLICE_BYTES, end - at) - (Math.min(IDX1_SLICE_BYTES, end - at) % IDX1_ENTRY_BYTES)
 			const slice = await read(at, length)
 
-			if (slice === null) {
+			if (slice === null || slice.length === 0) {
 				break
 			}
 
 			for (let entry = 0; entry + IDX1_ENTRY_BYTES <= slice.length; entry += IDX1_ENTRY_BYTES) {
-				const index = chunkStream(fourcc(slice, entry))
-				const track = index === null ? undefined : this.streams[index]
+				const stream = chunkStream(fourcc(slice, entry))
+				const track = stream === null ? undefined : this.streams[stream]
 
 				if (track === undefined) {
 					continue
@@ -554,15 +590,8 @@ class AviReader implements ContainerReader {
 
 				base ??= await this.idx1Base(offset)
 
-				const position = base + offset
-
-				if (
-					(track === this.video && (uint32le(slice, entry + 4) & AVIIF_KEYFRAME) !== 0) ||
-					(track === audioOnly && this.seconds(track, ticks[track.index] ?? 0) >= nextAudioCheckpoint)
-				) {
-					positions.push(position)
-					snapshots.push([...ticks])
-					nextAudioCheckpoint += AUDIO_CHECKPOINT_SECONDS
+				if (track === timing && (track !== this.video || (uint32le(slice, entry + 4) & AVIIF_KEYFRAME) !== 0)) {
+					index.add(base + offset, this.seconds(track, ticks[track.index] ?? 0), ticks)
 				}
 
 				ticks[track.index] =
@@ -570,13 +599,9 @@ class AviReader implements ContainerReader {
 			}
 
 			at += slice.length
-
-			if (slice.length === 0) {
-				break
-			}
 		}
 
-		this.keyIndex = positions.length === 0 ? null : { positions, ticks: snapshots }
+		this.keyIndex = index.build()
 
 		return this.keyIndex
 	}
@@ -692,7 +717,10 @@ class AviReader implements ContainerReader {
 			}
 
 			// dwSize counts the chunk with or without its header, by writer: read the header's worth more.
-			const chunk = offset + 8 <= this.size ? await readAt(this.input, offset, Math.min(size + 8, this.size - offset)) : null
+			const chunk =
+				offset + 8 <= this.size
+					? await readAt(this.input, offset, Math.min(size + 8, MAX_STANDARD_INDEX_BYTES, this.size - offset))
+					: null
 
 			// ix## header: id, size, then wLongsPerEntry 2, sub-type, bIndexType 1, entries, chunk id, base offset.
 			if (chunk === null || chunk.length < 32 || chunk[11] !== 1) {
@@ -721,6 +749,47 @@ class AviReader implements ContainerReader {
 	}
 }
 
+// The key index: positions and, flat, every stream's ticks before each.
+export interface KeyIndex {
+	positions: Float64Array
+	ticks: Float64Array
+}
+
+export class KeyIndexBuilder {
+	private readonly streams: number
+	private positions: number[] = []
+	private ticks: number[] = []
+	private spacing = KEY_INDEX_SECONDS
+	private last = -Infinity
+
+	public constructor(streams: number) {
+		this.streams = streams
+	}
+
+	public add(position: number, seconds: number, ticks: readonly number[]): void {
+		if (seconds - this.last < this.spacing) {
+			return
+		}
+
+		this.last = seconds
+		this.positions.push(position)
+
+		for (let stream = 0; stream < this.streams; stream++) {
+			this.ticks.push(ticks[stream] ?? 0)
+		}
+
+		if (this.positions.length > MAX_KEY_INDEX_ENTRIES) {
+			this.positions = this.positions.filter((_, i) => i % 2 === 0)
+			this.ticks = this.ticks.filter((_, i) => Math.floor(i / this.streams) % 2 === 0)
+			this.spacing *= 2
+		}
+	}
+
+	public build(): KeyIndex | null {
+		return this.positions.length === 0 ? null : { positions: Float64Array.from(this.positions), ticks: Float64Array.from(this.ticks) }
+	}
+}
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 	const out = new Uint8Array(a.length + b.length)
 
@@ -736,7 +805,8 @@ async function openAvi(input: Input): Promise<ContainerReader> {
 	const lists = await aviLists(read, size)
 	const hdrl = lists.hdrl
 	const movi = lists.movi ?? { start: size, end: size }
-	const header = hdrl === null ? null : await read(hdrl.start, Math.min(hdrl.end, size) - hdrl.start)
+	// The header list read no further than the probe's walker reads it.
+	const header = hdrl === null ? null : await read(hdrl.start, Math.min(hdrl.end, size, hdrl.start + BLOCK_BYTES) - hdrl.start)
 	const streams = header === null ? [] : parseAviHeader(header).streams
 	const tracks: Track[] = []
 	let firstAudio = true

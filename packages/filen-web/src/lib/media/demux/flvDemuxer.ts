@@ -272,9 +272,12 @@ function tagPacket(bytes: Uint8Array, at: number, unit: number, tracks: Map<numb
 async function openFlv(input: Input): Promise<ContainerReader> {
 	const size = input._reader.fileSize ?? 0
 	const header = (await readAt(input, 0, 9)) ?? new Uint8Array(9)
-	const dataStart = uint32(header, 5) + 4
+	const dataOffset = uint32(header, 5)
+	// A DataOffset past the head the probe reads is no FLV this plays: no tag is read.
+	const dataStart = dataOffset <= HEAD_BYTES ? dataOffset + 4 : size
 	const flags = header[4] ?? 0
-	const headBytes = (await readAt(input, 0, Math.min(size, dataStart + HEAD_BYTES))) ?? new Uint8Array()
+	const headBytes =
+		dataStart >= size ? new Uint8Array() : ((await readAt(input, 0, Math.min(size, dataStart + HEAD_BYTES))) ?? new Uint8Array())
 	const head = readHead(headBytes, dataStart, (flags & 0x01) !== 0, (flags & 0x04) !== 0)
 	const tracks = new Map<number, DemuxTrack>()
 

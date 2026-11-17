@@ -4,6 +4,7 @@ import {
 	ASF_HEADER,
 	ASF_SIMPLE_INDEX,
 	avcConfigCodecString,
+	BLOCK_BYTES,
 	isGuid,
 	mpegAudioHeader,
 	parseAsfHeader,
@@ -33,6 +34,12 @@ const WINDOW_PACKETS = 64
 const FINISH_PACKETS = 256
 // An object bigger than this is no picture or stretch of sound this plays: dropped.
 const MAX_OBJECT_BYTES = 16 * 1024 * 1024
+// The objects one read reassembles at once hold no more than this; one starting past it is dropped.
+const MAX_PENDING_BYTES = 32 * 1024 * 1024
+// Larger data packets than this are no file this reads (writers use a few KiB).
+const MAX_PACKET_BYTES = 64 * 1024
+// The Simple Index read no further than this.
+const MAX_SIMPLE_INDEX_BYTES = BLOCK_BYTES
 // The head of the data read for a stream's first key object, for H.264's parameter sets.
 const PARAMETER_SEARCH_PACKETS = 512
 
@@ -215,7 +222,7 @@ class AsfReader implements ContainerReader {
 	private readonly preroll: number
 	private readonly dataEnd: number
 	private readonly streams: Map<number, Track>
-	private simpleIndex: { interval: number; packets: number[] } | null | undefined
+	private simpleIndex: { interval: number; packets: Uint32Array } | null | undefined
 
 	public constructor(input: Input, size: number, header: AsfHeader, packetSize: number, streams: Map<number, Track>) {
 		this.input = input
@@ -245,6 +252,7 @@ class AsfReader implements ContainerReader {
 		const timelines = new Map<number, AvcTimelineState>()
 		let bytes: Uint8Array = new Uint8Array()
 		let bytesStart = pos
+		let pendingBytes = 0
 
 		for (let at = pos; at + this.packetSize <= finishEnd; at += this.packetSize) {
 			// Past the window only objects already started are finished; once none is, the read ends.
@@ -301,17 +309,19 @@ class AsfReader implements ContainerReader {
 
 					const size = payload.objectSize ?? payload.length
 
-					if (size > MAX_OBJECT_BYTES) {
+					if (size > MAX_OBJECT_BYTES || pendingBytes + size > MAX_PENDING_BYTES) {
 						continue
 					}
 
 					object = { unit: at, part: part++, key: payload.key, time: payload.time, size, received: 0, whole: null, bytes: null }
 					pending.set(id, object)
+					pendingBytes += size
 				}
 
 				if (payload.offset !== object.received) {
 					// A fragment lost or out of order: the object cannot be rebuilt.
 					pending.delete(id)
+					pendingBytes -= object.size
 
 					continue
 				}
@@ -330,6 +340,7 @@ class AsfReader implements ContainerReader {
 
 				if (object.received >= object.size) {
 					pending.delete(id)
+					pendingBytes -= object.size
 					this.emit(track, packets, timelines, object)
 				}
 			}
@@ -442,7 +453,7 @@ class AsfReader implements ContainerReader {
 	}
 
 	// The Simple Index after the data object: per time interval, the packet holding the key picture before it.
-	private async loadSimpleIndex(): Promise<{ interval: number; packets: number[] } | null> {
+	private async loadSimpleIndex(): Promise<{ interval: number; packets: Uint32Array } | null> {
 		if (this.simpleIndex !== undefined) {
 			return this.simpleIndex
 		}
@@ -456,14 +467,20 @@ class AsfReader implements ContainerReader {
 		}
 
 		const interval = uint64le(head, 40) / 1e7
-		const count = Math.min(uint32le(head, 52), Math.floor((this.size - this.dataEnd - 56) / 6))
+		const count = Math.min(uint32le(head, 52), Math.floor((this.size - this.dataEnd - 56) / 6), Math.floor(MAX_SIMPLE_INDEX_BYTES / 6))
 		const entries = count > 0 && interval > 0 ? await readAt(this.input, this.dataEnd + 56, count * 6) : null
 
 		if (entries === null) {
 			return null
 		}
 
-		this.simpleIndex = { interval, packets: Array.from({ length: count }, (_, i) => uint32le(entries, i * 6)) }
+		const packets = new Uint32Array(Math.floor(entries.length / 6))
+
+		for (let i = 0; i < packets.length; i++) {
+			packets[i] = uint32le(entries, i * 6)
+		}
+
+		this.simpleIndex = { interval, packets }
 
 		return this.simpleIndex
 	}
@@ -527,9 +544,10 @@ function audioTrack(stream: Extract<AsfStream, { audio: unknown }>, isDefault: b
 async function openAsf(input: Input): Promise<ContainerReader> {
 	const size = input._reader.fileSize ?? 0
 	const prefix = (await readAt(input, 0, Math.min(size, 30))) ?? new Uint8Array()
-	const headerSize = Math.min(size, uint64le(prefix, 16))
+	// The header read no further than the probe's walker reads it.
+	const headerSize = Math.min(size, uint64le(prefix, 16), BLOCK_BYTES)
 	const header = parseAsfHeader((await readAt(input, 0, headerSize)) ?? prefix)
-	const packetSize = header.packetSize ?? 0
+	const packetSize = header.packetSize !== null && header.packetSize <= MAX_PACKET_BYTES ? header.packetSize : 0
 	const streams = new Map<number, Track>()
 	let firstAudio = true
 
