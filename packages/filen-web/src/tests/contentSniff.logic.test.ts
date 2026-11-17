@@ -354,7 +354,7 @@ describe("the .ai read", () => {
 		])
 	})
 
-	it("finds a PDF header starting anywhere in the first kilobyte, not past it", () => {
+	it("finds a PDF header lying wholly in the first kilobyte, as pdf.js does, not past it", () => {
 		const sniffer = SNIFFERS.pdfCompatible
 
 		if (sniffer.mode !== "head") throw new Error("a head read")
@@ -368,10 +368,10 @@ describe("the .ai read", () => {
 			return head.subarray(0, sniffer.headBytes)
 		}
 
-		expect(sniffer.headBytes).toBe(1028)
+		expect(sniffer.headBytes).toBe(1024)
 		expect(sniffer.decide(at(0), 4096)).toBe("pdfCompatible")
-		expect(sniffer.decide(at(1023), 4096)).toBe("pdfCompatible")
-		expect(sniffer.decide(at(1024), 4096)).toBe("notPdfCompatible")
+		expect(sniffer.decide(at(1019), 4096)).toBe("pdfCompatible")
+		expect(sniffer.decide(at(1020), 4096)).toBe("notPdfCompatible")
 		expect(sniffer.decide(new TextEncoder().encode("%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator"), 4096)).toBe("notPdfCompatible")
 	})
 })

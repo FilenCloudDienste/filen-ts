@@ -30,16 +30,14 @@ export function isZipHead(head: Uint8Array): boolean {
 	return head.length >= ZIP_LOCAL_HEADER.length && ZIP_LOCAL_HEADER.every((byte, index) => head[index] === byte)
 }
 
-// Where Illustrator's PDF-compatible save begins its PDF: the PDF header within the file's first kilobyte (ISO 32000-1
-// §7.5.2 lets readers find it there, after bytes another program put first).
+// Where Illustrator's PDF-compatible save begins its PDF: a PDF header within the file's first kilobyte (ISO 32000-1
+// §7.5.2 lets readers find it there, after bytes another program put first). The whole header lies within it: pdf.js
+// finds no header starting past byte 1019.
 const PDF_HEADER = Uint8Array.from("%PDF-", char => char.charCodeAt(0))
-const PDF_HEADER_WITHIN = 1024
-
-// The bytes a header starting at the kilobyte's last byte still needs.
-const PDF_HEADER_HEAD_BYTES = PDF_HEADER_WITHIN + PDF_HEADER.length - 1
+const PDF_HEADER_HEAD_BYTES = 1024
 
 export function hasPdfHeader(head: Uint8Array): boolean {
-	const last = Math.min(PDF_HEADER_WITHIN - 1, head.length - PDF_HEADER.length)
+	const last = Math.min(PDF_HEADER_HEAD_BYTES, head.length) - PDF_HEADER.length
 
 	for (let at = 0; at <= last; at++) {
 		if (PDF_HEADER.every((byte, index) => head[at + index] === byte)) {
