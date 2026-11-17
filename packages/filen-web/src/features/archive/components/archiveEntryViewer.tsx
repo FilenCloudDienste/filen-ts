@@ -1,33 +1,16 @@
-import { isImeKeydown, matchesCombo } from "@filen/shared/keymap"
-import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
-import { isMacPlatform } from "@/lib/keymap/kbd.logic"
-import { bindingOf } from "@/lib/keymap/bindingOf"
-import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
-import { useEffectEvent, useLayoutEffect, useState, type KeyboardEvent } from "react"
+import { useEffectEvent, useLayoutEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import { useIsOnline } from "@/lib/useIsOnline"
 import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
-import type { DriveItem } from "@/features/drive/lib/item"
-import { PreviewByteOriginProvider, PreviewDownloadableProvider, usePreviewAccessMode } from "@/features/preview/lib/accessMode"
-import { PreviewReferenceSourceContext } from "@/features/preview/lib/referenceResolver"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryReferences } from "@/features/archive/lib/entryReferences"
-import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
-import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
-import { PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
-import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
 import { entryOrigin, isArchivePasswordError, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
-import { Button } from "@/components/ui/button"
-
-const IS_MAC = isMacPlatform()
-const BACK = ARCHIVE_ACTIONS.find(def => def.id === "archive.back")
-const DOWNLOAD = ARCHIVE_ACTIONS.find(def => def.id === "archive.download")
+import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
 
 export interface ViewedEntry {
 	request: EntryRequest
@@ -51,29 +34,6 @@ export interface ArchiveEntryViewerProps {
 	listing: { source: ArchiveSource; store: EntryStore }
 }
 
-// The entry's viewer: the one its name picked, else the one its content read found.
-function EntryBody({ item, category, alt }: { item: DriveItem; category: PreviewCategory | null; alt: string }) {
-	const { t } = useTranslation("preview")
-	const shown = category ?? sniffedEntryCategory(item)
-
-	if (shown === null) {
-		return (
-			<PreviewUnsupportedState
-				item={item}
-				message={t("previewUnsupportedType")}
-			/>
-		)
-	}
-
-	return (
-		<ReadOnlyPreviewBody
-			item={item}
-			category={shown}
-			alt={alt}
-		/>
-	)
-}
-
 // One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
 // gets. Its bytes come through the entry's origin, an entry reader opened for each password tried, cached like a
 // file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
@@ -88,8 +48,6 @@ export function ArchiveEntryViewer({
 	listing
 }: ArchiveEntryViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
-	const isOnline = useIsOnline()
-	const bindings = useBindings()
 	const [password, setPassword] = useState(listingPassword)
 	const [ask, setAsk] = useState<{ wrong: boolean } | null>(entry.encrypted && listingPassword === undefined ? { wrong: false } : null)
 	// Remounts the viewer, so a new password loads again.
@@ -135,84 +93,18 @@ export function ArchiveEntryViewer({
 		})
 	}, [readerId])
 
-	// The back key (Escape, Alt+Left) goes back to the list and Mod+S saves the entry, unless something inside took the
-	// key already (a find panel's Escape); keys from a dialog portaled out of this subtree are not this one's. Back is
-	// not taken in a text field, where Alt+Left moves the caret (Escape still leaves). Both are stopped here, so the
-	// overlay's own close and download never see them.
-	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		if (
-			event.defaultPrevented ||
-			isImeKeydown(event.nativeEvent) ||
-			isRecordingCombo() ||
-			!(event.target instanceof Node) ||
-			!event.currentTarget.contains(event.target)
-		) {
-			return
-		}
-
-		const back = BACK !== undefined && matchesCombo(event, bindingOf(bindings, BACK, IS_MAC), IS_MAC)
-		const save = !back && DOWNLOAD !== undefined && matchesCombo(event, bindingOf(bindings, DOWNLOAD, IS_MAC), IS_MAC)
-		const inField = event.target instanceof Element && event.target.matches("input, textarea")
-
-		if ((!back && !save) || (back && inField && event.key !== "Escape")) {
-			return
-		}
-
-		event.preventDefault()
-		event.stopPropagation()
-
-		if (event.repeat) {
-			return
-		}
-
-		if (back) {
-			onBack()
-		} else if (isOnline) {
-			onDownload?.()
-		}
-	}
-
-	// A surface of its own (data-preview-surface): the overlay leaves its keys alone, so Left/Right stay off
-	// the pager and Escape reaches handleKeyDown. Focusable, so a click into a viewer keeps focus inside.
 	return (
-		<div
-			tabIndex={-1}
-			data-preview-surface=""
-			className="flex size-full flex-col outline-none"
-			onKeyDown={handleKeyDown}
-		>
-			<div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-				{/* The list it replaced had focus. */}
-				<Button
-					autoFocus
-					variant="ghost"
-					size="sm"
-					onClick={onBack}
-				>
-					<ArrowLeftIcon data-icon="inline-start" />
-					{t("previewArchiveEntryBack")}
-				</Button>
-				<span
-					className="min-w-0 flex-1 truncate text-sm"
-					title={request.name}
-				>
-					{request.name}
-				</span>
-				{onDownload !== null ? (
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						disabled={!isOnline}
-						aria-label={t("previewDownloadAction")}
-						title={isOnline ? undefined : t("common:offlineActionDisabled")}
-						onClick={onDownload}
-					>
-						<DownloadIcon />
-					</Button>
-				) : null}
-			</div>
-			<div className="relative min-h-0 flex-1">
-				{ask !== null ? (
+		<NestedFileViewer
+			item={item}
+			origin={origin}
+			category={entry.category}
+			references={entryReferences(listing.source, listing.store, request.params.entry.index, password, access)}
+			backLabel={t("previewArchiveEntryBack")}
+			onBack={onBack}
+			onDownload={onDownload}
+			bodyKey={attempt}
+			replacement={
+				ask === null ? undefined : (
 					<ArchivePasswordGate
 						name={request.name}
 						wrong={ask.wrong}
@@ -222,39 +114,15 @@ export function ArchiveEntryViewer({
 							setAttempt(attempt + 1)
 						}}
 					/>
-				) : (
-					<PreviewByteOriginProvider
-						key={attempt}
-						origin={origin}
-					>
-						<PreviewReferenceSourceContext
-							value={entryReferences(listing.source, listing.store, request.params.entry.index, password, access)}
-						>
-							<PreviewDownloadableProvider
-								downloadable={onDownload !== null}
-								onDownload={onDownload}
-							>
-								<ContentSniffGate
-									item={item}
-									asText={false}
-									render={() => (
-										<EntryBody
-											item={item}
-											category={entry.category}
-											alt={request.name}
-										/>
-									)}
-								/>
-							</PreviewDownloadableProvider>
-						</PreviewReferenceSourceContext>
-					</PreviewByteOriginProvider>
-				)}
-				{waiting && ask === null ? (
+				)
+			}
+			overlay={
+				waiting && ask === null ? (
 					<div className="absolute inset-0 bg-background">
 						<ArchiveWaiting onCancel={onBack} />
 					</div>
-				) : null}
-			</div>
-		</div>
+				) : undefined
+			}
+		/>
 	)
 }
