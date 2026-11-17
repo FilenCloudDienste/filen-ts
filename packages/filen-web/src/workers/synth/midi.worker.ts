@@ -5,12 +5,17 @@ import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type S
 
 // MIDI songs rendered by spessasynth with the bundled SoundFont, started by the remux worker for MIDI playback and
 // analysis. The bank is fetched and parsed once per worker and kept across songs; its samples decode lazily under a
-// budget. Each song is parsed once per file key, and each renderer plays it on a synthesizer of its own.
+// budget per renderer, released when the renderer closes. Each song is parsed once per file key, with the sound bank
+// an RMI carries, and each renderer plays it on a synthesizer of its own.
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
 
-// Decoded sample data each synthesizer keeps, in bytes.
+// Decoded sample data each renderer's synthesizer keeps, in bytes; what a closed one decoded goes with it, but for the
+// samples another open renderer holds.
 const DECODED_SAMPLE_BUDGET = 32 * 1024 * 1024
+// The id an RMI's own bank is added under, ahead of the bundled one; not spessasynth's own embedded id, which its
+// sequencer clears and parses again for every song it loads.
+const SONG_BANK = "song"
 const VOICE_CAP = 128
 // After the last event, the notes' release rings on this long.
 const RELEASE_SECONDS = 2
@@ -19,6 +24,9 @@ const MIDI_CAP = synthCap("midi")
 
 interface Song {
 	midi: BasicMIDI
+	// An RMI's own sound bank, parsed once for every renderer of the song, and the bank offset it is played at.
+	bank: BasicSoundBank | null
+	bankOffset: number
 }
 
 interface Renderer {
@@ -97,7 +105,20 @@ function load(key: string, data: ArrayBuffer): { duration: number } {
 		throw new Unsupported("the song has no length")
 	}
 
-	songs.set(key, { midi })
+	let bank: BasicSoundBank | null = null
+
+	if (midi.embeddedSoundBank !== undefined) {
+		try {
+			bank = SoundBankLoader.fromArrayBuffer(midi.embeddedSoundBank)
+		} catch (error) {
+			throw new Unsupported(error instanceof Error ? error.message : String(error))
+		}
+
+		// Taken here: the sequencer would otherwise parse it again for each renderer.
+		delete midi.embeddedSoundBank
+	}
+
+	songs.set(key, { midi, bank, bankOffset: midi.bankOffset })
 
 	return { duration: midi.duration + RELEASE_SECONDS }
 }
@@ -119,6 +140,12 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number }
 
 	synth.setSystemParameter("voiceCap", VOICE_CAP)
 	synth.soundBankManager.addSoundBank(soundBank, "main")
+
+	if (song.bank !== null) {
+		synth.soundBankManager.addSoundBank(song.bank, SONG_BANK, song.bankOffset)
+		synth.soundBankManager.priorityOrder = [SONG_BANK, ...synth.soundBankManager.priorityOrder.filter(id => id !== SONG_BANK)]
+	}
+
 	await synth.ready
 
 	const sequencer = new SpessaSynthSequencer(synth)
@@ -144,6 +171,22 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number }
 	})
 
 	return { handle }
+}
+
+// Drops a renderer, not destroying it (that destroys the sound bank every renderer shares), with the samples it
+// decoded that no other renderer holds.
+function close(handle: number): void {
+	const renderer = renderers.get(handle)
+
+	if (renderer === undefined) {
+		return
+	}
+
+	renderers.delete(handle)
+
+	const others = [...renderers.values()]
+
+	renderer.synth.releaseDecodedSamples(sample => others.some(other => other.synth.holdsDecodedSample(sample)))
 }
 
 function seek(renderer: Renderer, seconds: number): number {
@@ -203,8 +246,7 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 		case "open":
 			return open(request.key, request.sampleRate)
 		case "close":
-			// Dropped, not destroyed: destroying a synthesizer destroys the sound bank every renderer shares.
-			renderers.delete(request.handle)
+			close(request.handle)
 
 			return {}
 		default: {

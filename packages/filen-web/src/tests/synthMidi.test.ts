@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { BasicMIDI, BasicSample, BasicSoundBank, SoundBankLoader } from "spessasynth_core"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { isAudioUnsupported, isSourceReadError } from "@/lib/media/remuxTypes"
 import type { SynthRequest, SynthResponse } from "@/workers/synth/protocol"
@@ -242,6 +243,64 @@ describe("MIDI synthesizer", () => {
 
 		expect(await reader.first(input.info.duration + 1)).toBeNull()
 		await reader.close()
+		await input.close()
+	})
+
+	it("parses an RMI's own sound bank once, however many renderers play the song", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const bank = BasicSoundBank.getSampleSoundBankFile()
+		const rmi = new Uint8Array(BasicMIDI.fromArrayBuffer(song(4).slice().buffer).writeRMIDI(bank))
+		const parses = vi.spyOn(SoundBankLoader, "fromArrayBuffer")
+
+		try {
+			const source = serve(rmi)
+			const input = await synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "rmi" })
+			const readers = [input.reader({} as never, () => false), input.reader({} as never, () => false)]
+
+			for (const reader of readers) {
+				const first = await reader.first(0)
+
+				first?.sample.close()
+				await reader.close()
+			}
+
+			expect(parses.mock.calls.filter(([buffer]) => buffer.byteLength === bank.byteLength)).toHaveLength(1)
+			await input.close()
+		} finally {
+			parses.mockRestore()
+		}
+	})
+
+	it("releases the samples a closed renderer decoded, but those another open renderer still holds", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(song(8))
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "release" })
+		const [first, second] = [input.reader({} as never, () => false), input.reader({} as never, () => false)]
+		const releases = vi.spyOn(BasicSample.prototype, "releaseDecoded")
+
+		try {
+			for (const reader of [first, second]) {
+				// The first note's samples decode as it sounds.
+				for (let item = await reader.first(0), count = 0; item !== null && count < 8; count++) {
+					const next = await reader.next(item)
+
+					item.sample.close()
+					item = next
+				}
+			}
+
+			await first.close()
+			// Its close reaches the worker on a later turn.
+			await new Promise(resolve => setTimeout(resolve, 50))
+			expect(releases).not.toHaveBeenCalled()
+			await second.close()
+			await vi.waitFor(() => {
+				expect(releases).toHaveBeenCalled()
+			})
+		} finally {
+			releases.mockRestore()
+		}
+
 		await input.close()
 	})
 })
