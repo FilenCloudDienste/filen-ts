@@ -8,3 +8,9 @@ import { webUrl } from "@/lib/safeUrl"
 export function noticeRepositoryHref(repository: string | null): string | null {
 	return repository !== null && webUrl(repository) !== null ? repository : null
 }
+
+// A notice whose license file came with no copyright line (stb-vorbis's Apache-2.0 LICENSE, for one) says so rather
+// than show the text with nothing above it, as if a line had been lost.
+export function noticeLacksCopyright(notice: { copyright: readonly string[]; texts: readonly number[] }): boolean {
+	return notice.copyright.length === 0 && notice.texts.length > 0
+}

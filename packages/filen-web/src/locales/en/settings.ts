@@ -325,6 +325,7 @@ export const settings = {
 	settingsNoticesBack: "Back to all packages",
 	/** Licenses dialog — shown for a package that shipped no license file; its SPDX id and repository are listed instead of another package's copyright */
 	settingsNoticesNoLicenseText: "This package did not ship a license file. Its license and repository are listed above.",
+	settingsNoticesNoCopyrightLine: "Its license file names no copyright holder.",
 	...settingsStorage,
 	...settingsAnnouncements,
 	...settingsLanguage,

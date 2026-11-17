@@ -8,7 +8,7 @@ import {
 	thirdPartyNoticesPayload,
 	type ThirdPartyNotice
 } from "@/features/settings/lib/thirdPartyNotices"
-import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
+import { noticeLacksCopyright, noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -157,6 +157,9 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 							{selected.copyright.map(line => (
 								<p key={line}>{line}</p>
 							))}
+							{noticeLacksCopyright(selected) ? (
+								<p className="text-muted-foreground">{t("settingsNoticesNoCopyrightLine")}</p>
+							) : null}
 							{thirdPartyLicenseTexts(selected).map(text => (
 								<pre
 									key={text}

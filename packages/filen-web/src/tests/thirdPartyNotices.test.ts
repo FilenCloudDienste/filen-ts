@@ -10,7 +10,7 @@ import {
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
 	THIRD_PARTY_NOTICES_SDK_VERSION
 } from "@/features/settings/lib/thirdPartyNotices"
-import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
+import { noticeLacksCopyright, noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 import ffmpegManifest from "@/vendor/ffmpeg-decoders/manifest.json"
 import libopenmptManifest from "@/vendor/libopenmpt/manifest.json"
 import wllamaManifest from "@/vendor/wllama/manifest.json"
@@ -435,6 +435,19 @@ describe("third-party notices surface", () => {
 				readFileSync(new URL(`../vendor/ffmpeg-decoders/licenses/${name}`, import.meta.url), "utf8")
 			)
 		}
+	})
+
+	it("says where a license file names no copyright holder, as stb-vorbis's does", () => {
+		const stbVorbis = installed.find(entry => entry.name === "stb-vorbis")
+		const notice = THIRD_PARTY_NOTICES.find(
+			entry => entry.ecosystem === "npm" && entry.name === "stb-vorbis" && entry.version === stbVorbis?.version
+		)
+
+		expect(notice).toMatchObject({ license: "Apache-2.0", copyright: [] })
+		expect(notice === undefined ? false : noticeLacksCopyright(notice)).toBe(true)
+		expect(noticeLacksCopyright({ copyright: ["Copyright 2024 Someone"], texts: [0] })).toBe(false)
+		// No license file at all has a note of its own.
+		expect(noticeLacksCopyright({ copyright: [], texts: [] })).toBe(false)
 	})
 
 	it("gives the stb_vorbis that stb-vorbis compiles in its own public-domain or MIT terms", () => {
