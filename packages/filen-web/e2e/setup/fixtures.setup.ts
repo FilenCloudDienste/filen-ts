@@ -13,7 +13,7 @@ import {
 	waitForListingSettled
 } from "../helpers/listing"
 import { FIXTURE_SCENARIOS, FIXTURE_FILES, fixturePayloads, type FixtureFileName, type FixtureScenario } from "../fixtures/registry"
-import type { DiskFixture, FixturePayload, InlineFixture } from "../fixtures/scenarios"
+import { splitUpload, type FixturePayload } from "../fixtures/scenarios"
 
 // Builds the ONE shared, read-only fixture tree every non-mutating spec reads from (helpers/fixtures.ts
 // explains what it is and why it exists). Runs once per suite, after cleanup-setup, in a single browser
@@ -26,11 +26,6 @@ import type { DiskFixture, FixturePayload, InlineFixture } from "../fixtures/sce
 // failure worth surviving (a stale drive-write lease losing the very first create) is retried inside
 // the test instead, where it costs one directory rather than twenty-six uploads.
 setup.describe.configure({ retries: 0 })
-
-interface FixtureEntry<TPayload extends FixturePayload> {
-	readonly name: FixtureFileName
-	readonly payload: TPayload
-}
 
 // ONE wall clock for the whole build, the shape cleanup-setup's SWEEP_BUDGET_MS already uses. Each row
 // wait below used to carry a generous pin of its OWN, which across 26 files declared several times the
@@ -54,9 +49,9 @@ const budgetExhausted = (name: FixtureFileName): string => `fixtures-setup: uplo
 // targeting whatever directory the app is currently in — the createTestFile hook cannot be used, it
 // uploads at the account root with no parent.
 //
-// setInputFiles takes EITHER an array of on-disk paths or an array of in-memory payloads, never a mix,
-// so a scenario that needs a synthesized file must be entirely on disk. Nothing mixes today; the throw
-// makes a future scenario that does fail here instead of silently uploading half its files.
+// setInputFiles takes EITHER an array of on-disk paths or an array of in-memory payloads, never a mix, so a
+// scenario holding both goes in as two picks of the same input, one per kind. Each pick is its own change event,
+// and the input's handler copies its files out before resetting the value, so the second never drops the first.
 async function uploadScenarioFiles(
 	page: Page,
 	scenario: FixtureScenario,
@@ -65,16 +60,7 @@ async function uploadScenarioFiles(
 	deadline: number
 ): Promise<void> {
 	const names: readonly FixtureFileName[] = FIXTURE_FILES[scenario]
-	// Name and payload carried together rather than as two index-aligned arrays — the two filters below
-	// each drop entries, and an index into the original names would then be pointing at the wrong file.
-	const entries: FixtureEntry<FixturePayload>[] = names.map(name => ({ name, payload: payloads[name] }))
-	const onDisk = entries.filter((entry): entry is FixtureEntry<DiskFixture> => !("buffer" in entry.payload))
-	const inline = entries.filter((entry): entry is FixtureEntry<InlineFixture> => "buffer" in entry.payload)
-
-	if (onDisk.length > 0 && inline.length > 0) {
-		throw new Error(`fixture scenario "${scenario}" mixes on-disk and in-memory payloads, which setInputFiles cannot take`)
-	}
-
+	const { onDisk, inline } = splitUpload(names, payloads)
 	const input = fileInput(page)
 
 	if (onDisk.length > 0) {
@@ -87,7 +73,9 @@ async function uploadScenarioFiles(
 				return path
 			})
 		)
-	} else {
+	}
+
+	if (inline.length > 0) {
 		await input.setInputFiles(inline.map(({ name, payload }) => ({ name, mimeType: payload.mimeType, buffer: payload.buffer })))
 	}
 

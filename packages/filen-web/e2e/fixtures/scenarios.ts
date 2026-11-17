@@ -60,3 +60,40 @@ export function scenarioModule<const F extends ScenarioFiles>(
 ): ScenarioModule<F> {
 	return { files, payloads }
 }
+
+export interface FixtureEntry<TName extends string, TPayload extends FixturePayload> {
+	readonly name: TName
+	readonly payload: TPayload
+}
+
+export interface FixtureUpload<TName extends string> {
+	readonly onDisk: readonly FixtureEntry<TName, DiskFixture>[]
+	readonly inline: readonly FixtureEntry<TName, InlineFixture>[]
+}
+
+// A scenario's files split by payload kind, each named file in exactly one half. setInputFiles takes on-disk paths
+// or in-memory payloads, never both in one call, so the setup hands it each non-empty half separately. Throws on a
+// name without a payload, which would otherwise surface as a row that never appears.
+export function splitUpload<TName extends string>(
+	names: readonly TName[],
+	payloads: Readonly<Partial<Record<TName, FixturePayload>>>
+): FixtureUpload<TName> {
+	const onDisk: FixtureEntry<TName, DiskFixture>[] = []
+	const inline: FixtureEntry<TName, InlineFixture>[] = []
+
+	for (const name of names) {
+		const payload = payloads[name]
+
+		if (payload === undefined) {
+			throw new Error(`fixture file "${name}" has no payload`)
+		}
+
+		if ("buffer" in payload) {
+			inline.push({ name, payload })
+		} else {
+			onDisk.push({ name, payload })
+		}
+	}
+
+	return { onDisk, inline }
+}
