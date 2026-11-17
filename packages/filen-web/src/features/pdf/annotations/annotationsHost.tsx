@@ -12,7 +12,7 @@ import { annotationStoreOf, editingSession } from "@/features/pdf/annotations/an
 import { downloadAttachmentTold } from "@/features/pdf/annotations/attachments"
 import { PdfCommentsPanel } from "@/features/pdf/comments/pdfCommentsPanel"
 import type { PdfToolPanelProps } from "@/features/pdf/tools/registry"
-import { isStampPicture } from "@/features/pdf/annotations/stampImage"
+import { isStampPicture, STAMP_FILE_ACCEPT } from "@/features/pdf/annotations/stampImage"
 import { log } from "@/lib/log"
 
 // What the annotation tools keep beside the pages, mounted once while the editor may be used (the selection tool's
@@ -117,7 +117,7 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 				ref={fileInput}
 				type="file"
 				hidden
-				accept="image/*,.heic,.heif,.hif"
+				accept={STAMP_FILE_ACCEPT}
 				onChange={event => {
 					const file = event.currentTarget.files?.[0]
 					const target = store.getState().imageWanted

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isStampPicture } from "@/features/pdf/annotations/stampImage"
+import { isStampPicture, STAMP_FILE_ACCEPT } from "@/features/pdf/annotations/stampImage"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 describe("isStampPicture", () => {
@@ -9,5 +9,12 @@ describe("isStampPicture", () => {
 		)
 
 		expect(offered).toEqual([true, true, true, true, true, true, true, false, false])
+	})
+
+	it("lets the device picker offer every format the stamp decodes, never a gzipped SVG", () => {
+		const accepted = STAMP_FILE_ACCEPT.split(",")
+
+		expect(accepted).toEqual(expect.arrayContaining(["image/*", ".heic", ".hif", ".qoi", ".jxl", ".tif", ".tiff"]))
+		expect(accepted).not.toContain(".svgz")
 	})
 })

@@ -19,6 +19,13 @@ export const STAMP_MAX_SIDE = 2048
 // The image formats a stamp is made from: the browser's own, and those the raster decode pool decodes.
 const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi", "jxl", "mupdf"])
 
+// What the device file picker offers: any image type, and the extensions of the formats the stamp decodes that a
+// browser may not type as images.
+export const STAMP_FILE_ACCEPT = [
+	"image/*",
+	...[...IMAGE_FORMATS].filter(([, format]) => STAMP_DECODES.has(format.decode)).map(([extension]) => `.${extension}`)
+].join(",")
+
 // A drive file the picture picker offers: what the previews show as a picture, HEIC included.
 export function isStampPicture(item: DriveItem): boolean {
 	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
