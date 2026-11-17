@@ -51,6 +51,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notVobsub":
 		case "vcard":
 		case "notVcard":
+		case "mpegPs":
+		case "notMpegPs":
 			return false
 	}
 }

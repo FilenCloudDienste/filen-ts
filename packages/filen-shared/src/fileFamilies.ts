@@ -10,6 +10,15 @@ export interface AudioFormat {
 	cap?: bigint
 }
 
+const MIB = 1024n * 1024n
+const MIDI: AudioFormat = { synth: "midi", cap: 4n * MIB }
+const TRACKER: AudioFormat = { synth: "module", cap: 32n * MIB }
+
+// Extensions libopenmpt reads that name other, commoner formats, which they keep: a Netpbm image, a 3D model, music
+// notation or Doom's MUS, id's IMF, a self-extracting archive, a FAR archive, Mobile XMF. `mod` is no collision: a
+// content read tells an MPEG program stream from a module.
+export const TRACKER_COLLISIONS: ReadonlySet<string> = new Set(["ppm", "mdl", "mus", "imf", "sfx", "far", "xmf"])
+
 // Every audio extension the apps play, one row each.
 export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, AudioFormat>([
 	["mp3", {}],
@@ -36,7 +45,75 @@ export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, A
 	["wma", { decoded: true }],
 	// Bare MPEG audio of any layer: MP1 and MP2 only FFmpeg decodes.
 	["mp2", { decoded: true }],
-	["mpa", { decoded: true }]
+	["mpa", { decoded: true }],
+	// MIDI songs, rendered with the bundled SoundFont; RMI is a song in a RIFF wrapper.
+	["mid", MIDI],
+	["midi", MIDI],
+	["kar", MIDI],
+	["rmi", MIDI],
+	// Tracker modules: every format libopenmpt reads (filen-web's src/vendor/libopenmpt/extensions.json, which a test
+	// keeps these rows equal to), but the TRACKER_COLLISIONS other formats use.
+	["mptm", TRACKER],
+	["mod", TRACKER],
+	["s3m", TRACKER],
+	["xm", TRACKER],
+	["it", TRACKER],
+	["667", TRACKER],
+	["669", TRACKER],
+	["amf", TRACKER],
+	["ams", TRACKER],
+	["c67", TRACKER],
+	["cba", TRACKER],
+	["dbm", TRACKER],
+	["digi", TRACKER],
+	["dmf", TRACKER],
+	["dsm", TRACKER],
+	["dsym", TRACKER],
+	["dtm", TRACKER],
+	["etx", TRACKER],
+	["fc", TRACKER],
+	["fc13", TRACKER],
+	["fc14", TRACKER],
+	["fmt", TRACKER],
+	["fst", TRACKER],
+	["ftm", TRACKER],
+	["ims", TRACKER],
+	["ice", TRACKER],
+	["j2b", TRACKER],
+	["m15", TRACKER],
+	["med", TRACKER],
+	["mms", TRACKER],
+	["mt2", TRACKER],
+	["mtm", TRACKER],
+	["nst", TRACKER],
+	["okt", TRACKER],
+	["plm", TRACKER],
+	["psm", TRACKER],
+	["pt36", TRACKER],
+	["ptm", TRACKER],
+	["puma", TRACKER],
+	["rtm", TRACKER],
+	["sfx2", TRACKER],
+	["smod", TRACKER],
+	["st26", TRACKER],
+	["stk", TRACKER],
+	["stm", TRACKER],
+	["stx", TRACKER],
+	["stp", TRACKER],
+	["symmod", TRACKER],
+	["tcb", TRACKER],
+	["gmc", TRACKER],
+	["gtk", TRACKER],
+	["gt2", TRACKER],
+	["ult", TRACKER],
+	["unic", TRACKER],
+	["wow", TRACKER],
+	["gdm", TRACKER],
+	["mo3", TRACKER],
+	["oxm", TRACKER],
+	["umx", TRACKER],
+	["xpk", TRACKER],
+	["mmcmp", TRACKER]
 ])
 
 // Subtitle files a text editor reads as they are (videos/sidecars.ts names their formats). Image-based tracks (VobSub,

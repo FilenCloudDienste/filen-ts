@@ -128,6 +128,22 @@ describe("resolveTrackSource", () => {
 		expect(media.dispose).toHaveBeenCalledOnce()
 	})
 
+	it("plays a synthesized song through its decoded stream alone, with the synthesizer named, never MediaSource", async () => {
+		openDecodedAudioStream.mockResolvedValue(decoded("/sw/download/wav"))
+
+		await resolveTrackSource(track("song.mid", "audio/midi"), new AbortController().signal)
+		expect(openDecodedAudioStream).toHaveBeenLastCalledWith(expect.objectContaining({ synth: "midi" }))
+		await resolveTrackSource(track("tune.xm", null), new AbortController().signal)
+		expect(openDecodedAudioStream).toHaveBeenLastCalledWith(expect.objectContaining({ synth: "module" }))
+
+		openDecodedAudioStream.mockRejectedValue(new Error("the service worker cannot serve this preview"))
+		await expect(resolveTrackSource(track("tune.it", null), new AbortController().signal)).rejects.toThrow()
+
+		streaming.value = false
+		await expect(resolveTrackSource(track("tune.s3m", null), new AbortController().signal)).rejects.toThrow()
+		expect(audioMediaSource).not.toHaveBeenCalled()
+	})
+
 	it("hands back a stream that resolved after its load was abandoned", async () => {
 		const abort = new AbortController()
 		const stream = decoded("/sw/download/wav")

@@ -4,13 +4,15 @@ import { BlockCache } from "@/lib/media/blockCache"
 import { BLOCK_INPUT_PROFILES, type BlockInputProfile } from "@/lib/media/blockInput"
 import { rangePortReader } from "@/lib/media/rangePort"
 import { REMUX_WORKER_IDLE_MS, SourceReadError, type RemuxStats } from "@/lib/media/remuxTypes"
+import soundFontUrl from "@/assets/soundfonts/GeneralUser-GS-2.0.3.sf3?url"
+import MidiWorker from "@/workers/synth/midi.worker.ts?worker"
 import ModuleWorker from "@/workers/synth/module.worker.ts?worker"
 import { NestedWorker } from "@/workers/nestedWorker"
 import { AudioUnsupportedError, openAudioInput, type AudioInput } from "@/workers/remux/audioInput"
 import type { SampleItem, SampleReader } from "@/workers/remux/audioTranscode"
 import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
 
-// Audio a synthesizer renders rather than a decoder decodes: tracker modules (libopenmpt) and, later, MIDI. The file
+// Audio a synthesizer renders rather than a decoder decodes: tracker modules (libopenmpt) and MIDI (spessasynth). The file
 // is read whole once, into one buffer per file key that the player's input and the crossfade analysis's share while
 // either is open; each reader renders the song on its own in the nested synthesizer worker.
 
@@ -36,8 +38,12 @@ interface Held {
 class Synth {
 	public readonly nested: NestedWorker<SynthRequest, SynthResponse>
 	private readonly held = new Map<string, Held>()
+	// What a new instance is told first (the MIDI synthesizer's sound bank), and the instance last told.
+	private readonly setup: SynthRequest | null
+	private setUp: Worker | null = null
 
-	public constructor(spawn: () => Worker, name: string) {
+	public constructor(spawn: () => Worker, name: string, setup: SynthRequest | null = null) {
+		this.setup = setup
 		this.nested = new NestedWorker(spawn, {
 			name,
 			idleMs: REMUX_WORKER_IDLE_MS,
@@ -56,6 +62,13 @@ class Synth {
 	// took them with it). Balanced by one release.
 	public async acquire(key: string, read: () => Promise<Uint8Array>): Promise<Worker> {
 		const worker = this.nested.acquire()
+
+		if (this.setup !== null && this.setUp !== worker) {
+			this.setUp = worker
+			// Answered in order: whatever is asked of this instance next comes after it.
+			this.nested.request(worker, this.setup).catch(() => undefined)
+		}
+
 		const held = this.held.get(key)
 
 		if (held?.worker === worker) {
@@ -110,13 +123,19 @@ class Synth {
 const synths: Partial<Record<AudioSynthKind, Synth>> = {}
 
 function synthFor(kind: AudioSynthKind): Synth {
-	if (kind !== "module") {
-		throw new AudioUnsupportedError(`no synthesizer for ${kind}`)
+	if (kind === "module") {
+		synths.module ??= new Synth(() => new ModuleWorker({ name: "module-synth" }), "module synthesizer")
+
+		return synths.module
 	}
 
-	synths[kind] ??= new Synth(() => new ModuleWorker({ name: "module-synth" }), "module synthesizer")
+	// The bundled SoundFont, same-origin: never fetched from anywhere else.
+	synths.midi ??= new Synth(() => new MidiWorker({ name: "midi-synth" }), "MIDI synthesizer", {
+		type: "bank",
+		url: new URL(soundFontUrl, self.location.href).href
+	})
 
-	return synths[kind]
+	return synths.midi
 }
 
 // The song from `time` on, rendered in RENDER_FRAMES chunks by a renderer of its own.

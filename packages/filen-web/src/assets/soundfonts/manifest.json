@@ -1,0 +1,26 @@
+{
+	"description": "GeneralUser GS 2.0.3 by S. Christian Collins, converted to SF3 by scripts/soundfont/build-sf3.sh.",
+	"input": {
+		"url": "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/97049183643d5fc5a9322a69c5b09efb667c6c3a/GeneralUser-GS.sf2",
+		"sha256": "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe"
+	},
+	"converter": {
+		"spessasynth_core": "4.4.10",
+		"encoder": "wasm-media-encoders@0.7.0",
+		"encoderBundleSha256": "e0a17b76b146afd59961f42b1d41abfd00c5730d0fb9b605c803e62534c0c906",
+		"vorbisQuality": 4
+	},
+	"sources": {
+		"build-sf3.sh": "ecbd34e502e4d58e64c47faddf2d7ef89cf771e26da5d71b6e8911caecd1796b",
+		"build-sf3.mjs": "cd5d3b909e6cc174bc71e13b50a5f6209c8ee38444b3f979be3af2a3097c378c"
+	},
+	"license": {
+		"GeneralUser-GS-LICENSE.txt": "7b32efefdf95ce38a043799f0659853ddc00fbaa14d8c50f0aca16b9b8b405be"
+	},
+	"output": {
+		"GeneralUser-GS-2.0.3.sf3": {
+			"bytes": 7623288,
+			"sha256": "33daca395031452aa94287319fbdd23f787fdd774e57d0f54ad9cdd22b83a50f"
+		}
+	}
+}

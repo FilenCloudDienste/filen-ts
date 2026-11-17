@@ -154,6 +154,16 @@ describe("audio preview without a service worker", () => {
 		expectNoWholeFileRead()
 	})
 
+	it("says a synthesized song cannot stream, rather than open MediaSource, which has no route for it", async () => {
+		const { screen } = await import("@testing-library/react")
+
+		render(createElement(MediaViewer, { item: linkedFileItem("song.mid"), category: "audio", alt: "a" }))
+
+		expect(await screen.findByText("This file can't be streamed here.")).toBeTruthy()
+		expect(mocks.openRemuxSession).not.toHaveBeenCalled()
+		expect(mocks.attach).not.toHaveBeenCalled()
+	})
+
 	it("streams a public link's audio over an unauthenticated range port", async () => {
 		render(createElement(MediaViewer, { item: linkedFileItem("track.flac"), category: "audio", alt: "a" }), { wrapper: anon })
 

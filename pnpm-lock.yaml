@@ -169,6 +169,7 @@ overrides:
   uniwind>metro: 0.87.1
   uniwind>metro-cache: 0.87.1
   uniwind>metro-transform-worker: 0.87.1
+  spessasynth_core>stb-vorbis: 0.0.7
 
 packageExtensionsChecksum: sha256-WvolJfSGQJYPVAY/Wpe3uAn8qrVKdv44J+fDoGbIHAw=
 
@@ -1278,6 +1279,9 @@ importers:
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(patch_hash=2d04f3dd9b4280ee9553ef3bc0812cc9503ba710f4f5cdddc884955fe50d63be)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      spessasynth_core:
+        specifier: 4.4.10
+        version: 4.4.10
       strtok3:
         specifier: 10.6.2
         version: 10.6.2
@@ -10262,6 +10266,9 @@ packages:
   space-separated-tokens@2.0.2:
     resolution: {integrity: sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q==}
 
+  spessasynth_core@4.4.10:
+    resolution: {integrity: sha512-v5PjNvBiqfHsXriDQJraeVwVXThgy0Ll60NaTsUwp2NNClUR0a3fgiRRZtJDm3WJv+a2wi19w9ZTzboBQ0V7sw==}
+
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
 
@@ -10299,6 +10306,10 @@ packages:
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
+
+  stb-vorbis@0.0.7:
+    resolution: {integrity: sha512-OsD8Vm9EcStsiYGUBSqJ88gBPwDYR1Uv57bV/KZhu6Li1kzjm0fO+iiTkm79bZ1L2I/z6IrA1wkWHu3xQYY7Hw==}
+    engines: {node: '>=18'}
 
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
@@ -22467,6 +22478,11 @@ snapshots:
 
   space-separated-tokens@2.0.2: {}
 
+  spessasynth_core@4.4.10:
+    dependencies:
+      fflate: 0.8.3
+      stb-vorbis: 0.0.7
+
   sprintf-js@1.1.3:
     optional: true
 
@@ -22494,6 +22510,8 @@ snapshots:
   statuses@1.5.0: {}
 
   statuses@2.0.2: {}
+
+  stb-vorbis@0.0.7: {}
 
   std-env@4.3.0: {}
 

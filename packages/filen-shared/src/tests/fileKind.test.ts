@@ -319,7 +319,8 @@ describe("content sniffs", () => {
 			pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
 			wavefront: ["wavefront", "notWavefront"],
 			vobsub: ["vobsub", "notVobsub"],
-			vcard: ["vcard", "notVcard"]
+			vcard: ["vcard", "notVcard"],
+			mpegPs: ["mpegPs", "notMpegPs"]
 		})
 	})
 
@@ -334,6 +335,8 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("obj")).toEqual(["obj", "obj", null])
 		expect(sniffCandidates("sub")).toEqual(["sub", null, "sub"])
 		expect(sniffCandidates("vcf")).toEqual(["vcf", "vcf", "txt"])
+		// A `.mod` is a tracker module unless its head is an MPEG program stream's.
+		expect(sniffCandidates("mod")).toEqual(["mod", "mpg", "mod"])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 

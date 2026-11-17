@@ -628,6 +628,41 @@ function libopenmptNotices(): Collected[] {
 }
 
 /**
+ * The SoundFont the MIDI synthesizer plays with, GeneralUser GS by S. Christian Collins, converted to SF3 by
+ * scripts/soundfont/build-sf3.sh; its licence (the author's own terms: free use, inclusion in software and
+ * modification allowed) is the one the build copied, and the release and input are read from its manifest.
+ */
+const SOUNDFONT_DIR = "src/assets/soundfonts"
+const SOUNDFONT_MANIFEST = `${SOUNDFONT_DIR}/manifest.json`
+
+function soundFontNotice(): Collected {
+	const manifest = requireJson(SOUNDFONT_MANIFEST)
+	const input = objectField(manifest, "input", SOUNDFONT_MANIFEST)
+	const converter = objectField(manifest, "converter", SOUNDFONT_MANIFEST)
+	const description = stringField(manifest, "description", SOUNDFONT_MANIFEST)
+	const version = /GeneralUser GS (\S+)/.exec(description)?.[1]
+
+	if (version === undefined) {
+		throw new Error(`${SOUNDFONT_MANIFEST}: the description no longer names the GeneralUser GS release`)
+	}
+
+	return vendoredNotice(
+		{
+			name: "GeneralUser GS",
+			version,
+			license: "LicenseRef-GeneralUser-GS",
+			copyright: ["Copyright (c) S. Christian Collins"],
+			repository: "https://github.com/mrbumpy409/GeneralUser-GS",
+			terms: [
+				`The SoundFont MIDI files are played with, converted from ${stringField(input, "url", SOUNDFONT_MANIFEST)} (SHA-256 ${stringField(input, "sha256", SOUNDFONT_MANIFEST)}) to SF3 with Ogg Vorbis samples by spessasynth_core ${stringField(converter, "spessasynth_core", SOUNDFONT_MANIFEST)} and ${stringField(converter, "encoder", SOUNDFONT_MANIFEST)}.`,
+				readFileSync(`${SOUNDFONT_DIR}/GeneralUser-GS-LICENSE.txt`, "utf8")
+			]
+		},
+		"vendored"
+	)
+}
+
+/**
  * @mediabunny/aac-encoder (MPL-2.0, described with the npm tree) inlines a WebAssembly build of FFmpeg's AAC
  * encoder, LGPL-2.1-or-later (configured without --enable-gpl or --enable-nonfree). The FFmpeg commit and the
  * Emscripten release are read from the package's own provenance section, so the notice follows each bump; the
@@ -2031,6 +2066,7 @@ const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
 const libopenmpt = libopenmptNotices()
+const soundFont = soundFontNotice()
 const aacEncoder = aacEncoderNotices(installed)
 const threeDecoders = threeDecoderNotices(installed)
 const engine = wllamaEngineNotices()
@@ -2062,6 +2098,7 @@ const cldr = cldrNotices()
 const vendored = [
 	...ffmpeg,
 	...libopenmpt,
+	soundFont,
 	...aacEncoder,
 	...threeDecoders,
 	...engine,

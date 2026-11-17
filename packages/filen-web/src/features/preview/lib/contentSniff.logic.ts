@@ -53,7 +53,7 @@ export function hasPdfHeader(head: Uint8Array): boolean {
 // A Wavefront model is text from its first byte; a compiled object file is not.
 export const WAVEFRONT_HEAD_BYTES = 8192
 
-// A VobSub `.sub` is an MPEG program stream: it begins with a pack header.
+// A VobSub `.sub` and a camcorder's `.mod` are MPEG program streams: each begins with a pack header.
 const MPEG_PACK_HEADER = [0x00, 0x00, 0x01, 0xba] as const
 
 export function isMpegPackHead(head: Uint8Array): boolean {
@@ -120,6 +120,12 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: VCARD_HEAD_BYTES,
 		decide: head => (isVcardHead(head) ? "vcard" : "notVcard")
+	},
+	// An MPEG program stream opens with a pack start code; a tracker module never does.
+	mpegPs: {
+		mode: "head",
+		headBytes: MPEG_PACK_HEADER.length,
+		decide: head => (isMpegPackHead(head) ? "mpegPs" : "notMpegPs")
 	}
 }
 

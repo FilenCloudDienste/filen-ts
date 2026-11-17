@@ -328,7 +328,8 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(".env.local"))).toBe("code")
 		expect(previewType(fileNamed("go.mod"))).toBe("text")
 		expect(previewType(fileNamed("go.work"))).toBe("text")
-		expect(previewType(fileNamed("tracker.mod"))).toBe("other")
+		// A tracker module, unless a read of its head finds an MPEG program stream.
+		expect(previewType(fileNamed("tracker.mod"))).toBe("audio")
 	})
 
 	it("a missing extension resolves by mime", () => {

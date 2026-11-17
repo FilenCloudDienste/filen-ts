@@ -88,6 +88,9 @@ function close(lib: LibopenmptModule, handle: number): void {
 
 async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">> {
 	switch (request.type) {
+		case "bank":
+			// Modules carry their own samples.
+			return {}
 		case "load":
 			files.set(request.key, new Uint8Array(request.data))
 

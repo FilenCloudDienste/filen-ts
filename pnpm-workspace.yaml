@@ -41,6 +41,9 @@ overrides:
   'uniwind>metro': 0.87.1
   'uniwind>metro-cache': 0.87.1
   'uniwind>metro-transform-worker': 0.87.1
+  # spessasynth_core depends on stb-vorbis at "latest"; pinned so a new release reaches the MIDI synthesizer only
+  # through a deliberate bump.
+  'spessasynth_core>stb-vorbis': 0.0.7
 
 # pnpm's default one-day minimumReleaseAge stays on for third-party packages. First-party ones are released
 # and adopted the same day, so they are exempt by name, never per version; pruning drops one-off exemptions

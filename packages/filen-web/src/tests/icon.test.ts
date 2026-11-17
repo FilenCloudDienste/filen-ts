@@ -34,7 +34,7 @@ describe("fileIconKey", () => {
 	it("routes Go's module files by their whole name, and newer formats to existing glyphs", () => {
 		expect(fileIconKey("go.mod")).toBe("txt")
 		expect(fileIconKey("go.sum")).toBe("txt")
-		expect(fileIconKey("tracker.mod")).toBe("other")
+		expect(fileIconKey("tracker.mod")).toBe("audio")
 		expect(fileIconKey("film.srt")).toBe("txt")
 		expect(fileIconKey("inbox.mbox")).toBe("txt")
 		expect(fileIconKey("tracks.gpx")).toBe("code")

@@ -26,12 +26,12 @@ export function inlineTypeForExtension(extension: string): string | null {
 const GENERIC_TYPES: ReadonlySet<string> = new Set(["", "application/octet-stream", "binary/octet-stream"])
 
 // Never served by a type the file did not store itself: SVG and its compressed form carry script, PostScript is a
-// program; and the formats the remux worker decodes, which no browser plays as they are.
+// program; and the formats the remux worker decodes or synthesizes, which no browser plays as they are.
 const NO_RESCUE: ReadonlySet<string> = new Set([
 	"svg",
 	"svgz",
 	"eps",
-	...[...AUDIO_FORMATS].filter(([, format]) => format.decoded === true).map(([extension]) => extension)
+	...[...AUDIO_FORMATS].filter(([, format]) => format.decoded === true || format.synth !== undefined).map(([extension]) => extension)
 ])
 
 export function isRescuable(extension: string): boolean {

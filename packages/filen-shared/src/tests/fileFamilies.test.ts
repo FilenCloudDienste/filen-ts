@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { AUDIO_FORMATS, SUBTITLE_FILE_EXTENSIONS, ZIP_PACKAGE_EXTENSIONS } from "@filen/shared"
+import { AUDIO_FORMATS, SUBTITLE_FILE_EXTENSIONS, TRACKER_COLLISIONS, ZIP_PACKAGE_EXTENSIONS } from "@filen/shared"
 import { subtitleFormat } from "@filen/shared/videos"
+
+// The tracker rows, which filen-web's tests keep equal to what its libopenmpt build reads.
+const TRACKERS = [...AUDIO_FORMATS].filter(([, format]) => format.synth === "module").map(([extension]) => extension)
 
 describe("AUDIO_FORMATS", () => {
 	it("lists every audio extension the apps play", () => {
@@ -25,7 +28,12 @@ describe("AUDIO_FORMATS", () => {
 			"dts",
 			"wma",
 			"mp2",
-			"mpa"
+			"mpa",
+			"mid",
+			"midi",
+			"kar",
+			"rmi",
+			...TRACKERS
 		])
 	})
 
@@ -35,11 +43,23 @@ describe("AUDIO_FORMATS", () => {
 		expect(decoded).toEqual(["mka", "ac3", "eac3", "ec3", "dts", "wma", "mp2", "mpa"])
 	})
 
-	it("has no synthesized formats and no format caps yet", () => {
-		for (const format of AUDIO_FORMATS.values()) {
-			expect(format.synth).toBeUndefined()
-			expect(format.cap).toBeUndefined()
+	it("renders MIDI and tracker modules with a synthesizer, under their caps, and decodes the rest", () => {
+		for (const [extension, format] of AUDIO_FORMATS) {
+			if (format.synth === undefined) {
+				expect(format.cap, extension).toBeUndefined()
+			} else {
+				expect(format.cap, extension).toBe(format.synth === "midi" ? 4n * 1024n * 1024n : 32n * 1024n * 1024n)
+			}
 		}
+
+		expect([...AUDIO_FORMATS].filter(([, format]) => format.synth === "midi").map(([extension]) => extension)).toEqual([
+			"mid",
+			"midi",
+			"kar",
+			"rmi"
+		])
+		expect(TRACKERS.some(extension => TRACKER_COLLISIONS.has(extension))).toBe(false)
+		expect(TRACKERS).toContain("mod")
 	})
 })
 

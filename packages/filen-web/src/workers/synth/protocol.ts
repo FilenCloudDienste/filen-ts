@@ -3,6 +3,8 @@ import type { NestedResponse } from "@/workers/nestedWorker"
 // What the remux worker asks a synthesizer worker (module.worker, midi.worker). A file's bytes are loaded once under
 // its key and shared by every renderer opened on them; each renderer plays the song on its own.
 export type SynthRequest =
+	// The sound bank to play with, fetched once per worker (the MIDI synthesizer's).
+	| { type: "bank"; url: string }
 	| { type: "load"; key: string; data: ArrayBuffer }
 	| { type: "unload"; key: string }
 	| { type: "open"; key: string; sampleRate: number }
