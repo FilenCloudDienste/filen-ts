@@ -27,7 +27,6 @@ const MAX_RECIPIENTS = 200
 const MAX_STORAGE_DEPTH = 64
 
 const PROPERTIES = "__properties_version1.0"
-const NAMED = "__nameid_version1.0"
 const RECIPIENT = "__recip_version1.0_#"
 const ATTACHMENT = "__attach_version1.0_#"
 // Property stream headers (§2.4.1): the message's, an embedded message's, a recipient's or attachment's.
@@ -170,6 +169,8 @@ class Properties {
 class Reader {
 	private readonly cfb: CfbFile
 	private readonly maxSize: number
+	// Bytes the embedded messages' own files take, together.
+	private produced = 0
 
 	constructor(cfb: CfbFile, maxSize: number) {
 		this.cfb = cfb
@@ -331,8 +332,10 @@ class Reader {
 		return out
 	}
 
-	// The embedded message at `path` as a message file: its storages and streams at the root, its property
-	// stream given the top-level header (§2.4.1.1), and the named-property mapping of the file it came from.
+	// The embedded message at `path` as a message file: its storages and streams at the root, its property stream given
+	// the top-level header (§2.4.1.1). The file's named-property mapping is not copied: nothing here reads named
+	// properties, and a copy per embedded message would multiply one large mapping by their count. Every byte these
+	// files take counts against `maxSize`.
 	// Null when its names cannot be written (a name a compound file reader accepts and its writer refuses).
 	private async standalone(path: readonly string[]): Promise<Uint8Array | null> {
 		const entries: CfbWriteEntry[] = []
@@ -360,24 +363,26 @@ class Reader {
 			}
 		}
 		const embedded = this.cfb.entry(path)
-		const named = this.cfb.entry([NAMED])
 
 		if (embedded === undefined) throw new MsgError("corrupt", "The embedded message is missing")
 
 		await add(embedded, [])
 
-		if (named?.kind === "storage" && embedded.children.every(child => child.name !== NAMED)) {
-			entries.push({ path: [NAMED], storage: true })
-			await add(named, [NAMED])
-		}
+		let bytes: Uint8Array
 
 		try {
-			return await cfbBytes(entries)
+			bytes = await cfbBytes(entries)
 		} catch (e) {
 			if (e instanceof CfbError) return null
 
 			throw e
 		}
+
+		this.produced += bytes.length
+
+		if (this.produced > this.maxSize) throw new MsgError("tooLarge", "The embedded messages are larger than the limit")
+
+		return bytes
 	}
 }
 

@@ -4,7 +4,6 @@ import { decompressRtf, readMsg, rtfBody, MsgError, type MsgReading } from "@fil
 import {
 	PT_INT32,
 	attachmentStorage,
-	messageEntries,
 	msgBytes,
 	recipientEntries,
 	storageEntries,
@@ -139,18 +138,55 @@ describe("readMsg", () => {
 		])
 	})
 
-	it("makes an embedded message a message file of its own, with the named-property mapping", async () => {
-		const outer = await cfbBytes([
-			...messageEntries(SPEC),
-			{ path: ["__nameid_version1.0", "__substg1.0_00020102"], bytes: new Uint8Array(16) }
-		])
-		const forwarded = ok(await readMsg(outer)).attachments[2]
+	it("makes an embedded message a message file of its own", async () => {
+		const forwarded = ok(await readMsg(await msgBytes(SPEC))).attachments[2]
 
 		expect(forwarded?.message).toBe(true)
 
 		const inner = ok(await readMsg(forwarded?.bytes ?? new Uint8Array(0)))
 
 		expect(inner).toMatchObject({ subject: "Forwarded one", text: "Inner text", attachments: [] })
+	})
+
+	// A large named-property mapping beside many embedded messages: copied into each once, it multiplied by their count.
+	it.each([300, 1000])("never copies the named-property mapping into %i embedded messages", async count => {
+		const entries: CfbWriteEntry[] = [
+			...storageEntries([], 32, []),
+			{ path: ["__nameid_version1.0", "__substg1.0_00020102"], bytes: new Uint8Array(30 * 1024 * 1024) }
+		]
+
+		for (let k = 0; k < count; k++) {
+			entries.push(...storageEntries([attachmentStorage(k)], 8, [[0x3705, PT_INT32, 5n]]), {
+				path: [attachmentStorage(k), "__substg1.0_3701000D"],
+				storage: true
+			})
+		}
+
+		const file = await cfbBytes(entries)
+		const started = performance.now()
+		const message = ok(await readMsg(file))
+		const total = message.attachments.reduce((sum, attachment) => sum + attachment.bytes.length, 0)
+
+		expect(message.attachments).toHaveLength(count)
+		// A few KiB each, not the mapping's 30 MiB.
+		expect(total).toBeLessThan(count * 8192)
+		expect(performance.now() - started).toBeLessThan(10_000)
+	})
+
+	it("counts every embedded message's file against the size limit", async () => {
+		const entries: CfbWriteEntry[] = [...storageEntries([], 32, [])]
+
+		for (let k = 0; k < 200; k++) {
+			entries.push(...storageEntries([attachmentStorage(k)], 8, [[0x3705, PT_INT32, 5n]]), {
+				path: [attachmentStorage(k), "__substg1.0_3701000D", "__properties_version1.0"],
+				bytes: new Uint8Array(24)
+			})
+		}
+
+		const file = await cfbBytes(entries)
+
+		// The file fits; its 200 embedded messages, each a file of its own (a few KiB of structure), do not.
+		expect(await readMsg(file, { maxSize: file.length + 1024 })).toEqual({ status: "tooLarge" })
 	})
 
 	it("reads an RTF-only body: its HTML when it encapsulates some, else its text", async () => {
