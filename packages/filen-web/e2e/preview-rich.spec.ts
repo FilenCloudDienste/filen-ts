@@ -264,8 +264,8 @@ test("a 3D model is drawn in a worker from its own files, and references outside
 		await expect(browser.row(RICH_MODEL_ENTRY)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await browser.row(RICH_MODEL_ENTRY).dblclick()
 
+		// The entry's password gate opens its prompt at once (its button shows only once the prompt is dismissed).
 		if (archive === MODELS_LOCKED_ZIP) {
-			await browser.overlay.getByRole("button", { name: "Enter password", exact: true }).click()
 			await browser.unlock(RICH_MODELS_PASSWORD)
 		}
 
