@@ -1,4 +1,5 @@
 import type { CompressFormat } from "@filen/sdk-rs"
+import { sanitizeFileName } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
 
@@ -197,3 +198,15 @@ const nameErrors = nameMemo((names: string[]) => sdkApi.itemNameErrors(names))
 // than copied.
 export const cachedItemNameError = nameErrors.cached
 export const itemNameError = nameErrors.ask
+
+// A name the SDK takes for `name`, which came from outside the drive (an attachment's, say): itself when it does, else
+// it sanitized, else that prefixed (a reserved device name such as CON survives sanitizing).
+export async function acceptedItemName(name: string): Promise<string> {
+	if ((await itemNameError(name)) === null) {
+		return name
+	}
+
+	const sanitized = sanitizeFileName(name)
+
+	return (await itemNameError(sanitized)) === null ? sanitized : `_${sanitized}`
+}

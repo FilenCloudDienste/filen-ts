@@ -6,12 +6,31 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import { readEmail } from "@/features/preview/lib/emailReading"
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message (E1): its headers, its HTML sanitized with its remote content counted and its inline pictures resolved,
 // its text and source; attachments listed (inline pictures not), opened in place and back.
+
+const { downloads, linkSaveAsks } = vi.hoisted(() => ({
+	downloads: [] as string[],
+	linkSaveAsks: [] as (string | null)[]
+}))
+
+vi.mock("@/lib/downloadBlob", () => ({
+	downloadBlob: (name: string) => {
+		downloads.push(name)
+	}
+}))
+vi.mock("@/features/publicLinks/queries/publicLink", () => ({
+	useLinkSaveable: (_kind: string, uuid: string | null) => {
+		linkSaveAsks.push(uuid)
+
+		return false
+	}
+}))
 
 const { message } = vi.hoisted((): { message: { current: string | Uint8Array } } => ({ message: { current: "" } }))
 
@@ -22,7 +41,11 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvKeys: () => Promise.resolve([])
 }))
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { downloadOriginBytes: vi.fn(), cancelPreviewDownload: () => Promise.resolve() },
+	sdkApi: {
+		downloadOriginBytes: vi.fn(),
+		cancelPreviewDownload: () => Promise.resolve(),
+		itemNameErrors: (names: string[]) => Promise.resolve(names.map(name => (name.includes(":") ? "ForbiddenChar" : null)))
+	},
 	threadCount: () => 1
 }))
 vi.mock("@/features/preview/hooks/usePreviewBytes", async () => {
@@ -218,5 +241,55 @@ describe("EmailViewer", () => {
 		expect(await screen.findByText("Attachments (2)")).toBeTruthy()
 		expect(screen.getByText("terms.pdf")).toBeTruthy()
 		expect(screen.getByText("unused.png")).toBeTruthy()
+	})
+
+	it("downloads under a name the drive takes, and on a link asks about saving of the link's own file only", async () => {
+		message.current = [
+			"Subject: Outer",
+			'Content-Type: multipart/mixed; boundary="o"',
+			"",
+			"--o",
+			"Content-Type: text/plain",
+			"",
+			"outer body",
+			"--o",
+			'Content-Type: message/rfc822; name="Re: Meeting.eml"',
+			'Content-Disposition: attachment; filename="Re: Meeting.eml"',
+			"",
+			"Subject: Inner",
+			'Content-Type: multipart/mixed; boundary="i"',
+			"",
+			"--i",
+			"Content-Type: text/plain",
+			"",
+			"inner body",
+			"--i",
+			'Content-Type: text/plain; name="notes.txt"',
+			'Content-Disposition: attachment; filename="notes.txt"',
+			"",
+			"notes",
+			"--i--",
+			"--o--",
+			""
+		].join("\r\n")
+		linkSaveAsks.length = 0
+		render(
+			<PreviewAccessModeProvider mode="anon">
+				<EmailViewer item={ITEM} />
+			</PreviewAccessModeProvider>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		fireEvent.click(await screen.findByRole("button", { name: "Download" }))
+		await vi.waitFor(() => {
+			expect(downloads).toContain("Re__Meeting.eml")
+		})
+
+		fireEvent.click(screen.getByRole("button", { name: "Open" }))
+
+		expect(await screen.findByRole("heading", { name: "Inner" })).toBeTruthy()
+		expect(screen.getByText("notes.txt")).toBeTruthy()
+		expect(linkSaveAsks.length).toBeGreaterThan(0)
+		expect(linkSaveAsks.every(uuid => uuid === ITEM.data.uuid)).toBe(true)
 	})
 })

@@ -1,11 +1,15 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, mimeForExtension, sanitizeFileName } from "@filen/shared"
+import { onlineManager } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { InfoIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { cachedOwnChain } from "@/features/drive/lib/ownAncestry"
 import { startUploads } from "@/features/drive/lib/upload"
+import { acceptedItemName } from "@/features/drive/lib/archiveHelpers"
+import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
@@ -31,6 +35,9 @@ import { cn } from "@filen/shared"
 
 // Messages opened from a message's attachments, how deep: a forwarded message opens as one, three levels at most.
 const EmailDepthContext = createContext(0)
+// The link's own file a message on a public link is (its uuid), for asking whether its visitor may save from it; null
+// for a message held in another file (an archive's), whose own file is not the link's; undefined outside a message.
+const EmailLinkRootContext = createContext<string | null | undefined>(undefined)
 const MAX_DEPTH = 3
 // Recipients shown before "+N more".
 const FOLDED_RECIPIENTS = 2
@@ -119,6 +126,18 @@ function Recipients({ label, list }: { label: string; list: readonly string[] })
 	)
 }
 
+// The attachment as a file to upload or download: a name the drive takes, its type from that name (as a picker gives).
+async function attachmentFile(attachment: EmailAttachment): Promise<File> {
+	const name = await acceptedItemName(attachment.name).catch((e: unknown) => {
+		log.error("preview", "checking an attachment's name failed", e)
+
+		// The shared rules, all but the SDK's reserved names.
+		return sanitizeFileName(attachment.name)
+	})
+
+	return new File([attachment.blob], name, { type: mimeForExtension(extensionOf(name)) ?? "" })
+}
+
 function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailAttachment }) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
@@ -139,7 +158,8 @@ function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailA
 			>
 				{t("previewEmailSaveToDrive")}
 			</Button>
-			{open ? (
+			{/* Gone when the device goes offline while it is open. */}
+			{open && isOnline ? (
 				<MoveTargetDialog
 					mode="pick"
 					startsWork
@@ -148,7 +168,16 @@ function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailA
 					initialPath={access === "authed" && !nested ? cachedOwnChain(item.data.parent) : undefined}
 					pickLabels={{ title: t("previewEmailSaveTitle", { name: attachment.name }), confirm: t("previewEmailSaveConfirm") }}
 					onPick={destination => {
-						void startUploads([new File([attachment.blob], attachment.name, { type: attachment.blob.type })], destination.uuid)
+						void attachmentFile(attachment).then(file => {
+							// Checked again where the upload starts: the device may have gone offline since.
+							if (!onlineManager.isOnline()) {
+								toast.error(t("common:offlineActionDisabled"))
+
+								return
+							}
+
+							return startUploads([file], destination.uuid)
+						})
 					}}
 					onClose={() => {
 						setOpen(false)
@@ -159,10 +188,12 @@ function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailA
 	)
 }
 
-// A link's visitor may save only when signed in, the link not their own, downloads allowed (useLinkSaveable).
+// A link's visitor may save only when signed in, the link not their own, downloads allowed (useLinkSaveable); asked of
+// the link's own file, which a nested message (or one in an archive) is not.
 function LinkSaveGate({ item, attachment }: { item: DriveItem; attachment: EmailAttachment }) {
 	const downloadable = usePreviewDownloadable()
-	const saveable = useLinkSaveable("file", downloadable ? item.data.uuid : null)
+	const root = useContext(EmailLinkRootContext)
+	const saveable = useLinkSaveable("file", downloadable && typeof root === "string" ? root : null)
 
 	return saveable ? (
 		<SaveToDrive
@@ -212,7 +243,9 @@ function AttachmentRow({
 						variant="ghost"
 						size="sm"
 						onClick={() => {
-							downloadBlob(attachment.name, attachment.blob)
+							void attachmentFile(attachment).then(file => {
+								downloadBlob(file.name, attachment.blob)
+							})
 						}}
 					>
 						{t("previewEmailDownload")}
@@ -370,7 +403,9 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 					onDownload={
 						downloadable
 							? () => {
-									downloadBlob(openedAttachment.name, openedAttachment.blob)
+									void attachmentFile(openedAttachment).then(file => {
+										downloadBlob(file.name, openedAttachment.blob)
+									})
 								}
 							: null
 					}
@@ -498,15 +533,21 @@ function EmailView({ item, bytes }: { item: DriveItem; bytes: Uint8Array }) {
 // NestedFileViewer, from the Blob the parse made), download or save to the drive.
 export function EmailViewer({ item }: { item: DriveItem }) {
 	const result = usePreviewBytes(item)
+	const outer = useContext(EmailLinkRootContext)
+	const held = useProvidedPreviewOrigin() !== null
+	// A message opened from a message keeps the first one's; the first is the link's own file unless another holds it.
+	const root = outer !== undefined ? outer : held ? null : item.data.uuid
 
 	return (
-		<PreviewGate result={result}>
-			{ready => (
-				<EmailView
-					item={item}
-					bytes={ready.bytes}
-				/>
-			)}
-		</PreviewGate>
+		<EmailLinkRootContext value={root}>
+			<PreviewGate result={result}>
+				{ready => (
+					<EmailView
+						item={item}
+						bytes={ready.bytes}
+					/>
+				)}
+			</PreviewGate>
+		</EmailLinkRootContext>
 	)
 }
