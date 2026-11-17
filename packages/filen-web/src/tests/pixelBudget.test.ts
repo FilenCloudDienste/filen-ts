@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest"
 import { MUPDF_BYTES_PER_PIXEL, PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
 import type { DeviceProfile } from "@/lib/deviceProfile"
-import { edit, mupdf, thumbnail, workerDecodeBytes, workerDecodePixels } from "@/lib/pixelBudget"
+import { edit, mupdf, nativeViewCrash, thumbnail, workerDecodeBytes, workerDecodePixels } from "@/lib/pixelBudget"
 
 const MIB = 1024 * 1024
 
 function profile(overrides: Partial<DeviceProfile>): DeviceProfile {
-	return { heicNative: "unknown", jxlNative: "unknown", appleMobile: false, mobile: false, pdfRangedMax: null, ...overrides }
+	return {
+		heicNative: "unknown",
+		jxlNative: "unknown",
+		appleMobile: false,
+		mobile: false,
+		phone: false,
+		pdfRangedMax: null,
+		...overrides
+	}
 }
 
 const DESKTOP = profile({})
@@ -14,6 +22,14 @@ const ANDROID = profile({ mobile: true })
 const IOS = profile({ mobile: true, appleMobile: true })
 
 describe("pixelBudget", () => {
+	it("caps a native <img> at 50 MP on a phone only; tablets and desktops have no cap", () => {
+		expect(nativeViewCrash(profile({ mobile: true, phone: true }))).toBe(50_000_000)
+		expect(nativeViewCrash(profile({ mobile: true, phone: true, appleMobile: true }))).toBe(50_000_000)
+		expect(nativeViewCrash(ANDROID)).toBeNull()
+		expect(nativeViewCrash(IOS)).toBeNull()
+		expect(nativeViewCrash(DESKTOP)).toBeNull()
+	})
+
 	it("gives the image editor the values it always had: 50 MP, 16 MP on iOS and iPadOS only", () => {
 		expect(edit(DESKTOP)).toBe(50_000_000)
 		expect(edit(ANDROID)).toBe(50_000_000)

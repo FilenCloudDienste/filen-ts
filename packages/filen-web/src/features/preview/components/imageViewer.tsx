@@ -19,6 +19,8 @@ import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomable
 import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
 import { MupdfImage } from "@/features/preview/components/mupdfImage"
 import { EpsImage } from "@/features/preview/components/epsImage"
+import { NativeSizeGate } from "@/features/preview/components/nativeSizeGate"
+import { NATIVE_VIEW_SNIFF_FROM_BYTES, nativeViewCrash } from "@/lib/pixelBudget"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 
 export interface ImageViewerProps {
@@ -336,8 +338,7 @@ export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerP
 	}
 
 	const decode = imageDecodeFor(item)
-
-	return (
+	const native = (
 		<StreamablePreview
 			item={item}
 			// A format with a decoder of our own that the browser received whole and could not decode goes to that decoder,
@@ -358,5 +359,19 @@ export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerP
 				/>
 			)}
 		/>
+	)
+	// Where the browser's own decode has a pixel cap (a phone), a file large enough to pass it is sized from its head
+	// first.
+	const cap = nativeViewCrash(profile)
+
+	return cap !== null && Number(item.data.size) >= NATIVE_VIEW_SNIFF_FROM_BYTES ? (
+		<NativeSizeGate
+			item={item}
+			cap={cap}
+		>
+			{native}
+		</NativeSizeGate>
+	) : (
+		native
 	)
 }

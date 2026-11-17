@@ -1,4 +1,4 @@
-import { isAppleMobile } from "@/lib/appleMobile"
+import { isAppleMobile, isPhone } from "@/lib/appleMobile"
 import { pdfMemoryConstrained, pdfViewerLimits } from "@/features/preview/lib/pdfLimits"
 
 // What this device can do, as the preview gates need it. Read once at first use; a capability probe that resolves
@@ -14,6 +14,8 @@ export interface DeviceProfile {
 	readonly appleMobile: boolean
 	// A phone or tablet, whose tab is killed far sooner than a desktop's.
 	readonly mobile: boolean
+	// A phone, not a tablet.
+	readonly phone: boolean
 	// Largest PDF read in ranges; null for no limit.
 	readonly pdfRangedMax: bigint | null
 }
@@ -34,6 +36,7 @@ export function deviceProfile(): DeviceProfile {
 		jxlNative: "unknown",
 		appleMobile: isAppleMobile(),
 		mobile: pdfMemoryConstrained(),
+		phone: isPhone(),
 		pdfRangedMax: BigInt(pdfViewerLimits().rangedMaxBytes)
 	}
 

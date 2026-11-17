@@ -534,7 +534,7 @@ async function expectNativeImage(page: Page, name: string): Promise<void> {
 		.toBe(HUGE_PNG_SIZE.width)
 }
 
-const [HUGE] = FIXTURE_FILES["images-huge"]
+const [HUGE, HUGE_PADDED] = FIXTURE_FILES["images-huge"]
 
 test("a 60 MP native image opens as the browser's own <img> on a desktop, with no request added", async ({ page, context }) => {
 	const egest = observeEgest(context)
@@ -545,10 +545,52 @@ test("a 60 MP native image opens as the browser's own <img> on a desktop, with n
 
 	await egestQuiet(egest)
 
+	// Each file's chunks (1 MiB each), streamed to the <img>: nothing read ahead of them.
+	for (const [name, chunks] of [
+		[HUGE, 1],
+		[HUGE_PADDED, 2]
+	] as const) {
+		egest.reset()
+		await itemRow(listbox, name).dblclick()
+		await expectNativeImage(page, name)
+		expect(egest.requests(), name).toBe(chunks)
+		await page.keyboard.press("Escape")
+		await expect(picture(page, name)).toHaveCount(0)
+	}
+})
+
+// An Android phone's user agent, for the page only: the device profile reads it.
+const PHONE_USER_AGENT =
+	"Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+test("on a phone, a native image past 50 MP is sized from its head and shown only when asked; a small file opens as before", async ({
+	page,
+	context
+}) => {
+	await context.addInitScript(userAgent => {
+		Object.defineProperty(navigator, "userAgent", { get: () => userAgent })
+	}, PHONE_USER_AGENT)
+
+	const egest = observeEgest(context)
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-huge")
+
+	await egestQuiet(egest)
+
+	// Over 1 MiB: its head is read first, and the browser is not handed it.
+	await itemRow(listbox, HUGE_PADDED).dblclick()
+	await expect(page.getByText(preview.previewImageTooLarge, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(picture(page, HUGE_PADDED)).toHaveCount(0)
+	await page.getByRole("button", { name: preview.previewImageOpenAnyway }).click()
+	await expectNativeImage(page, HUGE_PADDED)
+	await page.keyboard.press("Escape")
+
+	// Under 1 MiB: nothing read ahead, as before.
 	egest.reset()
 	await itemRow(listbox, HUGE).dblclick()
 	await expectNativeImage(page, HUGE)
-	// The file's one chunk, streamed to the <img>: nothing read ahead of it.
 	expect(egest.requests()).toBe(1)
 	await page.keyboard.press("Escape")
 })

@@ -18,7 +18,7 @@ export const PSD_SIZE = { width: 90, height: 60 } as const
 
 export const EPSI_WIDTH = 16
 
-// 60 MP: a black 1-bit PNG, small on disk, 240 MB once the browser decodes it.
+// Past the native view cap a phone has (50 MP): a black 1-bit PNG, small on disk, 240 MB once the browser decodes it.
 export const HUGE_PNG_SIZE = { width: 7800, height: 7800 } as const
 
 const POSTSCRIPT_AI = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
@@ -52,8 +52,9 @@ function pngChunk(type: string, data: Buffer): Buffer {
 	return Buffer.concat([head, body, tail])
 }
 
-// The huge PNG.
-function hugePng(): Buffer {
+// The huge PNG, with `padding` bytes of a private ancillary chunk (which every decoder skips) before its end: enough
+// makes the file large enough for a phone to read its size first.
+function hugePng(padding: number): Buffer {
 	const { width, height } = HUGE_PNG_SIZE
 	const header = Buffer.alloc(13)
 
@@ -69,6 +70,7 @@ function hugePng(): Buffer {
 		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
 		pngChunk("IHDR", header),
 		pngChunk("IDAT", deflateSync(rows, { level: 9 })),
+		...(padding > 0 ? [pngChunk("fiLn", Buffer.alloc(padding))] : []),
 		pngChunk("IEND", Buffer.alloc(0))
 	])
 }
@@ -86,7 +88,7 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"],
 		"images-ai": ["img-pdfcompat.ai", "img-postscript.ai"],
 		"images-eps": ["img-dos.eps", "img-epsi.eps", "img-plain.eps"],
-		"images-huge": ["img-60mp.png"]
+		"images-huge": ["img-60mp.png", "img-60mp-padded.png"]
 	},
 	() => ({
 		"img-sample.qoi": { buffer: qoiSample(), mimeType: "image/x-qoi" },
@@ -149,7 +151,9 @@ export const IMAGE_SCENARIOS = scenarioModule(
 			mimeType: "application/postscript"
 		},
 		"img-plain.eps": { buffer: Buffer.from(plainEps()), mimeType: "application/postscript" },
-		"img-60mp.png": { buffer: hugePng(), mimeType: "image/png" },
+		"img-60mp.png": { buffer: hugePng(0), mimeType: "image/png" },
+		// Over 1 MiB: what a phone sizes from its head before showing it.
+		"img-60mp-padded.png": { buffer: hugePng(1024 * 1024), mimeType: "image/png" },
 		"img-entries.zip": {
 			buffer: buildZip([
 				{ name: IMAGE_ENTRIES.qoi, data: qoiSample() },

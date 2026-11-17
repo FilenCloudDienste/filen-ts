@@ -27,6 +27,20 @@ const EDIT_PIXELS_APPLE_MOBILE = 16_000_000
 const DISPLAY_LONG_SIDE_DESKTOP = 4096
 const DISPLAY_LONG_SIDE_MOBILE = 2048
 
+// A native <img> on a phone: past this many pixels the browser's decoded frame (and its copies while zoomed) may get
+// the tab killed, so a larger image is not handed to it there. No phone was measured: this is a conservative cap.
+// Desktops and tablets measured no threshold up to 400 MP (e2e/perf/nativeImageDecode.spec.ts), so they have none.
+const NATIVE_VIEW_PIXELS_PHONE = 50_000_000
+
+// Below this size a native image is not read ahead for its size (no request is added): a smaller file past the cap is
+// a pixel bomb (a solid PNG), shown natively as before.
+export const NATIVE_VIEW_SNIFF_FROM_BYTES = 1024 * 1024
+
+// The most pixels a native <img> is handed on this device; null for no limit.
+export function nativeViewCrash(profile: DeviceProfile): number | null {
+	return profile.phone ? NATIVE_VIEW_PIXELS_PHONE : null
+}
+
 export function displayLongSide(profile: DeviceProfile): number {
 	return profile.mobile ? DISPLAY_LONG_SIDE_MOBILE : DISPLAY_LONG_SIDE_DESKTOP
 }

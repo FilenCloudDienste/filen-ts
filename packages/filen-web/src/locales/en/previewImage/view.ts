@@ -9,6 +9,8 @@ export const previewImageView = {
 	previewImageFullFailed: "The image couldn't be shown at full resolution.",
 	/** Image preview — an image with more pixels than this device can decode */
 	previewImageTooLarge: "This image is too large to display on this device.",
+	/** Image preview — button beside "This image is too large to display on this device." on a phone: shows it anyway */
+	previewImageOpenAnyway: "Open anyway",
 	/** Image preview — an image whose data could not be decoded (damaged or not what its name says) */
 	previewImageDecodeFailed: "This image couldn't be read.",
 	/** Image preview — a compressed SVG (.svgz) that inflates to more than the preview holds */

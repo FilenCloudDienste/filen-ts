@@ -21,3 +21,8 @@ export function isAppleMobile(): boolean {
 export function isWebKitEngine(): boolean {
 	return isAppleMobile() || userAgent().browser === "Safari"
 }
+
+// A phone (an iPhone, or Android whose browser says "Mobile"), not a tablet: the smallest tab budgets.
+export function isPhone(): boolean {
+	return userAgent().device === "mobile"
+}
