@@ -530,6 +530,9 @@ export function waveProbedCodec(
 	const view = format === null || format.length < 16 ? null : new DataView(format.buffer, format.byteOffset, format.byteLength)
 	const tag = format === null || view === null ? 0 : waveFormatTag(format, 0, format.length)
 	const extraLength = view === null || format === null || format.length < 18 ? 0 : Math.min(view.getUint16(16, true), format.length - 18)
+	// WAVE_FORMAT_EXTENSIBLE's own 22 bytes (valid bits, channel mask, sub-format) open the extra bytes; the codec's
+	// configuration follows them, as FFmpeg's WAV header reader takes it.
+	const extensible = view !== null && view.getUint16(0, true) === 0xfffe && extraLength >= 22 ? 22 : 0
 	const stream: FfmpegStream = {
 		blockAlign: view?.getUint16(12, true) ?? 0,
 		bitRate: (view?.getUint32(8, true) ?? 0) * 8,
@@ -559,7 +562,7 @@ export function waveProbedCodec(
 	return {
 		codec: ffmpeg,
 		stream,
-		...(format !== null && extraLength > 0 ? { extradata: format.slice(18, 18 + extraLength) } : {})
+		...(format !== null && extraLength > extensible ? { extradata: format.slice(18 + extensible, 18 + extraLength) } : {})
 	}
 }
 

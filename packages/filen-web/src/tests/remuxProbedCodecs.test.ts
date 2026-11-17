@@ -239,6 +239,11 @@ describe("waveProbedCodec", () => {
 		const extensible = (tag: number): number[] => [16, 0, 3, 0, 0, 0, tag & 0xff, tag >> 8, ...guidTail]
 
 		expect(waveProbedCodec("wma", waveFormat(0xfffe, 2, 44_100, 16_000, 2973, 16, extensible(0x0160)), null, null)?.codec).toBe("wmav1")
+		// The configuration after the extensible block is the codec's, without the block.
+		expect(
+			waveProbedCodec("wma", waveFormat(0xfffe, 2, 44_100, 16_000, 2973, 16, [...extensible(0x0161), 0, 0, 0, 0, 1, 0]), null, null)
+				?.extradata
+		).toEqual(Uint8Array.from([0, 0, 0, 0, 1, 0]))
 		expect(waveProbedCodec("adpcm", waveFormat(0xfffe, 1, 22_050, 11_100, 512, 4, extensible(0x0011)), null, null)?.codec).toBe(
 			"adpcm_ima_wav"
 		)
