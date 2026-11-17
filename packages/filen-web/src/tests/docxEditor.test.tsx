@@ -664,9 +664,10 @@ describe("DocxEditView", () => {
 		const { editor } = await openEditor()
 
 		expect(screen.queryByRole("tab", { name: "Table" })).toBeNull()
-		act(() => {
+		// The insert settles later (its layout): the table must be there before the caret or a menu asks about it.
+		await act(async () => {
 			editor.selectParagraph(1)
-			void editor.execute({ type: "table.insert", rows: 2, cols: 3 })
+			await editor.execute({ type: "table.insert", rows: 2, cols: 3 })
 		})
 		act(() => {
 			let inside = -1
@@ -835,10 +836,13 @@ describe("DocxEditView", () => {
 	it("keeps the split dialog open and says why when the table refuses the split", async () => {
 		const { editor } = await openEditor()
 
-		act(() => {
+		// The insert settles later (its layout): the table must be there before the caret or a menu asks about it.
+		await act(async () => {
 			editor.selectParagraph(1)
-			void editor.execute({ type: "table.insert", rows: 1, cols: 1 })
+			await editor.execute({ type: "table.insert", rows: 1, cols: 1 })
 		})
+		// The view knows the caret is in a table once its Table tab shows: only then does the context menu offer cells.
+		await screen.findByRole("tab", { name: "Table" })
 		vi.spyOn(editor, "execute").mockReturnValue(false)
 		fireEvent.contextMenu(screen.getByRole("textbox", { name: "report.docx" }))
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Split cells…" }))
