@@ -435,9 +435,10 @@ export class SqliteBrowser {
 		}
 	}
 
-	// The rows a table holds, counted on from where the last step stopped by one chunk (SQLITE_COUNT_CHUNK rows); every
-	// chunk boundary becomes an anchor the tiles walk from. For a table no key orders, all at once.
-	countStep(index: number, id: number): SqliteCount {
+	// The rows a table holds, counted on from where the last step stopped by `chunk` rows (the first step by the first
+	// tile's rows only); every chunk boundary becomes an anchor the tiles walk from. For a table no key orders, all at
+	// once.
+	countStep(index: number, id: number, chunk: number = SQLITE_COUNT_CHUNK): SqliteCount {
 		const table = this.table(index)
 
 		if (table.done) return { rows: table.counted, exact: true }
@@ -454,13 +455,13 @@ export class SqliteBrowser {
 
 			const anchored = table.next !== null
 			const bind = table.next ?? []
-			const chunk = anchored ? SQLITE_COUNT_CHUNK : SQLITE_FIRST_COUNT_CHUNK
-			const end = this.statement(chunkEndSql(info.name, paging.key, anchored, chunk), bind, statement =>
+			const rows = anchored ? Math.max(1, chunk) : SQLITE_FIRST_COUNT_CHUNK
+			const end = this.statement(chunkEndSql(info.name, paging.key, anchored, rows), bind, statement =>
 				statement.step() ? paging.key.map((_, k) => keyValue(statement.get(k))) : null
 			)
 
 			if (end !== null) {
-				table.counted += chunk
+				table.counted += rows
 				table.next = end
 				table.anchors.add({ index: table.counted, key: end })
 
@@ -468,7 +469,7 @@ export class SqliteBrowser {
 			}
 
 			table.counted += Number(
-				this.statement(chunkRestSql(info.name, paging.key, anchored, chunk), bind, statement =>
+				this.statement(chunkRestSql(info.name, paging.key, anchored, rows), bind, statement =>
 					statement.step() ? statement.get(0) : 0
 				)
 			)

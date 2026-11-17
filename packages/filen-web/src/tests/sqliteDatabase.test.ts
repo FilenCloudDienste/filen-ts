@@ -3,7 +3,7 @@ import type * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import type { SqliteBrowseWorkerApi } from "@/features/preview/workers/sqliteBrowse.worker"
 import { SqliteUnreadable } from "@/features/preview/lib/sqliteBrowser"
-import { INTERRUPT_COUNT, INTERRUPT_TILES, SQLITE_INTERRUPT_SLOTS } from "@/features/preview/lib/sqliteBrowse.logic"
+import { INTERRUPT_COUNT, INTERRUPT_TILES, SQLITE_INTERRUPT_SLOTS, SQLITE_TILE_ROWS } from "@/features/preview/lib/sqliteBrowse.logic"
 import { readsInRanges, sqliteReads } from "@/features/preview/lib/sqliteDatabase"
 
 vi.mock("@/features/preview/workers/sqliteBrowse.worker.ts?worker", () => ({ default: vi.fn() }))
@@ -29,7 +29,7 @@ describe("sqlite grid reads", () => {
 		const tiles = vi.fn(() => Promise.resolve([]))
 		const reads = sqliteReads(worker({ tiles, count: () => pendingCount.promise }), interrupt)
 
-		void reads.count(0)
+		void reads.count(0, 1000)
 		await reads.reads(0).tiles(0, Uint32Array.of(0, 0))
 		await reads.reads(0).tiles(0, Uint32Array.of(1, 0))
 
@@ -40,6 +40,31 @@ describe("sqlite grid reads", () => {
 		expect(firstId).toBeLessThan(secondId)
 		// The count was the first request.
 		expect(Atomics.load(interrupt, INTERRUPT_COUNT)).toBe(1)
+		pendingCount.resolve(null)
+	})
+
+	it("passes the step's size, stops the step in flight when asked, and tracks how far the grid read", async () => {
+		const interrupt = slots()
+		const pendingCount = Promise.withResolvers<null>()
+		const count = vi.fn(() => pendingCount.promise)
+		const reads = sqliteReads(worker({ tiles: () => Promise.resolve([]), count }), interrupt)
+		const reached: [number, number][] = []
+
+		reads.onReach((table, row) => reached.push([table, row]))
+
+		void reads.count(3, 256)
+		await Promise.resolve()
+		expect(count).toHaveBeenCalledWith(3, 1, 256)
+
+		reads.stopCount()
+		expect(Atomics.load(interrupt, INTERRUPT_COUNT)).toBe(1)
+
+		// Tile row 2 of a window at row 1,000: its last data row is 1,000 + 3 × 64 − 1.
+		await reads.reads(3).tiles(1000, Uint32Array.of(0, 0, 2, 1))
+		await reads.reads(3).tiles(1000, Uint32Array.of(1, 0))
+
+		expect(reads.reach(3)).toBe(1000 + 3 * SQLITE_TILE_ROWS - 1)
+		expect(reached).toEqual([[3, 1000 + 3 * SQLITE_TILE_ROWS - 1]])
 		pendingCount.resolve(null)
 	})
 

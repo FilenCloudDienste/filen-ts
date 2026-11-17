@@ -331,6 +331,9 @@ describe("SqliteBrowser", () => {
 		expect(texts(tile).get(`${String(SQLITE_FIRST_COUNT_CHUNK)}:0`)).toBe(String(SQLITE_FIRST_COUNT_CHUNK))
 		expect(pages.size).toBe(counted)
 
+		// A step covers the rows it is asked for, no more.
+		expect(browser.countStep(0, 1, 37)).toEqual({ rows: SQLITE_FIRST_COUNT_CHUNK + 37, exact: false })
+
 		// The whole count reads every leaf, far more than the first step did.
 		while (!browser.countStep(0, 1).exact);
 

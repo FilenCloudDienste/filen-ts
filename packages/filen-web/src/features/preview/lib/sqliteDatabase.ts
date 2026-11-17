@@ -21,6 +21,7 @@ import {
 	INTERRUPT_COUNT,
 	INTERRUPT_TILES,
 	SQLITE_AUTO_CHECK_MAX_BYTES,
+	SQLITE_TILE_ROWS,
 	SQLITE_INTERRUPT_SLOTS
 } from "@/features/preview/lib/sqliteBrowse.logic"
 
@@ -50,8 +51,14 @@ export interface SqliteDatabase {
 	lastRead(): number
 	// One per table, the same object each time.
 	reads(table: number): SqliteTableReads
-	// Null when a grid read went ahead of the step: count on later.
-	count(table: number): Promise<SqliteCount | null>
+	// Counts `chunk` more rows. Null when a grid read went ahead of the step, or stopCount stopped it: count on later.
+	count(table: number, chunk: number): Promise<SqliteCount | null>
+	// Stops the count step in flight (Cancel).
+	stopCount(): void
+	// The furthest row of `table` the grid has asked for (base plus the tiles' rows), and a listener told each time it
+	// moves further; returns the unsubscribe.
+	reach(table: number): number
+	onReach(listener: (table: number, row: number) => void): () => void
 	// Called when a read fails after the database opened (the bridge's read aborted or timed out); returns the
 	// unsubscribe.
 	onUnreadable(listener: () => void): () => void
@@ -137,7 +144,7 @@ export async function openSqliteDatabase(owned: SqliteWorker, origin: ByteOrigin
 	return { ok: true, database }
 }
 
-export type SqliteReads = Pick<SqliteDatabase, "lastRead" | "reads" | "count" | "onUnreadable">
+export type SqliteReads = Pick<SqliteDatabase, "lastRead" | "reads" | "count" | "stopCount" | "reach" | "onReach" | "onUnreadable">
 
 // The grid's reads of an open database, each named for the interrupt flag: a tile request makes every earlier one
 // stale (the grid asks again for what it still shows once the newer lands), and any grid read stops the count step in
@@ -150,6 +157,8 @@ export function sqliteReads(owned: Pick<SqliteWorker, "run">, interrupt: Int32Ar
 	let counting = 0
 	const nextId = (): number => ++ids
 	const unreadable = new Set<() => void>()
+	const reached = new Map<number, number>()
+	const reachListeners = new Set<(table: number, row: number) => void>()
 	const tables = new Map<number, SqliteTableReads>()
 	const watch = <T>(read: Promise<T>): Promise<T> =>
 		read.catch((error: unknown) => {
@@ -173,6 +182,17 @@ export function sqliteReads(owned: Pick<SqliteWorker, "run">, interrupt: Int32Ar
 		return {
 			tiles: (base, coordinates) => {
 				const id = gridRead()
+				let furthest = 0
+
+				// Pairs of (tile row, tile column): a tile's last data row (its grid rows below the header) past the window's base.
+				for (let at = 0; at < coordinates.length; at += 2)
+					furthest = Math.max(furthest, ((coordinates[at] ?? 0) + 1) * SQLITE_TILE_ROWS - 1)
+
+				if (base + furthest > (reached.get(table) ?? 0)) {
+					reached.set(table, base + furthest)
+
+					for (const listener of reachListeners) listener(table, base + furthest)
+				}
 
 				// Every earlier tile request is stale: the grid asks again for what it still shows once this one lands.
 				Atomics.store(interrupt, INTERRUPT_TILES, id - 1)
@@ -213,14 +233,25 @@ export function sqliteReads(owned: Pick<SqliteWorker, "run">, interrupt: Int32Ar
 
 			return reads
 		},
-		count: table => {
+		count: (table, chunk) => {
 			const id = nextId()
 
 			counting = id
 
-			return watch(owned.run(remote => remote.count(table, id))).finally(() => {
+			return watch(owned.run(remote => remote.count(table, id, chunk))).finally(() => {
 				if (counting === id) counting = 0
 			})
+		},
+		stopCount: () => {
+			if (counting !== 0) Atomics.store(interrupt, INTERRUPT_COUNT, counting)
+		},
+		reach: table => reached.get(table) ?? 0,
+		onReach: listener => {
+			reachListeners.add(listener)
+
+			return () => {
+				reachListeners.delete(listener)
+			}
 		},
 		onUnreadable: listener => {
 			unreadable.add(listener)

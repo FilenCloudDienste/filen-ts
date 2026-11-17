@@ -6,6 +6,7 @@ import "@/lib/i18n"
 import type { SqliteCheck, SqliteSchema } from "@/features/preview/lib/sqliteBrowser"
 import type { SqliteDatabase, SqliteOpenOutcome } from "@/features/preview/lib/sqliteDatabase"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
+import { SQLITE_COUNT_CHUNK, SQLITE_FIRST_COUNT_CHUNK, SQLITE_TILE_ROWS } from "@/features/preview/lib/sqliteBrowse.logic"
 
 // The database viewer's states: a file that is no database, the table list with views and virtual tables (listed,
 // never browsed), the WAL notice, and the integrity check: by itself up to 256 MiB, on demand above, damage replacing
@@ -94,6 +95,9 @@ function database(overrides: Partial<SqliteDatabase> = {}): SqliteDatabase {
 			cell: () => Promise.resolve({ type: "null", bytes: 0, value: null })
 		}),
 		count: () => Promise.resolve({ rows: 2, exact: true }),
+		stopCount: () => undefined,
+		reach: () => 0,
+		onReach: () => () => undefined,
 		onUnreadable: () => () => undefined,
 		close: () => undefined,
 		...overrides
@@ -192,6 +196,113 @@ describe("SqliteViewer", () => {
 			expect(screen.getByText("Not checked")).toBeTruthy()
 		})
 		expect(checks.cancels).toBe(1)
+	})
+
+	it("counts a database read in ranges only as far as the grid reads, and every row only on Count, which Cancel stops", async () => {
+		const chunks: number[] = []
+		const stops = vi.fn()
+		let rows = 0
+		const total = 100_000
+		const pending: ((value: { rows: number; exact: boolean } | null) => void)[] = []
+
+		outcome.next = {
+			ok: true,
+			database: database({
+				count: (_table, chunk) => {
+					chunks.push(chunk)
+
+					// The Count steps wait until the test lets them through.
+					if (chunk === SQLITE_COUNT_CHUNK) return new Promise(resolve => pending.push(resolve))
+
+					rows = Math.min(total, rows === 0 ? SQLITE_FIRST_COUNT_CHUNK : rows + chunk)
+
+					return Promise.resolve({ rows, exact: rows === total })
+				},
+				stopCount: stops
+			})
+		}
+		await renderViewer()
+
+		// The first tile's rows, and no more while the grid reads no further; the grid shows one tile past them.
+		expect(await screen.findByText(/≥ 63 rows/)).toBeTruthy()
+		await new Promise(resolve => setTimeout(resolve, 50))
+		expect(screen.getByText(/≥ 63 rows/)).toBeTruthy()
+		expect(screen.getByText(`grid of users: ${String(63 + SQLITE_TILE_ROWS)}`)).toBeTruthy()
+		expect(chunks).toHaveLength(1)
+
+		fireEvent.click(screen.getByRole("button", { name: "Count" }))
+
+		expect(await screen.findByText("Counting…")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+		pending.shift()?.(null)
+
+		expect(await screen.findByRole("button", { name: "Count" })).toBeTruthy()
+		expect(stops).toHaveBeenCalledOnce()
+
+		fireEvent.click(screen.getByRole("button", { name: "Count" }))
+		await waitFor(() => {
+			expect(pending).toHaveLength(1)
+		})
+		pending.shift()?.({ rows: total, exact: true })
+
+		expect(await screen.findByText(/100,000 rows/)).toBeTruthy()
+		expect(screen.queryByText(/≥/)).toBeNull()
+		expect(screen.queryByRole("button", { name: "Count" })).toBeNull()
+	})
+
+	it("counts on as the grid scrolls past what is counted", async () => {
+		let rows = 0
+		let reach: ((table: number, row: number) => void) | null = null
+
+		outcome.next = {
+			ok: true,
+			database: database({
+				count: (_table, chunk) => {
+					rows = rows === 0 ? SQLITE_FIRST_COUNT_CHUNK : rows + chunk
+
+					return Promise.resolve({ rows, exact: false })
+				},
+				onReach: listener => {
+					reach = listener
+
+					return () => undefined
+				}
+			})
+		}
+		await renderViewer()
+
+		expect(await screen.findByText(/≥ 63 rows/)).toBeTruthy()
+
+		// The grid asked for rows as far as 1,000: counting follows it there.
+		act(() => {
+			reach?.(0, 1000)
+		})
+
+		expect(await screen.findByText(/≥ 1,000 rows/)).toBeTruthy()
+	})
+
+	it("counts a database read whole to the end by itself, with no Count", async () => {
+		const chunks: number[] = []
+		let rows = 0
+
+		outcome.next = {
+			ok: true,
+			database: database({
+				ranged: false,
+				count: (_table, chunk) => {
+					chunks.push(chunk)
+					rows += rows === 0 ? SQLITE_FIRST_COUNT_CHUNK : chunk
+
+					return Promise.resolve({ rows: Math.min(rows, 120_000), exact: rows >= 120_000 })
+				}
+			})
+		}
+		await renderViewer()
+
+		expect(await screen.findByText(/120,000 rows/, undefined, { timeout: 3000 })).toBeTruthy()
+		expect(chunks.slice(1).every(chunk => chunk === SQLITE_COUNT_CHUNK)).toBe(true)
+		expect(screen.queryByRole("button", { name: "Count" })).toBeNull()
 	})
 
 	it("shows the unreadable card with Retry when a read fails after opening", async () => {

@@ -96,13 +96,13 @@ const api = {
 			from.close()
 		}
 	},
-	// Null when a grid read went ahead of it (the interrupt flag): the page counts on later.
-	count: async (table: number, id: number): Promise<SqliteCount | null> => {
+	// Null when a grid read went ahead of it, or the page stopped it (the interrupt flag): the page counts on later.
+	count: async (table: number, id: number, chunk: number): Promise<SqliteCount | null> => {
 		// A task boundary first, so tile requests posted meanwhile run before this chunk.
 		await new Promise(resolve => setTimeout(resolve, 0))
 
 		try {
-			return opened().countStep(table, id)
+			return opened().countStep(table, id, chunk)
 		} catch (error) {
 			if (isSqliteInterrupted(error)) return null
 

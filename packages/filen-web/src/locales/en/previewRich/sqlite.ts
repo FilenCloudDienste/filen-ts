@@ -13,8 +13,14 @@ export const previewRichSqlite = {
 	/** SQLite viewer — a table's row count, exact */
 	previewSqliteRows_one: "{{count, number}} row",
 	previewSqliteRows_other: "{{count, number}} rows",
-	/** SQLite viewer — a table's row count while it is still being counted: at least this many */
+	/** SQLite viewer — a table's row count not counted to the end (still counting, or a large database counted only as far as it was read): at least this many */
 	previewSqliteRowsAtLeast: "≥ {{count, number}} rows",
+	/** SQLite viewer — button beside "≥ N rows" on a large database: count every row of the table (reads all of it) */
+	previewSqliteCount: "Count",
+	/** SQLite viewer — tooltip of the Count button */
+	previewSqliteCountTitle: "Count every row (reads the whole table)",
+	/** SQLite viewer — the table's rows are being counted; the count beside it grows as it goes */
+	previewSqliteCounting: "Counting…",
 	/** SQLite viewer — shown above the grid when it starts past the first rows (after Go to row), e.g. "Rows 2,000,001–" */
 	previewSqliteWindow: "Rows {{from, number}}–",
 	/** SQLite viewer — button opening the field to jump to a row number */

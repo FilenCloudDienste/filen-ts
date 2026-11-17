@@ -16,7 +16,15 @@ import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/comp
 import { SqliteTableGrid } from "@/features/preview/components/sqliteTableGrid"
 import type { SqliteBrowseWorkerApi } from "@/features/preview/workers/sqliteBrowse.worker"
 import type { SqliteCellValue, SqliteLabels, SqliteTableInfo } from "@/features/preview/lib/sqliteBrowser"
-import { SQLITE_HEX_DUMP_BYTES, SQLITE_INTERRUPT_SLOTS, fullValueText, goToRow, hexDump } from "@/features/preview/lib/sqliteBrowse.logic"
+import {
+	SQLITE_HEX_DUMP_BYTES,
+	SQLITE_INTERRUPT_SLOTS,
+	countChunk,
+	gridRows,
+	fullValueText,
+	goToRow,
+	hexDump
+} from "@/features/preview/lib/sqliteBrowse.logic"
 import { SQLITE_WINDOW_ROWS } from "@/features/preview/lib/sqliteSource"
 import {
 	SQLITE_COUNT_IDLE_MS,
@@ -110,12 +118,38 @@ function useSqliteOpen(
 	}
 }
 
-// The rows of `table`, counted in chunks while the grid is idle; the first (small) chunk at once. A step a grid read
-// went ahead of is taken again once the grid is idle.
-function useRowCount(database: SqliteDatabase, table: number | null): Counted | null {
+interface RowCount {
+	readonly counted: Counted | null
+	// Counting every row, as asked (Count).
+	readonly counting: boolean
+	// Null where counting runs by itself to the end (a database read whole) or is done.
+	readonly count: (() => void) | null
+	readonly cancel: () => void
+}
+
+// The rows of `table`, counted in chunks while the grid is idle; the first (small) chunk at once. A database read whole
+// is counted to the end by itself. One read in ranges is counted only as far as the grid has read (the furthest tile it
+// asked for, or the window it was sent to): its grid grows as it scrolls (gridRows), and its exact count is taken when
+// asked. A step a grid read went ahead of is taken again once the grid is idle.
+function useRowCount(database: SqliteDatabase, table: number | null, base: number): RowCount {
 	const [counts, setCounts] = useState<ReadonlyMap<number, Counted>>(new Map())
+	const [all, setAll] = useState(false)
+	const [reach, setReach] = useState(() => (table === null ? 0 : database.reach(table)))
+	// The rows counted so far, for the next step's size; -1 before the first.
+	const countedRows = useRef(-1)
 	const known = table === null ? undefined : counts.get(table)
 	const exact = known?.exact === true
+	const target = !database.ranged || all ? Number.POSITIVE_INFINITY : Math.max(reach, base > 0 ? base + 1 : 0)
+
+	useEffect(() => {
+		if (table === null) {
+			return
+		}
+
+		return database.onReach((reached, row) => {
+			if (reached === table) setReach(previous => Math.max(previous, row))
+		})
+	}, [database, table])
 
 	useEffect(() => {
 		if (table === null || exact) {
@@ -123,10 +157,13 @@ function useRowCount(database: SqliteDatabase, table: number | null): Counted | 
 		}
 
 		let live = true
-		let first = true
 		let timer: ReturnType<typeof setTimeout> | undefined
 		const step = (): void => {
+			const first = countedRows.current < 0
+			const chunk = countChunk(Math.max(0, countedRows.current), target)
 			const idle = performance.now() - database.lastRead()
+
+			if (!first && chunk === 0) return
 
 			if (!first && idle < SQLITE_COUNT_IDLE_MS) {
 				timer = setTimeout(step, SQLITE_COUNT_IDLE_MS - idle)
@@ -134,8 +171,7 @@ function useRowCount(database: SqliteDatabase, table: number | null): Counted | 
 				return
 			}
 
-			first = false
-			database.count(table).then(
+			database.count(table, Math.max(1, chunk)).then(
 				counted => {
 					if (!live) return
 
@@ -145,6 +181,7 @@ function useRowCount(database: SqliteDatabase, table: number | null): Counted | 
 						return
 					}
 
+					countedRows.current = counted.rows
 					setCounts(previous => new Map(previous).set(table, counted))
 
 					if (!counted.exact) timer = setTimeout(step, 0)
@@ -160,9 +197,54 @@ function useRowCount(database: SqliteDatabase, table: number | null): Counted | 
 			live = false
 			clearTimeout(timer)
 		}
-	}, [database, table, exact])
+	}, [database, table, exact, target])
 
-	return known ?? null
+	return {
+		counted: known ?? null,
+		counting: all && !exact,
+		count:
+			database.ranged && !exact && !all
+				? () => {
+						setAll(true)
+					}
+				: null,
+		cancel: () => {
+			setAll(false)
+			database.stopCount()
+		}
+	}
+}
+
+function CountControl({ rows }: { rows: RowCount }) {
+	const { t } = useTranslation(["preview", "common"])
+
+	if (rows.counting) {
+		return (
+			<span className="flex items-center gap-2 text-xs text-muted-foreground">
+				<span>{t("previewSqliteCounting")}</span>
+				<Button
+					size="sm"
+					variant="outline"
+					onClick={rows.cancel}
+				>
+					{t("common:cancel")}
+				</Button>
+			</span>
+		)
+	}
+
+	if (rows.count === null) return null
+
+	return (
+		<Button
+			size="sm"
+			variant="outline"
+			title={t("previewSqliteCountTitle")}
+			onClick={rows.count}
+		>
+			{t("previewSqliteCount")}
+		</Button>
+	)
 }
 
 function TableList({
@@ -417,7 +499,8 @@ function TableView({
 	const [value, setValue] = useState<SqliteCellValue | null>(null)
 	const gridRef = useRef<SheetGridHandle | null>(null)
 	const browsable = table.kind === "table" && table.columns.length > 0
-	const counted = useRowCount(database, browsable ? index : null)
+	const rowCount = useRowCount(database, browsable ? index : null, base)
+	const counted = rowCount.counted
 	const [reads] = useState(() => database.reads(index))
 	const column = table.columns[active.col]
 
@@ -479,6 +562,7 @@ function TableView({
 						</span>
 					) : null}
 				</span>
+				{browsable && counted !== null ? <CountControl rows={rowCount} /> : null}
 				{base > 0 ? <span className="text-xs text-muted-foreground">{t("previewSqliteWindow", { from: base + 1 })}</span> : null}
 				<span className="ms-auto flex items-center gap-3">
 					{check.status === "checking" ? (
@@ -506,7 +590,7 @@ function TableView({
 							name={table.name}
 							columns={table.columns}
 							reads={reads}
-							rows={counted.rows}
+							rows={gridRows(counted)}
 							base={base}
 							gridRef={gridRef}
 							onActive={(row, col) => {

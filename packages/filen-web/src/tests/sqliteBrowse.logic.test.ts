@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 import {
 	AnchorIndex,
 	SQLITE_HEADER,
+	SQLITE_COUNT_CHUNK,
+	SQLITE_GROW_CHUNK,
 	SQLITE_HEX_DUMP_BYTES,
+	SQLITE_TILE_ROWS,
+	countChunk,
+	gridRows,
 	cellView,
 	fullValueText,
 	goToRow,
@@ -130,5 +135,20 @@ describe("sqlite browse logic", () => {
 		expect(goToRow(500, 0, 100, { rows: 50, exact: false })).toEqual({ kind: "rebase", base: 499 })
 		expect(goToRow(5_000_000, 0, 1_048_575, { rows: 2_000_010, exact: true })).toEqual({ kind: "rebase", base: 2_000_009 })
 		expect(goToRow(5, 100, 100, null)).toEqual({ kind: "rebase", base: 4 })
+	})
+})
+
+describe("countChunk", () => {
+	it("covers as far as the grid needs in ranges, at least a tile window and at most a full chunk, nothing once there", () => {
+		expect(countChunk(63, 63 + 10)).toBe(SQLITE_GROW_CHUNK)
+		expect(countChunk(63, 63 + 5_000)).toBe(5_000)
+		expect(countChunk(63, 10_000_000)).toBe(SQLITE_COUNT_CHUNK)
+		expect(countChunk(63, Number.POSITIVE_INFINITY)).toBe(SQLITE_COUNT_CHUNK)
+		expect(countChunk(500, 400)).toBe(0)
+	})
+
+	it("shows one tile of rows past an inexact count, the count itself once exact", () => {
+		expect(gridRows({ rows: 63, exact: false })).toBe(63 + SQLITE_TILE_ROWS)
+		expect(gridRows({ rows: 300, exact: true })).toBe(300)
 	})
 })

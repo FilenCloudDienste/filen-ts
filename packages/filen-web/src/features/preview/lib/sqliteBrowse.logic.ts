@@ -11,6 +11,25 @@ export const SQLITE_TILE_COLS = 32
 // read of each is a block download of its own.
 export const SQLITE_COUNT_CHUNK = 50_000
 export const SQLITE_FIRST_COUNT_CHUNK = SQLITE_TILE_ROWS - 1
+// A database read in ranges is counted only as far as the grid has read (every row past it a leaf page, maybe a block
+// download, of its own), in steps of at least a tile's rows and at most SQLITE_COUNT_CHUNK; its grid shows one tile of
+// rows past the count, so scrolling there asks for the next tile, and the count follows. Its exact count is taken when
+// asked (Count).
+export const SQLITE_GROW_CHUNK = SQLITE_TILE_ROWS
+
+// The rows a grid shows: the count when exact; one more tile of rows past an inexact count, which the grid reads when
+// scrolled to (an empty row there is past the table's end).
+export function gridRows(count: { readonly rows: number; readonly exact: boolean }): number {
+	return count.exact ? count.rows : count.rows + SQLITE_TILE_ROWS
+}
+
+// The rows the next counting step covers: on a table read whole, or counting all of it, a full chunk; on one read in
+// ranges, as far as `target` (the furthest row the grid has read) and no further; 0 once there.
+export function countChunk(counted: number, target: number): number {
+	if (target <= counted) return 0
+
+	return Math.min(SQLITE_COUNT_CHUNK, Math.max(SQLITE_GROW_CHUNK, target - counted))
+}
 // The shared interrupt flag's slots (an Int32Array the page and the worker both hold): tile requests with an id at or
 // below slot 0 are stale; the count with slot 1's id stops; the check with slot 2's id stops.
 export const INTERRUPT_TILES = 0
