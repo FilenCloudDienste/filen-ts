@@ -88,20 +88,23 @@ class Tokenizer {
 		return isIdentStart(first) || validEscape(first, second)
 	}
 
+	// Plain runs are sliced, never built a character at a time.
 	private name(): string {
 		let name = ""
+		let run = this.at
 
 		for (;;) {
 			const char = this.char()
 
 			if (isIdent(char)) {
-				name += char
 				this.at++
 			} else if (validEscape(char, this.char(1))) {
+				name += this.css.slice(run, this.at)
 				this.at++
 				name += this.escaped()
+				run = this.at
 			} else {
-				return name
+				return name + this.css.slice(run, this.at)
 			}
 		}
 	}
@@ -154,52 +157,62 @@ class Tokenizer {
 
 	private string(quote: string, start: number): Token {
 		let value = ""
+		let run = this.at
 
 		for (;;) {
-			const char = this.css[this.at++]
+			const char = this.css[this.at]
 
 			if (char === undefined || char === quote) {
+				value += this.css.slice(run, this.at)
+				this.at = Math.min(this.at + 1, this.css.length)
+
 				return { type: "string", value, start, end: this.at }
 			}
 
 			if (char === "\n") {
-				this.at--
-
 				return { type: "badString", start, end: this.at }
 			}
 
 			if (char === "\\") {
-				const next = this.char()
+				value += this.css.slice(run, this.at)
+				this.at++
 
-				if (next === undefined) {
-					continue
-				}
+				const next = this.char()
 
 				if (next === "\n") {
 					this.at++
-					continue
+				} else if (next !== undefined) {
+					value += this.escaped()
 				}
 
-				value += this.escaped()
+				run = this.at
 				continue
 			}
 
-			value += char
+			this.at++
 		}
 	}
 
 	// §4.3.6: after "url(" and its whitespace.
 	private url(start: number): Token {
 		let value = ""
+		let run = this.at
 
 		for (;;) {
-			const char = this.css[this.at++]
+			const char = this.css[this.at]
 
 			if (char === undefined || char === ")") {
+				value += this.css.slice(run, this.at)
+				this.at = Math.min(this.at + 1, this.css.length)
+
 				return { type: "url", value, start, end: this.at }
 			}
 
+			this.at++
+
 			if (isWhitespace(char)) {
+				value += this.css.slice(run, this.at - 1)
+
 				while (isWhitespace(this.char())) this.at++
 
 				if (this.char() === ")" || this.char() === undefined) {
@@ -220,11 +233,9 @@ class Tokenizer {
 					return this.badUrl(start)
 				}
 
-				value += this.escaped()
-				continue
+				value += this.css.slice(run, this.at - 1) + this.escaped()
+				run = this.at
 			}
-
-			value += char
 		}
 	}
 
@@ -349,6 +360,7 @@ class Tokenizer {
 	}
 }
 
+// Every token of `css` (already preprocessed). For tests and debugging: the judge below streams them.
 export function cssTokens(css: string): Token[] {
 	const tokenizer = new Tokenizer(css)
 	const tokens: Token[] = []
@@ -384,69 +396,88 @@ export function cssCid(value: string): string | null {
 	return CID.exec(value)?.[1] ?? null
 }
 
-// A url() value that loads nothing from outside: one clean data:image token, or a part of the message.
-function localValue(value: string, isPart: (id: string) => boolean): boolean {
-	const part = cssCid(value)
+// Resolves a part of the message (a cid: id) to its local URL; null for none.
+export type PartResolver = (id: string) => string | null
 
-	return CLEAN_DATA_IMAGE.test(value) || (part !== null && isPart(part))
+interface Replacement {
+	readonly start: number
+	readonly end: number
+	readonly local: string
 }
 
-// The url() of a url function with a string argument: the string's value, or null when the function holds anything
-// else.
-function urlFunctionValue(tokens: readonly Token[], open: number): { value: string; close: number } | null {
-	let at = open + 1
+// One chunk's verdict, fed a token at a time: whether it could load from outside the message, and where a url naming
+// one of its parts is to be replaced. Holds offsets only, never the tokens.
+class ChunkJudge {
+	loads = false
+	replacements: Replacement[] = []
+	// A url( function seen: where it starts, and its string argument once read.
+	private pending: { start: number; value: string | null } | null = null
+	private readonly resolve: PartResolver
 
-	while (tokens[at]?.type === "ws") at++
-
-	const string = tokens[at]
-
-	if (string?.type !== "string") {
-		return null
+	constructor(resolve: PartResolver) {
+		this.resolve = resolve
 	}
 
-	at++
+	// A url value: one clean data:image token, or a part of the message (kept, or replaced by its local URL).
+	private url(value: string, start: number, end: number): void {
+		if (CLEAN_DATA_IMAGE.test(value)) {
+			return
+		}
 
-	while (tokens[at]?.type === "ws") at++
+		const part = cssCid(value)
+		const local = part === null ? null : this.resolve(part)
 
-	return tokens[at]?.type === ")" ? { value: string.value, close: at } : null
-}
+		if (local === null) {
+			this.loads = true
+		} else {
+			this.replacements.push({ start, end, local })
+		}
+	}
 
-// Whether the tokens could load anything from outside the message.
-export function tokensLoad(tokens: readonly Token[], isPart: (id: string) => boolean): boolean {
-	for (let index = 0; index < tokens.length; index++) {
-		const token = tokens[index]
+	feed(token: Token): void {
+		const pending = this.pending
 
-		if (token === undefined) {
-			continue
+		if (pending !== null) {
+			if (token.type === "ws") {
+				return
+			}
+
+			if (pending.value === null && token.type === "string") {
+				pending.value = token.value
+
+				return
+			}
+
+			this.pending = null
+
+			if (pending.value !== null && token.type === ")") {
+				this.url(pending.value, pending.start, token.end)
+
+				return
+			}
+
+			// url( holding anything but one string.
+			this.loads = true
 		}
 
 		switch (token.type) {
 			case "badUrl":
 			case "badString":
-				return true
+				this.loads = true
+				break
 			case "url":
-				if (!localValue(token.value, isPart)) {
-					return true
-				}
-
+				this.url(token.value, token.start, token.end)
 				break
 			case "atKeyword":
-				if (LOADING_AT_RULES.has(token.value.toLowerCase())) {
-					return true
-				}
-
+				if (LOADING_AT_RULES.has(token.value.toLowerCase())) this.loads = true
 				break
 			case "function": {
 				const name = token.value.toLowerCase()
 
-				if (!LOADING_FUNCTIONS.has(name)) {
-					break
-				}
-
-				const url = name === "url" ? urlFunctionValue(tokens, index) : null
-
-				if (url === null || !localValue(url.value, isPart)) {
-					return true
+				if (name === "url") {
+					this.pending = { start: token.start, value: null }
+				} else if (LOADING_FUNCTIONS.has(name)) {
+					this.loads = true
 				}
 
 				break
@@ -456,104 +487,100 @@ export function tokensLoad(tokens: readonly Token[], isPart: (id: string) => boo
 		}
 	}
 
-	return false
+	// The verdict once the chunk ended (an unclosed url( loads).
+	finish(): boolean {
+		if (this.pending !== null) {
+			this.pending = null
+			this.loads = true
+		}
+
+		return this.loads
+	}
 }
 
-// The CSS of tokens [from, to) with every url naming a resolved part replaced by its local URL; any other text as it
-// was (preprocessed).
-export function withParts(css: string, tokens: readonly Token[], resolve: (id: string) => string | null): string {
-	let out = ""
-	let at = tokens[0]?.start ?? 0
+// Whether a CSS value could load anything from outside the message.
+export function cssValueLoads(css: string, resolve: PartResolver): boolean {
+	const tokenizer = new Tokenizer(preprocessCss(css))
+	const judge = new ChunkJudge(resolve)
 
-	for (let index = 0; index < tokens.length; index++) {
-		const token = tokens[index]
+	for (let token = tokenizer.next(); token !== null && !judge.loads; token = tokenizer.next()) {
+		judge.feed(token)
+	}
 
-		if (token === undefined) {
+	return judge.finish()
+}
+
+export interface KeptCss {
+	// The kept chunks as preprocessed, their parts' urls replaced.
+	readonly css: string
+	// Chunks dropped because they could load from outside the message.
+	readonly dropped: number
+}
+
+// CSS split into chunks, each kept or dropped whole while it streams: a style sheet's top-level statements (ending at
+// ";") and blocks (ending at their closing "}", an @media block whole), or a declaration list's declarations (split at
+// semicolons inside no block, parenthesis or bracket).
+export function keptCss(css: string, mode: "sheet" | "declarations", resolve: PartResolver): KeptCss {
+	const text = preprocessCss(css)
+	const tokenizer = new Tokenizer(text)
+	const kept: string[] = []
+	let dropped = 0
+	let judge = new ChunkJudge(resolve)
+	let start = -1
+	let end = -1
+	let depth = 0
+
+	const close = (): void => {
+		if (judge.finish()) {
+			dropped++
+		} else if (start === -1) {
+			kept.push("")
+		} else {
+			let out = ""
+			let at = start
+
+			for (const replacement of judge.replacements) {
+				out += `${text.slice(at, replacement.start)}url('${replacement.local}')`
+				at = replacement.end
+			}
+
+			kept.push(out + text.slice(at, end))
+		}
+
+		judge = new ChunkJudge(resolve)
+		start = -1
+	}
+
+	for (let token = tokenizer.next(); token !== null; token = tokenizer.next()) {
+		if (mode === "declarations" && token.type === ";" && depth === 0) {
+			close()
 			continue
 		}
 
-		let value: string | null = null
-		let end = token.end
+		if (start === -1) start = token.start
 
-		if (token.type === "url") {
-			value = token.value
-		} else if (token.type === "function" && token.value.toLowerCase() === "url") {
-			const url = urlFunctionValue(tokens, index)
+		end = token.end
+		judge.feed(token)
 
-			if (url !== null) {
-				value = url.value
-				end = tokens[url.close]?.end ?? end
-				index = url.close
+		if (mode === "sheet") {
+			if (token.type === "{") {
+				depth++
+			} else if (token.type === "}" && depth > 0) {
+				depth--
+
+				if (depth === 0) close()
+			} else if (token.type === ";" && depth === 0) {
+				close()
 			}
-		}
-
-		const part = value === null ? null : cssCid(value)
-		const local = part === null ? null : resolve(part)
-
-		if (local !== null) {
-			out += `${css.slice(at, token.start)}url('${local}')`
-			at = end
-		}
-	}
-
-	return out + css.slice(at, tokens.at(-1)?.end ?? at)
-}
-
-// Tokens split into top-level chunks: statements ending at ";" and blocks ending at their closing "}" (an @media block
-// whole).
-export function topLevelChunks(tokens: readonly Token[]): Token[][] {
-	const chunks: Token[][] = []
-	let current: Token[] = []
-	let depth = 0
-
-	for (const token of tokens) {
-		current.push(token)
-
-		if (token.type === "{") {
-			depth++
-		} else if (token.type === "}" && depth > 0) {
-			depth--
-
-			if (depth === 0) {
-				chunks.push(current)
-				current = []
-			}
-		} else if (token.type === ";" && depth === 0) {
-			chunks.push(current)
-			current = []
-		}
-	}
-
-	if (current.length > 0) {
-		chunks.push(current)
-	}
-
-	return chunks
-}
-
-// Tokens of a declaration list split at its top-level semicolons (inside no block, parenthesis or bracket).
-export function declarationChunks(tokens: readonly Token[]): Token[][] {
-	const chunks: Token[][] = []
-	let current: Token[] = []
-	let depth = 0
-
-	for (const token of tokens) {
-		if (token.type === ";" && depth === 0) {
-			chunks.push(current)
-			current = []
-			continue
-		}
-
-		current.push(token)
-
-		if (token.type === "{" || token.type === "(" || token.type === "[" || token.type === "function") {
+		} else if (token.type === "{" || token.type === "(" || token.type === "[" || token.type === "function") {
 			depth++
 		} else if ((token.type === "}" || token.type === ")" || token.type === "]") && depth > 0) {
 			depth--
 		}
 	}
 
-	chunks.push(current)
+	// A sheet's unfinished last chunk; a declaration list's last declaration, even an empty one.
+	if (start !== -1 || mode === "declarations") close()
 
-	return chunks
+	return { css: kept.join(mode === "sheet" ? "" : ";"), dropped }
 }

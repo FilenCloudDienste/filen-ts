@@ -2,7 +2,7 @@
 
 import DOMPurify from "dompurify"
 import { describe, expect, it } from "vitest"
-import { EMAIL_MAX_LINKS } from "@filen/shared/dom"
+import { EMAIL_MAX_HTML_CHARS, EMAIL_MAX_LINKS } from "@filen/shared/dom"
 import { sanitizeEmailHtml } from "@/features/preview/lib/emailSanitizer"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
@@ -204,5 +204,18 @@ describe("sanitizeEmailHtml", () => {
 
 		expect(sanitizeRichTextHtml(NOTE)).toBe(before)
 		expect(DOMPurify.sanitize('<img src="https://x.y/a.png">')).toBe(defaultBefore)
+	})
+})
+
+describe("the email sanitizer's input cap", () => {
+	it("refuses a document past the cap before parsing it, and reads one at the cap", () => {
+		const over = sanitizeEmailHtml(`<p>${"x".repeat(EMAIL_MAX_HTML_CHARS)}</p>`, NO_CID)
+
+		expect(over).toEqual({ html: "", remoteBlocked: 0, links: [], tooLarge: true })
+
+		const at = sanitizeEmailHtml(`<p>${"x".repeat(EMAIL_MAX_HTML_CHARS - 7)}</p>`, NO_CID)
+
+		expect(at.tooLarge).toBe(false)
+		expect(at.html).toContain("xxxx")
 	})
 })

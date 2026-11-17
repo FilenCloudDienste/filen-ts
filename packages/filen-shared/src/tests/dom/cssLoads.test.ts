@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { tokenize, TokenType } from "@csstools/css-tokenizer"
-import { cssTokens, declarationChunks, preprocessCss, tokensLoad, topLevelChunks } from "@filen/shared/dom/cssLoads"
+import { cssTokens, cssValueLoads, keptCss, preprocessCss } from "@filen/shared/dom/cssLoads"
 
 function types(css: string): string[] {
 	return cssTokens(css).map(token => ("value" in token ? `${token.type}:${token.value}` : token.type))
 }
 
+const resolve = (id: string): string | null => (id === "part" ? "blob:part" : null)
+
 function loads(css: string): boolean {
-	return tokensLoad(cssTokens(css), id => id === "part")
+	return cssValueLoads(css, resolve)
 }
 
 describe("css tokens", () => {
@@ -85,8 +87,18 @@ describe("css loads", () => {
 	)
 
 	it("splits rules at the top level and declarations at semicolons outside blocks", () => {
-		expect(topLevelChunks(cssTokens("a{b:c}@media x{d{e:f}}g{h:i}"))).toHaveLength(3)
-		expect(declarationChunks(cssTokens("color:red;background:url(x);margin:0"))).toHaveLength(3)
+		expect(keptCss("a{b:c}@media x{d{e:url(https://e.vil/x)}}g{h:i}", "sheet", resolve)).toEqual({ css: "a{b:c}g{h:i}", dropped: 1 })
+		expect(keptCss("color:red;background:url(x);margin:0", "declarations", resolve)).toEqual({ css: "color:red;margin:0", dropped: 1 })
+		expect(keptCss("a:b;;c:d;", "declarations", resolve)).toEqual({ css: "a:b;;c:d;", dropped: 0 })
+	})
+
+	// A comment between two rules belongs to neither and is not kept.
+	it("replaces a part's url by its local URL, keeping everything else as written", () => {
+		expect(keptCss("a{background:url(cid:part)}/* x */b{c:url( 'cid:part' ) /* y */ d}", "sheet", resolve)).toEqual({
+			css: "a{background:url('blob:part')}b{c:url('blob:part') /* y */ d}",
+			dropped: 0
+		})
+		expect(keptCss("a{background:url(cid:other)}", "sheet", resolve)).toEqual({ css: "", dropped: 1 })
 	})
 })
 

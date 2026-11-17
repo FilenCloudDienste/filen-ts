@@ -1,3 +1,4 @@
+import { EMAIL_MAX_HTML_CHARS } from "@filen/shared/dom"
 import { linkHrefOf } from "@/lib/trustedLinks/useTrustedLinkGate"
 
 // The frame SafeHtmlDocument shows sanitized HTML in: no scripts (its sandbox gives only allow-same-origin, so the page
@@ -7,8 +8,8 @@ import { linkHrefOf } from "@/lib/trustedLinks/useTrustedLinkGate"
 // string is never held by the frame.
 export const SAFE_HTML_SANDBOX = "allow-same-origin"
 export const SAFE_HTML_CSP = "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'"
-// The largest document a frame is given (characters): a bigger one is not rendered.
-export const SAFE_HTML_MAX_CHARS = 8 * 1024 * 1024
+// The largest document a frame is given (characters), the sanitizer's own input cap: a bigger one is not rendered.
+export const SAFE_HTML_MAX_CHARS = EMAIL_MAX_HTML_CHARS
 
 // Sanitized links carry their address in data-filen-href, never href: shown as links, opened by the host.
 const LINK_STYLE = "[data-filen-href]{cursor:pointer;text-decoration:underline;color:LinkText}"

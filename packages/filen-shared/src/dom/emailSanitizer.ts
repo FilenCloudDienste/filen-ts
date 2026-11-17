@@ -13,7 +13,7 @@
 // frame can never navigate, and the host opens it through its own gate. They are also returned, once each, labelled
 // by their visible text, for the host to list beside the frame (a script-less frame runs no listener in WebKit).
 
-import { cssTokens, declarationChunks, preprocessCss, tokensLoad, topLevelChunks, withParts } from "./cssLoads"
+import { cssValueLoads, keptCss } from "./cssLoads"
 
 export interface EmailLink {
 	readonly href: string
@@ -22,10 +22,13 @@ export interface EmailLink {
 }
 
 export interface EmailSanitizeResult {
+	// Empty when the input is past EMAIL_MAX_HTML_CHARS (`tooLarge`).
 	readonly html: string
 	// URLs, CSS rules, declarations and attribute values removed because they pointed outside the message.
 	readonly remoteBlocked: number
 	readonly links: readonly EmailLink[]
+	// The input was past EMAIL_MAX_HTML_CHARS and was not read.
+	readonly tooLarge: boolean
 }
 
 // The part of DOMPurify this module uses.
@@ -46,6 +49,8 @@ export interface EmailPurifier {
 	removed: unknown[]
 }
 
+// The largest HTML read (characters); a bigger document is refused before parsing.
+export const EMAIL_MAX_HTML_CHARS = 8 * 1024 * 1024
 // The attribute a kept link's address moves to.
 export const EMAIL_LINK_ATTRIBUTE = "data-filen-href"
 // The most links listed beside a body (a newsletter can carry hundreds; the frame keeps them all).
@@ -103,39 +108,14 @@ function localUrl(value: string, run: Run): string | null {
 	return cid === undefined ? null : run.resolveCid(cid)
 }
 
-const isPart = (run: Run) => (id: string) => run.resolveCid(id) !== null
+// CSS with every chunk that could load from outside the message dropped whole and counted: a style element's rules (an
+// @media block with one inside it too), or a style attribute's declarations.
+function cleanCss(css: string, mode: "sheet" | "declarations", run: Run): string {
+	const kept = keptCss(css, mode, run.resolveCid)
 
-// CSS split into chunks, each kept as preprocessed (its parts' urls resolved) or dropped whole and counted when it could
-// load from outside the message.
-function keptChunks(css: string, split: (tokens: ReturnType<typeof cssTokens>) => ReturnType<typeof cssTokens>[], run: Run): string[] {
-	const text = preprocessCss(css)
-	const kept: string[] = []
+	run.remoteBlocked += kept.dropped
 
-	for (const chunk of split(cssTokens(text))) {
-		if (tokensLoad(chunk, isPart(run))) {
-			run.remoteBlocked++
-		} else {
-			kept.push(withParts(text, chunk, run.resolveCid))
-		}
-	}
-
-	return kept
-}
-
-// A style element's CSS with every rule that could load from outside dropped whole (an @media block with one inside
-// it too).
-function cleanStyleSheet(css: string, run: Run): string {
-	return keptChunks(css, topLevelChunks, run).join("")
-}
-
-// A style attribute with every declaration that could load from outside dropped.
-function cleanStyleAttribute(css: string, run: Run): string {
-	return keptChunks(css, declarationChunks, run).join(";")
-}
-
-// A CSS value attribute (SVG presentation) judged whole.
-function cssValueLoads(value: string, run: Run): boolean {
-	return tokensLoad(cssTokens(preprocessCss(value)), isPart(run))
+	return kept.css
 }
 
 function linkHref(value: string): string | null {
@@ -186,14 +166,14 @@ function cleanAttributes(node: Element, run: Run): void {
 	const style = node.getAttribute("style")
 
 	if (style !== null) {
-		node.setAttribute("style", cleanStyleAttribute(style, run))
+		node.setAttribute("style", cleanCss(style, "declarations", run))
 	}
 
 	// Judged as one declaration each.
 	for (const name of PRESENTATION_ATTRIBUTES) {
 		const value = node.getAttribute(name)
 
-		if (value !== null && cssValueLoads(value, run)) {
+		if (value !== null && cssValueLoads(value, run.resolveCid)) {
 			node.removeAttribute(name)
 			run.remoteBlocked++
 		}
@@ -265,7 +245,7 @@ export function createEmailHtmlSanitizer(
 
 	purifier.addHook("uponSanitizeElement", node => {
 		if (current !== null && node.nodeName.toLowerCase() === "style" && node.textContent !== null) {
-			node.textContent = cleanStyleSheet(node.textContent, current)
+			node.textContent = cleanCss(node.textContent, "sheet", current)
 		}
 	})
 	purifier.addHook("afterSanitizeAttributes", node => {
@@ -275,6 +255,10 @@ export function createEmailHtmlSanitizer(
 	})
 
 	return (html, resolveCid) => {
+		if (html.length > EMAIL_MAX_HTML_CHARS) {
+			return { html: "", remoteBlocked: 0, links: [], tooLarge: true }
+		}
+
 		const run: Run = { resolveCid, remoteBlocked: 0 }
 
 		current = run
@@ -291,7 +275,7 @@ export function createEmailHtmlSanitizer(
 			// WHOLE_DOCUMENT with RETURN_DOM: the document's html element.
 			const element = root as Element
 
-			return { html: element.outerHTML, remoteBlocked: run.remoteBlocked, links: keptLinks(element) }
+			return { html: element.outerHTML, remoteBlocked: run.remoteBlocked, links: keptLinks(element), tooLarge: false }
 		} finally {
 			current = null
 			purifier.removed.length = 0
