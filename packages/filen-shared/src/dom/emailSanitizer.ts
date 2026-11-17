@@ -27,7 +27,7 @@ export interface EmailSanitizeResult {
 	// URLs, CSS rules, declarations and attribute values removed because they pointed outside the message.
 	readonly remoteBlocked: number
 	readonly links: readonly EmailLink[]
-	// The input was past EMAIL_MAX_HTML_CHARS and was not read.
+	// The input, or the sanitized document, was past EMAIL_MAX_HTML_CHARS: nothing is returned.
 	readonly tooLarge: boolean
 }
 
@@ -275,7 +275,14 @@ export function createEmailHtmlSanitizer(
 			// WHOLE_DOCUMENT with RETURN_DOM: the document's html element.
 			const element = root as Element
 
-			return { html: element.outerHTML, remoteBlocked: run.remoteBlocked, links: keptLinks(element), tooLarge: false }
+			const output = element.outerHTML
+
+			// Resolved parts and escaping can grow a document past what its frame shows: one gate for both.
+			if (output.length > EMAIL_MAX_HTML_CHARS) {
+				return { html: "", remoteBlocked: run.remoteBlocked, links: [], tooLarge: true }
+			}
+
+			return { html: output, remoteBlocked: run.remoteBlocked, links: keptLinks(element), tooLarge: false }
 		} finally {
 			current = null
 			purifier.removed.length = 0

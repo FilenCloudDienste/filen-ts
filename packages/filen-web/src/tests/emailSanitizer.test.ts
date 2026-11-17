@@ -208,14 +208,23 @@ describe("sanitizeEmailHtml", () => {
 })
 
 describe("the email sanitizer's input cap", () => {
-	it("refuses a document past the cap before parsing it, and reads one at the cap", () => {
+	it("refuses a document past the cap before parsing it, and reads one just under it", () => {
 		const over = sanitizeEmailHtml(`<p>${"x".repeat(EMAIL_MAX_HTML_CHARS)}</p>`, NO_CID)
 
 		expect(over).toEqual({ html: "", remoteBlocked: 0, links: [], tooLarge: true })
 
-		const at = sanitizeEmailHtml(`<p>${"x".repeat(EMAIL_MAX_HTML_CHARS - 7)}</p>`, NO_CID)
+		const at = sanitizeEmailHtml(`<p>${"x".repeat(EMAIL_MAX_HTML_CHARS - 100)}</p>`, NO_CID)
 
 		expect(at.tooLarge).toBe(false)
 		expect(at.html).toContain("xxxx")
+	})
+
+	// Every short cid url becomes a long local one: the input fits, the output does not.
+	it("refuses a document that grows past the cap as it is sanitized", () => {
+		const css = "a{b:url(cid:p)}".repeat(400_000)
+		const result = sanitizeEmailHtml(`<style>${css}</style>`, id => (id === "p" ? `blob:https://app.example/${"0".repeat(48)}` : null))
+
+		expect(css.length).toBeLessThan(EMAIL_MAX_HTML_CHARS)
+		expect(result).toEqual({ html: "", remoteBlocked: 0, links: [], tooLarge: true })
 	})
 })
