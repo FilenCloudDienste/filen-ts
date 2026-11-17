@@ -183,6 +183,7 @@ class Mutex {
 export class PacketDemuxer implements Demuxer {
 	public readonly input: Input
 	private readonly open: Promise<ContainerReader>
+	private backings: Promise<InputTrackBacking[]> | null = null
 	private readonly mimeType: string
 	private readonly runs: Run[] = []
 	private readonly mutex = new Mutex()
@@ -210,16 +211,21 @@ export class PacketDemuxer implements Demuxer {
 		return Promise.resolve({})
 	}
 
-	public async getTrackBackings(): Promise<InputTrackBacking[]> {
-		const reader = await this.open
+	// The same backings for every call: mediabunny names a track by its backing's place in the list it cached, and two
+	// track queries at once (a primary video track beside the audio tracks) each ask before either is cached, so new
+	// backings for the second would leave the first's tracks out of the list (its assertion fails on their id).
+	public getTrackBackings(): Promise<InputTrackBacking[]> {
+		this.backings ??= this.open.then(reader => {
+			const counts = { video: 0, audio: 0 }
 
-		const counts = { video: 0, audio: 0 }
+			// mediabunny's track number is the track's place among the tracks of its type, which the probe's lists use too;
+			// the container's own track number stays the packets' key.
+			return reader.tracks.map(track =>
+				track.type === "video" ? new VideoBacking(this, track, ++counts.video) : new AudioBacking(this, track, ++counts.audio)
+			)
+		})
 
-		// mediabunny's track number is the track's place among the tracks of its type, which the probe's lists use too;
-		// the container's own track number stays the packets' key.
-		return reader.tracks.map(track =>
-			track.type === "video" ? new VideoBacking(this, track, ++counts.video) : new AudioBacking(this, track, ++counts.audio)
-		)
+		return this.backings
 	}
 
 	// The header's duration, else one estimated from the data's start at the file's average rate (never a read of the
