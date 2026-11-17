@@ -1,3 +1,4 @@
+import type { FileVerdict } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import {
 	bufferedSizeCap,
@@ -54,7 +55,12 @@ export type AnonPreviewability = "previewable" | "too-large" | "archive" | "unpr
 // only ever held whole, so above its cap it is too large — the view then offers download instead. A non-file /
 // undecryptable / unknown-category item is simply not previewable. An archive is never previewed inline: a signed-in
 // visitor may browse it on request, through the authed client, at any size (its listing is not a buffered read).
-export function anonPreviewability(item: DriveItem, profile: DeviceProfile = deviceProfile()): AnonPreviewability {
+// `verdict` is what a read of its content found (undefined: the recorded one).
+export function anonPreviewability(
+	item: DriveItem,
+	profile: DeviceProfile = deviceProfile(),
+	verdict?: FileVerdict | null
+): AnonPreviewability {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {
@@ -63,11 +69,11 @@ export function anonPreviewability(item: DriveItem, profile: DeviceProfile = dev
 
 	// Its content read picks the viewer (a `.ts` that may be a transport stream, which streams at any size): it previews
 	// if some kind the read may find does.
-	if (needsContentSniff(item) !== null) {
+	if (needsContentSniff(item, verdict) !== null) {
 		return sniffAdmits(item, profile, "link") ? "previewable" : "too-large"
 	}
 
-	const category = previewType(item)
+	const category = previewType(item, verdict)
 
 	switch (CATEGORY_POLICY[category].anon) {
 		case "none":

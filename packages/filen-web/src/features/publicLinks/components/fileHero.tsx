@@ -14,6 +14,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
+import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
 import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
@@ -63,8 +64,10 @@ export function FileHero({
 	const base = asDirectoryOrFile(item)
 	const name = base.type === "file" ? driveItemName(base) : base.data.uuid
 	const size = base.data.size
-	// A probe that resolves later (a HEIC this browser shows by itself) may make the file previewable.
-	const previewability = anonPreviewability(item, useDeviceProfile())
+	// A probe that resolves later (a HEIC this browser shows by itself) may make the file previewable, and the preview's
+	// read of its content may find nothing it shows (an Illustrator file without a PDF inside): the card then.
+	const verdict = useFileKindVerdict(base.type === "file" ? base.data.uuid : undefined)
+	const previewability = anonPreviewability(item, useDeviceProfile(), verdict ?? null)
 	const [previewHidden, setPreviewHidden] = useState(false)
 	const [showContents, setShowContents] = useState(false)
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
