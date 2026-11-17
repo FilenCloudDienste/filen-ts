@@ -51,6 +51,19 @@ describe("the preview's markdown", () => {
 		expect(source.getAttribute("title")).not.toBe("")
 	})
 
+	it("keeps a fence whose language is math a code block", () => {
+		const { container } = render(
+			<PreviewMarkdown
+				text={"```math\n\\frac{a}{b}\n```"}
+				alt="notes.md"
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		expect(container.querySelector("span[role=math]")).toBeNull()
+		expect(container.querySelector("pre > code")?.textContent).toBe("\\frac{a}{b}\n")
+	})
+
 	it("keeps prices text", () => {
 		render(
 			<PreviewMarkdown

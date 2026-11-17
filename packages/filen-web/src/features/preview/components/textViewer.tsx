@@ -29,6 +29,8 @@ export interface TextViewerProps {
 	// Asked to be editable: whether a save writes the file back as it was (false for text in an encoding a save would
 	// change until converted, or not text at all, which shows read-only). The overlay keeps the slot read-only on false.
 	onTextState?: (state: TextState) => void
+	// The codepage this version is known to be in (this open saved it so): read without asking the detector again.
+	readAs?: string | null
 }
 
 // Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile), then a decode that keeps the
@@ -36,8 +38,8 @@ export interface TextViewerProps {
 // under its command bar lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte
 // loading, item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState }: TextViewerProps) {
-	const text = usePreviewTextFile(item, editable === true, onTextState)
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: TextViewerProps) {
+	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
 
 	useLeaveViewerFullScreen()
 

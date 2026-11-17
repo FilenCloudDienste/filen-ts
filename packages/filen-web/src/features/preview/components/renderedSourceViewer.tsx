@@ -37,6 +37,8 @@ export interface RenderedSourceViewerProps {
 	locked?: boolean
 	// See TextViewer's own prop.
 	onTextState?: (state: TextState) => void
+	// The codepage this version is known to be in (this open saved it so): read without asking the detector again.
+	readAs?: string | null
 }
 
 // A text-family file shown rendered, with its source a toggle away (markdown; diagrams, calendars and the like render
@@ -55,9 +57,10 @@ export function RenderedSourceViewer({
 	onDirtyChange,
 	contentRef,
 	locked,
-	onTextState
+	onTextState,
+	readAs
 }: RenderedSourceViewerProps) {
-	const text = usePreviewTextFile(item, editable === true, onTextState)
+	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
 	const download = usePreviewDownload()
 
 	useLeaveViewerFullScreen()

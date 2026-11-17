@@ -18,7 +18,8 @@ function classNames(value: unknown): readonly unknown[] {
 function PreviewCode({ className, children }: { className?: string | undefined; children?: ReactNode | undefined }) {
 	const classes = className?.split(" ") ?? []
 
-	if (classes.includes("language-math")) {
+	// Math only as remark-math marks it: a fence whose language is "math" stays a code block.
+	if (classes.includes("math-inline") || classes.includes("math-display")) {
 		return (
 			<MathFormula
 				latex={typeof children === "string" ? children : ""}

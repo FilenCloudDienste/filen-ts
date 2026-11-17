@@ -69,6 +69,7 @@ export const TEXT_ENCODINGS: readonly { label: string; name: string }[] = [
 	{ label: "iso-8859-2", name: "Central European (ISO 8859-2)" },
 	{ label: "iso-8859-4", name: "Baltic (ISO 8859-4)" },
 	{ label: "iso-8859-5", name: "Cyrillic (ISO 8859-5)" },
+	{ label: "iso-8859-6", name: "Arabic (ISO 8859-6)" },
 	{ label: "iso-8859-7", name: "Greek (ISO 8859-7)" },
 	{ label: "iso-8859-8", name: "Hebrew (ISO 8859-8)" },
 	{ label: "iso-8859-10", name: "Nordic (ISO 8859-10)" },
@@ -78,6 +79,18 @@ export const TEXT_ENCODINGS: readonly { label: string; name: string }[] = [
 ]
 
 const KNOWN_LABELS: ReadonlySet<string> = new Set(TEXT_ENCODINGS.map(encoding => encoding.label))
+
+// Names a detector may give that TEXT_ENCODINGS lists under another label which reads the same bytes the same way
+// (GB18030 is a superset of GBK).
+const LABEL_ALIASES: ReadonlyMap<string, string> = new Map([["gbk", "gb18030"]])
+
+// The TEXT_ENCODINGS label for an encoding's WHATWG name (a detector's answer), or null when it lists none.
+export function textEncodingLabel(name: string): string | null {
+	const lowered = name.toLowerCase()
+	const label = LABEL_ALIASES.get(lowered) ?? lowered
+
+	return KNOWN_LABELS.has(label) ? label : null
+}
 
 // Legacy encodings with multi-byte sequences: never written back as-is.
 const MULTI_BYTE_LEGACY: ReadonlySet<string> = new Set(["gb18030", "gbk", "big5", "shift_jis", "euc-jp", "euc-kr", "iso-2022-jp"])
@@ -453,6 +466,14 @@ export function decodeTextBytes(bytes: Uint8Array, options?: DecodeTextOptions):
 	}
 
 	return legacy("", "windows-1252", result.bom)
+}
+
+// The bytes read as Unicode (BOM, UTF-16 sniff, strict UTF-8, UTF-8 with a few errors), or null when they are not: a
+// legacy codepage then has to be picked (decodeTextBytes with that `encoding`). One decode either way.
+export function decodeUnicodeText(bytes: Uint8Array, options?: { prefix?: boolean }): DecodedText | null {
+	const result = decodeUnicode(bytes, options?.prefix === true)
+
+	return "decoded" in result ? result.decoded : null
 }
 
 // No Unicode reading fits (BOM, UTF-16, UTF-8 even with a few errors): a legacy codepage has to be picked.

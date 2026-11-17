@@ -15,6 +15,8 @@ export interface MarkdownViewerProps {
 	contentRef?: RefObject<TextBuffer | null>
 	locked?: boolean
 	onTextState?: (state: TextState) => void
+	// The codepage this version is known to be in (this open saved it so): read without asking the detector again.
+	readAs?: string | null
 }
 
 function renderMarkdown(source: RenderedSource, alt: string) {
@@ -28,7 +30,7 @@ function renderMarkdown(source: RenderedSource, alt: string) {
 
 // A markdown file: rendered (math, images that are not loaded), with its source a toggle away.
 // No parameter defaults: the React Compiler skips a component that has them.
-export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState }: MarkdownViewerProps) {
+export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: MarkdownViewerProps) {
 	return (
 		<RenderedSourceViewer
 			item={item}
@@ -41,6 +43,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 			{...(contentRef === undefined ? {} : { contentRef })}
 			{...(locked === undefined ? {} : { locked })}
 			{...(onTextState === undefined ? {} : { onTextState })}
+			{...(readAs === undefined ? {} : { readAs })}
 		/>
 	)
 }

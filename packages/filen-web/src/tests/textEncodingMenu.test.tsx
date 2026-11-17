@@ -10,11 +10,11 @@ import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 // The text editor's encoding menu over a real viewer and editor: what was detected, Reopen with another encoding
 // (never over unsaved edits, never remembered), Convert to UTF-8 (a read-only file becomes editable and dirty), and a
-// save refused for a character the file's encoding cannot hold.
+// save refused for a character the file's encoding cannot hold. Converting a lossy read asks first.
 
 const { previewBytes, frames, detected } = vi.hoisted(() => ({
 	// What the detector guesses for bytes that are not Unicode (its wasm is not loaded here).
-	detected: { current: null as string | null },
+	detected: { current: null as string | null, asked: 0 },
 	previewBytes: { current: new Uint8Array(0) },
 	frames: [] as FrameRequestCallback[]
 }))
@@ -25,7 +25,11 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvDelete: () => Promise.resolve()
 }))
 vi.mock("@/features/preview/lib/encodingGuess", () => ({
-	guessLegacyEncoding: () => Promise.resolve(detected.current)
+	guessLegacyEncoding: () => {
+		detected.asked++
+
+		return Promise.resolve(detected.current)
+	}
 }))
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: previewBytes.current, refetch: vi.fn() })
@@ -79,7 +83,7 @@ function editorView(): EditorView {
 	return view
 }
 
-async function mount(bytes: Uint8Array<ArrayBuffer>) {
+async function mount(bytes: Uint8Array<ArrayBuffer>, readAs?: string) {
 	previewBytes.current = bytes
 
 	const contentRef = createRef<TextBuffer | null>() as { current: TextBuffer | null }
@@ -94,6 +98,7 @@ async function mount(bytes: Uint8Array<ArrayBuffer>) {
 			contentRef={contentRef}
 			onDirtyChange={onDirtyChange}
 			onTextState={onTextState}
+			{...(readAs === undefined ? {} : { readAs })}
 		/>
 	)
 
@@ -121,7 +126,31 @@ describe("the encoding menu", () => {
 		expect(editorView().state.doc.toString()).toBe("При")
 		await openMenu(/Encoding: Windows-1251/)
 		expect(screen.getByText("Detected: Windows-1251")).toBeTruthy()
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "windows-1251" })
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "windows-1251", readEncoding: "windows-1251" })
+	})
+
+	// A version this open saved reads in the codepage it was saved in: a new guess could differ, and the next save would
+	// then mix two codepages in one file.
+	it("reads a version known to be in a codepage in it, without asking the detector", async () => {
+		detected.current = "windows-1251"
+		detected.asked = 0
+		await mount(CYRILLIC, "koi8-r")
+
+		expect(detected.asked).toBe(0)
+		expect(editorView().state.doc.toString()).toBe(new TextDecoder("koi8-r").decode(CYRILLIC))
+		expect(screen.getByRole("button", { name: "Encoding: KOI8-R" })).toBeTruthy()
+	})
+
+	// The detector names GBK, which the menu lists as GB18030 (the same bytes read the same way).
+	it("checks the menu's own label for the detector's name", async () => {
+		detected.current = "gb18030"
+		await mount(Uint8Array.of(0xc4, 0xe3, 0xba, 0xc3))
+
+		await openMenu(/Encoding: GB18030/)
+		fireEvent.click(screen.getByRole("menuitem", { name: "Reopen with encoding" }))
+		expect((await screen.findByRole("menuitemradio", { name: "Chinese Simplified (GB18030)" })).getAttribute("aria-checked")).toBe(
+			"true"
+		)
 	})
 
 	it("says what was detected and reopens the held bytes with another encoding", async () => {
@@ -136,23 +165,30 @@ describe("the encoding menu", () => {
 
 		expect(editorView().state.doc.toString()).toBe("При")
 		expect(screen.getByRole("button", { name: /Encoding: Windows-1251/ })).toBeTruthy()
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "windows-1251" })
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "windows-1251", readEncoding: "windows-1251" })
 	})
 
-	it("converts a file a save would change to UTF-8: editable, and unsaved until saved", async () => {
+	it("converts a lossy read to UTF-8 only once the loss is accepted: then editable, and unsaved until saved", async () => {
 		const { contentRef, onDirtyChange, onTextState } = await mount(STRAY)
 
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: false, encoding: "utf-8" })
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: false, encoding: "utf-8", readEncoding: "utf-8" })
 		expect(screen.getByText("Read-only")).toBeTruthy()
 
 		await openMenu(/Encoding: UTF-8/)
 		fireEvent.click(screen.getByRole("menuitem", { name: "Convert to UTF-8" }))
 
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "utf-8" })
+		const warning = await screen.findByRole("alertdialog", { name: "Replace unreadable characters?" })
+
+		expect(warning.textContent).toContain("can't be read as UTF-8")
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: false, encoding: "utf-8", readEncoding: "utf-8" })
+
+		fireEvent.click(screen.getByRole("button", { name: "Convert to UTF-8" }))
+
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding: "utf-8", readEncoding: "utf-8" })
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
 		expect(screen.queryByText("Read-only")).toBeNull()
 		expect(screen.getByText("UTF-8 (unsaved)")).toBeTruthy()
-		expect(contentRef.current?.bytes()).toEqual(new TextEncoder().encode("Grüße, Köln�"))
+		expect(contentRef.current?.bytes()).toEqual({ bytes: new TextEncoder().encode("Grüße, Köln\uFFFD") })
 	})
 
 	it("does not offer Convert for a file that is UTF-8 as is", async () => {
@@ -170,19 +206,25 @@ describe("the encoding menu", () => {
 			view.dispatch({ changes: { from: view.state.doc.length, insert: "☃" } })
 		})
 
-		let bytes: Uint8Array | null | undefined
+		const encoded = contentRef.current?.bytes()
 
+		expect(encoded).toEqual({ unencodable: { line: 1, column: 5, char: "☃" } })
+
+		// What the overlay does with a refused save.
 		act(() => {
-			bytes = contentRef.current?.bytes()
+			if (encoded !== undefined && "unencodable" in encoded) {
+				contentRef.current?.explain(encoded.unencodable)
+			}
 		})
 
-		expect(bytes).toBeNull()
 		expect(await screen.findByText(/Windows-1252 has no character “☃” \(line 1, column 5\)/)).toBeTruthy()
 
 		fireEvent.click(screen.getByRole("button", { name: "Convert to UTF-8" }))
 
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
-		expect(contentRef.current?.bytes()).toEqual(new TextEncoder().encode("café☃"))
+		// Nothing was lost in the read: no warning.
+		expect(screen.queryByRole("alertdialog", { name: "Replace unreadable characters?" })).toBeNull()
+		expect(contentRef.current?.bytes()).toEqual({ bytes: new TextEncoder().encode("café☃") })
 	})
 
 	it("blocks Reopen while there are unsaved edits", async () => {

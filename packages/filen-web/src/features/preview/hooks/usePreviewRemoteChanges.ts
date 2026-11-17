@@ -8,6 +8,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
 	editedSaveTimes,
 	runPreviewSave,
+	SaveRefusedError,
 	type ImageSaveEdits,
 	type PresentationSaveEdits,
 	type PreviewSaveContent
@@ -782,6 +783,15 @@ export function usePreviewRemoteChanges({
 		setPending(true)
 
 		const outcome = await writeAsNewFile(asked, item, readEdits, t).catch((e: unknown) => {
+			// An editor refused to write its edits (text its encoding cannot hold): its reason, not a failure.
+			if (e instanceof SaveRefusedError) {
+				if (!e.silent) {
+					toast.error(t(e.messageKey))
+				}
+
+				return null
+			}
+
 			log.error("preview", "saving unsaved edits as a new file failed", e)
 			toast.error(t("previewSaveAsNewFileFailed"))
 

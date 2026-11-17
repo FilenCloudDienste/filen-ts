@@ -55,7 +55,7 @@ import { BAR_BUTTON, BAR_MENU } from "@/features/preview/components/commandBar.l
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { CODE_INDENTS, type CodeChrome, type CodeIndent } from "@/features/preview/lib/codeChrome"
 import { CODE_FONT_SIZES, setCodeViewSettings, type CodeViewSettings } from "@/features/preview/lib/codeViewSettings"
-import { TEXT_ENCODINGS } from "@filen/shared/textEncoding"
+import { TEXT_ENCODINGS, textEncodingLabel } from "@filen/shared/textEncoding"
 import { encodingShortName, type TextFileFormat } from "@/features/preview/lib/textFile"
 import type { TextEncodingControls } from "@/features/preview/hooks/usePreviewTextFile"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
@@ -131,8 +131,10 @@ function EncodingMenu({ format, encoding, dirty }: { format: TextFileFormat; enc
 		format.encoding === "utf-8"
 			? t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")
 			: encodingShortName(format.encoding)
-	// A file read with an encoding outside the menu (UTF-32) still shows as chosen nowhere.
-	const current = encoding.chosen ?? encoding.detected
+	// Checked under the menu's own label (a detector's GBK is the menu's GB18030); a file read with an encoding outside
+	// the menu (UTF-32) checks none.
+	const read = encoding.chosen ?? encoding.detected
+	const current = textEncodingLabel(read) ?? read
 
 	return (
 		<DropdownMenu>

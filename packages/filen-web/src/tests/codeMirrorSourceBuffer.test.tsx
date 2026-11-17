@@ -288,12 +288,20 @@ describe("CodeMirrorSource buffer", () => {
 
 		append(view, "\n!")
 
-		expect(contentRef.current?.bytes()).toEqual(Uint8Array.of(0x63, 0x61, 0x66, 0xe9, 0x0d, 0x0a, 0x21))
-		expect(onUnencodable).not.toHaveBeenCalled()
+		expect(contentRef.current?.bytes()).toEqual({ bytes: Uint8Array.of(0x63, 0x61, 0x66, 0xe9, 0x0d, 0x0a, 0x21) })
 
 		append(view, "\u2603")
 
-		expect(contentRef.current?.bytes()).toBeNull()
+		const encoded = contentRef.current?.bytes()
+
+		expect(encoded).toEqual({ unencodable: { line: 2, column: 2, char: "\u2603" } })
+		// Reading the bytes explains nothing by itself: the save asks the editor to.
+		expect(onUnencodable).not.toHaveBeenCalled()
+
+		if (encoded !== undefined && "unencodable" in encoded) {
+			contentRef.current?.explain(encoded.unencodable)
+		}
+
 		expect(onUnencodable).toHaveBeenCalledWith({ line: 2, column: 2, char: "\u2603" })
 	})
 
@@ -320,7 +328,7 @@ describe("CodeMirrorSource buffer", () => {
 		)
 
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
-		expect(contentRef.current?.bytes()).toEqual(new TextEncoder().encode("caf\u00e9"))
+		expect(contentRef.current?.bytes()).toEqual({ bytes: new TextEncoder().encode("caf\u00e9") })
 
 		const view = editorView(container)
 
@@ -329,5 +337,24 @@ describe("CodeMirrorSource buffer", () => {
 
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
 		expect(view.state.doc.eq(Text.of(["caf\u00e9"]))).toBe(true)
+	})
+
+	// Most lines end in CRLF, one in LF: the edit changes its own line only.
+	it("keeps each untouched line's own ending", () => {
+		const contentRef = createRef<TextBuffer | null>()
+		const { container } = render(
+			<CodeMirrorSource
+				text={"one\r\ntwo\nthree\r\n"}
+				tag="text"
+				alt="notes.txt"
+				editable
+				format={{ encoding: "utf-8", bom: false, lineEnding: "crlf" }}
+				contentRef={contentRef}
+			/>
+		)
+
+		append(editorView(container), "four")
+
+		expect(contentRef.current?.text()).toBe("one\r\ntwo\nthree\r\nfour")
 	})
 })

@@ -315,7 +315,7 @@ export function PreviewOverlay({
 			return await readImageEdits(editing, imageSaveRef.current, editable)
 		}
 
-		const edits = await readSaveEdits(false)
+		const edits = await readSaveEdits(false, false)
 
 		return edits === null ? null : "kind" in edits ? edits : edits.bytes
 	}
@@ -346,6 +346,10 @@ export function PreviewOverlay({
 	// What the slot's text viewer reports (TextState): text a save would change keeps the slot read-only until the
 	// viewer converts it; the encoding a save writes is what a newer version is compared in.
 	const [textState, setTextState] = useState<(TextState & { forUuid: string }) | null>(null)
+	// The codepage the slot's text was last saved in by this overlay (frozen uuid), and the version that save made:
+	// that version is read in it, never detected again (a guess could differ, and the next save would mix codepages).
+	// Unicode needs none: its reading is never a guess.
+	const [savedReadAs, setSavedReadAs] = useState<{ forUuid: string; versionUuid: string; encoding: string } | null>(null)
 	// Not component state: the sign-out path is a plain lib function and has to be able to read this
 	// same bit (see usePreviewUnsavedGuard). Boolean-collapsed selector, so the overlay still re-renders
 	// on the dirty EDGE only.
@@ -426,6 +430,10 @@ export function PreviewOverlay({
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 	const slotText = textState !== null && textState.forUuid === rawDriveItem?.data.uuid ? textState : null
+	const readAs =
+		savedReadAs !== null && savedReadAs.forUuid === rawDriveItem?.data.uuid && savedReadAs.versionUuid === driveItem?.data.uuid
+			? savedReadAs.encoding
+			: null
 	const editable = slotWritable && slotText?.writable !== false
 	// Read-only only because a rename changed the format the open edits would be saved in.
 	const renamedReadOnly = driveItem !== undefined && pin?.editable === true && saveFormat(driveItem) !== pin.format
@@ -1155,7 +1163,7 @@ export function PreviewOverlay({
 
 	async function saveNow(targetItem: DriveItem, targetRawItem: DriveItem, auto: boolean): Promise<void> {
 		// An editor that refused to write its file (its own check failed) says why.
-		const edits = await readSaveEdits(auto).catch((e: unknown) => {
+		const edits = await readSaveEdits(auto, true).catch((e: unknown) => {
 			if (e instanceof SaveRefusedError) {
 				return e
 			}
@@ -1220,6 +1228,16 @@ export function PreviewOverlay({
 		// A spreadsheet stays mounted (keyed by its document, see bodyKey) and reports its own dirty bit:
 		// edits made during the upload are still unsaved.
 		edits.commit?.()
+
+		// Text saved in a codepage: the version it made reads in that codepage.
+		if (edits.encoding !== undefined) {
+			const encoding = edits.encoding
+
+			setSavedReadAs(
+				encoding.startsWith("utf-") ? null : { forUuid: targetRawItem.data.uuid, versionUuid: outcome.item.data.uuid, encoding }
+			)
+		}
+
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
 		commitSaved(targetRawItem.data.uuid, outcome.item, true)
@@ -1472,10 +1490,12 @@ export function PreviewOverlay({
 	}
 
 	// What a save uploads, and for a spreadsheet the call that marks that version saved once it landed; for a deck,
-	// the save its session streams.
+	// the save its session streams; for text, the encoding the bytes are in. Text its encoding cannot hold is refused:
+	// with `explain` the editor's dialog says why (silently here), else the refusal carries the reason.
 	async function readSaveEdits(
-		auto: boolean
-	): Promise<{ bytes: Uint8Array; commit: (() => void) | null } | PresentationSaveEdits | null> {
+		auto: boolean,
+		explain: boolean
+	): Promise<{ bytes: Uint8Array; commit: (() => void) | null; encoding?: string } | PresentationSaveEdits | null> {
 		if (presentationRef.current !== null) {
 			return await presentationRef.current({ auto })
 		}
@@ -1494,14 +1514,19 @@ export function PreviewOverlay({
 			return null
 		}
 
-		const bytes = buffer.bytes()
+		const encoded = buffer.bytes()
 
-		// The editor says why (a character its encoding cannot hold).
-		if (bytes === null) {
-			throw new SaveRefusedError("previewTextUnencodableTitle", { silent: true })
+		if ("unencodable" in encoded) {
+			if (explain) {
+				buffer.explain(encoded.unencodable)
+			}
+
+			throw new SaveRefusedError(explain ? "previewTextUnencodableTitle" : "previewTextUnencodableSaveAsNew", { silent: explain })
 		}
 
-		return { bytes, commit: null }
+		return slotText === null
+			? { bytes: encoded.bytes, commit: null }
+			: { bytes: encoded.bytes, commit: null, encoding: slotText.encoding }
 	}
 
 	// Idle autosave (the Word document editor's, the spreadsheet editor's) runs the same save, with its guards, as it
@@ -2291,6 +2316,7 @@ export function PreviewOverlay({
 															neverEditable={variant !== "drive"}
 															locked={saving}
 															onDirtyChange={setPreviewDirty}
+															readAs={readAs}
 															onTextState={state => {
 																if (rawDriveItem !== undefined) {
 																	const forUuid = rawDriveItem.data.uuid
@@ -2298,7 +2324,8 @@ export function PreviewOverlay({
 																	setTextState(current =>
 																		current?.forUuid === forUuid &&
 																		current.writable === state.writable &&
-																		current.encoding === state.encoding
+																		current.encoding === state.encoding &&
+																		current.readEncoding === state.readEncoding
 																			? current
 																			: { ...state, forUuid }
 																	)
@@ -2372,7 +2399,7 @@ export function PreviewOverlay({
 											<RemoteFileCompare
 												theirs={remoteTheirs}
 												mine={mine}
-												encoding={slotText?.encoding ?? "utf-8"}
+												encoding={slotText?.readEncoding ?? "utf-8"}
 											/>
 										)
 									: undefined
@@ -2670,6 +2697,8 @@ interface PreviewBodyProps {
 	onDirtyChange: (dirty: boolean) => void
 	// The text viewer's TextState (a file a save would change leaves the slot read-only).
 	onTextState: (state: TextState) => void
+	// The codepage the version shown is known to be in (this overlay saved it so).
+	readAs: string | null
 	contentRef: RefObject<TextBuffer | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 	docxRef: RefObject<DocxSaveSource | null>
@@ -2710,6 +2739,7 @@ function PreviewBody({
 	locked,
 	onDirtyChange,
 	onTextState,
+	readAs,
 	contentRef,
 	spreadsheetRef,
 	docxRef,
@@ -2857,6 +2887,7 @@ function PreviewBody({
 					locked={locked}
 					onDirtyChange={onDirtyChange}
 					onTextState={onTextState}
+					readAs={readAs}
 					contentRef={contentRef}
 				/>
 			)
@@ -2869,6 +2900,7 @@ function PreviewBody({
 					locked={locked}
 					onDirtyChange={onDirtyChange}
 					onTextState={onTextState}
+					readAs={readAs}
 					contentRef={contentRef}
 				/>
 			)

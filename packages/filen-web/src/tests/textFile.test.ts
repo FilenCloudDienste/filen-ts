@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { EditorState, Text } from "@codemirror/state"
-import { detectLineEnding, encodeTextFile, readAsLegacy, readTextFile, utf8Format, writeTextFile } from "@/features/preview/lib/textFile"
+import {
+	detectLineEnding,
+	encodeTextFile,
+	readTextFile,
+	readUnicodeTextFile,
+	utf8Format,
+	writeTextFile
+} from "@/features/preview/lib/textFile"
+import { otherLineBreaks } from "@/features/preview/lib/lineBreaks"
 
 // Saving a text file changes only what was edited: its byte order mark and its line ending (which the editor does
 // not keep, splitting lines on any ending) come back on save.
@@ -79,8 +87,13 @@ describe("text file fidelity", () => {
 		expect(encodeTextFile(Text.of(["hi"]), utf16)).toEqual({ bytes: Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00) })
 	})
 
-	it("opens text a save would change read-only", () => {
-		expect(readTextFile(Uint8Array.of(...bytes("Grüße, Köln, schön"), 0xff))).toMatchObject({ encoding: "utf-8", editableAsIs: false })
+	it("opens text a save would change read-only, and says when bytes could not be read", () => {
+		expect(readTextFile(Uint8Array.of(...bytes("Grüße, Köln, schön"), 0xff))).toMatchObject({
+			encoding: "utf-8",
+			editableAsIs: false,
+			lossy: true
+		})
+		expect(readTextFile(bytes("plain")).lossy).toBe(false)
 	})
 
 	it("reads bytes that are not Unicode with the detector's guess, a choice over it", () => {
@@ -90,8 +103,8 @@ describe("text file fidelity", () => {
 		})
 		expect(readTextFile(bytes("plain"), { guess: "windows-1251" }).encoding).toBe("utf-8")
 		expect(readTextFile(Uint8Array.of(0xcf), { guess: "windows-1251", encoding: "koi8-r" }).encoding).toBe("koi8-r")
-		expect(readAsLegacy(readTextFile(Uint8Array.of(0xcf)))).toBe(true)
-		expect(readAsLegacy(readTextFile(bytes("plain")))).toBe(false)
+		expect(readUnicodeTextFile(Uint8Array.of(0xcf))).toBeNull()
+		expect(readUnicodeTextFile(bytes("plain"))).toMatchObject({ text: "plain", encoding: "utf-8" })
 	})
 
 	it("reads the bytes with a chosen encoding", () => {
@@ -113,5 +126,14 @@ describe("text file fidelity", () => {
 			bom: true,
 			lineEnding: "crlf"
 		})
+	})
+
+	// A file most lines of which end in CRLF, some in LF: an unedited save writes every line's own ending back.
+	it("saves a file with mixed endings byte for byte", () => {
+		const original = "one\r\ntwo\nthree\r\nfour"
+		const file = readTextFile(bytes(original))
+
+		expect(file.lineEnding).toBe("crlf")
+		expect(writeTextFile(EditorState.create({ doc: file.text }).doc, file, otherLineBreaks(file.text, "\r\n"))).toBe(original)
 	})
 })

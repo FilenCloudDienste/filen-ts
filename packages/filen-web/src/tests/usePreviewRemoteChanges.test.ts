@@ -9,7 +9,8 @@ import { testUuid } from "@/tests/support/uuid"
 import type { PresentationSaveEdits } from "@/features/drive/lib/previewSave.logic"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
 
-const { toast, runPreviewSave, nameExistsInDirectory, listings, cachedListings } = vi.hoisted(() => ({
+const { toast, runPreviewSave, nameExistsInDirectory, listings, cachedListings, logError } = vi.hoisted(() => ({
+	logError: vi.fn(),
 	toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 	runPreviewSave: vi.fn(),
 	nameExistsInDirectory: vi.fn(() => Promise.resolve(false)),
@@ -24,7 +25,13 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { nameExistsInDirectory, uploadFileBytes: vi.fn() } }))
-vi.mock("@/features/drive/lib/previewSave.logic", () => ({ runPreviewSave }))
+vi.mock("@/features/drive/lib/previewSave.logic", async () => ({
+	SaveRefusedError: (
+		await vi.importActual<typeof import("@/features/drive/lib/previewSave.logic")>("@/features/drive/lib/previewSave.logic")
+	).SaveRefusedError,
+	runPreviewSave
+}))
+vi.mock("@/lib/log", () => ({ log: { error: logError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root" }))
 vi.mock("@/features/drive/queries/drive", () => ({
 	driveListingQueryOptions: vi.fn(),
@@ -91,7 +98,13 @@ function setup(
 	const commitSaved = vi.fn((frozenUuid: string, item: DriveItem) => {
 		savedRef.current = new Map(savedRef.current).set(frozenUuid, item)
 	})
-	const contentRef = { current: { text: () => "mine", bytes: () => new TextEncoder().encode("mine") } as TextBuffer | null }
+	const contentRef = {
+		current: {
+			text: () => "mine",
+			bytes: () => ({ bytes: new TextEncoder().encode("mine") }),
+			explain: () => undefined
+		} as TextBuffer | null
+	}
 	const onItemRemoved = vi.fn()
 	const hook = renderHook(
 		(props: { items: DriveItem[]; index: number }) =>
@@ -827,5 +840,29 @@ describe("usePreviewRemoteChanges", () => {
 		})
 
 		expect(onItemRemoved).not.toHaveBeenCalled()
+	})
+
+	// The editor refused to write its edits (a character the file's encoding cannot hold): its own reason, once, and no
+	// failure logged or toasted.
+	it("tells why an editor refused to write a copy, without a failure", async () => {
+		const { SaveRefusedError } = await vi.importActual<typeof import("@/features/drive/lib/previewSave.logic")>(
+			"@/features/drive/lib/previewSave.logic"
+		)
+		const { hook } = setup(undefined, undefined, () => Promise.reject(new SaveRefusedError("previewTextUnencodableSaveAsNew")))
+
+		logError.mockClear()
+		toast.error.mockClear()
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		expect(toast.error.mock.calls).toEqual([["previewTextUnencodableSaveAsNew"]])
+		expect(logError).not.toHaveBeenCalled()
+		expect(runPreviewSave).not.toHaveBeenCalled()
 	})
 })

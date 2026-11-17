@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import type { Extension } from "@codemirror/state"
 import { codeTheme, mountCodeCompare } from "@filen/office/dom/code"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { decodeTextBytes } from "@filen/shared/textEncoding"
+import { readTextFileDetected } from "@/features/preview/lib/encodingGuess"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { languageExtensionFor } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
@@ -80,24 +80,36 @@ export function RemoteCompare({
 	)
 }
 
-// A file's newer version, downloaded here (from the preview cache when it was opened already). Read as Unicode where
-// it is, else in `encoding`, the codepage the edits save in (a newer version of the same file).
+// A file's newer version, downloaded here (from the preview cache when it was opened already), read as Unicode where it
+// is, else in `encoding`, the codepage the file was read in (a newer version of the same file), else as the detector
+// guesses.
 export function RemoteFileCompare({ theirs, mine, encoding }: { theirs: DriveItem; mine: string; encoding: string }) {
 	const result = usePreviewBytes(theirs)
+	const bytes = result.status === "success" ? result.bytes : null
+	const [read, setRead] = useState<{ bytes: Uint8Array; text: string } | null>(null)
+	const text = read !== null && read.bytes === bytes ? read.text : null
+
+	useEffect(() => {
+		if (bytes === null) {
+			return undefined
+		}
+
+		let live = true
+
+		void readTextFileDetected(bytes, encoding).then(file => {
+			if (live) {
+				setRead({ bytes, text: file.text })
+			}
+		})
+
+		return () => {
+			live = false
+		}
+	}, [bytes, encoding])
 
 	return (
 		<RemoteCompare
-			theirs={
-				result.status === "success"
-					? {
-							status: "ready",
-							text: decodeTextBytes(result.bytes, {
-								guess: encoding.startsWith("utf-") ? null : encoding,
-								languageHint: navigator.languages[0] ?? null
-							}).text
-						}
-					: { status: result.status === "error" ? "failed" : "loading" }
-			}
+			theirs={text !== null ? { status: "ready", text } : { status: result.status === "error" ? "failed" : "loading" }}
 			mine={mine}
 			tag={codeMirrorLanguageFor(itemTypeExtension(theirs))}
 		/>

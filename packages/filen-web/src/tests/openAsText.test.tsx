@@ -280,7 +280,7 @@ describe("TextViewer — editing only what a save writes back", () => {
 		renderEditable(bytes, onTextState)
 
 		expect((await screen.findByTestId("source")).dataset["editable"]).toBe("true")
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding })
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding, readEncoding: encoding })
 	})
 
 	it.each([

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { looksLikeText } from "@filen/shared/textEncoding"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes, type UsePreviewBytesResult } from "@/features/preview/hooks/usePreviewBytes"
-import { readAsLegacy, readTextFile, utf8Format, type TextFile } from "@/features/preview/lib/textFile"
+import { readTextFile, readUnicodeTextFile, utf8Format, type TextFile } from "@/features/preview/lib/textFile"
 import { guessLegacyEncoding } from "@/features/preview/lib/encodingGuess"
 
 // The status bar's encoding menu: read the held bytes again with another encoding, or save them as UTF-8. Neither
@@ -28,18 +28,22 @@ export type PreviewTextFile =
 	| { status: "success"; bytes: Uint8Array; file: TextFile; writable: boolean; encoding: TextEncodingControls }
 
 // What an editable text viewer tells the overlay: whether a save writes the file back as it was (one it would change
-// keeps the slot read-only until converted), and the encoding a save writes (a newer version is compared in it).
+// keeps the slot read-only until converted), the encoding a save writes (the saved version is read in it), and the one
+// the file was read in (a newer version saved elsewhere is compared in it).
 export interface TextState {
 	readonly writable: boolean
 	readonly encoding: string
+	readonly readEncoding: string
 }
 
 // The whole-buffer load every text-family viewer opens on. Bytes that do not look like text (looksLikeText) are not
-// decoded; once shown anyway they stay read-only. A file asked to be editable reports its TextState.
+// decoded; once shown anyway they stay read-only. A file asked to be editable reports its TextState. `readAs`: the
+// codepage this version is known to be in (one this open saved it in), read without asking the detector again.
 export function usePreviewTextFile(
 	item: DriveItem,
 	editable: boolean,
-	onTextState: ((state: TextState) => void) | undefined
+	onTextState: ((state: TextState) => void) | undefined,
+	readAs: string | null
 ): PreviewTextFile {
 	const result = usePreviewBytes(item)
 	// The viewer is remounted per file, so none of these carry over to another.
@@ -52,13 +56,22 @@ export function usePreviewTextFile(
 	const bytes = result.status === "success" ? result.bytes : null
 	const known = guess !== null && guess.bytes === bytes ? guess.label : undefined
 	const notText = bytes !== null && !looksLikeText(bytes)
+	const shown = bytes !== null && (!notText || shownAnyway)
+	// A chosen codepage, else the one this version is known to be in; else Unicode, else the detector's guess. Each
+	// read decodes the bytes once.
+	const forced = choice?.label ?? readAs
+	const unicode = bytes !== null && shown && forced === null ? readUnicodeTextFile(bytes) : null
+	// Not Unicode (and not shown anyway): the detector (lazily loaded wasm, the first MiB) picks the codepage first.
+	const guessing = shown && !notText && forced === null && unicode === null && known === undefined
 	const read =
-		bytes !== null && (!notText || shownAnyway) ? readTextFile(bytes, { encoding: choice?.label ?? null, guess: known ?? null }) : null
-	// Not Unicode and not shown anyway: the detector (lazily loaded wasm, the first MiB) picks the codepage first.
-	const guessing = read !== null && !notText && choice === null && known === undefined && readAsLegacy(read)
+		bytes === null || !shown
+			? null
+			: forced !== null
+				? readTextFile(bytes, { encoding: forced })
+				: (unicode ?? (guessing ? null : readTextFile(bytes, { encoding: known ?? null })))
 
 	useEffect(() => {
-		if (!guessing || bytes === null) {
+		if (!guessing) {
 			return undefined
 		}
 
@@ -76,14 +89,15 @@ export function usePreviewTextFile(
 	}, [guessing, bytes])
 	const file = read !== null && converted ? { ...read, ...utf8Format(read), editableAsIs: true } : read
 	const writable = file !== null && !notText && file.editableAsIs
-	const reports = editable && file !== null && !guessing
+	const reports = editable && file !== null && read !== null
 	const encoding = file?.encoding ?? ""
+	const readEncoding = read?.encoding ?? ""
 
 	useEffect(() => {
 		if (reports) {
-			onTextState?.({ writable, encoding })
+			onTextState?.({ writable, encoding, readEncoding })
 		}
-	}, [reports, writable, encoding, onTextState])
+	}, [reports, writable, encoding, readEncoding, onTextState])
 
 	if (result.status !== "success") {
 		return result
@@ -93,7 +107,7 @@ export function usePreviewTextFile(
 		return { status: "pending", refetch: result.refetch }
 	}
 
-	if (file === null || read === null) {
+	if (file === null || read === null || bytes === null) {
 		return {
 			status: "notText",
 			showAnyway: () => {

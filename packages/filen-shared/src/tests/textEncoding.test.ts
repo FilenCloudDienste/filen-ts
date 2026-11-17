@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { decodeTextBytes, editableAsIs, encodeTextBytes, looksLikeText, needsLegacyGuess, TEXT_ENCODINGS } from "@filen/shared/textEncoding"
+import {
+	decodeTextBytes,
+	decodeUnicodeText,
+	editableAsIs,
+	encodeTextBytes,
+	looksLikeText,
+	needsLegacyGuess,
+	textEncodingLabel,
+	TEXT_ENCODINGS
+} from "@filen/shared/textEncoding"
 
 const enc = new TextEncoder()
 
@@ -278,5 +287,49 @@ describe("encodeTextBytes", () => {
 
 	it("refuses an encoding it never writes", () => {
 		expect(() => encodeTextBytes("a", "shift_jis")).toThrow()
+	})
+})
+
+describe("decodeUnicodeText", () => {
+	it("reads Unicode, and leaves bytes that are not to a codepage", () => {
+		expect(decodeUnicodeText(enc.encode("héllo"))).toMatchObject({ text: "héllo", encoding: "utf-8" })
+		expect(decodeUnicodeText(utf16("hi", true, true))).toMatchObject({ text: "hi", encoding: "utf-16le" })
+		expect(decodeUnicodeText(Uint8Array.of(0xcf, 0xf0, 0xe8))).toBeNull()
+	})
+})
+
+describe("textEncodingLabel", () => {
+	// Every encoding the detector (chardetng) can name, except UTF-8 and ISO-2022-JP, which it is never asked for.
+	const DETECTED = [
+		"Big5",
+		"EUC-JP",
+		"EUC-KR",
+		"GBK",
+		"IBM866",
+		"ISO-8859-2",
+		"ISO-8859-4",
+		"ISO-8859-5",
+		"ISO-8859-6",
+		"ISO-8859-7",
+		"ISO-8859-8",
+		"ISO-8859-13",
+		"KOI8-U",
+		"Shift_JIS",
+		"windows-874",
+		"windows-1250",
+		"windows-1251",
+		"windows-1252",
+		"windows-1253",
+		"windows-1254",
+		"windows-1255",
+		"windows-1256",
+		"windows-1257",
+		"windows-1258"
+	]
+
+	it("names a menu label for every encoding the detector gives", () => {
+		expect(DETECTED.filter(name => textEncodingLabel(name) === null)).toEqual([])
+		expect(textEncodingLabel("GBK")).toBe("gb18030")
+		expect(textEncodingLabel("x-user-defined")).toBeNull()
 	})
 })

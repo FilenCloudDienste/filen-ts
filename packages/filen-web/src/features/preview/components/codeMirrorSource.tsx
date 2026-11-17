@@ -5,7 +5,8 @@ import { codeEditorSetup, codeFillParent, codeReadOnly, codeTheme } from "@filen
 import { CodeEditor } from "@filen/office/react/code"
 import { languageExtensionFor, useEditorKeymap, type EditorKeymapCommands } from "@/features/preview/lib/codeMirrorShared"
 import type { Unencodable } from "@filen/shared/textEncoding"
-import { encodeTextFile, writeTextFile, type TextBuffer, type TextFileFormat } from "@/features/preview/lib/textFile"
+import { encodeTextFile, lineBreak, writeTextFile, type TextBuffer, type TextFileFormat } from "@/features/preview/lib/textFile"
+import { lineBreaksField, otherLineBreaks, type LineBreaks } from "@/features/preview/lib/lineBreaks"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
 // notes editor) reuses the SAME language/theme plumbing (lib/codeMirrorShared.ts) as file preview
@@ -70,33 +71,27 @@ function emptyCompartment(): { compartment: Compartment; initial: Extension } {
 const SETUP: Extension = codeEditorSetup()
 const SETUP_WITHOUT_LINE_NUMBERS: Extension = codeEditorSetup({ lineNumbers: false })
 
-// The buffer as contentRef hands it out, in the format current when it is read.
+// The buffer as contentRef hands it out, in the format current when it is read; `breaks`: the line breaks the file
+// keeps other than its own ending (none without a format).
 function textBuffer(
-	doc: () => Text,
+	read: () => { doc: Text; breaks: LineBreaks | undefined },
 	sinksRef: RefObject<{ format: TextFileFormat | undefined; onUnencodable: ((at: Unencodable) => void) | undefined }>
 ): TextBuffer {
 	return {
 		text() {
 			const format = sinksRef.current.format
+			const { doc, breaks } = read()
 
-			return format === undefined ? doc().toString() : writeTextFile(doc(), format)
+			return format === undefined ? doc.toString() : writeTextFile(doc, format, breaks)
 		},
 		bytes() {
 			const format = sinksRef.current.format
+			const { doc, breaks } = read()
 
-			if (format === undefined) {
-				return new TextEncoder().encode(doc().toString())
-			}
-
-			const encoded = encodeTextFile(doc(), format)
-
-			if ("unencodable" in encoded) {
-				sinksRef.current.onUnencodable?.(encoded.unencodable)
-
-				return null
-			}
-
-			return encoded.bytes
+			return format === undefined ? { bytes: new TextEncoder().encode(doc.toString()) } : encodeTextFile(doc, format, breaks)
+		},
+		explain(at) {
+			sinksRef.current.onUnencodable?.(at)
 		}
 	}
 }
@@ -140,6 +135,8 @@ export function CodeMirrorSource({
 	const [changes] = useState(emptyCompartment)
 	const viewRef = useRef<EditorView | null>(null)
 	const [seed] = useState(text)
+	// The file's line breaks other than its own ending, mapped through every edit so a save keeps them (lineBreaks.ts).
+	const [breaks] = useState(() => (format === undefined ? null : lineBreaksField(otherLineBreaks(seed, lineBreak(format.lineEnding)))))
 	// The doc the view was created with, which dirty compares against.
 	const seedDocRef = useRef<Text | null>(null)
 	// Reported from the change listener itself, in the same task as the edit: a state round trip would leave the
@@ -154,8 +151,19 @@ export function CodeMirrorSource({
 	})
 
 	const readOnly = codeReadOnly(!editable)
+	const breaksExtension = breaks?.extension ?? []
 	const extensions = chrome
-		? [codeFillParent, SETUP_WITHOUT_LINE_NUMBERS, codeTheme, readOnly, chrome.extensions, editorKeymap, lock.initial, changes.initial]
+		? [
+				codeFillParent,
+				SETUP_WITHOUT_LINE_NUMBERS,
+				codeTheme,
+				readOnly,
+				chrome.extensions,
+				editorKeymap,
+				lock.initial,
+				changes.initial,
+				breaksExtension
+			]
 		: languageExtension
 			? [
 					codeFillParent,
@@ -166,9 +174,20 @@ export function CodeMirrorSource({
 					EditorView.lineWrapping,
 					editorKeymap,
 					lock.initial,
-					changes.initial
+					changes.initial,
+					breaksExtension
 				]
-			: [codeFillParent, SETUP, codeTheme, readOnly, EditorView.lineWrapping, editorKeymap, lock.initial, changes.initial]
+			: [
+					codeFillParent,
+					SETUP,
+					codeTheme,
+					readOnly,
+					EditorView.lineWrapping,
+					editorKeymap,
+					lock.initial,
+					changes.initial,
+					breaksExtension
+				]
 	const isLocked = locked === true
 
 	// A lock change on the live view; a view created while locked takes it in handleCreateEditor.
@@ -185,7 +204,10 @@ export function CodeMirrorSource({
 		viewRef.current = view
 		chrome?.attach(view)
 
-		const buffer = textBuffer(() => view.state.doc, sinksRef)
+		const buffer = textBuffer(
+			() => ({ doc: view.state.doc, breaks: breaks === null ? undefined : view.state.field(breaks.field) }),
+			sinksRef
+		)
 
 		const listener = EditorView.updateListener.of(update => {
 			const sinks = sinksRef.current
@@ -243,9 +265,19 @@ export function CodeMirrorSource({
 	// Before the view exists the buffer is still the seed.
 	useEffect(() => {
 		if (contentRef) {
-			contentRef.current = editable ? textBuffer(() => viewRef.current?.state.doc ?? Text.of(seed.split(/\r\n?|\n/)), sinksRef) : null
+			contentRef.current = editable
+				? textBuffer(() => {
+						const state = viewRef.current?.state
+
+						if (state === undefined) {
+							return { doc: Text.of(seed.split(/\r\n?|\n/)), breaks: breaks?.initial }
+						}
+
+						return { doc: state.doc, breaks: breaks === null ? undefined : state.field(breaks.field) }
+					}, sinksRef)
+				: null
 		}
-	}, [contentRef, editable, seed])
+	}, [contentRef, editable, seed, breaks])
 
 	return (
 		<div className="size-full">

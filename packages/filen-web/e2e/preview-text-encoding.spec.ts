@@ -8,7 +8,7 @@ import { preview } from "@/locales/en/preview"
 
 // Saving text in the encoding it was read with, byte for byte (windows-1252, UTF-16 with its mark), a character the
 // encoding cannot hold refused with the conversion offered, and Convert to UTF-8 making a file a save would change
-// editable. Each leg saves, so each owns a scratch directory.
+// editable once the loss of its unreadable bytes is accepted. Each leg saves, so each owns a scratch directory.
 
 const LATIN = "Café crème à la carte, déjà vu.\r\nDeuxième ligne : naïve façade.\r\n"
 const UTF16 = "Grüße aus Köln\nzweite Zeile\n"
@@ -131,6 +131,13 @@ test("a character the encoding cannot hold is refused, and Convert to UTF-8 save
 		await expect(dialog.getByText("Read-only", { exact: true })).toBeVisible()
 		await dialog.getByRole("button", { name: "Encoding: UTF-8" }).click()
 		await page.getByRole("menuitem", { name: "Convert to UTF-8" }).click()
+
+		// The byte it could not read is replaced: asked first, and nothing changes until accepted.
+		const warning = page.getByRole("alertdialog", { name: "Replace unreadable characters?" })
+
+		await expect(warning).toBeVisible()
+		await expect(dialog.getByText("Read-only", { exact: true })).toBeVisible()
+		await warning.getByRole("button", { name: "Convert to UTF-8" }).click()
 		await expect(dialog.getByText("Read-only", { exact: true })).toHaveCount(0)
 		await save(dialog)
 		expect(await downloaded(page)).toEqual(Buffer.from("Grüße, Köln, schön\n�\n", "utf8"))

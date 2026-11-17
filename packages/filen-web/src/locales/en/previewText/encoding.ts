@@ -15,5 +15,13 @@ export const previewTextEncoding = {
 	previewTextUnencodableTitle: "Can't save in this encoding",
 	/** Text editor — dialog body; {{encoding}} is the file's encoding, {{char}} the character, {{line}}/{{column}} where it is */
 	previewTextUnencodableBody:
-		"{{encoding}} has no character “{{char}}” (line {{line}}, column {{column}}). Convert the file to UTF-8 to save it, or remove the character."
+		"{{encoding}} has no character “{{char}}” (line {{line}}, column {{column}}). Convert the file to UTF-8 to save it, or remove the character.",
+	/** Text editor — dialog title before converting a file some of whose bytes could not be read */
+	previewTextConvertLossyTitle: "Replace unreadable characters?",
+	/** Text editor — dialog body; {{encoding}} is the encoding the file was read with (e.g. "UTF-8", "Shift JIS") */
+	previewTextConvertLossyBody:
+		"Some bytes of this file can't be read as {{encoding}} and show as �. Converting to UTF-8 writes � in their place: once you save, the original bytes are gone.",
+	/** Text editor — toast: saving the unsaved edits as a new file was refused because the file's encoding cannot hold a typed character */
+	previewTextUnencodableSaveAsNew:
+		"Your edits hold a character this file's encoding can't store. Keep your edits, convert the file to UTF-8 from its encoding menu, then save."
 } as const

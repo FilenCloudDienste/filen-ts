@@ -74,6 +74,21 @@ export function CodeSurface({
 	const [changes, setChanges] = useState<string | null>(null)
 	// A save refused: the file's encoding cannot hold this character.
 	const [unencodable, setUnencodable] = useState<Unencodable | null>(null)
+	// Converting a file some bytes of which could not be read waits for the user to accept what is lost.
+	const [confirmLossy, setConfirmLossy] = useState(false)
+	const convert = encoding?.convert ?? null
+	// Convert to UTF-8, from the menu or the refusal: at once, or behind the loss warning when the read was lossy.
+	const requestConvert =
+		convert === null
+			? null
+			: () => {
+					if (file.lossy) {
+						setConfirmLossy(true)
+					} else {
+						convert()
+					}
+				}
+	const menuEncoding = encoding === undefined ? null : { ...encoding, convert: requestConvert }
 	const download = usePreviewDownload()
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -263,7 +278,7 @@ export function CodeSurface({
 				}}
 				settings={settings}
 				format={file}
-				encoding={encoding ?? null}
+				encoding={menuEncoding}
 				onGoToLine={() => {
 					setGoToLine(true)
 				}}
@@ -336,7 +351,21 @@ export function CodeSurface({
 				}}
 				onConfirm={() => {
 					setUnencodable(null)
-					encoding?.convert?.()
+					requestConvert?.()
+				}}
+			/>
+			<ConfirmDialog
+				open={confirmLossy}
+				pending={false}
+				title={t("previewTextConvertLossyTitle")}
+				body={t("previewTextConvertLossyBody", { encoding: encodingShortName(file.encoding) })}
+				confirmLabel={t("previewTextConvertToUtf8")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={setConfirmLossy}
+				onConfirm={() => {
+					setConfirmLossy(false)
+					convert?.()
 				}}
 			/>
 			<Dialog
