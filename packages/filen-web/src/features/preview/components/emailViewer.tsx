@@ -95,7 +95,8 @@ function useEmailReading(bytes: Uint8Array): ReadingState {
 	return state
 }
 
-function Recipients({ label, list }: { label: string; list: readonly string[] }) {
+// `muted`: a secondary row (Reply to), all of it in the muted colour.
+function Recipients({ label, list, muted }: { label: string; list: readonly string[]; muted?: boolean }) {
 	const { t } = useTranslation("preview")
 	const [open, setOpen] = useState(false)
 
@@ -107,7 +108,7 @@ function Recipients({ label, list }: { label: string; list: readonly string[] })
 	const hidden = list.length - shown.length
 
 	return (
-		<div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
+		<div className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm", muted === true ? "text-muted-foreground" : null)}>
 			<span className="min-w-10 shrink-0 text-muted-foreground">{label}</span>
 			<span className="min-w-0 break-words">
 				<bdi>{shown.join(", ")}</bdi>
@@ -464,14 +465,20 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 					</span>
 					{date === null ? null : <span className="shrink-0 text-muted-foreground">{date}</span>}
 				</div>
+				{/* Under the address (past the label column): the international domain as written. */}
 				{message.fromIdnDomain === null ? null : (
-					<p className="flex items-center gap-2 text-xs text-muted-foreground">
-						<InfoIcon className="size-4 shrink-0" />
+					<p className="flex items-center gap-1.5 pl-12 text-xs text-muted-foreground">
+						<InfoIcon className="size-3.5 shrink-0" />
 						<span className="min-w-0 break-words">
 							{t("previewEmailIdnDomain")} <bdi>{message.fromIdnDomain}</bdi>
 						</span>
 					</p>
 				)}
+				<Recipients
+					label={t("previewEmailReplyTo")}
+					list={message.replyTo}
+					muted
+				/>
 				<Recipients
 					label={t("previewEmailTo")}
 					list={message.to}
@@ -479,10 +486,6 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 				<Recipients
 					label={t("previewEmailCc")}
 					list={message.cc}
-				/>
-				<Recipients
-					label={t("previewEmailReplyTo")}
-					list={message.replyTo}
 				/>
 				{message.addressesOmitted > 0 ? (
 					<p className="text-xs text-muted-foreground">

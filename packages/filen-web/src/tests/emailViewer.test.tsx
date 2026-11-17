@@ -327,4 +327,22 @@ describe("EmailViewer", () => {
 
 		expect(await screen.findByText("This file is too large to show as text.")).toBeTruthy()
 	})
+
+	it("shows Reply to only when it differs from the sender, and an international domain as written under the address", async () => {
+		message.current = ["From: Anna <anna@acm\u00e9.com>", "Reply-To: drop@y.io", "Subject: Cues", "", "x", ""].join("\r\n")
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByText("Anna <anna@xn--acm-dma.com>")).toBeTruthy()
+		expect(screen.getByText("Domain written as:", { exact: false }).textContent).toBe("Domain written as: acm\u00e9.com")
+		expect(screen.getByText("Reply to")).toBeTruthy()
+		expect(screen.getByText("drop@y.io")).toBeTruthy()
+
+		cleanup()
+		message.current = ["From: Anna <anna@x.io>", "Reply-To: anna@x.io", "Subject: Same", "", "x", ""].join("\r\n")
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByText("Anna <anna@x.io>")).toBeTruthy()
+		expect(screen.queryByText("Reply to")).toBeNull()
+		expect(screen.queryByText("Domain written as:", { exact: false })).toBeNull()
+	})
 })

@@ -52,8 +52,8 @@ export const previewTextEmail = {
 	previewEmailTextTruncated: "This text is longer than can be shown here; only its start is shown.",
 	/** Email preview — the Reply-To row's label, shown when it names someone other than the sender */
 	previewEmailReplyTo: "Reply to",
-	/** Email preview — under the sender when their domain has non-ASCII characters; the domain as written follows */
-	previewEmailIdnDomain: "The sender's domain uses international characters and is shown in its ASCII form. As written:",
+	/** Email preview — under the sender's address (shown with its domain in ASCII) when the domain has non-ASCII characters; the domain as written follows */
+	previewEmailIdnDomain: "Domain written as:",
 	/** Email preview — reading the message failed */
 	previewEmailFailed: "The message could not be read."
 }
