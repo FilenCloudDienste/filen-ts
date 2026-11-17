@@ -78,6 +78,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	archive: "drivePreviewKindArchive",
 	iwork: "drivePreviewKindIwork",
 	font: "drivePreviewKindFont",
+	sqlite: "drivePreviewKindSqlite",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -262,7 +263,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -506,5 +507,27 @@ describe("added category rows", () => {
 		expect(isTextCategory("font")).toBe(false)
 		expect(policy.assistantKind).toBeNull()
 		expect(policy.pager).toBe(true)
+	})
+})
+
+describe("the sqlite row", () => {
+	it.each(["app.sqlite", "app.sqlite3", "app.db3", "app.s3db", "app.sl3"])(
+		"%s opens at any size on the drive and a link, whole up to 256 MiB in an archive",
+		name => {
+			expect(previewType(fileNamed(name, 1024n))).toBe("sqlite")
+			expect(canPreview(fileNamed(name, 50n * 1024n * MIB))).toBe(true)
+			expect(anonPreviewability(fileNamed(name, 50n * 1024n * MIB))).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(PREVIEW_MAX_BYTES) }]), 0)).toBe(true)
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(PREVIEW_MAX_BYTES) + 1 }]), 0)).toBe(false)
+		}
+	)
+
+	it("reads an extensionless database by its stored type, and a .db only once its head is read", () => {
+		expect(previewType(fileNamed("data", 1024n, "application/vnd.sqlite3"))).toBe("sqlite")
+		expect(previewType(fileNamed("data", 1024n, "application/x-sqlite3"))).toBe("sqlite")
+		expect(previewType(fileNamed("app.db", 1024n))).toBe("other")
+		expect(canPreview(fileNamed("app.db", 50n * 1024n * MIB))).toBe(true)
+		expect(previewKindLabelKey("sqlite")).toBe("drivePreviewKindSqlite")
+		expect(isPhotoCategory("sqlite")).toBe(false)
 	})
 })

@@ -42,6 +42,7 @@ export type PreviewCategory =
 	| "archive"
 	| "iwork"
 	| "font"
+	| "sqlite"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -340,6 +341,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindFont",
 		assistantKind: null
 	},
+	// Read in ranges through the database viewer's own VFS on the drive and a public link, at any size; held whole in
+	// sqlite's memory up to the cap where only a whole read reaches it (an archive's entry, held bytes).
+	sqlite: {
+		streamed: false,
+		ranged: true,
+		bufferCap: PREVIEW_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "ranged",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindSqlite",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -405,6 +422,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// 97–2003 files (viewed). A `.pot` is a 97–2003 template until a read of its signature says it is text (gettext).
 	[PRESENTATION_EXTENSIONS, "presentation"],
 	[["ttf", "otf", "woff", "woff2"], "font"],
+	// A `.db` is many programs' data: a database only once a read of its head finds the SQLite header.
+	[["sqlite", "sqlite3", "db3", "s3db", "sl3"], "sqlite"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],

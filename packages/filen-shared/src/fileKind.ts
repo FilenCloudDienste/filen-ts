@@ -14,7 +14,8 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 // 2. An extension that means two (`.ts` TypeScript or an MPEG transport stream; `.webm`, `.ogg`, `.mp4`,
 //    `.mkv` and their audio siblings; `.dot` a Word 97–2003 template or a Graphviz/text file; `.pot` a PowerPoint
 //    97–2003 template or a gettext template; `.vhd` VHDL source or a Virtual Hard Disk; `.key` a Keynote package or
-//    anything else, a key file most often) is settled by a content verdict for the file when one exists, else by
+//    anything else, a key file most often; `.db` a SQLite database or any other program's data) is settled by a
+//    content verdict for the file when one exists, else by
 //    a MIME type that says audio or video (text, for a `.dot` or `.pot`), else by its usual meaning. A MIME type never makes a `.ts` a
 //    video: browsers upload TypeScript as video/mp2t too. One with no usual meaning (`.key`) reads, until a verdict
 //    says otherwise, like an unknown extension, as in 3.
@@ -29,8 +30,8 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 export type ContentVerdict = "transportStream" | "notTransportStream" | "video" | "audio"
 
 // What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not;
-// of a `.vhd`: a Virtual Hard Disk or not; of a `.key`: a Keynote package (a zip) or not. Kept apart from the media
-// verdicts the apps persist.
+// of a `.vhd`: a Virtual Hard Disk or not; of a `.key`: a Keynote package (a zip) or not; of a `.db`: a SQLite
+// database or not. Kept apart from the media verdicts the apps persist.
 export type DocumentVerdict =
 	| "wordBinary"
 	| "notWordBinary"
@@ -40,6 +41,8 @@ export type DocumentVerdict =
 	| "notVirtualDisk"
 	| "iworkPackage"
 	| "notIworkPackage"
+	| "sqlite"
+	| "notSqlite"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -50,9 +53,10 @@ export type FileVerdict = ContentVerdict | DocumentVerdict
 //   presentationTemplate  pot     presentationBinary / notPresentationBinary
 //   virtualDisk           vhd     virtualDisk / notVirtualDisk
 //   iworkPackage          key     iworkPackage / notIworkPackage
-// Reserved, added with their readers: pdfCompatible (ai), sqlite (db), wavefront (obj), vobsub (sub), vcard (vcf),
-// mpegPs (mod), executable (no extension).
-export type SniffId = "transportStream" | "wordTemplate" | "presentationTemplate" | "virtualDisk" | "iworkPackage"
+//   sqlite                db      sqlite / notSqlite
+// Reserved, added with their readers: pdfCompatible (ai), wavefront (obj), vobsub (sub), vcard (vcf), mpegPs (mod),
+// executable (no extension).
+export type SniffId = "transportStream" | "wordTemplate" | "presentationTemplate" | "virtualDisk" | "iworkPackage" | "sqlite"
 
 // Each read's verdicts: what it found, what it did not.
 export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
@@ -60,7 +64,8 @@ export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdi
 	wordTemplate: ["wordBinary", "notWordBinary"],
 	presentationTemplate: ["presentationBinary", "notPresentationBinary"],
 	virtualDisk: ["virtualDisk", "notVirtualDisk"],
-	iworkPackage: ["iworkPackage", "notIworkPackage"]
+	iworkPackage: ["iworkPackage", "notIworkPackage"],
+	sqlite: ["sqlite", "notSqlite"]
 }
 
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
@@ -101,6 +106,8 @@ export interface Ambiguity {
 	notVirtualDisk?: string | null
 	iworkPackage?: string | null
 	notIworkPackage?: string | null
+	sqlite?: string | null
+	notSqlite?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
@@ -128,14 +135,24 @@ const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	["dot", { fallback: "dot", wordBinary: "dot", notWordBinary: "txt", text: "txt", mimeHint: false, sniff: "wordTemplate" }],
 	[
 		"pot",
-		{ fallback: "pot", presentationBinary: "pot", notPresentationBinary: "txt", text: "txt", mimeHint: false, sniff: "presentationTemplate" }
+		{
+			fallback: "pot",
+			presentationBinary: "pot",
+			notPresentationBinary: "txt",
+			text: "txt",
+			mimeHint: false,
+			sniff: "presentationTemplate"
+		}
 	],
 	// VHDL source unless its head carries a Virtual Hard Disk's footer copy. Only a read decides: browsers type both by
 	// the extension alone.
 	["vhd", { fallback: "vhd", virtualDisk: null, notVirtualDisk: "vhd", mimeHint: false, sniff: "virtualDisk" }],
 	// A Keynote package is a zip; a `.key` that is not one (a private key, a licence key) has no kind its name gives.
 	// Neither meaning is the usual one, and browsers type both by the extension alone.
-	["key", { fallback: null, iworkPackage: "key", notIworkPackage: null, mimeHint: false, sniff: "iworkPackage" }]
+	["key", { fallback: null, iworkPackage: "key", notIworkPackage: null, mimeHint: false, sniff: "iworkPackage" }],
+	// Many programs' data: a SQLite database only when its head says so. Neither meaning is the usual one; a MIME type
+	// it was stored under still reads as for an unknown extension.
+	["db", { fallback: null, sqlite: "sqlite", notSqlite: null, mimeHint: true, sniff: "sqlite" }]
 ])
 
 function lowerName(name: string): string {
@@ -194,6 +211,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.iworkPackage
 		case "notIworkPackage":
 			return ambiguity.notIworkPackage
+		case "sqlite":
+			return ambiguity.sqlite
+		case "notSqlite":
+			return ambiguity.notSqlite
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

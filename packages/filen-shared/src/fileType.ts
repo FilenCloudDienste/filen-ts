@@ -112,6 +112,8 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["font/woff", "woff", "both"],
 	["application/font-woff", "woff", "toExt"],
 	["font/woff2", "woff2", "both"],
+	["application/vnd.sqlite3", "sqlite", "both"],
+	["application/x-sqlite3", "sqlite", "toExt"],
 	["application/pdf", "pdf", "both"],
 	["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx", "both"],
 	["application/vnd.ms-word.document.macroenabled.12", "docm", "both"],

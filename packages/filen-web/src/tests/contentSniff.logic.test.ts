@@ -299,3 +299,38 @@ describe("SNIFFERS", () => {
 		}
 	})
 })
+
+// Many programs keep data in a `.db`; only the SQLite header makes one a database the viewer opens.
+describe("the .db read", () => {
+	it("reads a .db's head before choosing a viewer, from any origin, and opens it as a database only on the header", () => {
+		const file = fileNamed("app.db", 3n * MIB)
+		const sniffer = SNIFFERS.sqlite
+
+		expect(needsContentSniff(file, null)).toBe("sqlite")
+		expect(previewType(file, "sqlite")).toBe("sqlite")
+		expect(previewType(file, "notSqlite")).toBe("other")
+		expect(needsContentSniff(file, "sqlite")).toBeNull()
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(16)
+		expect(["file", "linkedFile", "entry", "bytes"].map(origin => gateRunsSniffer(sniffer, origin as "file"))).toEqual([
+			true,
+			true,
+			true,
+			true
+		])
+		expect(sniffer.mode === "head" && sniffer.decide(new TextEncoder().encode("SQLite format 3\0"), 4096)).toBe("sqlite")
+		expect(sniffer.mode === "head" && sniffer.decide(new TextEncoder().encode("PK\u0003\u0004 not a database"), 4096)).toBe("notSqlite")
+	})
+
+	it("opens a .db in an archive only within the whole-read cap", () => {
+		expect(entryAwaitsSniff(storeOf([{ path: "app.db", access: { type: "direct", packedBytes: 10n }, size: 1024 }]), 0)).toBe(true)
+		expect(canOpenEntry(storeOf([{ path: "app.db", access: { type: "direct", packedBytes: 10n }, size: 1024 }]), 0)).toBe(true)
+		expect(canOpenEntry(storeOf([{ path: "app.db", access: { type: "direct", packedBytes: 10n }, size: 300 * 1024 * 1024 }]), 0)).toBe(
+			false
+		)
+	})
+
+	it("leaves a .db stored as text to its type", () => {
+		expect(needsContentSniff(fileNamed("notes.db", 300n, "text/plain"), null)).toBeNull()
+		expect(previewType(fileNamed("notes.db", 300n, "text/plain"), null)).toBe("text")
+	})
+})

@@ -669,6 +669,8 @@ export const drive = {
 	drivePreviewKindIwork: "iWork document",
 	/** Info panel — Kind row value: a font file (ttf, otf, woff, woff2) */
 	drivePreviewKindFont: "Font",
+	/** Info panel — Kind row value: a SQLite database file */
+	drivePreviewKindSqlite: "SQLite database",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

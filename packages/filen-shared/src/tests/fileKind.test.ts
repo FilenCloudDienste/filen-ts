@@ -36,7 +36,8 @@ const KINDS: Readonly<Record<string, string>> = {
 	dot: "docx",
 	pot: "presentation",
 	vhd: "code",
-	key: "iwork"
+	key: "iwork",
+	sqlite: "sqlite"
 }
 
 function kindOf(extension: string): string | null {
@@ -124,7 +125,14 @@ const ROWS: Row[] = [
 	["deck.key", null, 3 * MIB, "iworkPackage", "iwork", "key", "sniff", true, false],
 	["server.key", null, 1_700, "notIworkPackage", null, "key", "sniff", true, false],
 	["server.key", "text/plain", 1_700, null, "text", "txt", "mime", true, true],
-	["server.key", "audio/mpeg", 1_700, null, null, "key", "default", true, true]
+	["server.key", "audio/mpeg", 1_700, null, null, "key", "default", true, true],
+	// A .db is a SQLite database only when its head says so; its stored type reads as for an unknown extension.
+	["app.db", null, 3 * MIB, null, null, "db", "default", true, true],
+	["app.db", "application/octet-stream", 3 * MIB, "sqlite", "sqlite", "sqlite", "sniff", true, false],
+	["cache.db", null, 3 * MIB, "notSqlite", null, "db", "sniff", true, false],
+	["notes.db", "text/plain", 300, null, "text", "txt", "mime", true, true],
+	["clip.db", "audio/mpeg", 300, null, "audio", "mp3", "mime", true, true],
+	["app.db", "application/vnd.sqlite3", 3 * MIB, null, "sqlite", "sqlite", "mime", true, true]
 ]
 
 describe("resolveFileKind", () => {
@@ -251,13 +259,16 @@ describe("verdictChangesKind", () => {
 
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
-		expect(["ts", "mts", "dot", "pot", "vhd", "key", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))).toEqual([
+		expect(
+			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))
+		).toEqual([
 			"transportStream",
 			"transportStream",
 			"wordTemplate",
 			"presentationTemplate",
 			"virtualDisk",
 			"iworkPackage",
+			"sqlite",
 			null,
 			null,
 			null,
@@ -271,7 +282,8 @@ describe("content sniffs", () => {
 			wordTemplate: ["wordBinary", "notWordBinary"],
 			presentationTemplate: ["presentationBinary", "notPresentationBinary"],
 			virtualDisk: ["virtualDisk", "notVirtualDisk"],
-			iworkPackage: ["iworkPackage", "notIworkPackage"]
+			iworkPackage: ["iworkPackage", "notIworkPackage"],
+			sqlite: ["sqlite", "notSqlite"]
 		})
 	})
 
@@ -281,6 +293,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("pot")).toEqual(["pot", "pot", "txt"])
 		expect(sniffCandidates("vhd")).toEqual(["vhd", null, "vhd"])
 		expect(sniffCandidates("key")).toEqual([null, "key", null])
+		expect(sniffCandidates("db")).toEqual([null, "sqlite", null])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 
@@ -315,11 +328,14 @@ describe("content sniffs", () => {
 		expect(resolveFileKind({ name: "server.key", size: 300, verdict: "notIworkPackage" }, kindOf)).toMatchObject({ sniffable: false })
 		// One that leaves a viewer, which reads the file anyway, is not kept.
 		expect(verdictChangesKind({ name: "alu.vhd", size: 300 }, "notVirtualDisk", kindOf)).toBe(false)
+		// A .db's either way: it takes the kind, or settles the read.
+		expect(verdictChangesKind({ name: "app.db", size: 300 }, "sqlite", kindOf)).toBe(true)
+		expect(verdictChangesKind({ name: "cache.db", size: 300 }, "notSqlite", kindOf)).toBe(true)
 		// A media verdict on an extension no read settles changes nothing it would not already.
 		expect(verdictChangesKind({ name: "clip.mp4", size: 300 }, "video", kindOf)).toBe(false)
 	})
 
-		// An app whose table has no Keynote reads a .key as before: by its MIME type, else no kind.
+	// An app whose table has no Keynote reads a .key as before: by its MIME type, else no kind.
 	it("leaves a .key to its MIME type on a table without Keynote", () => {
 		const withoutKey = (extension: string) => (extension === "key" ? null : kindOf(extension))
 

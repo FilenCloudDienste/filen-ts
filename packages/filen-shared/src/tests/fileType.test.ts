@@ -96,7 +96,9 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["font/otf", "otf"],
 	["font/woff", "woff"],
 	["application/font-woff", "woff"],
-	["font/woff2", "woff2"]
+	["font/woff2", "woff2"],
+	["application/vnd.sqlite3", "sqlite"],
+	["application/x-sqlite3", "sqlite"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.

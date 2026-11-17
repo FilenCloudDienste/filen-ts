@@ -18,7 +18,8 @@ export interface FileKindVerdictStorage {
 }
 
 // A verdict as memory holds it: a document verdict (a `.dot` read as a Word template or not, a `.pot` as a
-// PowerPoint one or not, a `.vhd` as a disk image or not, a `.key` as a Keynote package or not) as well as the media ones kv keeps.
+// PowerPoint one or not, a `.vhd` as a disk image or not, a `.key` as a Keynote package or not, a `.db` as a SQLite
+// database or not) as well as the media ones kv keeps.
 interface HeldVerdict {
 	v: FileVerdict
 	at: number
@@ -40,6 +41,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notVirtualDisk":
 		case "iworkPackage":
 		case "notIworkPackage":
+		case "sqlite":
+		case "notSqlite":
 			return false
 	}
 }

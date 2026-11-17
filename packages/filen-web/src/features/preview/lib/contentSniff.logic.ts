@@ -1,5 +1,6 @@
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { FileVerdict, SniffId } from "@filen/shared"
+import { SQLITE_HEADER, isSqliteHeader } from "@/features/preview/lib/sqliteBrowse.logic"
 
 // How each content read (@filen/shared's SniffId) runs. Pure, for the gates (preview.logic.ts); the reads themselves are
 // contentSniff.ts's.
@@ -45,6 +46,12 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: ZIP_LOCAL_HEADER.length,
 		decide: head => (isZipHead(head) ? "iworkPackage" : "notIworkPackage")
+	},
+	// The SQLite header's 16 bytes, read through the origin the database viewer then reads.
+	sqlite: {
+		mode: "head",
+		headBytes: SQLITE_HEADER.length,
+		decide: head => (isSqliteHeader(head) ? "sqlite" : "notSqlite")
 	}
 }
 

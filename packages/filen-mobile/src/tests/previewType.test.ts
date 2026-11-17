@@ -442,6 +442,21 @@ describe("getPreviewType — stored mime", () => {
 		}
 	})
 
+	// Before = after: a database type names an extension this platform's tables lack, and a .db (now an extension a
+	// read settles on web) still reads by its stored type alone here.
+	it("keeps an extensionless database unknown, and a .db to its stored type", () => {
+		for (const mime of ["application/vnd.sqlite3", "application/x-sqlite3"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+			expect(fileTypeExtension("download", mime), mime).toBe("")
+		}
+
+		expect(getPreviewType("app.db")).toBe("unknown")
+		expect(fileTypeExtension("app.db")).toBe("db")
+		expect(getPreviewType("notes.db", "text/plain")).toBe("text")
+		expect(fileTypeExtension("notes.db", "text/plain")).toBe("txt")
+		expect(getPreviewType("clip.db", "video/mp4")).toBe("video")
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

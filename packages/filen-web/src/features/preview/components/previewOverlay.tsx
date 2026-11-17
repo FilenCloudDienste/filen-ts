@@ -89,6 +89,7 @@ import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
+import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
@@ -2863,6 +2864,8 @@ function PreviewBody({
 			)
 		case "font":
 			return <FontViewer item={item} />
+		case "sqlite":
+			return <SqliteViewer item={item} />
 		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive
 		// switch's required fallback.
 		case "other":
