@@ -45,6 +45,7 @@ import { previewTextMetadata } from "@/locales/en/previewText/metadata"
 import { previewEbookReader } from "@/locales/en/previewEbook/reader"
 import { previewTextEncoding } from "@/locales/en/previewText/encoding"
 import { previewTextMarkdown } from "@/locales/en/previewText/markdown"
+import { previewTextHtml } from "@/locales/en/previewText/html"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -887,5 +888,6 @@ export const preview = {
 	...previewTextMetadata,
 	...previewEbookReader,
 	...previewTextEncoding,
-	...previewTextMarkdown
+	...previewTextMarkdown,
+	...previewTextHtml
 } as const
