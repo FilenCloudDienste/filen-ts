@@ -343,6 +343,8 @@ class MpegPsReader implements ContainerReader {
 		let unit = pos
 		// The first pack past the window: where the next read starts.
 		const reach: { next: number | null } = { next: null }
+		// The streams a PES came for past the window: a picture still open in another one ends with what was read.
+		const continued = new Set<number>()
 
 		const partOf = (at: number): number | null => {
 			const part = parts.get(at) ?? 0
@@ -382,6 +384,10 @@ class MpegPsReader implements ContainerReader {
 
 			const inWindow = absolute < windowEnd
 
+			if (!inWindow) {
+				continued.add(key)
+			}
+
 			if (entry.avc !== null) {
 				this.accessUnits(
 					entry,
@@ -405,8 +411,9 @@ class MpegPsReader implements ContainerReader {
 			return true
 		})
 
-		// Pictures still open at the end of what was read finish there: cut short, unless the file ends there too.
-		const cut = readEnd < this.size && (video.size > 0 || open.size > 0)
+		// Pictures still open at the end of what was read finish there: cut short, unless the file ends there too, or their
+		// stream sent nothing more past the window (it ended before the file does: more bytes would add nothing to them).
+		const cut = readEnd < this.size && [...video.keys(), ...open.keys()].some(key => continued.has(key))
 
 		for (const key of video.keys()) {
 			const entry = this.streams.get(key)
@@ -731,12 +738,18 @@ class MpegPsReader implements ContainerReader {
 
 		for (const packet of packets) {
 			if (packet.duration === 0) {
-				byTrack.set(packet.track, [...(byTrack.get(packet.track) ?? []), packet])
+				const list = byTrack.get(packet.track)
+
+				if (list === undefined) {
+					byTrack.set(packet.track, [packet])
+				} else {
+					list.push(packet)
+				}
 			}
 		}
 
-		for (const list of byTrack.values()) {
-			const sorted = [...list].sort((a, b) => a.pts - b.pts)
+		for (const sorted of byTrack.values()) {
+			sorted.sort((a, b) => a.pts - b.pts)
 
 			for (const [i, packet] of sorted.entries()) {
 				const following = sorted[i + 1]

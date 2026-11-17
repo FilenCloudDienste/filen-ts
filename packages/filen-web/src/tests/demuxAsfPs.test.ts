@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { BufferSource, EncodedPacketSink, Input, type EncodedPacket, type InputTrack } from "mediabunny"
+import { BufferSource, CustomSource, EncodedPacketSink, Input, type EncodedPacket, type InputTrack } from "mediabunny"
 import { ASF } from "@/lib/media/demux/asfDemuxer"
 import { MPEG_PS } from "@/lib/media/demux/mpegPsDemuxer"
 
@@ -221,5 +221,47 @@ describe("MPEG program stream demuxer over a large picture", () => {
 
 		expect(first?.data.length).toBeGreaterThan(PES_COUNT * filler.length)
 		expect(performance.now() - started).toBeLessThan(3000)
+	})
+})
+
+describe("MPEG program stream demuxer over a stream that ends before the file does", () => {
+	it("finishes the last picture where its stream stopped, rather than reading ever more of the file for it", async () => {
+		const aud = [0, 0, 0, 1, 0x09, 0xf0]
+		const head = [
+			videoPack(90_000, [0, 0, 0, 1, ...SPS_NAL, 0, 0, 0, 1, ...PPS_NAL, 0, 0, 0, 1, 0x65, 0x88, 0x84]),
+			videoPack(90_000 + 3600, [...aud, 0, 0, 0, 1, 0x65, 0x88, 0x84]),
+			videoPack(90_000 + 7200, [...aud, 0, 0, 0, 1, 0x65, 0x88, 0x84])
+		].flat()
+		// Then only padding packs, for 20 MiB: the video has ended, the file goes on.
+		const padding = Uint8Array.from([
+			...[0, 0, 1, 0xba, 0x44, 0, 4, 0, 4, 1, 0x01, 0x89, 0xc3, 0xf8, 0, 0, 1, 0xbe, 0x07, 0xd0],
+			...new Array<number>(2000).fill(0xff)
+		])
+		const bytes = new Uint8Array(head.length + padding.length * Math.ceil((20 * 1024 * 1024) / padding.length))
+
+		bytes.set(head)
+
+		for (let at = head.length; at + padding.length <= bytes.length; at += padding.length) {
+			bytes.set(padding, at)
+		}
+
+		let read = 0
+		const file = new Input({
+			formats: [MPEG_PS],
+			source: new CustomSource({
+				getSize: () => bytes.length,
+				read: (start, end) => {
+					read += end - start
+
+					return bytes.subarray(start, end)
+				}
+			})
+		})
+		const pictures = await all(file.getPrimaryVideoTrack())
+
+		expect(pictures).toHaveLength(3)
+		// The file once over, as the search for a fourth picture reads on to its end, and the probe's head: not reads
+		// doubled again and again for the last picture, up to the largest one assembled.
+		expect(read).toBeLessThan(bytes.length + 2 * 1024 * 1024)
 	})
 })
