@@ -334,12 +334,22 @@ describe("EmailViewer", () => {
 	})
 
 	it("shows Reply to only when it differs from the sender, and an international domain as written under the address", async () => {
-		message.current = ["From: Anna <anna@acm\u00e9.com>", "Reply-To: drop@y.io", "Subject: Cues", "", "x", ""].join("\r\n")
+		message.current = [
+			"From: Anna <anna@acm\u00e9.com>",
+			"Sender: Desk <desk@x.io>",
+			"Reply-To: drop@y.io",
+			"Subject: Cues",
+			"",
+			"x",
+			""
+		].join("\r\n")
 		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
 
 		expect(await screen.findByText("Anna <anna@xn--acm-dma.com>")).toBeTruthy()
 		expect(screen.getByText("Domain written as:", { exact: false }).textContent).toBe("Domain written as: acm\u00e9.com")
 		expect(screen.getByText("Reply to")).toBeTruthy()
+		expect(screen.getByText("Sent by")).toBeTruthy()
+		expect(screen.getByText("Desk <desk@x.io>")).toBeTruthy()
 		expect(screen.getByText("drop@y.io")).toBeTruthy()
 
 		cleanup()

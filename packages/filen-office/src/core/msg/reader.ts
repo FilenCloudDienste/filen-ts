@@ -22,6 +22,8 @@ export const MSG_DEFAULT_MAX_SIZE = 67_108_864
 const MAX_ENTRIES = 65_536
 const MAX_PROPERTY_BYTES = 1_048_576
 const MAX_SHORT_BYTES = 4096
+// The message's Internet headers, as received: real ones are a few KiB.
+const MAX_HEADER_BYTES = 262_144
 const MAX_ATTACHMENTS = 1000
 const MAX_RECIPIENTS = 200
 const MAX_STORAGE_DEPTH = 64
@@ -50,6 +52,9 @@ const SENDER_ADDRESS = 0x0c1f
 const SENDER_SMTP = 0x5d01
 const SENT_REPRESENTING_NAME = 0x0042
 const SENT_REPRESENTING_ADDRESS = 0x0065
+const SENT_REPRESENTING_SMTP = 0x5d02
+const REPLY_RECIPIENT_NAMES = 0x0050
+const TRANSPORT_HEADERS = 0x007d
 const BODY = 0x1000
 const RTF_COMPRESSED = 0x1009
 const HTML = 0x1013
@@ -89,7 +94,15 @@ export interface MsgAttachment {
 
 export interface MsgMessage {
 	readonly subject: string | null
+	// The author: PidTagSentRepresenting's name and address (the account sent on behalf of), else the sender's.
 	readonly from: MsgAddress | null
+	// The account that sent it, when it is not the author (sent on behalf of `from`); else null. Each address is its
+	// own property pair's, never one's name with the other's address.
+	readonly sender: MsgAddress | null
+	// PidTagReplyRecipientNames: the Reply-To names, ";"-separated; null for none.
+	readonly replyToNames: string | null
+	// PidTagTransportMessageHeaders: the Internet headers the message arrived with (Reply-To, Sender), at most 256 KiB.
+	readonly transportHeaders: string | null
 	readonly to: readonly MsgAddress[]
 	readonly cc: readonly MsgAddress[]
 	// Recipients past MAX_RECIPIENTS, counted.
@@ -253,15 +266,23 @@ class Reader {
 			else if (type === RECIPIENT_CC) cc.push(address)
 		}
 
-		const fromName = (await this.short(path, SENDER_NAME, codepage)) ?? (await this.short(path, SENT_REPRESENTING_NAME, codepage))
-		const fromAddress =
-			(await this.short(path, SENDER_SMTP, codepage)) ??
-			(await this.short(path, SENDER_ADDRESS, codepage)) ??
-			(await this.short(path, SENT_REPRESENTING_ADDRESS, codepage))
+		const pair = async (name: number, smtp: number, address: number): Promise<MsgAddress | null> => {
+			const shownName = await this.short(path, name, codepage)
+			const shownAddress = (await this.short(path, smtp, codepage)) ?? (await this.short(path, address, codepage))
+
+			return shownName === null && shownAddress === null ? null : { name: shownName, address: shownAddress }
+		}
+		const sentBy = await pair(SENDER_NAME, SENDER_SMTP, SENDER_ADDRESS)
+		const author = await pair(SENT_REPRESENTING_NAME, SENT_REPRESENTING_SMTP, SENT_REPRESENTING_ADDRESS)
+		const same = (a: MsgAddress | null, b: MsgAddress | null): boolean =>
+			a === null || b === null || (a.address ?? a.name ?? "").toLowerCase() === (b.address ?? b.name ?? "").toLowerCase()
 
 		return {
 			subject: await this.short(path, SUBJECT, codepage),
-			from: fromName === null && fromAddress === null ? null : { name: fromName, address: fromAddress },
+			from: author ?? sentBy,
+			sender: same(author, sentBy) ? null : sentBy,
+			replyToNames: await this.short(path, REPLY_RECIPIENT_NAMES, codepage),
+			transportHeaders: await this.string(path, TRANSPORT_HEADERS, codepage, MAX_HEADER_BYTES),
 			to,
 			cc,
 			recipientsOmitted: Math.max(0, recipients.length - MAX_RECIPIENTS),

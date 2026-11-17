@@ -9,6 +9,7 @@ vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
 
 const { rasterImageType, readEmail, readEmailNames } = await import("@/features/preview/lib/emailReading")
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
+import { msgBytes } from "@filen/office/testing/msg"
 
 // A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
 // past the nesting, part or size bounds it is "tooLarge". An Outlook message (.msg) reads into the same model.
@@ -280,5 +281,45 @@ describe("readEmail", () => {
 				reading => reading.status === "ok" && reading.attachments.every(attachment => Object.keys(attachment).length === 1)
 			)
 		).toBe(true)
+	})
+
+	it("shows the Sender when it differs, an existing xn-- domain as written, and a fullwidth @ name address-first", async () => {
+		const read = async (bytes: Uint8Array) => {
+			const reading = await readEmail(bytes as Uint8Array<ArrayBuffer>)
+
+			if (reading.status !== "ok") throw new Error("expected a message")
+
+			return reading
+		}
+
+		expect(await read(encode(CRLF(["From: Boss <boss@x.io>", "Sender: Assistant <pa@x.io>", "", "x"])))).toMatchObject({
+			from: "Boss <boss@x.io>",
+			sender: "Assistant <pa@x.io>"
+		})
+		expect(await read(encode(CRLF(["From: a@x.io", "Sender: A@x.io", "", "x"])))).toMatchObject({ sender: null })
+		expect(await read(encode(CRLF(["From: a@xn--bcher-kva.example", "", "x"])))).toMatchObject({
+			from: "a@xn--bcher-kva.example",
+			fromIdnDomain: "b\u00fccher.example"
+		})
+		expect(await read(encode(CRLF(['From: "support\uff20bank.com" <evil@x.io>', "", "x"])))).toMatchObject({
+			from: "evil@x.io (support\uff20bank.com)"
+		})
+	})
+
+	it("reads a .msg's sending account and its Reply-To from the headers it arrived with, else its reply names", async () => {
+		const read = async (spec: Parameters<typeof msgBytes>[0]) => {
+			const reading = await readEmail((await msgBytes(spec)) as Uint8Array<ArrayBuffer>)
+
+			if (reading.status !== "ok") throw new Error("expected a message")
+
+			return reading
+		}
+
+		expect(await read({ sender: [null, "evil@x.io"], representing: ["CEO", null] })).toMatchObject({ from: "CEO", sender: "evil@x.io" })
+		expect(
+			await read({ sender: ["Anna", "anna@x.io"], transportHeaders: "From: anna@x.io\r\nReply-To: Desk <desk@y.io>\r\n" })
+		).toMatchObject({ replyTo: ["Desk <desk@y.io>"] })
+		expect(await read({ sender: ["Anna", "anna@x.io"], replyToNames: "Desk; Other" })).toMatchObject({ replyTo: ["Desk", "Other"] })
+		expect(await read({ sender: ["Anna", "anna@x.io"], replyToNames: "Anna" })).toMatchObject({ replyTo: [] })
 	})
 })

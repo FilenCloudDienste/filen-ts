@@ -175,6 +175,7 @@ export function emailText(message: EmailNames, limit: number): string {
 	}
 
 	field("From", message.from)
+	field("Sender", message.sender)
 	list("Reply-To", message.replyTo)
 	list("To", message.to, message.addressesOmitted)
 	list("Cc", message.cc)

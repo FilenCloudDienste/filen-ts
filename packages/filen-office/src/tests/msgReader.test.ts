@@ -173,6 +173,26 @@ describe("readMsg", () => {
 		expect(performance.now() - started).toBeLessThan(10_000)
 	})
 
+	it("takes each address from its own property pair, and names the sending account when it is not the author", async () => {
+		const spoof = ok(await readMsg(await msgBytes({ sender: [null, "evil@x.io"], representing: ["CEO", null] })))
+
+		expect(spoof).toMatchObject({ from: { name: "CEO", address: null }, sender: { name: null, address: "evil@x.io" } })
+
+		const assistant = ok(
+			await readMsg(await msgBytes({ sender: ["Assistant", "pa@x.io"], representing: ["Boss", "boss@x.io"], replyToNames: "Desk" }))
+		)
+
+		expect(assistant).toMatchObject({
+			from: { name: "Boss", address: "boss@x.io" },
+			sender: { name: "Assistant", address: "pa@x.io" },
+			replyToNames: "Desk"
+		})
+		expect(ok(await readMsg(await msgBytes({ sender: ["Anna", "a@x.io"], representing: ["Anna", "A@x.io"] }))).sender).toBeNull()
+		expect(ok(await readMsg(await msgBytes({ transportHeaders: "Reply-To: r@x.io\r\n" }))).transportHeaders).toBe(
+			"Reply-To: r@x.io\r\n"
+		)
+	})
+
 	it("reads names alone when asked: no part read, no embedded message made a file", async () => {
 		const message = ok(await readMsg(await msgBytes(SPEC), { parts: false }))
 

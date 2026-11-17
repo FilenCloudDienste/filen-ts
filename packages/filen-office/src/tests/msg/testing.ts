@@ -25,7 +25,12 @@ export interface MsgEmbeddedSpec {
 
 export interface MsgSpec {
 	readonly subject?: string
-	readonly sender?: readonly [name: string, address: string]
+	// The sending account (PidTagSender*), and the author it sent on behalf of (PidTagSentRepresenting*); a null name
+	// or address leaves that property out.
+	readonly sender?: readonly [name: string | null, address: string | null]
+	readonly representing?: readonly [name: string | null, address: string | null]
+	readonly replyToNames?: string
+	readonly transportHeaders?: string
 	readonly to?: readonly (readonly [name: string, address: string])[]
 	readonly cc?: readonly (readonly [name: string, address: string])[]
 	readonly date?: string
@@ -123,10 +128,17 @@ export function messageEntries(spec: MsgSpec, path: readonly string[] = [], embe
 	const fixed: FixedProperty[] = []
 
 	if (spec.subject !== undefined) strings.set(0x0037, spec.subject)
-	if (spec.sender !== undefined) {
-		strings.set(0x0c1a, spec.sender[0])
-		strings.set(0x5d01, spec.sender[1])
+	for (const [pair, name, address] of [
+		[spec.sender, 0x0c1a, 0x5d01],
+		[spec.representing, 0x0042, 0x5d02]
+	] as const) {
+		const [shownName, shownAddress] = pair ?? [null, null]
+
+		if (shownName !== null) strings.set(name, shownName)
+		if (shownAddress !== null) strings.set(address, shownAddress)
 	}
+	if (spec.replyToNames !== undefined) strings.set(0x0050, spec.replyToNames)
+	if (spec.transportHeaders !== undefined) strings.set(0x007d, spec.transportHeaders)
 	if (spec.text !== undefined) strings.set(0x1000, spec.text)
 	if (spec.html !== undefined) {
 		// Copied into this realm's Uint8Array: under jsdom, TextEncoder's arrays are another realm's.

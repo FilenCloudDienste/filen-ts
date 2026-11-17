@@ -40,6 +40,8 @@ export interface EmailMessage<A = EmailAttachment> {
 	readonly cc: readonly string[]
 	// Addresses past MAX_ADDRESSES, counted.
 	readonly addressesOmitted: number
+	// The account that sent it when that is not the author (Sender, or a .msg sent on behalf of `from`); else null.
+	readonly sender: string | null
 	// Reply-To, when it names someone other than the sender; else empty.
 	readonly replyTo: readonly string[]
 	// The sender's domain as written when it is international (shown in its ASCII form in `from`); else null.
@@ -96,12 +98,93 @@ function display(text: string | undefined | null): string | null {
 	return shown === "" ? null : shown.slice(0, MAX_SHORT)
 }
 
+// RFC 3492: a label's code points from its punycode (the part after "xn--"); null for one that is not valid.
+function punycodeLabel(input: string): string | null {
+	const base = 36
+	const tMin = 1
+	const tMax = 26
+	const delimiter = input.lastIndexOf("-")
+	const output: number[] = []
+	let n = 128
+	let bias = 72
+	let i = 0
+
+	for (let k = 0; k < Math.max(0, delimiter); k++) {
+		const code = input.charCodeAt(k)
+
+		if (code >= 0x80) return null
+
+		output.push(code)
+	}
+
+	for (let at = delimiter > 0 ? delimiter + 1 : 0; at < input.length;) {
+		const old = i
+
+		for (let w = 1, k = base; ; k += base) {
+			const code = at < input.length ? input.charCodeAt(at++) : -1
+			const digit =
+				code >= 0x30 && code <= 0x39
+					? code - 22
+					: code >= 0x41 && code <= 0x5a
+						? code - 0x41
+						: code >= 0x61 && code <= 0x7a
+							? code - 0x61
+							: -1
+
+			if (digit < 0) return null
+
+			i += digit * w
+
+			const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias
+
+			if (digit < t) break
+
+			w *= base - t
+
+			if (i > 0x10ffff * 64) return null
+		}
+
+		const length = output.length + 1
+		let delta = old === 0 ? Math.floor((i - old) / 700) : (i - old) >> 1
+		let k = 0
+
+		delta += Math.floor(delta / length)
+
+		while (delta > ((base - tMin) * tMax) >> 1) {
+			delta = Math.floor(delta / (base - tMin))
+			k += base
+		}
+
+		bias = k + Math.floor(((base - tMin + 1) * delta) / (delta + 38))
+		n += Math.floor(i / length)
+		i %= length
+
+		if (n > 0x10ffff) return null
+
+		output.splice(i, 0, n)
+		i++
+	}
+
+	return String.fromCodePoint(...output)
+}
+
 // An address with an international (non-ASCII) domain in its ASCII form, which no lookalike script can imitate.
 function asciiAddress(address: string): { readonly shown: string; readonly idn: string | null } {
 	const at = address.lastIndexOf("@")
 	const domain = address.slice(at + 1)
 
-	if (at < 0 || /^[\x20-\x7e]*$/.test(domain)) return { shown: address, idn: null }
+	if (at < 0) return { shown: address, idn: null }
+
+	// Already in ASCII form: written as its labels decode, when one is an "xn--" label.
+	if (/^[\x20-\x7e]*$/.test(domain)) {
+		const labels = domain.split(".")
+
+		if (!labels.some(label => /^xn--/i.test(label))) return { shown: address, idn: null }
+
+		const decoded = labels.map(label => (/^xn--/i.test(label) ? punycodeLabel(label.slice(4)) : label))
+
+		return { shown: address, idn: decoded.every(label => label !== null) ? decoded.join(".") : domain }
+	}
 
 	try {
 		return { shown: `${address.slice(0, at + 1)}${new URL(`http://${domain}`).hostname}`, idn: domain }
@@ -118,7 +201,8 @@ function mailbox(name: string, address: string): string {
 	if (shownAddress === "") return shownName ?? ""
 	if (shownName === null || shownName === shownAddress) return shownAddress
 
-	return shownName.includes("@") ? `${shownAddress} (${shownName})` : `${shownName} <${shownAddress}>`
+	// "@" and its fullwidth and small forms: a name with one could pass for an address.
+	return /[@\uff20\ufe6b]/u.test(shownName) ? `${shownAddress} (${shownName})` : `${shownName} <${shownAddress}>`
 }
 
 // The sender's international domain as written, for the viewer to point out; null for an ASCII one.
@@ -206,6 +290,10 @@ function readMessage<A>(email: Email, part: (attachment: Email["attachments"][nu
 		to,
 		cc,
 		addressesOmitted: budget.omitted,
+		sender:
+			email.sender?.address === undefined || email.sender.address.toLowerCase() === (email.from?.address ?? "").toLowerCase()
+				? null
+				: mailbox(email.sender.name, email.sender.address),
 		replyTo: differingReplyTo(email.replyTo, email.from),
 		fromIdnDomain: idnDomain(email.from?.address),
 		date: display(email.date),
@@ -239,7 +327,11 @@ function msgPart(attachment: MsgAttachment, index: number): EmailAttachment {
 	}
 }
 
-function readMsgMessage<A>(message: MsgMessage, part: (attachment: MsgAttachment, index: number) => A): EmailMessage<A> {
+function readMsgMessage<A>(
+	message: MsgMessage,
+	replyTo: readonly string[],
+	part: (attachment: MsgAttachment, index: number) => A
+): EmailMessage<A> {
 	const shown = (list: readonly MsgAddress[]): string[] => list.map(msgMailbox).filter(entry => entry !== "")
 	const from = message.from === null ? "" : msgMailbox(message.from)
 
@@ -249,8 +341,8 @@ function readMsgMessage<A>(message: MsgMessage, part: (attachment: MsgAttachment
 		to: shown(message.to),
 		cc: shown(message.cc),
 		addressesOmitted: message.recipientsOmitted,
-		// Reply-To is not read from a .msg (its recipients are entry IDs, not addresses).
-		replyTo: [],
+		sender: message.sender === null ? null : msgMailbox(message.sender),
+		replyTo,
 		fromIdnDomain: idnDomain(message.from?.address),
 		date: display(message.date),
 		...bodies(message.html, message.text),
@@ -259,7 +351,36 @@ function readMsgMessage<A>(message: MsgMessage, part: (attachment: MsgAttachment
 	}
 }
 
-type Parsed = { readonly kind: "eml"; readonly email: Email } | { readonly kind: "msg"; readonly message: MsgMessage } | null
+type Parsed =
+	| { readonly kind: "eml"; readonly email: Email }
+	| { readonly kind: "msg"; readonly message: MsgMessage; readonly replyTo: readonly string[] }
+	| null
+
+// A .msg's Reply-To: from the Internet headers it arrived with, else its reply names (display names alone).
+async function msgReplyTo(message: MsgMessage): Promise<string[]> {
+	const sender: Address | undefined =
+		message.from === null ? undefined : { name: message.from.name ?? "", address: message.from.address ?? "" }
+
+	if (message.transportHeaders !== null) {
+		try {
+			const headers = await PostalMime.parse(`${message.transportHeaders.replace(/(\r?\n)+$/, "")}\r\n\r\n`, {
+				maxNestingDepth: 1,
+				maxPartCount: 1
+			})
+
+			if (headers.replyTo !== undefined) return differingReplyTo(headers.replyTo, sender)
+		} catch {
+			// Headers that do not parse: the reply names below.
+		}
+	}
+
+	const names = (message.replyToNames ?? "")
+		.split(";")
+		.map(name => display(name))
+		.filter((name): name is string => name !== null)
+
+	return names.every(name => name === display(message.from?.name)) ? [] : names.slice(0, MAX_ADDRESSES)
+}
 
 // The parse; null past a bound. `parts: false` asks a .msg for names only (an .eml's parts are decoded either way).
 async function parse(bytes: Uint8Array<ArrayBuffer>, parts: boolean): Promise<Parsed> {
@@ -270,7 +391,7 @@ async function parse(bytes: Uint8Array<ArrayBuffer>, parts: boolean): Promise<Pa
 	if (isCompoundFile(bytes)) {
 		const reading = await readMsg(bytes, { maxSize: EMAIL_MAX_BYTES, parts })
 
-		return reading.status === "ok" ? { kind: "msg", message: reading.message } : null
+		return reading.status === "ok" ? { kind: "msg", message: reading.message, replyTo: await msgReplyTo(reading.message) } : null
 	}
 
 	try {
@@ -299,7 +420,10 @@ export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailRe
 
 	if (parsed === null) return { status: "tooLarge" }
 
-	return { status: "ok", ...(parsed.kind === "eml" ? readMessage(parsed.email, emlPart) : readMsgMessage(parsed.message, msgPart)) }
+	return {
+		status: "ok",
+		...(parsed.kind === "eml" ? readMessage(parsed.email, emlPart) : readMsgMessage(parsed.message, parsed.replyTo, msgPart))
+	}
 }
 
 // The message with its attachments' names alone (for a text extract): no Blob made, no embedded message copied.
@@ -312,6 +436,6 @@ export async function readEmailNames(bytes: Uint8Array<ArrayBuffer>): Promise<Em
 		status: "ok",
 		...(parsed.kind === "eml"
 			? readMessage(parsed.email, (attachment, index) => ({ name: emlName(attachment, index) }))
-			: readMsgMessage(parsed.message, (attachment, index) => ({ name: msgName(attachment, index) })))
+			: readMsgMessage(parsed.message, parsed.replyTo, (attachment, index) => ({ name: msgName(attachment, index) })))
 	}
 }

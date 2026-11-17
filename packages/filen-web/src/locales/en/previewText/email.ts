@@ -50,6 +50,8 @@ export const previewTextEmail = {
 	previewEmailTooLarge: "This message is too large to show here.",
 	/** Email preview — above a text body cut at the text viewers' size limit */
 	previewEmailTextTruncated: "This text is longer than can be shown here; only its start is shown.",
+	/** Email preview — the label of a muted row under the sender: the account that sent the message on the sender's behalf (Sender header, or Outlook's "on behalf of") */
+	previewEmailSentBy: "Sent by",
 	/** Email preview — the Reply-To row's label, shown when it names someone other than the sender */
 	previewEmailReplyTo: "Reply to",
 	/** Email preview — under the sender's address (shown with its domain in ASCII) when the domain has non-ASCII characters; the domain as written follows */

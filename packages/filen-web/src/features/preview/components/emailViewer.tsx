@@ -461,6 +461,12 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 						</span>
 					</p>
 				)}
+				{/* The account that sent it on the author's behalf, when that is someone else. */}
+				<Recipients
+					label={t("previewEmailSentBy")}
+					list={message.sender === null ? [] : [message.sender]}
+					muted
+				/>
 				<Recipients
 					label={t("previewEmailReplyTo")}
 					list={message.replyTo}

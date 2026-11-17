@@ -11,6 +11,7 @@ const MESSAGE: EmailMessage = {
 	to: ["me@example.com", "Bob <bob@example.com>"],
 	cc: [],
 	addressesOmitted: 0,
+	sender: null,
 	replyTo: [],
 	fromIdnDomain: null,
 	date: "2026-11-16T09:14:00.000Z",
