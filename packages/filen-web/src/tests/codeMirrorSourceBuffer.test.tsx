@@ -11,6 +11,8 @@ vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
 }))
 
 const { CodeMirrorSource } = await import("@/features/preview/components/codeMirrorSource")
+const { Text } = await import("@codemirror/state")
+type TextBuffer = import("@/features/preview/lib/textFile").TextBuffer
 
 function editorView(container: HTMLElement): EditorView {
 	const dom = container.querySelector<HTMLElement>(".cm-editor")
@@ -40,7 +42,7 @@ function removeLast(view: EditorView, count: number): void {
 describe("CodeMirrorSource buffer", () => {
 	it("flips dirty on an edit and back when the edit is undone by hand, keeping contentRef current", () => {
 		const onDirtyChange = vi.fn<(dirty: boolean) => void>()
-		const contentRef = createRef<(() => string) | null>()
+		const contentRef = createRef<TextBuffer | null>()
 		const { container } = render(
 			<CodeMirrorSource
 				text="saved"
@@ -53,17 +55,17 @@ describe("CodeMirrorSource buffer", () => {
 		)
 		const view = editorView(container)
 
-		expect(contentRef.current?.()).toBe("saved")
+		expect(contentRef.current?.text()).toBe("saved")
 
 		append(view, "!")
 
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
-		expect(contentRef.current?.()).toBe("saved!")
+		expect(contentRef.current?.text()).toBe("saved!")
 
 		removeLast(view, 1)
 
 		expect(onDirtyChange).toHaveBeenLastCalledWith(false)
-		expect(contentRef.current?.()).toBe("saved")
+		expect(contentRef.current?.text()).toBe("saved")
 	})
 
 	// Outside act: the report must not wait for React to render, or a key handled right after the edit (the
@@ -92,7 +94,7 @@ describe("CodeMirrorSource buffer", () => {
 	})
 
 	it("builds the buffer string only when contentRef is read, never per keystroke", () => {
-		const contentRef = createRef<(() => string) | null>()
+		const contentRef = createRef<TextBuffer | null>()
 		const { container } = render(
 			<CodeMirrorSource
 				text="saved"
@@ -109,13 +111,13 @@ describe("CodeMirrorSource buffer", () => {
 		append(view, "?")
 
 		expect(toString).not.toHaveBeenCalled()
-		expect(contentRef.current?.()).toBe("saved!?")
+		expect(contentRef.current?.text()).toBe("saved!?")
 		expect(toString).toHaveBeenCalledTimes(1)
 	})
 
 	// The overlay nulls the channel on a slot change, which can run after this editor's mount effect.
 	it("re-arms contentRef on the next edit after an outside reset", () => {
-		const contentRef = createRef<(() => string) | null>()
+		const contentRef = createRef<TextBuffer | null>()
 		const { container } = render(
 			<CodeMirrorSource
 				text="saved"
@@ -132,11 +134,11 @@ describe("CodeMirrorSource buffer", () => {
 		})
 		append(view, "!")
 
-		expect(contentRef.current?.()).toBe("saved!")
+		expect(contentRef.current?.text()).toBe("saved!")
 	})
 
 	it("still reads the last buffer once the editor has unmounted", () => {
-		const contentRef = createRef<(() => string) | null>()
+		const contentRef = createRef<TextBuffer | null>()
 		const { container, unmount } = render(
 			<CodeMirrorSource
 				text="saved"
@@ -150,7 +152,7 @@ describe("CodeMirrorSource buffer", () => {
 		append(editorView(container), "!")
 		unmount()
 
-		expect(contentRef.current?.()).toBe("saved!")
+		expect(contentRef.current?.text()).toBe("saved!")
 	})
 
 	it("never flattens the doc into a string when no caller reads the buffer", () => {
@@ -194,7 +196,7 @@ describe("CodeMirrorSource buffer", () => {
 
 	it("reports nothing for a read-only mount", () => {
 		const onDirtyChange = vi.fn<(dirty: boolean) => void>()
-		const contentRef = createRef<(() => string) | null>()
+		const contentRef = createRef<TextBuffer | null>()
 		const { container } = render(
 			<CodeMirrorSource
 				text="saved"
@@ -266,5 +268,66 @@ describe("CodeMirrorSource buffer", () => {
 		expect(editorView(container)).toBe(view)
 		expect(view.state.doc.toString()).toBe("saved!")
 		expect(onValueChange.mock.calls.map(([value]) => value)).toEqual(["saved!"])
+	})
+	// A save writes the file's own encoding; a character it has no byte for refuses, saying where.
+	it("encodes the buffer in the file's encoding and reports a character it cannot hold", () => {
+		const contentRef = createRef<TextBuffer | null>()
+		const onUnencodable = vi.fn()
+		const { container } = render(
+			<CodeMirrorSource
+				text={"caf\u00e9"}
+				tag="text"
+				alt="notes.txt"
+				editable
+				format={{ encoding: "windows-1252", bom: false, lineEnding: "crlf" }}
+				contentRef={contentRef}
+				onUnencodable={onUnencodable}
+			/>
+		)
+		const view = editorView(container)
+
+		append(view, "\n!")
+
+		expect(contentRef.current?.bytes()).toEqual(Uint8Array.of(0x63, 0x61, 0x66, 0xe9, 0x0d, 0x0a, 0x21))
+		expect(onUnencodable).not.toHaveBeenCalled()
+
+		append(view, "\u2603")
+
+		expect(contentRef.current?.bytes()).toBeNull()
+		expect(onUnencodable).toHaveBeenCalledWith({ line: 2, column: 2, char: "\u2603" })
+	})
+
+	// A conversion changes what a save writes though the text is the same: dirty with no edit, and after undoing them.
+	it("is dirty while changed, edits or not, and encodes in the format current when read", () => {
+		const onDirtyChange = vi.fn<(dirty: boolean) => void>()
+		const contentRef = createRef<TextBuffer | null>()
+		const props = { text: "caf\u00e9", tag: "text", alt: "notes.txt", editable: true, onDirtyChange, contentRef }
+		const { container, rerender } = render(
+			<CodeMirrorSource
+				{...props}
+				format={{ encoding: "windows-1252", bom: false, lineEnding: "lf" }}
+			/>
+		)
+
+		expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+
+		rerender(
+			<CodeMirrorSource
+				{...props}
+				format={{ encoding: "utf-8", bom: false, lineEnding: "lf" }}
+				changed
+			/>
+		)
+
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+		expect(contentRef.current?.bytes()).toEqual(new TextEncoder().encode("caf\u00e9"))
+
+		const view = editorView(container)
+
+		append(view, "!")
+		removeLast(view, 1)
+
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+		expect(view.state.doc.eq(Text.of(["caf\u00e9"]))).toBe(true)
 	})
 })

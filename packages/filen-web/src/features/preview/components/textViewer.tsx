@@ -1,7 +1,8 @@
 import { type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
-import { usePreviewTextFile } from "@/features/preview/hooks/usePreviewTextFile"
+import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -22,12 +23,12 @@ export interface TextViewerProps {
 	// click) without this component re-rendering the overlay on every keystroke — a plain reactive
 	// callback would force that; a ref lets the overlay pull, not push. It holds a reader, so the buffer
 	// is flattened into a string only when read. See CodeMirrorSource's own prop.
-	contentRef?: RefObject<(() => string) | null>
+	contentRef?: RefObject<TextBuffer | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
-	// Asked to be editable, the file turned out to be text a save would change (not strict UTF-8), or not text at
-	// all: it shows read-only, and the overlay is told so.
-	onReadOnly?: () => void
+	// Asked to be editable: whether a save writes the file back as it was (false for text in an encoding a save would
+	// change until converted, or not text at all, which shows read-only). The overlay keeps the slot read-only on false.
+	onTextState?: (state: TextState) => void
 }
 
 // Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile), then a decode that keeps the
@@ -35,8 +36,8 @@ export interface TextViewerProps {
 // under its command bar lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte
 // loading, item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onReadOnly }: TextViewerProps) {
-	const text = usePreviewTextFile(item, editable === true, onReadOnly)
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState }: TextViewerProps) {
+	const text = usePreviewTextFile(item, editable === true, onTextState)
 
 	useLeaveViewerFullScreen()
 
@@ -60,7 +61,10 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 		case "success":
 			return (
 				<CodeSurface
+					// Reopened with another encoding: a new text, so a new editor.
+					key={text.encoding.chosen ?? ""}
 					file={text.file}
+					encoding={text.encoding}
 					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 					alt={alt}
 					editable={editable === true && text.writable}

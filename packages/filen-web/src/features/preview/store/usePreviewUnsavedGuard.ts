@@ -1,5 +1,6 @@
 import type { RefObject } from "react"
 import { create } from "zustand"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 // The overlay's unsaved-buffer bit, hoisted out of component state so the sign-out path — a plain lib
 // function, not a component — can ask about it and, if it is set, wait for the user's answer BEFORE
@@ -45,7 +46,7 @@ export function setPreviewDirty(dirty: boolean): void {
 }
 
 // The dirty bit and the buffer's getter clear together, or a stale buffer stays readable to a save.
-export function dropPreviewBuffer(contentRef: RefObject<(() => string) | null>): void {
+export function dropPreviewBuffer(contentRef: RefObject<TextBuffer | null>): void {
 	setPreviewDirty(false)
 	contentRef.current = null
 }

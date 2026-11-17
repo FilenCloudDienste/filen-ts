@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { EditorState, Text } from "@codemirror/state"
-import { detectLineEnding, readTextFile, writeTextFile } from "@/features/preview/lib/textFile"
+import { detectLineEnding, encodeTextFile, readTextFile, utf8Format, writeTextFile } from "@/features/preview/lib/textFile"
 
 // Saving a text file changes only what was edited: its byte order mark and its line ending (which the editor does
 // not keep, splitting lines on any ending) come back on save.
@@ -68,14 +68,36 @@ describe("text file fidelity", () => {
 		expect(readTextFile(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61)).editableAsIs).toBe(true)
 	})
 
-	it("opens text a UTF-8 save would change read-only", () => {
+	it("opens text a save writes back in its own encoding editable, and saves it in that encoding", () => {
+		const latin = readTextFile(Uint8Array.of(0x61, 0xff, 0x62))
+		const utf16 = readTextFile(Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00))
+
 		// Not UTF-8: read with the browser language's codepage (windows-1252 for English).
-		expect(readTextFile(Uint8Array.of(0x61, 0xff, 0x62))).toMatchObject({ text: "aÿb", encoding: "windows-1252", editableAsIs: false })
-		expect(readTextFile(Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00))).toMatchObject({
-			text: "hi",
-			encoding: "utf-16le",
+		expect(latin).toMatchObject({ text: "aÿb", encoding: "windows-1252", editableAsIs: true })
+		expect(encodeTextFile(Text.of(["aÿb"]), latin)).toEqual({ bytes: Uint8Array.of(0x61, 0xff, 0x62) })
+		expect(utf16).toMatchObject({ text: "hi", encoding: "utf-16le", bom: true, editableAsIs: true })
+		expect(encodeTextFile(Text.of(["hi"]), utf16)).toEqual({ bytes: Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00) })
+	})
+
+	it("opens text a save would change read-only", () => {
+		expect(readTextFile(Uint8Array.of(...bytes("Grüße, Köln, schön"), 0xff))).toMatchObject({ encoding: "utf-8", editableAsIs: false })
+	})
+
+	it("reads the bytes with a chosen encoding", () => {
+		expect(readTextFile(Uint8Array.of(0xcf, 0xf0, 0xe8), "windows-1251")).toMatchObject({ text: "При", encoding: "windows-1251" })
+	})
+
+	it("refuses a character the encoding cannot hold, and converts to UTF-8 without another encoding's mark", () => {
+		const utf16 = readTextFile(Uint8Array.of(0xff, 0xfe, 0x68, 0x00))
+
+		expect(encodeTextFile(Text.of(["a", "\u2603"]), { encoding: "windows-1252", bom: false, lineEnding: "lf" })).toEqual({
+			unencodable: { line: 2, column: 1, char: "\u2603" }
+		})
+		expect(utf8Format(utf16)).toEqual({ encoding: "utf-8", bom: false, lineEnding: "lf" })
+		expect(utf8Format({ encoding: "utf-8", bom: true, lineEnding: "crlf" })).toEqual({
+			encoding: "utf-8",
 			bom: true,
-			editableAsIs: false
+			lineEnding: "crlf"
 		})
 	})
 })

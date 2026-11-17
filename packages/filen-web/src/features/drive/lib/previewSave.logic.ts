@@ -9,6 +9,7 @@ import {
 	extensionOf,
 	itemTypeExtension,
 	previewType,
+	TEXT_MAX_BYTES,
 	VIEW_ONLY_TEXT_EXTENSIONS,
 	type PreviewCategory
 } from "@/features/drive/lib/preview.logic"
@@ -105,7 +106,8 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 		return inPlaceVideoContainerByName(driveItemName(base)) !== null
 	}
 
-	return isTextCategory(category) && !VIEW_ONLY_TEXT_EXTENSIONS.has(itemTypeExtension(item))
+	// Text edits as a whole buffer: never above the buffered cap (a larger file only ever opens read-only).
+	return isTextCategory(category) && base.data.size <= TEXT_MAX_BYTES && !VIEW_ONLY_TEXT_EXTENSIONS.has(itemTypeExtension(item))
 }
 
 // Whether the preview offers the image editor: any decodable still in the user's own drive, saved in place or, for

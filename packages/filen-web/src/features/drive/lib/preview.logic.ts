@@ -824,15 +824,6 @@ export function stepPreviewIndex(currentUuid: string, siblings: DriveItem[], del
 	return clampListboxIndex((currentIndex === -1 ? 0 : currentIndex) + delta, siblings.length)
 }
 
-// Non-fatal UTF-8 decode — an invalid byte sequence becomes the U+FFFD replacement character rather
-// than throwing (TextDecoder's default `fatal: false`). A whole-buffer text/code/markdown preview
-// always renders SOMETHING: a labeled "can't display" would be wrong for a file that decodes almost
-// entirely cleanly, and a hard failure on the rare genuinely-binary-misnamed file just shows as a
-// handful of replacement glyphs instead of blocking the preview outright.
-export function decodeUtf8(bytes: Uint8Array): string {
-	return new TextDecoder("utf-8").decode(bytes)
-}
-
 // ext -> the code language (@filen/office/core/code: every grammar both apps ship) codeMirrorShared.ts
 // builds the editor's highlighting from. "" means no grammar covers the extension; the file still renders
 // as a fully usable, unhighlighted CodeMirror view, never a blocked preview.

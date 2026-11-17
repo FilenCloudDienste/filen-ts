@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import type { Extension } from "@codemirror/state"
 import { codeTheme, mountCodeCompare } from "@filen/office/dom/code"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { codeMirrorLanguageFor, decodeUtf8, itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { decodeTextBytes } from "@filen/shared/textEncoding"
+import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { languageExtensionFor } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { LoadingState } from "@/components/loadingState"
@@ -79,15 +80,22 @@ export function RemoteCompare({
 	)
 }
 
-// A file's newer version, downloaded here (from the preview cache when it was opened already).
-export function RemoteFileCompare({ theirs, mine }: { theirs: DriveItem; mine: string }) {
+// A file's newer version, downloaded here (from the preview cache when it was opened already). Read as Unicode where
+// it is, else in `encoding`, the codepage the edits save in (a newer version of the same file).
+export function RemoteFileCompare({ theirs, mine, encoding }: { theirs: DriveItem; mine: string; encoding: string }) {
 	const result = usePreviewBytes(theirs)
 
 	return (
 		<RemoteCompare
 			theirs={
 				result.status === "success"
-					? { status: "ready", text: decodeUtf8(result.bytes) }
+					? {
+							status: "ready",
+							text: decodeTextBytes(result.bytes, {
+								guess: encoding.startsWith("utf-") ? null : encoding,
+								languageHint: navigator.languages[0] ?? null
+							}).text
+						}
 					: { status: result.status === "error" ? "failed" : "loading" }
 			}
 			mine={mine}

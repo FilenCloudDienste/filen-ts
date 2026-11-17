@@ -93,6 +93,8 @@ import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
 import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
@@ -285,7 +287,7 @@ export function PreviewOverlay({
 	const popupRef = useRef<HTMLDivElement>(null)
 	// Reader for performSave to pull the live buffer without this component
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
-	const contentRef = useRef<(() => string) | null>(null)
+	const contentRef = useRef<TextBuffer | null>(null)
 	// The spreadsheet editor's side channel: its bytes as edited, serialised when a save asks for them.
 	const spreadsheetRef = useRef<SpreadsheetSaveSource | null>(null)
 	// The Word document editor's, likewise (written by its lossless writer when a save asks).
@@ -339,9 +341,11 @@ export function PreviewOverlay({
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
-	// fresh item or a fresh overlay mount, never by an effect. A text file a save would change (not strict UTF-8)
-	// locks it the same way, reported by its viewer on each mount.
+	// fresh item or a fresh overlay mount, never by an effect.
 	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
+	// What the slot's text viewer reports (TextState): text a save would change keeps the slot read-only until the
+	// viewer converts it; the encoding a save writes is what a newer version is compared in.
+	const [textState, setTextState] = useState<(TextState & { forUuid: string }) | null>(null)
 	// Not component state: the sign-out path is a plain lib function and has to be able to read this
 	// same bit (see usePreviewUnsavedGuard). Boolean-collapsed selector, so the overlay still re-renders
 	// on the dirty EDGE only.
@@ -412,7 +416,8 @@ export function PreviewOverlay({
 	// Compared against the FROZEN pre-save uuid (rawDriveItem), never the possibly-rotated override's uuid — see
 	// `saved`'s own comment on why that's the stable key. A rename to another format leaves the open
 	// viewer read-only: what it holds would be saved under a name that says otherwise.
-	const editable =
+	// `slotWritable` is what the viewer is asked for; a text viewer may still find its file read-only (textState).
+	const slotWritable =
 		rawDriveItem !== undefined &&
 		driveItem !== undefined &&
 		pin !== null &&
@@ -420,6 +425,8 @@ export function PreviewOverlay({
 		slotEditable(driveItem, variant) &&
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
+	const slotText = textState !== null && textState.forUuid === rawDriveItem?.data.uuid ? textState : null
+	const editable = slotWritable && slotText?.writable !== false
 	// Read-only only because a rename changed the format the open edits would be saved in.
 	const renamedReadOnly = driveItem !== undefined && pin?.editable === true && saveFormat(driveItem) !== pin.format
 	// The image editor's session, for the slot and the version it opened on: another file on screen (a newer version
@@ -1481,9 +1488,20 @@ export function PreviewOverlay({
 			return await docxRef.current({ auto })
 		}
 
-		const text = contentRef.current?.()
+		const buffer = contentRef.current
 
-		return text === undefined ? null : { bytes: new TextEncoder().encode(text), commit: null }
+		if (buffer === null) {
+			return null
+		}
+
+		const bytes = buffer.bytes()
+
+		// The editor says why (a character its encoding cannot hold).
+		if (bytes === null) {
+			throw new SaveRefusedError("previewTextUnencodableTitle", { silent: true })
+		}
+
+		return { bytes, commit: null }
 	}
 
 	// Idle autosave (the Word document editor's, the spreadsheet editor's) runs the same save, with its guards, as it
@@ -2268,17 +2286,21 @@ export function PreviewOverlay({
 															variant={variant}
 															category={pin?.category}
 															documentKey={currentDocumentKey}
-															editable={editable}
+															editable={slotWritable}
 															renamedReadOnly={renamedReadOnly}
 															neverEditable={variant !== "drive"}
 															locked={saving}
 															onDirtyChange={setPreviewDirty}
-															onReadOnly={() => {
+															onTextState={state => {
 																if (rawDriveItem !== undefined) {
 																	const forUuid = rawDriveItem.data.uuid
 
-																	setLockedReadOnly(current =>
-																		current?.forUuid === forUuid ? current : { forUuid }
+																	setTextState(current =>
+																		current?.forUuid === forUuid &&
+																		current.writable === state.writable &&
+																		current.encoding === state.encoding
+																			? current
+																			: { ...state, forUuid }
 																	)
 																}
 															}}
@@ -2350,11 +2372,12 @@ export function PreviewOverlay({
 											<RemoteFileCompare
 												theirs={remoteTheirs}
 												mine={mine}
+												encoding={slotText?.encoding ?? "utf-8"}
 											/>
 										)
 									: undefined
 							}
-							readMine={() => contentRef.current?.()}
+							readMine={() => contentRef.current?.text()}
 							pending={remote.pending}
 							onKeepMine={remote.keepMine}
 							onLoadTheirs={remote.loadTheirs}
@@ -2645,9 +2668,9 @@ interface PreviewBodyProps {
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
-	// The text viewer found text a save would change: the slot is read-only.
-	onReadOnly: () => void
-	contentRef: RefObject<(() => string) | null>
+	// The text viewer's TextState (a file a save would change leaves the slot read-only).
+	onTextState: (state: TextState) => void
+	contentRef: RefObject<TextBuffer | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 	docxRef: RefObject<DocxSaveSource | null>
 	// The presentation editor's save source (its session streams each save to the upload).
@@ -2686,7 +2709,7 @@ function PreviewBody({
 	neverEditable,
 	locked,
 	onDirtyChange,
-	onReadOnly,
+	onTextState,
 	contentRef,
 	spreadsheetRef,
 	docxRef,
@@ -2833,7 +2856,7 @@ function PreviewBody({
 					editable={editable}
 					locked={locked}
 					onDirtyChange={onDirtyChange}
-					onReadOnly={onReadOnly}
+					onTextState={onTextState}
 					contentRef={contentRef}
 				/>
 			)
@@ -2845,7 +2868,7 @@ function PreviewBody({
 					editable={editable}
 					locked={locked}
 					onDirtyChange={onDirtyChange}
-					onReadOnly={onReadOnly}
+					onTextState={onTextState}
 					contentRef={contentRef}
 				/>
 			)

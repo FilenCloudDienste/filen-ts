@@ -18,17 +18,23 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
-const { reportReadOnly } = vi.hoisted(() => ({ reportReadOnly: { current: false } }))
+const { reportWritable } = vi.hoisted(() => ({ reportWritable: { current: null as boolean | null } }))
 
 vi.mock("@/features/preview/components/textViewer", async () => {
 	const { useEffect } = await import("react")
 
 	return {
-		// Reports read-only as the real viewer does for text a save would change.
-		TextViewer: ({ editable, onReadOnly }: { editable?: boolean; onReadOnly?: () => void }) => {
+		// Reports its TextState as the real viewer does (read-only for text a save would change, until converted).
+		TextViewer: ({
+			editable,
+			onTextState
+		}: {
+			editable?: boolean
+			onTextState?: (state: { writable: boolean; encoding: string }) => void
+		}) => {
 			useEffect(() => {
-				if (reportReadOnly.current && editable === true) {
-					onReadOnly?.()
+				if (reportWritable.current !== null && editable === true) {
+					onTextState?.({ writable: reportWritable.current, encoding: "shift_jis" })
 				}
 			})
 
@@ -75,7 +81,7 @@ function overlay(name: string, asText: boolean) {
 
 afterEach(() => {
 	cleanup()
-	reportReadOnly.current = false
+	reportWritable.current = null
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
 
@@ -118,14 +124,20 @@ describe("PreviewOverlay — opened as text", () => {
 		expect(viewer.dataset["editable"]).toBe("true")
 	})
 
-	it("locks a text file its viewer reports a save would change", async () => {
-		reportReadOnly.current = true
-		render(overlay("notes.txt", false))
+	// The viewer stays asked for editing (it offers Convert to UTF-8); the overlay offers no Save until it converts.
+	it("offers no save for a text file its viewer reports a save would change, until it reports it writable", async () => {
+		reportWritable.current = false
+		const { rerender } = render(overlay("notes.txt", false))
 
 		const viewer = await screen.findByTestId("text")
 
-		await vi.waitFor(() => {
-			expect(viewer.dataset["editable"]).toBe("false")
-		})
+		expect(viewer.dataset["editable"]).toBe("true")
+		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+
+		reportWritable.current = true
+		rerender(overlay("notes.txt", false))
+
+		expect(await screen.findByRole("button", { name: "Save" })).toBeDefined()
 	})
 })

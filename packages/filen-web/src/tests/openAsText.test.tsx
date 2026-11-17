@@ -155,7 +155,7 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 })
 
 describe("TextViewer — binary guard", () => {
-	function renderBinary(name: string, onReadOnly?: () => void) {
+	function renderBinary(name: string, onTextState?: (state: { writable: boolean; encoding: string }) => void) {
 		previewBytes.current = Uint8Array.of(0x7f, 0x45, 0x4c, 0x46, 0x02, 0x00, 0x01)
 
 		render(
@@ -167,7 +167,7 @@ describe("TextViewer — binary guard", () => {
 					item={named(name)}
 					alt={name}
 					editable
-					{...(onReadOnly === undefined ? {} : { onReadOnly })}
+					{...(onTextState === undefined ? {} : { onTextState })}
 				/>
 			</PreviewDownloadableProvider>
 		)
@@ -184,15 +184,15 @@ describe("TextViewer — binary guard", () => {
 	})
 
 	it("shows the bytes anyway on request, read-only, and tells the overlay", () => {
-		const onReadOnly = vi.fn()
+		const onTextState = vi.fn()
 
-		renderBinary("notes.txt", onReadOnly)
-		expect(onReadOnly).not.toHaveBeenCalled()
+		renderBinary("notes.txt", onTextState)
+		expect(onTextState).not.toHaveBeenCalled()
 
 		fireEvent.click(screen.getByRole("button", { name: "Show anyway (read-only)" }))
 
 		expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
-		expect(onReadOnly).toHaveBeenCalled()
+		expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
 	})
 
 	it("shows a text file", () => {
@@ -227,64 +227,64 @@ describe("MarkdownViewer — binary guard", () => {
 
 	it("shows binary bytes only on request, read-only, and tells the overlay", () => {
 		previewBytes.current = Uint8Array.of(0x23, 0x20, 0x00, 0x01)
-		const onReadOnly = vi.fn()
+		const onTextState = vi.fn()
 
 		render(
 			<MarkdownViewer
 				item={named("notes.md")}
 				alt="notes.md"
 				editable
-				onReadOnly={onReadOnly}
+				onTextState={onTextState}
 			/>,
 			{ wrapper: queryClientWrapper(createTestQueryClient()) }
 		)
 
 		expect(screen.getByText("This file isn't text.")).toBeDefined()
-		expect(onReadOnly).not.toHaveBeenCalled()
+		expect(onTextState).not.toHaveBeenCalled()
 
 		fireEvent.click(screen.getByRole("button", { name: "Show anyway (read-only)" }))
 
 		expect(screen.queryByText("This file isn't text.")).toBeNull()
-		expect(onReadOnly).toHaveBeenCalled()
+		expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
 	})
 })
 
 describe("TextViewer — editing only what a save writes back", () => {
-	it("keeps strict UTF-8 editable", () => {
-		previewBytes.current = new TextEncoder().encode("café")
-		const onReadOnly = vi.fn()
+	function renderEditable(bytes: Uint8Array<ArrayBuffer>, onTextState: (state: { writable: boolean; encoding: string }) => void) {
+		previewBytes.current = bytes
 
 		render(
 			<TextViewer
 				item={named("notes.txt")}
 				alt="notes.txt"
 				editable
-				onReadOnly={onReadOnly}
+				onTextState={onTextState}
 			/>
 		)
-
-		expect(screen.getByTestId("source").dataset["editable"]).toBe("true")
-		expect(onReadOnly).not.toHaveBeenCalled()
-	})
+	}
 
 	it.each([
-		["latin-1", Uint8Array.of(0x63, 0x61, 0x66, 0xe9)],
-		["UTF-16", Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00)],
-		["UTF-8 with a stray byte", Uint8Array.of(...new TextEncoder().encode("Grüße, Köln, schön"), 0xff)]
-	])("opens %s text read-only and tells the overlay", (_, bytes) => {
-		previewBytes.current = bytes
-		const onReadOnly = vi.fn()
+		["strict UTF-8", new TextEncoder().encode("café"), "utf-8"],
+		["latin-1", Uint8Array.of(0x63, 0x61, 0x66, 0xe9), "windows-1252"],
+		["UTF-16", Uint8Array.of(0xff, 0xfe, 0x68, 0x00, 0x69, 0x00), "utf-16le"]
+	])("keeps %s editable: a save writes it back in its own encoding", (_, bytes, encoding) => {
+		const onTextState = vi.fn()
 
-		render(
-			<TextViewer
-				item={named("notes.txt")}
-				alt="notes.txt"
-				editable
-				onReadOnly={onReadOnly}
-			/>
-		)
+		renderEditable(bytes, onTextState)
 
-		expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
-		expect(onReadOnly).toHaveBeenCalled()
+		expect(screen.getByTestId("source").dataset["editable"]).toBe("true")
+		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding })
 	})
+
+	it.each([["UTF-8 with a stray byte", Uint8Array.of(...new TextEncoder().encode("Grüße, Köln, schön"), 0xff)]])(
+		"opens %s read-only and tells the overlay",
+		(_, bytes) => {
+			const onTextState = vi.fn()
+
+			renderEditable(bytes, onTextState)
+
+			expect(screen.getByTestId("source").dataset["editable"]).toBe("false")
+			expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
+		}
+	)
 })

@@ -34,9 +34,16 @@ import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
+	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem
+	DropdownMenuRadioItem,
+	DropdownMenuSeparator,
+	DropdownMenuSub,
+	DropdownMenuSubContent,
+	DropdownMenuSubTrigger,
+	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
@@ -48,15 +55,17 @@ import { BAR_BUTTON, BAR_MENU } from "@/features/preview/components/commandBar.l
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { CODE_INDENTS, type CodeChrome, type CodeIndent } from "@/features/preview/lib/codeChrome"
 import { CODE_FONT_SIZES, setCodeViewSettings, type CodeViewSettings } from "@/features/preview/lib/codeViewSettings"
-import type { TextFileFormat } from "@/features/preview/lib/textFile"
+import { TEXT_ENCODINGS } from "@filen/shared/textEncoding"
+import { encodingShortName, type TextFileFormat } from "@/features/preview/lib/textFile"
+import type { TextEncodingControls } from "@/features/preview/hooks/usePreviewTextFile"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { Kbd } from "@/lib/keymap/kbd"
 
 // The text and code viewers' command bar (OfficeCommandBar), and the markdown viewer's in both its views: File
 // (Download), then the markdown view switch, Undo and Redo, Find (find, replace, go to line), Code (toggle comment,
 // fold and unfold all), View changes, markdown Formatting, and View (wrap, line numbers, font size, language,
-// indentation, full screen); the position, language, indentation, line ending, encoding and a read-only badge at the
-// end. Find and replace take the groups' place while finding (codeFind.ts). The bar renders on what changes rarely
+// indentation, full screen); the position, language, indentation, line ending, the encoding (a menu: Reopen with
+// another, Convert to UTF-8) and a read-only badge at the end. Find and replace take the groups' place while finding (codeFind.ts). The bar renders on what changes rarely
 // (find opening, the dirty edge, a setting); a keystroke reaches only the position and the undo and redo buttons,
 // each reading the editor's status store (codeChrome.ts).
 
@@ -111,6 +120,74 @@ function CodeFindField({ chrome, locked }: { chrome: CodeChrome; locked: boolean
 				chrome.focus()
 			}}
 		/>
+	)
+}
+
+// The status's encoding, as a menu: what was detected, Reopen with another encoding (not over unsaved edits), Convert to
+// UTF-8 where the file is editable here and not UTF-8 as is.
+function EncodingMenu({ format, encoding, dirty }: { format: TextFileFormat; encoding: TextEncodingControls; dirty: boolean }) {
+	const { t } = useTranslation("preview")
+	const label =
+		format.encoding === "utf-8"
+			? t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")
+			: encodingShortName(format.encoding)
+	// A file read with an encoding outside the menu (UTF-32) still shows as chosen nowhere.
+	const current = encoding.chosen ?? encoding.detected
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-6 px-1.5 text-xs font-normal text-muted-foreground tabular-nums"
+						aria-label={t("previewTextEncodingMenu", { encoding: label })}
+						onMouseDown={keepFocus}
+					>
+						{encoding.converted ? t("previewTextEncodingConverted", { encoding: label }) : label}
+					</Button>
+				}
+			/>
+			<DropdownMenuContent
+				align="end"
+				data-preview-surface
+			>
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>
+						{t("previewTextEncodingDetected", { encoding: encodingShortName(encoding.detected) })}
+					</DropdownMenuLabel>
+				</DropdownMenuGroup>
+				<DropdownMenuSeparator />
+				<DropdownMenuSub>
+					<DropdownMenuSubTrigger disabled={dirty}>{t("previewTextEncodingReopen")}</DropdownMenuSubTrigger>
+					<DropdownMenuSubContent
+						data-preview-surface
+						className="max-h-[min(24rem,var(--available-height))] overflow-y-auto"
+					>
+						<DropdownMenuRadioGroup
+							value={current}
+							onValueChange={(next: string) => {
+								encoding.reopen(next === encoding.detected ? null : next)
+							}}
+						>
+							{TEXT_ENCODINGS.map(option => (
+								<DropdownMenuRadioItem
+									key={option.label}
+									value={option.label}
+									closeOnClick
+								>
+									{option.name}
+								</DropdownMenuRadioItem>
+							))}
+						</DropdownMenuRadioGroup>
+					</DropdownMenuSubContent>
+				</DropdownMenuSub>
+				{encoding.convert === null ? null : (
+					<DropdownMenuItem onClick={encoding.convert}>{t("previewTextConvertToUtf8")}</DropdownMenuItem>
+				)}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	)
 }
 
@@ -246,6 +323,8 @@ export interface CodeCommandBarProps {
 	onIndent: (indent: CodeIndent) => void
 	settings: CodeViewSettings
 	format: TextFileFormat
+	// The encoding menu; null shows the encoding as text.
+	encoding: TextEncodingControls | null
 	onGoToLine: () => void
 	onViewChanges: () => void
 	onDownload: (() => void) | null
@@ -263,6 +342,7 @@ export function CodeCommandBar({
 	onIndent,
 	settings,
 	format,
+	encoding,
 	onGoToLine,
 	onViewChanges,
 	onDownload
@@ -589,23 +669,34 @@ export function CodeCommandBar({
 				) : undefined
 			}
 			status={
-				<span className="flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden">
-					<CodePosition chrome={chrome} />
-					<span>{languageName}</span>
-					<span>{indentLabel(indent)}</span>
-					<span>
-						<span className="sr-only">{t("previewCommandBarEol", { ending: t(ending) })}</span>
-						<span aria-hidden="true">{t(ending)}</span>
+				// The encoding menu stays on a phone: Reopen and Convert live nowhere else.
+				<span className="flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+					<span className="flex items-center gap-3 max-sm:hidden">
+						<CodePosition chrome={chrome} />
+						<span>{languageName}</span>
+						<span>{indentLabel(indent)}</span>
+						<span>
+							<span className="sr-only">{t("previewCommandBarEol", { ending: t(ending) })}</span>
+							<span aria-hidden="true">{t(ending)}</span>
+						</span>
 					</span>
-					<span>
-						{format.encoding === "utf-8"
-							? t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")
-							: format.encoding.toUpperCase()}
-					</span>
+					{encoding === null ? (
+						<span className="max-sm:hidden">
+							{format.encoding === "utf-8"
+								? t(format.bom ? "previewCommandBarEncodingBom" : "previewCommandBarEncoding")
+								: encodingShortName(format.encoding)}
+						</span>
+					) : (
+						<EncodingMenu
+							format={format}
+							encoding={encoding}
+							dirty={dirty}
+						/>
+					)}
 					{editable ? null : (
 						<Badge
 							variant="outline"
-							className="text-muted-foreground"
+							className="text-muted-foreground max-sm:hidden"
 						>
 							<LockIcon data-icon="inline-start" />
 							{t("previewCommandBarReadOnly")}

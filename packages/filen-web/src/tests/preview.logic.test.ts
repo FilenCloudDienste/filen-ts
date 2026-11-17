@@ -20,7 +20,6 @@ import {
 	streamFailureAction,
 	extensionOf,
 	codeMirrorLanguageFor,
-	decodeUtf8,
 	bufferedSizeCap,
 	previewCategoryForExtension,
 	linkAdmits,
@@ -932,33 +931,6 @@ describe("extensionOf", () => {
 
 	it("uses the LAST dot for a multi-dot name", () => {
 		expect(extensionOf("archive.tar.gz")).toBe("gz")
-	})
-})
-
-describe("decodeUtf8", () => {
-	it("decodes plain ASCII", () => {
-		expect(decodeUtf8(new TextEncoder().encode("hello world"))).toBe("hello world")
-	})
-
-	it("decodes multi-byte UTF-8 (accents, CJK, emoji) round-trip", () => {
-		const text = "café — 日本語 — 🎉"
-
-		expect(decodeUtf8(new TextEncoder().encode(text))).toBe(text)
-	})
-
-	it("returns an empty string for an empty buffer", () => {
-		expect(decodeUtf8(new Uint8Array(0))).toBe("")
-	})
-
-	// Non-fatal: an invalid byte sequence becomes the U+FFFD replacement character rather than
-	// throwing — a preview always shows SOMETHING for a whole-buffer text/code/markdown file (mirrors
-	// the app's mobile counterpart's own plain `new TextDecoder().decode(bytes)`, no `fatal: true`); a
-	// labeled "can't display" would be wrong for a file that's mostly valid UTF-8 with a few bad bytes.
-	it("never throws on an invalid byte sequence — decodes to the replacement character", () => {
-		const invalid = new Uint8Array([0xff, 0xfe, 0x00, 0x41])
-
-		expect(() => decodeUtf8(invalid)).not.toThrow()
-		expect(decodeUtf8(invalid)).toContain("�")
 	})
 })
 

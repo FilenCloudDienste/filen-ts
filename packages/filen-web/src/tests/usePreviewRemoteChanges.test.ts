@@ -7,6 +7,7 @@ import type { File, FileMeta, SharingRole } from "@filen/sdk-rs"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { testUuid } from "@/tests/support/uuid"
 import type { PresentationSaveEdits } from "@/features/drive/lib/previewSave.logic"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 const { toast, runPreviewSave, nameExistsInDirectory, listings, cachedListings } = vi.hoisted(() => ({
 	toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -90,7 +91,7 @@ function setup(
 	const commitSaved = vi.fn((frozenUuid: string, item: DriveItem) => {
 		savedRef.current = new Map(savedRef.current).set(frozenUuid, item)
 	})
-	const contentRef = { current: (() => "mine") as (() => string) | null }
+	const contentRef = { current: { text: () => "mine", bytes: () => new TextEncoder().encode("mine") } as TextBuffer | null }
 	const onItemRemoved = vi.fn()
 	const hook = renderHook(
 		(props: { items: DriveItem[]; index: number }) =>
@@ -104,7 +105,7 @@ function setup(
 				readEdits:
 					readEdits ??
 					(() => {
-						const text = contentRef.current?.()
+						const text = contentRef.current?.text()
 
 						return Promise.resolve(text === undefined ? null : new TextEncoder().encode(text))
 					}),

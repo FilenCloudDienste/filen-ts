@@ -75,6 +75,7 @@ import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { registerAction } from "@/lib/keymap/registry"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 const ALT = "readme.md"
 const ORIGINAL = "# Original heading\n\nbody"
@@ -154,7 +155,7 @@ describe("MarkdownViewer request count", () => {
 		downloadFileBytes.mockImplementation(file =>
 			Promise.resolve(bytes((file as { uuid: string }).uuid.startsWith("after") ? SAVED : ORIGINAL))
 		)
-		const contentRef = { current: null as (() => string) | null }
+		const contentRef = { current: null as TextBuffer | null }
 		const props = { alt: ALT, editable: true, onDirtyChange: setPreviewDirty, contentRef }
 		const { rerender } = render(createElement(MarkdownViewer, { key: "before", item: mdFile("before"), ...props }), {
 			wrapper: queryClientWrapper(createTestQueryClient())
@@ -165,7 +166,7 @@ describe("MarkdownViewer request count", () => {
 		const editor = await sourceEditor()
 		expect(editor.readOnly).toBe(false)
 		await waitFor(() => {
-			expect(contentRef.current?.()).toBe(ORIGINAL)
+			expect(contentRef.current?.text()).toBe(ORIGINAL)
 		})
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
 
@@ -173,7 +174,7 @@ describe("MarkdownViewer request count", () => {
 		await waitFor(() => {
 			expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(true)
 		})
-		expect(contentRef.current?.()).toBe(SAVED)
+		expect(contentRef.current?.text()).toBe(SAVED)
 
 		// Locked while dirty: the unsaved buffer stays mounted.
 		toggle("Rendered")

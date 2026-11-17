@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { EditorView, runScopeHandlers } from "@codemirror/view"
 import "@/lib/i18n"
 import type { MarkdownBar } from "@/features/preview/components/codeCommandBar"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 // The text and code viewers' command bar over a real editor: a keystroke re-renders only the position and the undo
 // and redo buttons (the rest of the bar renders on the dirty edge and settings alone), find and replace live in the
@@ -75,7 +76,7 @@ function flushFrames(): void {
 
 function mount(
 	text: string,
-	options?: { editable?: boolean; tag?: string; markdown?: MarkdownBar; contentRef?: { current: (() => string) | null } }
+	options?: { editable?: boolean; tag?: string; markdown?: MarkdownBar; contentRef?: { current: TextBuffer | null } }
 ) {
 	const bytes = new TextEncoder().encode(text)
 
@@ -280,7 +281,7 @@ describe("the text and code command bar", () => {
 	})
 
 	it("tells a CRLF file with a byte order mark, and saves it as it was", async () => {
-		const contentRef = createRef<(() => string) | null>() as { current: (() => string) | null }
+		const contentRef = createRef<TextBuffer | null>() as { current: TextBuffer | null }
 		const view = mount("﻿a\r\nb", { contentRef })
 
 		expect(screen.getByText("UTF-8 with BOM")).toBeTruthy()
@@ -288,7 +289,7 @@ describe("the text and code command bar", () => {
 
 		type(view, "\nc")
 		await waitFor(() => {
-			expect(contentRef.current?.()).toBe("﻿a\r\nb\r\nc")
+			expect(contentRef.current?.text()).toBe("﻿a\r\nb\r\nc")
 		})
 	})
 

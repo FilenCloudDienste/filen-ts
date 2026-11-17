@@ -352,11 +352,12 @@ function isSingleByte(encoding: string): boolean {
 	return !encoding.startsWith("utf-") && !MULTI_BYTE_LEGACY.has(encoding)
 }
 
-// Decoded with a codepage that is not Unicode: writable only from a single-byte one that lost nothing.
+// Decoded with a codepage that is not Unicode: writable only from a single-byte one that lost nothing, without a UTF-8
+// mark (a mark of another encoding would not be written back).
 function legacy(text: string, encoding: string, bom: boolean): DecodedText {
 	const lossy = text.includes("\ufffd")
 
-	return { text, encoding, bom, confident: false, writable: !lossy && isSingleByte(encoding) ? "yes" : "convert", lossy }
+	return { text, encoding, bom, confident: false, writable: !lossy && !bom && isSingleByte(encoding) ? "yes" : "convert", lossy }
 }
 
 function unicode(text: string, encoding: string, bom: boolean, strict: boolean): DecodedText {
@@ -480,9 +481,135 @@ export function looksLikeText(bytes: Uint8Array): boolean {
 	return !bytes.subarray(0, BINARY_PROBE_BYTES).includes(0)
 }
 
-// Whether today's save path (UTF-8, its mark kept) writes the text back as the bytes it came from.
+// Whether a save (encodeTextBytes in the same encoding, its mark kept) writes the text back as the bytes it came from.
 export function editableAsIs(decoded: DecodedText): boolean {
-	return decoded.writable === "yes" && decoded.encoding === "utf-8"
+	return decoded.writable === "yes"
+}
+
+// Where a save meets a character the file's encoding cannot hold: 1-based line and column (UTF-16 units).
+export interface Unencodable {
+	line: number
+	column: number
+	char: string
+}
+
+export type EncodedText = { bytes: Uint8Array } | { unencodable: Unencodable }
+
+// Character code → byte for a single-byte codepage, from its own decoder; built once per label.
+const singleByteTables = new Map<string, Map<number, number>>()
+
+function singleByteTable(encoding: string): Map<number, number> | null {
+	const cached = singleByteTables.get(encoding)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	const decoded = decodeWith(encoding, Uint8Array.from({ length: 256 }, (_, byte) => byte), false, false)
+
+	if (decoded === null || decoded.text.length !== 256) {
+		return null
+	}
+
+	const table = new Map<number, number>()
+
+	for (let byte = 0; byte < 256; byte++) {
+		const code = decoded.text.charCodeAt(byte)
+
+		if (code !== 0xfffd && !table.has(code)) {
+			table.set(code, byte)
+		}
+	}
+
+	singleByteTables.set(encoding, table)
+
+	return table
+}
+
+function unencodableAt(text: string, index: number): { unencodable: Unencodable } {
+	let line = 1
+	let lineStart = 0
+
+	for (let i = 0; i < index; i++) {
+		const code = text.charCodeAt(i)
+
+		if (code === 10 || (code === 13 && text.charCodeAt(i + 1) !== 10)) {
+			line++
+			lineStart = i + 1
+		}
+	}
+
+	return { unencodable: { line, column: index - lineStart + 1, char: String.fromCodePoint(text.codePointAt(index) ?? 0xfffd) } }
+}
+
+function encodeUtf16(text: string, littleEndian: boolean): Uint8Array {
+	const bytes = new Uint8Array(text.length * 2)
+	const view = new DataView(bytes.buffer)
+
+	for (let i = 0; i < text.length; i++) {
+		view.setUint16(i * 2, text.charCodeAt(i), littleEndian)
+	}
+
+	return bytes
+}
+
+function encodeUtf32(text: string, littleEndian: boolean): Uint8Array {
+	let points = 0
+
+	for (let i = 0; i < text.length; i++, points++) {
+		const code = text.charCodeAt(i)
+
+		if (code >= 0xd800 && code <= 0xdbff && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+			i++
+		}
+	}
+
+	const bytes = new Uint8Array(points * 4)
+	const view = new DataView(bytes.buffer)
+	let offset = 0
+
+	for (const char of text) {
+		view.setUint32(offset, char.codePointAt(0) ?? 0xfffd, littleEndian)
+		offset += 4
+	}
+
+	return bytes
+}
+
+// The inverse of decodeTextBytes for every encoding it reads as writable "yes": UTF-8, UTF-16, UTF-32 and the
+// single-byte codepages. A byte order mark is the text's leading U+FEFF. A character the codepage has no byte for is
+// reported, never replaced. Throws for an encoding that is never written (multi-byte legacy).
+export function encodeTextBytes(text: string, encoding: string): EncodedText {
+	switch (encoding) {
+		case "utf-8":
+			return { bytes: new TextEncoder().encode(text) }
+		case "utf-16le":
+		case "utf-16be":
+			return { bytes: encodeUtf16(text, encoding === "utf-16le") }
+		case "utf-32le":
+		case "utf-32be":
+			return { bytes: encodeUtf32(text, encoding === "utf-32le") }
+	}
+
+	const table = isSingleByte(encoding) ? singleByteTable(encoding) : null
+
+	if (table === null) {
+		throw new Error(`encodeTextBytes: ${encoding} is never written`)
+	}
+
+	const bytes = new Uint8Array(text.length)
+
+	for (let i = 0; i < text.length; i++) {
+		const byte = table.get(text.charCodeAt(i))
+
+		if (byte === undefined) {
+			return unencodableAt(text, i)
+		}
+
+		bytes[i] = byte
+	}
+
+	return { bytes }
 }
 
 export interface DecodeSubtitleOptions {

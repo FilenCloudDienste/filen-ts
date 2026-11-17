@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { decodeTextBytes, editableAsIs, looksLikeText, needsLegacyGuess, TEXT_ENCODINGS } from "@filen/shared/textEncoding"
+import { decodeTextBytes, editableAsIs, encodeTextBytes, looksLikeText, needsLegacyGuess, TEXT_ENCODINGS } from "@filen/shared/textEncoding"
 
 const enc = new TextEncoder()
 
@@ -214,13 +214,69 @@ describe("looksLikeText", () => {
 })
 
 describe("editableAsIs", () => {
-	it("is true only for strict UTF-8, with or without a BOM", () => {
+	it("is true for Unicode read strictly and for single-byte codepages that lost nothing", () => {
 		expect(editableAsIs(decodeTextBytes(enc.encode("ok")))).toBe(true)
 		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61)))).toBe(true)
-		expect(editableAsIs(decodeTextBytes(utf16("hi", true, true)))).toBe(false)
-		expect(editableAsIs(decodeTextBytes(utf32([0x68], true)))).toBe(false)
-		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xe9)))).toBe(false)
-		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0xcf, 0xf0), { languageHint: "ru" }))).toBe(false)
+		expect(editableAsIs(decodeTextBytes(utf16("hi", true, true)))).toBe(true)
+		expect(editableAsIs(decodeTextBytes(utf32([0x68], true)))).toBe(true)
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xe9)))).toBe(true)
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0xcf, 0xf0), { languageHint: "ru" }))).toBe(true)
+	})
+
+	it("is false for lossy, multi-byte legacy and marked legacy reads", () => {
 		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xff), { encoding: "utf-8" }))).toBe(false)
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x82, 0xa0), { encoding: "shift_jis" }))).toBe(false)
+		// A UTF-8 mark over bytes that are not UTF-8.
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61, 0xe9, 0x62)))).toBe(false)
+		// windows-1255 leaves holes.
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xca), { encoding: "windows-1255" }))).toBe(false)
+	})
+})
+
+describe("encodeTextBytes", () => {
+	// What a save of an unedited file writes: the text and its mark, in its own encoding.
+	function roundTrip(bytes: Uint8Array, options?: { encoding?: string; languageHint?: string }): Uint8Array {
+		const decoded = decodeTextBytes(bytes, options)
+		const encoded = encodeTextBytes(decoded.bom ? `\uFEFF${decoded.text}` : decoded.text, decoded.encoding)
+
+		if (!("bytes" in encoded)) {
+			throw new Error("unencodable")
+		}
+
+		return encoded.bytes
+	}
+
+	it("writes Unicode back as it was read", () => {
+		const astral = "a😀b"
+
+		expect(roundTrip(enc.encode("héllo"))).toEqual(enc.encode("héllo"))
+		expect(roundTrip(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61))).toEqual(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61))
+		expect(roundTrip(utf16(astral, true, true))).toEqual(utf16(astral, true, true))
+		expect(roundTrip(utf16(astral, false, true))).toEqual(utf16(astral, false, true))
+		expect(roundTrip(utf16("plain ascii text, no mark", true, false))).toEqual(utf16("plain ascii text, no mark", true, false))
+		expect(roundTrip(utf32([0x68, 0x1f600], true))).toEqual(utf32([0x68, 0x1f600], true))
+		expect(roundTrip(utf32([0x68, 0x1f600], false))).toEqual(utf32([0x68, 0x1f600], false))
+	})
+
+	it.each(
+		TEXT_ENCODINGS.map(encoding => encoding.label).filter(
+			label => !label.startsWith("utf-") && !["gb18030", "big5", "shift_jis", "euc-jp", "euc-kr"].includes(label)
+		)
+	)("writes every byte %s reads without loss back unchanged", label => {
+		const all = Uint8Array.from({ length: 256 }, (_, byte) => byte)
+		const decoded = decodeTextBytes(all, { encoding: label })
+		const kept = Uint8Array.from([...all].filter((_, byte) => decoded.text[byte] !== "\ufffd"))
+		const encoded = encodeTextBytes(decodeTextBytes(kept, { encoding: label }).text, label)
+
+		expect(encoded).toEqual({ bytes: kept })
+	})
+
+	it("reports the first character the codepage cannot hold", () => {
+		expect(encodeTextBytes("ab\r\ncd\nxé☃", "windows-1252")).toEqual({ unencodable: { line: 3, column: 3, char: "☃" } })
+		expect(encodeTextBytes("😀", "iso-8859-5")).toEqual({ unencodable: { line: 1, column: 1, char: "😀" } })
+	})
+
+	it("refuses an encoding it never writes", () => {
+		expect(() => encodeTextBytes("a", "shift_jis")).toThrow()
 	})
 })

@@ -11,7 +11,10 @@ import { codeViewKey, codeViewSettingsChange } from "@/features/preview/lib/code
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
-import type { TextFile } from "@/features/preview/lib/textFile"
+import { encodingShortName, type TextBuffer, type TextFile } from "@/features/preview/lib/textFile"
+import type { TextEncodingControls } from "@/features/preview/hooks/usePreviewTextFile"
+import type { Unencodable } from "@filen/shared/textEncoding"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
@@ -28,10 +31,12 @@ export interface CodeSurfaceProps {
 	editable: boolean
 	locked: boolean
 	onDirtyChange?: ((dirty: boolean) => void) | undefined
-	contentRef?: RefObject<(() => string) | null> | undefined
+	contentRef?: RefObject<TextBuffer | null> | undefined
 	autoFocus?: boolean | undefined
 	// The markdown source's view switch and formatting.
 	markdown?: MarkdownBar | undefined
+	// The status bar's encoding menu (Reopen with, Convert to UTF-8).
+	encoding?: TextEncodingControls | undefined
 }
 
 // "12" or "12:5" (line, column), within the file.
@@ -46,8 +51,19 @@ function parseLine(value: string, lines: number): { line: number; column: number
 	return { line, column: match[2] === undefined ? 1 : Number(match[2]) }
 }
 
-export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, contentRef, autoFocus, markdown }: CodeSurfaceProps) {
-	const { t } = useTranslation("preview")
+export function CodeSurface({
+	file,
+	tag,
+	alt,
+	editable,
+	locked,
+	onDirtyChange,
+	contentRef,
+	autoFocus,
+	markdown,
+	encoding
+}: CodeSurfaceProps) {
+	const { t } = useTranslation(["preview", "common"])
 	const settings = useCodeViewSettings()
 	const [language, setLanguage] = useState<CodeLanguageId | "">(() => (isCodeLanguageId(tag) ? tag : ""))
 	const [indent, setIndent] = useState<CodeIndent>(() => detectIndent(file.text))
@@ -56,6 +72,8 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 	const [goToLine, setGoToLine] = useState(false)
 	// The edits being compared with the file as opened, while View changes is open.
 	const [changes, setChanges] = useState<string | null>(null)
+	// A save refused: the file's encoding cannot hold this character.
+	const [unencodable, setUnencodable] = useState<Unencodable | null>(null)
 	const download = usePreviewDownload()
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -245,6 +263,7 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 				}}
 				settings={settings}
 				format={file}
+				encoding={encoding ?? null}
 				onGoToLine={() => {
 					setGoToLine(true)
 				}}
@@ -267,6 +286,8 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 					autoFocus={autoFocus ?? false}
 					chrome={chrome}
 					format={file}
+					changed={encoding?.converted ?? false}
+					onUnencodable={setUnencodable}
 					onDirtyChange={setDirty}
 					// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely.
 					{...(contentRef !== undefined ? { contentRef } : {})}
@@ -290,6 +311,32 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 					if (target !== null) {
 						chrome.goToLine(target.line, target.column)
 					}
+				}}
+			/>
+			<ConfirmDialog
+				open={unencodable !== null}
+				pending={false}
+				title={t("previewTextUnencodableTitle")}
+				body={
+					unencodable === null
+						? ""
+						: t("previewTextUnencodableBody", {
+								encoding: encodingShortName(file.encoding),
+								char: unencodable.char,
+								line: unencodable.line,
+								column: unencodable.column
+							})
+				}
+				confirmLabel={t("previewTextConvertToUtf8")}
+				cancelLabel={t("common:cancel")}
+				onOpenChange={open => {
+					if (!open) {
+						setUnencodable(null)
+					}
+				}}
+				onConfirm={() => {
+					setUnencodable(null)
+					encoding?.convert?.()
 				}}
 			/>
 			<Dialog

@@ -34,6 +34,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { i18n } from "@/lib/i18n"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 
 // What "save mine as new" writes: text or a document's bytes, a deck's streamed save, or an edited image.
 export type PreviewEdits = Uint8Array | PresentationSaveEdits | ImageSaveEdits
@@ -55,7 +56,7 @@ interface UsePreviewRemoteChangesParams {
 	// two revisions can arrive before the overlay renders again.
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
-	contentRef: RefObject<(() => string) | null>
+	contentRef: RefObject<TextBuffer | null>
 	// The unsaved edits as they stand: encoded, a deck's save its session streams to an upload, or an edited image.
 	readEdits: () => Promise<PreviewEdits | null>
 	onItemRemoved: (frozenUuid: string) => void

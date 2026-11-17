@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
-import { usePreviewTextFile } from "@/features/preview/hooks/usePreviewTextFile"
+import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import type { TextBuffer } from "@/features/preview/lib/textFile"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { MarkdownRenderedBar, type MarkdownBar, type MarkdownMode } from "@/features/preview/components/codeCommandBar"
@@ -22,11 +23,11 @@ export interface MarkdownViewerProps {
 	// rendered arm is never an editing surface.
 	editable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
-	contentRef?: RefObject<(() => string) | null>
+	contentRef?: RefObject<TextBuffer | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
 	// See TextViewer's own prop.
-	onReadOnly?: () => void
+	onTextState?: (state: TextState) => void
 }
 
 // Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile, shared with the text viewer)
@@ -34,8 +35,8 @@ export interface MarkdownViewerProps {
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
 // save rotates the uuid, remounting this whole viewer onto the new bytes.
 // No parameter defaults: the React Compiler skips a component that has them.
-export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onReadOnly }: MarkdownViewerProps) {
-	const text = usePreviewTextFile(item, editable === true, onReadOnly)
+export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState }: MarkdownViewerProps) {
+	const text = usePreviewTextFile(item, editable === true, onTextState)
 	const download = usePreviewDownload()
 
 	useLeaveViewerFullScreen()
@@ -117,7 +118,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		)
 	}
 
-	const { file, writable } = text
+	const { file, writable, encoding } = text
 	const bar: MarkdownBar = {
 		mode,
 		locked: dirty,
@@ -143,7 +144,10 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		>
 			{mode === "source" ? (
 				<CodeSurface
+					// Reopened with another encoding: a new text, so a new editor.
+					key={encoding.chosen ?? ""}
 					file={file}
+					encoding={encoding}
 					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 					alt={alt}
 					editable={editable === true && writable}

@@ -4,7 +4,8 @@ import { EditorView } from "@codemirror/view"
 import { codeEditorSetup, codeFillParent, codeReadOnly, codeTheme } from "@filen/office/dom/code"
 import { CodeEditor } from "@filen/office/react/code"
 import { languageExtensionFor, useEditorKeymap, type EditorKeymapCommands } from "@/features/preview/lib/codeMirrorShared"
-import { writeTextFile, type TextFileFormat } from "@/features/preview/lib/textFile"
+import type { Unencodable } from "@filen/shared/textEncoding"
+import { encodeTextFile, writeTextFile, type TextBuffer, type TextFileFormat } from "@/features/preview/lib/textFile"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
 // notes editor) reuses the SAME language/theme plumbing (lib/codeMirrorShared.ts) as file preview
@@ -23,10 +24,10 @@ export interface CodeMirrorSourceProps {
 	// itself editable-gated.
 	onDirtyChange?: (dirty: boolean) => void
 	// Side channel for a Save handler to read the CURRENT buffer on demand without this component
-	// re-rendering its parent on every keystroke: a reader, so the doc is flattened into a string only
+	// re-rendering its parent on every keystroke: a reader, so the doc is flattened into a string (or bytes) only
 	// when someone asks, never per keystroke. Null while not editable. Still answers with the last buffer
 	// after unmount (a destroyed view keeps its final state).
-	contentRef?: RefObject<(() => string) | null>
+	contentRef?: RefObject<TextBuffer | null>
 	// Per-change callback (editable-only): fires the CURRENT buffer on EVERY change, not just the
 	// dirty edge — the notes editor's immediate-persist rule enqueues on every keystroke, unlike the
 	// preview save path that reads on demand via contentRef. Read-only callers omit it (never fires).
@@ -39,8 +40,13 @@ export interface CodeMirrorSourceProps {
 	// A host's command bar (CodeChrome): its extensions take the place of the editor's own wrapping, line numbers
 	// and language, its keymap that of the search panel. Stable for the editor's life.
 	chrome?: CodeMirrorChrome
-	// The file's byte order mark and line ending, put back in what contentRef reads (textFile.ts).
+	// The file's encoding, byte order mark and line ending, put back in what contentRef reads (textFile.ts). May
+	// change while mounted (a conversion to UTF-8).
 	format?: TextFileFormat
+	// A save writes something else than the file even with no edit (a conversion): dirty from the start.
+	changed?: boolean
+	// contentRef's bytes() met a character the format's encoding cannot hold.
+	onUnencodable?: (at: Unencodable) => void
 }
 
 export interface CodeMirrorChrome {
@@ -63,6 +69,37 @@ function emptyCompartment(): { compartment: Compartment; initial: Extension } {
 // Extension values hold no state of their own, so every editor shares one setup.
 const SETUP: Extension = codeEditorSetup()
 const SETUP_WITHOUT_LINE_NUMBERS: Extension = codeEditorSetup({ lineNumbers: false })
+
+// The buffer as contentRef hands it out, in the format current when it is read.
+function textBuffer(
+	doc: () => Text,
+	sinksRef: RefObject<{ format: TextFileFormat | undefined; onUnencodable: ((at: Unencodable) => void) | undefined }>
+): TextBuffer {
+	return {
+		text() {
+			const format = sinksRef.current.format
+
+			return format === undefined ? doc().toString() : writeTextFile(doc(), format)
+		},
+		bytes() {
+			const format = sinksRef.current.format
+
+			if (format === undefined) {
+				return new TextEncoder().encode(doc().toString())
+			}
+
+			const encoded = encodeTextFile(doc(), format)
+
+			if ("unencodable" in encoded) {
+				sinksRef.current.onUnencodable?.(encoded.unencodable)
+
+				return null
+			}
+
+			return encoded.bytes
+		}
+	}
+}
 
 function noopDirtyChange(): void {
 	// Default for every read-only caller — CodeMirrorSource always calls onDirtyChange, so a real
@@ -88,8 +125,11 @@ export function CodeMirrorSource({
 	autoFocus,
 	locked,
 	chrome,
-	format
+	format,
+	changed: changedProp,
+	onUnencodable
 }: CodeMirrorSourceProps) {
+	const changed = changedProp === true
 	const editable = editableProp ?? false
 	const onDirtyChange = onDirtyChangeProp ?? noopDirtyChange
 	const languageExtension = languageExtensionFor(tag)
@@ -100,15 +140,17 @@ export function CodeMirrorSource({
 	const [changes] = useState(emptyCompartment)
 	const viewRef = useRef<EditorView | null>(null)
 	const [seed] = useState(text)
+	// The doc the view was created with, which dirty compares against.
+	const seedDocRef = useRef<Text | null>(null)
 	// Reported from the change listener itself, in the same task as the edit: a state round trip would leave the
 	// overlay clean for a moment, in which a key that drops the editor (the markdown view toggle) drops the edit too.
 	const dirtyRef = useRef(false)
 	// Latest sinks for the change listener, which is installed once: a new callback identity must never
 	// reconfigure the editor.
-	const sinksRef = useRef({ editable, contentRef, onValueChange, format, onDirtyChange })
+	const sinksRef = useRef({ editable, contentRef, onValueChange, format, onDirtyChange, changed, onUnencodable })
 
 	useEffect(() => {
-		sinksRef.current = { editable, contentRef, onValueChange, format, onDirtyChange }
+		sinksRef.current = { editable, contentRef, onValueChange, format, onDirtyChange, changed, onUnencodable }
 	})
 
 	const readOnly = codeReadOnly(!editable)
@@ -139,14 +181,11 @@ export function CodeMirrorSource({
 		// deciding it never flattens a large document into a string on each keystroke.
 		const seedDoc = view.state.doc
 
+		seedDocRef.current = seedDoc
 		viewRef.current = view
 		chrome?.attach(view)
 
-		function readBuffer(): string {
-			const fileFormat = sinksRef.current.format
-
-			return fileFormat === undefined ? view.state.doc.toString() : writeTextFile(view.state.doc, fileFormat)
-		}
+		const buffer = textBuffer(() => view.state.doc, sinksRef)
 
 		const listener = EditorView.updateListener.of(update => {
 			const sinks = sinksRef.current
@@ -155,7 +194,7 @@ export function CodeMirrorSource({
 				return
 			}
 
-			const dirty = !update.state.doc.eq(seedDoc)
+			const dirty = sinks.changed || !update.state.doc.eq(seedDoc)
 
 			if (dirty !== dirtyRef.current) {
 				dirtyRef.current = dirty
@@ -165,7 +204,7 @@ export function CodeMirrorSource({
 			// Re-armed on every edit: the overlay nulls it on a slot change, which can land after this
 			// editor's own mount effect when its bytes were already cached.
 			if (sinks.contentRef) {
-				sinks.contentRef.current = readBuffer
+				sinks.contentRef.current = buffer
 			}
 
 			// Only a caller that consumes every change pays for the string.
@@ -183,6 +222,18 @@ export function CodeMirrorSource({
 		onDirtyChange(dirtyRef.current)
 	}, [onDirtyChange])
 
+	// A conversion makes the buffer differ from the file without an edit (and undoing every edit keeps it so).
+	useEffect(() => {
+		const doc = viewRef.current?.state.doc
+		const seedDoc = seedDocRef.current
+		const dirty = changed || (doc !== undefined && seedDoc !== null && !doc.eq(seedDoc))
+
+		if (dirty !== dirtyRef.current) {
+			dirtyRef.current = dirty
+			sinksRef.current.onDirtyChange(dirty)
+		}
+	}, [changed])
+
 	useEffect(() => {
 		return () => {
 			chrome?.attach(null)
@@ -192,19 +243,9 @@ export function CodeMirrorSource({
 	// Before the view exists the buffer is still the seed.
 	useEffect(() => {
 		if (contentRef) {
-			contentRef.current = editable
-				? () => {
-						const doc = viewRef.current?.state.doc
-
-						if (format === undefined) {
-							return doc?.toString() ?? seed
-						}
-
-						return writeTextFile(doc ?? Text.of(seed.split(/\r\n?|\n/)), format)
-					}
-				: null
+			contentRef.current = editable ? textBuffer(() => viewRef.current?.state.doc ?? Text.of(seed.split(/\r\n?|\n/)), sinksRef) : null
 		}
-	}, [contentRef, editable, seed, format])
+	}, [contentRef, editable, seed])
 
 	return (
 		<div className="size-full">
