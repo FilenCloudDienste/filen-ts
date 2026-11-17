@@ -199,7 +199,7 @@ patchedDependencies:
   react-native-screens@4.30.0: 38fb3df9c913bf4c102d1b126ec58c36901c4494b9accc8220225df5cf229882
   react-native-svg@15.16.0: 032616792f4720b593e011bd31b37c270a43413d13a64d0823d2123dcb0bffb0
   sonner@2.0.8: 2d04f3dd9b4280ee9553ef3bc0812cc9503ba710f4f5cdddc884955fe50d63be
-  spessasynth_core@4.4.10: a710bc6a9d977cb6c2b0a5bb4577aa751bcd5de95cbbabb15df251c5a64dc92d
+  spessasynth_core@4.4.10: fddbd8368502754ad9a4d4e3144f8c2d48283ec3bae98ad1806aecd1850a00d6
   three@0.187.0: b1ec80d39de17bc01d5ddb872592828c8fcf2b3a4d4fcbc0627361173c7d3c8f
 
 importers:
@@ -1282,7 +1282,7 @@ importers:
         version: 2.0.8(patch_hash=2d04f3dd9b4280ee9553ef3bc0812cc9503ba710f4f5cdddc884955fe50d63be)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       spessasynth_core:
         specifier: 4.4.10
-        version: 4.4.10(patch_hash=a710bc6a9d977cb6c2b0a5bb4577aa751bcd5de95cbbabb15df251c5a64dc92d)
+        version: 4.4.10(patch_hash=fddbd8368502754ad9a4d4e3144f8c2d48283ec3bae98ad1806aecd1850a00d6)
       strtok3:
         specifier: 10.6.2
         version: 10.6.2
@@ -22479,7 +22479,7 @@ snapshots:
 
   space-separated-tokens@2.0.2: {}
 
-  spessasynth_core@4.4.10(patch_hash=a710bc6a9d977cb6c2b0a5bb4577aa751bcd5de95cbbabb15df251c5a64dc92d):
+  spessasynth_core@4.4.10(patch_hash=fddbd8368502754ad9a4d4e3144f8c2d48283ec3bae98ad1806aecd1850a00d6):
     dependencies:
       fflate: 0.8.3
       stb-vorbis: 0.0.7
