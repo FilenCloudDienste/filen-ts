@@ -16,7 +16,13 @@ const opener = vi.hoisted(() => ({
 	openIworkPreview: vi.fn<(_handle: unknown, _options: OpenIworkPreviewOptions) => Promise<IworkPreviewEntry | null>>()
 }))
 
-vi.mock("@/features/archive/lib/archiveHandle", () => ({ acquireArchiveHandle: () => ({ id: "h", ...handle }) }))
+const acquire = vi.hoisted(() => ({ refused: false }))
+
+vi.mock("@/features/archive/lib/archiveHandle", () => ({
+	archiveHandleRefusal: () => (acquire.refused ? "needsArchiveReader" : null),
+	acquireArchiveHandle: () =>
+		acquire.refused ? { type: "refused", reason: "needsArchiveReader" } : { type: "opened", handle: { id: "h", ...handle } }
+}))
 vi.mock("@/features/iwork/lib/iworkPreview", () => opener)
 vi.mock("@/features/preview/components/readOnlyPreviewBody", () => ({
 	ReadOnlyPreviewBody: ({ category, item }: { category: string; item: { data: { uuid: string } } }) =>
@@ -115,6 +121,16 @@ describe("IworkPreview", () => {
 			expect(screen.getByText("No preview inside this file.")).toBeTruthy()
 		})
 		expect(screen.queryByText(/body:/)).toBeNull()
+	})
+
+	// A package its origin cannot open yet (a public link's, an archive's entry): its card, never a crash.
+	it("shows the card for a document whose package cannot be opened from here", async () => {
+		acquire.refused = true
+		renderPreview("report.pages")
+
+		expect(await screen.findByText("This document can't be previewed here yet.")).toBeTruthy()
+		expect(opener.openIworkPreview).not.toHaveBeenCalled()
+		acquire.refused = false
 	})
 
 	it("offers to try again after a failed read, and reads again", async () => {

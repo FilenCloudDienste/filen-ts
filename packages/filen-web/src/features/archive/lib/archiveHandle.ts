@@ -41,6 +41,19 @@ export interface ArchiveHandle {
 	release(): void
 }
 
+// What opening an archive gave: its handle, or why it cannot be opened yet (a public link's archive, or one inside
+// another, needs the SDK's archive reader).
+export type ArchiveHandleResult =
+	{ readonly type: "opened"; readonly handle: ArchiveHandle } | { readonly type: "refused"; readonly reason: "needsArchiveReader" }
+
+export type ArchiveRefusal = Extract<ArchiveHandleResult, { type: "refused" }>["reason"]
+
+// Why `origin`'s archive cannot be opened yet; null when it can. Only a drive file opens before the SDK has archive
+// readers.
+export function archiveHandleRefusal(origin: ByteOrigin): ArchiveRefusal | null {
+	return origin.kind === "file" ? null : "needsArchiveReader"
+}
+
 export interface ArchiveHandleDeps {
 	listArchive: (
 		jobId: string,
@@ -141,15 +154,17 @@ function closeArchive(open: OpenArchive): void {
 	}
 }
 
-// The archive `origin` names, opened (or joined, when open already) under `password`. Only a drive file opens before
-// the SDK has archive readers: a public link's archive, and one inside another, need one.
+// The archive `origin` names, opened (or joined, when open already) under `password`; refused (archiveHandleRefusal),
+// never thrown at the caller.
 export function acquireArchiveHandle(
 	origin: ByteOrigin,
 	password: string | undefined,
 	deps: ArchiveHandleDeps = defaultArchiveHandleDeps
-): ArchiveHandle {
-	if (origin.kind !== "file") {
-		throw new Error(`a ${origin.kind} origin's archive needs the SDK's archive reader`)
+): ArchiveHandleResult {
+	const refusal = archiveHandleRefusal(origin)
+
+	if (refusal !== null || origin.kind !== "file") {
+		return { type: "refused", reason: refusal ?? "needsArchiveReader" }
 	}
 
 	const key = `${origin.kind}:${originKey(origin)}`
@@ -179,7 +194,7 @@ export function acquireArchiveHandle(
 		}
 	}
 
-	return {
+	const handle: ArchiveHandle = {
 		id: archive.id,
 		list: (onBatch, { signal, onWaiting }) => {
 			const jobId = deps.newId()
@@ -267,4 +282,6 @@ export function acquireArchiveHandle(
 			unref()
 		}
 	}
+
+	return { type: "opened", handle }
 }

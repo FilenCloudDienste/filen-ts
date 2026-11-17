@@ -10,7 +10,7 @@ import { bufferedSizeCap, itemTypeExtension } from "@/features/drive/lib/preview
 import { PreviewByteOriginProvider, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
-import { acquireArchiveHandle } from "@/features/archive/lib/archiveHandle"
+import { acquireArchiveHandle, archiveHandleRefusal } from "@/features/archive/lib/archiveHandle"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { ArchiveWaiting, Banner } from "@/features/archive/components/archiveStatus"
 import { openIworkPreview } from "@/features/iwork/lib/iworkPreview"
@@ -50,7 +50,14 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 
 		const runKey = `${uuid}:${String(attempt)}`
 		const abort = new AbortController()
-		const handle = acquireArchiveHandle(openFrom(), undefined)
+		const acquired = acquireArchiveHandle(openFrom(), undefined)
+
+		// Rendered as its card below.
+		if (acquired.type === "refused") {
+			return
+		}
+
+		const { handle } = acquired
 		const report = (next: boolean): void => {
 			if (!abort.signal.aborted) {
 				onWaiting(next)
@@ -113,6 +120,16 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 	const retry = (): void => {
 		setStopped(false)
 		setAttempt(previous => previous + 1)
+	}
+
+	// Its package cannot be opened from here yet (a public link's, or one inside an archive).
+	if (archiveHandleRefusal(origin) !== null) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewIworkUnavailableHere")}
+			/>
+		)
 	}
 
 	if (stopped) {

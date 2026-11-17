@@ -8,7 +8,7 @@ import { packEntries, storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntri
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
-const { acquireArchiveHandle } = await import("@/features/archive/lib/archiveHandle")
+const { acquireArchiveHandle, archiveHandleRefusal } = await import("@/features/archive/lib/archiveHandle")
 const { runPreviewDisposers } = await import("@/lib/workers/previewDisposers")
 const { createEntryStore } = await import("@/features/archive/lib/entryStore")
 
@@ -25,6 +25,17 @@ interface ListCall {
 
 function fileOrigin(uuid: string = TEST_ARCHIVE): ByteOrigin {
 	return { kind: "file", file: { uuid: uuid as UuidStr } as unknown as AnyFile }
+}
+
+// A drive file's archive, opened.
+function opened(origin: ByteOrigin, deps: Deps) {
+	const result = acquireArchiveHandle(origin, undefined, deps)
+
+	if (result.type !== "opened") {
+		throw new Error("a drive file's archive was refused")
+	}
+
+	return result.handle
 }
 
 function report(extra: Partial<ListReportDTO> = {}): ListReportDTO {
@@ -112,7 +123,7 @@ function harness() {
 describe("acquireArchiveHandle", () => {
 	it("lists every entry into the caller's batches and settles to the summary, releasing its job", async () => {
 		const { deps, list } = harness()
-		const handle = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const handle = opened(fileOrigin(), deps)
 		const store = createEntryStore()
 		const waiting: boolean[] = []
 		const listed = handle.list(
@@ -146,7 +157,7 @@ describe("acquireArchiveHandle", () => {
 
 	it("rejects with the listing's error, and cancels its job on abort", async () => {
 		const { deps, list } = harness()
-		const handle = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const handle = opened(fileOrigin(), deps)
 		const abort = new AbortController()
 		const listed = handle.list(() => undefined, { signal: abort.signal })
 
@@ -161,7 +172,7 @@ describe("acquireArchiveHandle", () => {
 
 	it("finds an entry by its exact path, else by its path up to ASCII case, and never a directory", () => {
 		const { deps } = harness()
-		const handle = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const handle = opened(fileOrigin(), deps)
 		const store = storeOf([
 			{ path: "QuickLook/", access: DIRECT },
 			{ path: "QuickLook/preview.pdf", access: DIRECT },
@@ -180,7 +191,7 @@ describe("acquireArchiveHandle", () => {
 
 	it("leases an entry's whole-read origin through its own entry reader, released with the lease", async () => {
 		const { deps, readers } = harness()
-		const handle = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const handle = opened(fileOrigin(), deps)
 		const store = storeOf([{ path: "preview.jpg", index: 7, size: 2048, access: DIRECT }])
 		const lease = await handle.origin(store, 0)
 
@@ -204,9 +215,9 @@ describe("acquireArchiveHandle", () => {
 
 	it("shares one archive per file and keeps it open while a lease holds it", async () => {
 		const { deps } = harness()
-		const first = acquireArchiveHandle(fileOrigin(), undefined, deps)
-		const second = acquireArchiveHandle(fileOrigin(), undefined, deps)
-		const other = acquireArchiveHandle(fileOrigin("other-0000-0000-0000-000000000000"), undefined, deps)
+		const first = opened(fileOrigin(), deps)
+		const second = opened(fileOrigin(), deps)
+		const other = opened(fileOrigin("other-0000-0000-0000-000000000000"), deps)
 		const store = storeOf([{ path: "preview.jpg", access: DIRECT }])
 
 		expect(second.id).toBe(first.id)
@@ -217,7 +228,7 @@ describe("acquireArchiveHandle", () => {
 		first.release()
 		second.release()
 		// The lease still holds the archive: a new handle joins it.
-		const third = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const third = opened(fileOrigin(), deps)
 
 		expect(third.id).toBe(first.id)
 		lease.release()
@@ -225,7 +236,7 @@ describe("acquireArchiveHandle", () => {
 		other.release()
 
 		// The last reference closed it: the next acquire opens it afresh.
-		const fresh = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const fresh = opened(fileOrigin(), deps)
 
 		expect(fresh.id).not.toBe(first.id)
 		fresh.release()
@@ -233,7 +244,7 @@ describe("acquireArchiveHandle", () => {
 
 	it("closes every archive and lease at sign-out, and refuses a lease afterwards", async () => {
 		const { deps, readers } = harness()
-		const handle = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const handle = opened(fileOrigin(), deps)
 		const store = storeOf([{ path: "preview.jpg", access: DIRECT }])
 
 		await handle.origin(store, 0)
@@ -244,18 +255,32 @@ describe("acquireArchiveHandle", () => {
 		expect(readers.size).toBe(0)
 		await expect(handle.origin(store, 0)).rejects.toThrow("closed")
 		// A new acquire opens the archive afresh.
-		const reopened = acquireArchiveHandle(fileOrigin(), undefined, deps)
+		const reopened = opened(fileOrigin(), deps)
 
 		expect(reopened.id).not.toBe(handle.id)
 		handle.release()
 		reopened.release()
 	})
 
-	it("opens only a drive file before the SDK has archive readers", () => {
+	it("refuses every origin but a drive file before the SDK has archive readers, without throwing", () => {
 		const { deps } = harness()
+		const others: ByteOrigin[] = [
+			{ kind: "linkedFile", file: { uuid: TEST_ARCHIVE } as unknown as AnyFile },
+			{
+				kind: "entry",
+				reader: "r",
+				entry: { archive: TEST_ARCHIVE, index: 0 },
+				size: 1,
+				access: "whole",
+				anon: false,
+				cacheKey: "k"
+			},
+			{ kind: "bytes", blob: new Blob(), cacheKey: "b" }
+		]
 
-		expect(() =>
-			acquireArchiveHandle({ kind: "linkedFile", file: { uuid: TEST_ARCHIVE } as unknown as AnyFile }, undefined, deps)
-		).toThrow("archive reader")
+		for (const origin of others) {
+			expect(acquireArchiveHandle(origin, undefined, deps)).toEqual({ type: "refused", reason: "needsArchiveReader" })
+			expect(archiveHandleRefusal(origin)).toBe("needsArchiveReader")
+		}
 	})
 })

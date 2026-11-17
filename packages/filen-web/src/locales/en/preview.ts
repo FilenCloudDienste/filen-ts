@@ -646,6 +646,8 @@ export const preview = {
 	previewIworkSavedCopy: "Preview copy saved in the document. Open in {{app}} for the full document.",
 	/** iWork preview — the document carries no preview of itself (or is no iWork package) */
 	previewIworkNoPreview: "No preview inside this file.",
+	/** iWork preview — the document is opened from a public link or an archive, where its package can't be read yet */
+	previewIworkUnavailableHere: "This document can't be previewed here yet.",
 	/** Archive browser — the user stopped the listing */
 	previewArchiveStopped_one: "Listing stopped after {{count}} entry.",
 	/** Archive browser — the user stopped the listing */
