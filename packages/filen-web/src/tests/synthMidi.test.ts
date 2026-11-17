@@ -134,14 +134,27 @@ function peak(data: ArrayBuffer | ArrayBufferView): number {
 }
 
 describe("MIDI synthesizer without its bank", () => {
-	it("fails the read, for Retry, when the SoundFont cannot be fetched", async () => {
-		fetches.fail = true
-
+	it("knows a song's length without its bank, and fails the read, for Retry, when the SoundFont cannot be fetched", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
 		const source = serve(song(2))
 
-		await expect(synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "c" })).rejects.toSatisfy(isSourceReadError)
-		fetches.fail = false
+		fetches.fail = true
+		fetches.count = 0
+
+		try {
+			const input = await synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "c" })
+
+			expect(input.info.duration).toBeCloseTo(0.5 + 2, 1)
+			expect(fetches.count).toBe(0)
+
+			const reader = input.reader({} as never, () => false)
+
+			await expect(reader.first(0)).rejects.toSatisfy(isSourceReadError)
+			await reader.close()
+			await input.close()
+		} finally {
+			fetches.fail = false
+		}
 	})
 })
 
@@ -205,5 +218,30 @@ describe("MIDI synthesizer", () => {
 		await expect(synthAudioInput(garbage.port, garbage.size, "audio", { kind: "midi", key: "garbage" })).rejects.toSatisfy(
 			isAudioUnsupported
 		)
+	})
+
+	it("refuses a song whose header divides a beat into no ticks, which would never end", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const bytes = song(4)
+
+		bytes[12] = 0
+		bytes[13] = 0
+
+		const endless = serve(bytes)
+
+		await expect(synthAudioInput(endless.port, endless.size, "audio", { kind: "midi", key: "endless" })).rejects.toSatisfy(
+			isAudioUnsupported
+		)
+	})
+
+	it("renders nothing past the song's end and its release", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(song(4))
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "past" })
+		const reader = input.reader({} as never, () => false)
+
+		expect(await reader.first(input.info.duration + 1)).toBeNull()
+		await reader.close()
+		await input.close()
 	})
 })

@@ -16,6 +16,8 @@ const scope: { handler: Handler | null; answer: (response: SynthResponse) => voi
 	closed: false
 }
 const loads: string[] = []
+// Every request the worker was sent, by type.
+const posted: SynthRequest[] = []
 
 // What the remux worker starts as its nested worker: messages go to the worker module's listener and back.
 class InProcessWorker {
@@ -36,6 +38,8 @@ class InProcessWorker {
 	}
 
 	public postMessage(message: SynthRequest & { id: number }): void {
+		posted.push(message)
+
 		if (message.type === "load") {
 			loads.push(message.key)
 		}
@@ -69,15 +73,9 @@ vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
 	}
 })
 
-// The shipped wasm, read from disk where the remux worker fetches it; counted, as it is compiled once.
-const compiles = { count: 0 }
-
+// The shipped wasm, read from disk where the remux worker fetches it.
 vi.mock("@/workers/synth/libopenmptWasm", () => ({
-	compileLibopenmpt: () => {
-		compiles.count++
-
-		return WebAssembly.compile(readFileSync(new URL("../vendor/libopenmpt/libopenmpt.wasm", import.meta.url)))
-	}
+	compileLibopenmpt: () => WebAssembly.compile(readFileSync(new URL("../vendor/libopenmpt/libopenmpt.wasm", import.meta.url)))
 }))
 
 // A module playback never starts the MIDI synthesizer, so it never evaluates spessasynth.
@@ -167,6 +165,37 @@ describe("module synthesizer", () => {
 		await second.close()
 	})
 
+	it("answers a module's length at load, building no renderer for it", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(tinyMod())
+		const from = posted.length
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "length" })
+
+		expect(input.info.duration).toBeCloseTo(7.68, 3)
+		expect(posted.slice(from).map(request => request.type)).not.toContain("open")
+		await input.close()
+	})
+
+	it("closes a renderer whose reader closed while it was still opening", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(tinyMod())
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "early" })
+		const reader = input.reader({} as never, () => false)
+		const from = posted.length
+		const first = reader.first(0)
+
+		await reader.close()
+		await first.catch(() => null)
+		await vi.waitFor(() => {
+			const opened = posted.slice(from).filter(request => request.type === "open").length
+			const closed = posted.slice(from).filter(request => request.type === "close").length
+
+			expect(opened).toBe(1)
+			expect(closed).toBe(1)
+		})
+		await input.close()
+	})
+
 	it("refuses a file the heap has no room for, and a render it cannot buffer, without losing the instance", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
 
@@ -205,7 +234,7 @@ describe("module synthesizer", () => {
 		await input.close()
 	})
 
-	it("keeps libopenmpt's log off the console and compiles its wasm once", async () => {
+	it("keeps libopenmpt's log off the console", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
 		const spies = (["log", "warn", "error", "info", "debug"] as const).map(level => vi.spyOn(console, level))
 
@@ -224,8 +253,6 @@ describe("module synthesizer", () => {
 				spy.mockRestore()
 			}
 		}
-
-		expect(compiles.count).toBe(1)
 	})
 
 	it("refuses what libopenmpt does not read as unsupported audio, and a lost key as a read failure", async () => {

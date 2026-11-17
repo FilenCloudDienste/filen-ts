@@ -27,20 +27,26 @@ const SAMPLE_RATE = 48_000
 const CHANNELS = 2
 // Frames per render: about 85 ms, a few dozen messages a second of playback at most.
 const RENDER_FRAMES = 4096
+// How long a synthesizer may take before it is taken for stuck and dropped (Retry starts another): a load parses the
+// file and works out its length, an open builds a renderer (decoding a module's samples, or fetching the MIDI
+// synthesizer's sound bank on its first), a seek or a render is a fraction of a second's work.
+const LOAD_TIMEOUT_MS = 20_000
+const OPEN_TIMEOUT_MS: Readonly<Record<AudioSynthKind, number>> = { module: 20_000, midi: 60_000 }
+const RENDER_TIMEOUT_MS = 5_000
 
 // A file key the synthesizer worker holds, and how many inputs use it there.
 interface Held {
 	worker: Worker
 	users: number
-	// Settles once the bytes are in the worker, with the song's length when the worker answered it: a second input
-	// opens only after.
-	loaded: Promise<number | undefined>
+	// Settles once the bytes are in the worker, with the song's length: a second input opens only after.
+	loaded: Promise<number>
 }
 
 // What a new instance is told before anything else.
 type Setup = () => Promise<SynthRequest>
 
 class Synth {
+	public readonly kind: AudioSynthKind
 	public readonly nested: NestedWorker<SynthRequest, SynthResponse>
 	private readonly held = new Map<string, Held>()
 	// What a new instance is told first (the compiled libopenmpt, the MIDI synthesizer's sound bank), the instance last
@@ -49,7 +55,8 @@ class Synth {
 	private setUp: Worker | null = null
 	private told: Promise<void> = Promise.resolve()
 
-	public constructor(spawn: () => Worker, name: string, setup: Setup) {
+	public constructor(kind: AudioSynthKind, spawn: () => Worker, name: string, setup: Setup) {
+		this.kind = kind
 		this.setup = setup
 		this.nested = new NestedWorker(spawn, {
 			name,
@@ -86,22 +93,31 @@ class Synth {
 	}
 
 	// The worker holding `key`'s bytes, loaded through `read` when it does not yet (or no longer: a worker that failed
-	// took them with it), and the song's length when the worker answered it. Balanced by one release.
-	public async acquire(key: string, read: () => Promise<Uint8Array>): Promise<{ worker: Worker; duration: number | undefined }> {
+	// took them with it), and the song's length. Balanced by one release.
+	public async acquire(key: string, read: () => Promise<Uint8Array>): Promise<{ worker: Worker; duration: number }> {
 		const worker = this.nested.acquire()
-		let entry = this.held.get(key)
+		let counted = false
 
 		try {
 			await this.tell(worker)
 
+			// Looked up once told: an input of the same key that came meanwhile may have started its load.
+			let entry = this.held.get(key)
+
+			counted = true
+
 			if (entry?.worker === worker) {
 				entry.users++
 			} else {
-				const load = async (): Promise<number | undefined> => {
+				const load = async (): Promise<number> => {
 					const data = (await read()).slice().buffer
-					const response = await this.nested.request(worker, { type: "load", key, data }, [data])
+					const { duration } = await this.nested.request(worker, { type: "load", key, data }, [data], LOAD_TIMEOUT_MS)
 
-					return response.duration
+					if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
+						throw new AudioUnsupportedError("the song has no length")
+					}
+
+					return duration
 				}
 
 				entry = { worker, users: 1, loaded: load() }
@@ -110,7 +126,11 @@ class Synth {
 
 			return { worker, duration: await entry.loaded }
 		} catch (error) {
-			this.release(key, worker)
+			if (counted) {
+				this.release(key, worker)
+			} else {
+				this.nested.release(worker)
+			}
 
 			throw error
 		}
@@ -136,6 +156,7 @@ const synths: Partial<Record<AudioSynthKind, Synth>> = {}
 function synthFor(kind: AudioSynthKind): Synth {
 	if (kind === "module") {
 		synths.module ??= new Synth(
+			"module",
 			() => new ModuleWorker({ name: "module-synth" }),
 			"module synthesizer",
 			async () => ({
@@ -149,6 +170,7 @@ function synthFor(kind: AudioSynthKind): Synth {
 
 	// The bundled SoundFont, same-origin: never fetched from anywhere else.
 	synths.midi ??= new Synth(
+		"midi",
 		() => new MidiWorker({ name: "midi-synth" }),
 		"MIDI synthesizer",
 		() => Promise.resolve({ type: "bank", url: new URL(soundFontUrl, self.location.href).href })
@@ -159,20 +181,19 @@ function synthFor(kind: AudioSynthKind): Synth {
 
 // The song from `time` on, rendered in RENDER_FRAMES chunks by a renderer of its own.
 function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () => boolean): SampleReader {
-	let handle: number | null = null
 	let opening: Promise<number> | null = null
 	let closed = false
 
 	const opened = (): Promise<number> => {
-		opening ??= synth.nested.request(worker, { type: "open", key, sampleRate: SAMPLE_RATE }).then(response => {
-			if (response.handle === undefined) {
-				throw new Error("the synthesizer opened no renderer")
-			}
+		opening ??= synth.nested
+			.request(worker, { type: "open", key, sampleRate: SAMPLE_RATE }, [], OPEN_TIMEOUT_MS[synth.kind])
+			.then(response => {
+				if (response.handle === undefined) {
+					throw new Error("the synthesizer opened no renderer")
+				}
 
-			handle = response.handle
-
-			return response.handle
-		})
+				return response.handle
+			})
 
 		return opening
 	}
@@ -183,7 +204,7 @@ function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () 
 		}
 
 		const id = await opened()
-		const response = await synth.nested.request(worker, { type: "render", handle: id, frames: RENDER_FRAMES })
+		const response = await synth.nested.request(worker, { type: "render", handle: id, frames: RENDER_FRAMES }, [], RENDER_TIMEOUT_MS)
 		const frames = response.frames ?? 0
 
 		if (frames === 0 || response.data === undefined) {
@@ -205,17 +226,21 @@ function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () 
 		first: async time => {
 			const id = await opened()
 			// The renderer reports where it landed (a row boundary), which the first item's time is.
-			const { position } = await synth.nested.request(worker, { type: "seek", handle: id, seconds: time })
+			const { position } = await synth.nested.request(worker, { type: "seek", handle: id, seconds: time }, [], RENDER_TIMEOUT_MS)
 
 			return chunk(position ?? time)
 		},
 		next: item => chunk(item.timestamp + item.duration),
 		close: () => {
 			closed = true
-
-			if (handle !== null && synth.nested.current(worker)) {
-				synth.nested.request(worker, { type: "close", handle }).catch(() => undefined)
-			}
+			// An open still under way is closed once it lands: a renderer no reader holds would stay in the worker.
+			opening
+				?.then(handle => {
+					if (synth.nested.current(worker)) {
+						synth.nested.request(worker, { type: "close", handle }).catch(() => undefined)
+					}
+				})
+				.catch(() => undefined)
 
 			return Promise.resolve()
 		}
@@ -250,21 +275,7 @@ export async function synthAudioInput(port: MessagePort, size: number, profile: 
 		close()
 
 		const held = worker
-		let duration = acquired.duration ?? 0
-
-		if (acquired.duration === undefined) {
-			const probe = await synth.nested.request(held, { type: "open", key: hint.key, sampleRate: SAMPLE_RATE })
-
-			if (probe.handle !== undefined) {
-				synth.nested.request(held, { type: "close", handle: probe.handle }).catch(() => undefined)
-			}
-
-			duration = probe.duration ?? 0
-		}
-
-		if (!(duration > 0)) {
-			throw new AudioUnsupportedError("the song has no length")
-		}
+		const { duration } = acquired
 
 		let released = false
 

@@ -17,8 +17,7 @@ const RELEASE_SECONDS = 2
 const QUANTUM = 128
 
 interface Song {
-	bytes: Uint8Array
-	midi: BasicMIDI | null
+	midi: BasicMIDI
 }
 
 interface Renderer {
@@ -66,7 +65,8 @@ function loadBank(url: string): Promise<BasicSoundBank> {
 	return bank
 }
 
-function load(key: string, data: ArrayBuffer): void {
+// Parses the song once for every renderer of its key, and answers its length (with the release tail) without one.
+function load(key: string, data: ArrayBuffer): { duration: number } {
 	const bytes = new Uint8Array(data)
 	// Counted before anything is parsed: a song past the cap is refused at the cost of one walk.
 	const events = midiEventCount(bytes, MIDI_MAX_EVENTS)
@@ -79,10 +79,25 @@ function load(key: string, data: ArrayBuffer): void {
 		throw new Unsupported(`more than ${String(MIDI_MAX_EVENTS)} events`)
 	}
 
-	songs.set(key, { bytes, midi: null })
+	let midi: BasicMIDI
+
+	try {
+		midi = BasicMIDI.fromArrayBuffer(data)
+	} catch (error) {
+		throw new Unsupported(error instanceof Error ? error.message : String(error))
+	}
+
+	// A header dividing a beat into 0 ticks makes the song endless.
+	if (!Number.isFinite(midi.duration) || midi.duration < 0) {
+		throw new Unsupported("the song has no length")
+	}
+
+	songs.set(key, { midi })
+
+	return { duration: midi.duration + RELEASE_SECONDS }
 }
 
-async function open(key: string, sampleRate: number): Promise<{ handle: number; duration: number }> {
+async function open(key: string, sampleRate: number): Promise<{ handle: number }> {
 	const song = songs.get(key)
 
 	if (song === undefined) {
@@ -95,14 +110,6 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number; 
 
 	const soundBank = await loadBank(bankUrl)
 
-	if (song.midi === null) {
-		try {
-			song.midi = BasicMIDI.fromArrayBuffer(song.bytes.slice().buffer)
-		} catch (error) {
-			throw new Unsupported(error instanceof Error ? error.message : String(error))
-		}
-	}
-
 	const synth = new SpessaSynthProcessor(sampleRate, { decodedSampleBudget: DECODED_SAMPLE_BUDGET, effectsEnabled: true })
 
 	synth.setSystemParameter("voiceCap", VOICE_CAP)
@@ -111,9 +118,10 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number; 
 
 	const sequencer = new SpessaSynthSequencer(synth)
 
-	// Sample 0 is song time 0, and the song plays once.
+	// Sample 0 is song time 0, and the song plays once. Samples decode as notes first need them, not all up front.
 	sequencer.skipToFirstNoteOn = false
 	sequencer.loopCount = 0
+	sequencer.preload = false
 	sequencer.loadNewSongList([song.midi])
 	sequencer.play()
 
@@ -130,7 +138,7 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number; 
 		right: new Float32Array(QUANTUM)
 	})
 
-	return { handle, duration: length + RELEASE_SECONDS }
+	return { handle }
 }
 
 function seek(renderer: Renderer, seconds: number): number {
@@ -182,9 +190,7 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 		case "probe":
 			throw new Unsupported(`${request.type} is the module synthesizer's`)
 		case "load":
-			load(request.key, request.data)
-
-			return {}
+			return load(request.key, request.data)
 		case "unload":
 			songs.delete(request.key)
 
