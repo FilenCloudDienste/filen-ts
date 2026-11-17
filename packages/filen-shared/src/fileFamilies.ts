@@ -38,7 +38,8 @@ export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, A
 // PGS) and the ambiguous `.sub` are not text.
 export const SUBTITLE_FILE_EXTENSIONS: ReadonlySet<string> = new Set(["srt", "vtt", "ass", "ssa", "smi", "sami"])
 
-// Application and library packages that are zip archives under their own extension: browsed and extracted as zips.
+// Application and library packages that are zip archives under their own extension: browsed and extracted as zips. A
+// .crx is a zip behind a signed header, which the SDK skips.
 export const ZIP_PACKAGE_EXTENSIONS: ReadonlySet<string> = new Set([
 	"apk",
 	"aab",
@@ -48,6 +49,7 @@ export const ZIP_PACKAGE_EXTENSIONS: ReadonlySet<string> = new Set([
 	"war",
 	"ear",
 	"xpi",
+	"crx",
 	"whl",
 	"nupkg",
 	"vsix",

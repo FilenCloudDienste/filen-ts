@@ -10,7 +10,7 @@ import {
 	uploadFiles,
 	waitForListingSettled
 } from "./helpers/listing"
-import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
+import { FIXTURE_FILES, gotoFixture, openFixtureRows } from "./helpers/fixtures"
 import { escapeRegExp, expectEntries, extractToTree, itemRow, openArchive, openRowMenu } from "./helpers/archive"
 import { extractDone, withArchiveScratch } from "./helpers/jobs"
 import { buildZip } from "./helpers/archiveFixtures"
@@ -18,7 +18,7 @@ import { menuItemName } from "./helpers/menu"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
-import { ROUTING_LATIN1_LINE, ROUTING_PACKAGE_ENTRY } from "./fixtures/routing"
+import { ROUTING_EXTENSION_ENTRY, ROUTING_LATIN1_LINE, ROUTING_PACKAGE_ENTRY } from "./fixtures/routing"
 
 // Which viewer a file opens in, by its name or by its stored type: extensions that open in an existing viewer
 // (highlighted code, text, a streamed image, a package's listing), one that must not open as text, and the editor's
@@ -29,6 +29,7 @@ const [YAML, MO] = FIXTURE_FILES["routing-code"]
 const [SUBTITLES, LATIN1, MAIL] = FIXTURE_FILES["routing-text"]
 const [JFIF, GENERIC_JPG] = FIXTURE_FILES["routing-images"]
 const [PACKAGE] = FIXTURE_FILES["routing-package"]
+const [EXTENSION] = FIXTURE_FILES["routing-extension"]
 
 // The open text editor's content: contenteditable unless the file is shown read-only.
 function editorContent(page: Page): Locator {
@@ -174,5 +175,38 @@ test("a zip-based package lists at once at any size, and extracts into a directo
 		cspViolations
 	)
 
+	expect(foreign).toEqual([])
+})
+
+test("an icon and an animated PNG get thumbnails from the SDK", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+
+	await bootTo(page)
+
+	const { rows } = await openFixtureRows(page, "routing-thumbnails")
+
+	// Each row's icon slot swaps to the generated thumbnail's blob: URL.
+	for (const row of rows) {
+		await expect(row.locator("img")).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
+	}
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a Chrome extension lists as the zip behind its signed header", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+
+	await bootTo(page)
+
+	const fixture = await gotoFixture(page, "routing-extension")
+	const browser = await openArchive(page, fixture, EXTENSION)
+
+	await expect(browser.row(ROUTING_EXTENSION_ENTRY)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await browser.close()
+
+	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
 })

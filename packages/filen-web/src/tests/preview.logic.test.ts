@@ -359,9 +359,12 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("analysis.ipynb"))).toBe("other")
 	})
 
-	it.each(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "whl", "nupkg", "vsix", "appx", "msix"])("%s -> archive", ext => {
-		expect(previewType(fileNamed(`file.${ext}`))).toBe("archive")
-	})
+	it.each(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "crx", "whl", "nupkg", "vsix", "appx", "msix"])(
+		"%s -> archive",
+		ext => {
+			expect(previewType(fileNamed(`file.${ext}`))).toBe("archive")
+		}
+	)
 
 	it("reads an archive or package type as an archive without an extension", () => {
 		for (const [mime, extension] of [

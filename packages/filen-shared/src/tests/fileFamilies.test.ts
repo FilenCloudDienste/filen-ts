@@ -52,6 +52,6 @@ describe("SUBTITLE_FILE_EXTENSIONS", () => {
 
 describe("ZIP_PACKAGE_EXTENSIONS", () => {
 	it("lists the zip-based packages, none of them a format the apps read otherwise", () => {
-		expect([...ZIP_PACKAGE_EXTENSIONS]).toEqual(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "whl", "nupkg", "vsix", "appx", "msix"])
+		expect([...ZIP_PACKAGE_EXTENSIONS]).toEqual(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "crx", "whl", "nupkg", "vsix", "appx", "msix"])
 	})
 })

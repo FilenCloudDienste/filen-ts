@@ -428,6 +428,12 @@ describe("getPreviewType — stored mime", () => {
 		}
 	})
 
+	// Before = after: .crx joins web's zip packages only; no table on this platform lists it.
+	it("keeps .crx unknown under its own extension", () => {
+		expect(getPreviewType("extension.crx")).toBe("unknown")
+		expect(fileTypeExtension("extension.crx")).toBe("crx")
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

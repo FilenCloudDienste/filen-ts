@@ -232,6 +232,7 @@ describe("isArchiveCandidateName", () => {
 		"site.war",
 		"app.ear",
 		"addon.xpi",
+		"Extension.CRX",
 		"pkg-1.0-py3-none-any.whl",
 		"Package.1.0.nupkg",
 		"ext.vsix",
@@ -251,6 +252,7 @@ describe("isArchiveCandidateName", () => {
 	it("names zip-based packages, never a plain archive", () => {
 		expect(isZipPackageName("app.apk")).toBe(true)
 		expect(isZipPackageName("Tool.JAR")).toBe(true)
+		expect(isZipPackageName("extension.crx")).toBe(true)
 		expect(isZipPackageName(".apk")).toBe(false)
 		expect(isZipPackageName("photos.zip")).toBe(false)
 		expect(isZipPackageName("map.kmz")).toBe(false)
