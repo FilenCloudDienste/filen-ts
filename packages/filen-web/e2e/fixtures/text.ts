@@ -84,7 +84,9 @@ const TORRENT_INFO = Buffer.concat([
 	Buffer.from("e")
 ])
 
-export const TORRENT_TRACKER = "udp://tracker.e2e-never-contacted.example:1337/announce"
+// Addresses a browser could reach: the preview must still never contact them.
+export const TORRENT_TRACKER = "https://tracker.e2e-never-contacted.example/announce"
+export const TORRENT_WEB_SEED = "https://seed.e2e-never-contacted.example/album/"
 export const TORRENT_INFOHASH = createHash("sha1").update(TORRENT_INFO).digest("hex")
 
 const TORRENT_BYTES = Buffer.concat([
@@ -93,6 +95,8 @@ const TORRENT_BYTES = Buffer.concat([
 	bstring(TORRENT_TRACKER),
 	bstring("info"),
 	TORRENT_INFO,
+	bstring("url-list"),
+	bstring(TORRENT_WEB_SEED),
 	Buffer.from("e")
 ])
 

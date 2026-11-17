@@ -9,7 +9,8 @@ import {
 	LEGACY_CYRILLIC_TEXT,
 	MATH_REMOTE_IMAGES,
 	TORRENT_INFOHASH,
-	TORRENT_TRACKER
+	TORRENT_TRACKER,
+	TORRENT_WEB_SEED
 } from "./fixtures/text"
 
 // Reading text-family files, from the shared fixture tree only: a legacy codepage named by the encoding detector (its
@@ -109,7 +110,7 @@ test("markdown math renders as MathML and its remote images are never fetched", 
 	expect(cspViolations).toEqual([])
 })
 
-test("a torrent shows its infohash, trackers and files, and its tracker is never contacted", async ({ page, context }) => {
+test("a torrent shows its infohash, tracker, web seed and files, and neither address is ever contacted", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
 	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
@@ -124,6 +125,7 @@ test("a torrent shows its infohash, trackers and files, and its tracker is never
 	await expect(dialog.getByText("E2E Album", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText(TORRENT_INFOHASH, { exact: true })).toBeVisible()
 	await expect(dialog.getByText(TORRENT_TRACKER, { exact: true })).toBeVisible()
+	await expect(dialog.getByText(TORRENT_WEB_SEED, { exact: true })).toBeVisible()
 	await expect(dialog.getByText("E2E Album/01 Intro.flac", { exact: true })).toBeVisible()
 
 	await close(page)
