@@ -1,4 +1,4 @@
-import { serveSyncRange, type SyncRangeServerStats } from "@filen/office/dom/pdfedit"
+import { serveSyncRange, type SyncRangePort, type SyncRangeServerStats } from "@filen/office/dom/pdfedit"
 
 // The SDK worker's end of a sync range bridge (office dom/pdfedit/syncRange.ts): serves one file's decrypted blocks
 // into the shared buffer the PDF engine reads from synchronously. Lives until the reader closes, the page that opened
@@ -16,7 +16,7 @@ export interface SyncRangeServeDeps {
 	readonly locks?: Pick<LockManager, "request">
 }
 
-export function serveFileSyncRange(buffer: SharedArrayBuffer, port: MessagePort, deps: SyncRangeServeDeps): SyncRangeServerStats {
+export function serveFileSyncRange(buffer: SharedArrayBuffer, port: SyncRangePort, deps: SyncRangeServeDeps): SyncRangeServerStats {
 	const { lifetime } = deps
 	let reading = 0
 	let release = deps.release

@@ -16,9 +16,12 @@ import { RICH_SQLITE_BIG_BYTES, writeBigDatabase } from "./fixtures/richSqlite"
 
 // Opening and drawing the first rows: the block holding the header, the schema and `users`, and the leaf pages of
 // `blobs`' first tile. Three 1 MiB rows fit a leaf and each leaf follows its rows' overflow pages, so the tile's 63 rows
-// span 20 blocks (counted through the range VFS: 21 blocks in all). One block of slack: the open's own requests, which
-// the run that read all of `blobs` counted one above the VFS (101 against 100).
+// span 20 blocks (21 in all, counted through the app's bridge in sqliteRangedReads.test.ts). One block of slack: the
+// open's own requests, which the run that read all of `blobs` counted one above the VFS (101 against 100). Only in a
+// window of ordinary height: the grid asks for every tile its view shows, and the listing helpers' 8000 px page shows
+// all 300 rows (every leaf, 100 blocks).
 const OPEN_CHUNKS = 22
+const WINDOW = { width: 1280, height: 900 }
 // Longer than the viewer's idle wait before a counting step (SQLITE_COUNT_IDLE_MS), several times over.
 const IDLE_MS = 3_000
 const CHECK_TIMEOUT_MS = 600_000
@@ -43,6 +46,8 @@ test("a 300 MiB database opens unchecked in ranges and checks its integrity when
 			const egest = observeEgest(context)
 			const dialog = previewOverlay(page)
 
+			// The scratch directory's only row stays mounted at this height.
+			await page.setViewportSize(WINDOW)
 			await listbox.getByRole("option", { name }).dblclick()
 			await expect(dialog.getByText("Not checked", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 			// The list is by name: `blobs` is selected first, counted only as far as its first tile.
