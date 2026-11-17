@@ -31,13 +31,20 @@ import { copyItemLink } from "@/features/drive/lib/copyLink"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
-import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
-import { previewOpenTarget } from "@/features/drive/lib/preview.logic"
+import { driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
+import { driveItemName, type SniffId } from "@filen/shared"
+import { openSniffedAudio } from "@/features/drive/lib/openSniffedAudio"
+import { log } from "@/lib/log"
+import { needsContentSniff, previewOpenTarget } from "@/features/drive/lib/preview.logic"
+import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
+import { runContentSniff } from "@/features/preview/lib/contentSniff"
+import { previewCacheScope } from "@/features/preview/lib/accessMode"
+import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { startDownloads } from "@/features/drive/lib/download"
+import { narrowToAnyFile, startDownloads } from "@/features/drive/lib/download"
 import {
 	useDirectoryListingQuery,
 	useHiddenDotFilenRoot,
@@ -145,6 +152,41 @@ interface ListingOpenOptions {
 function useListingOpen({ items, variant, splat, searchActive, clearSearch, openPreview }: ListingOpenOptions): (index: number) => void {
 	const navigate = useNavigate()
 
+	const handOff = (item: DriveItem): void => {
+		const handoff = deriveAudioHandoff(items, item.data.uuid, variant === "trash")
+
+		if (handoff) {
+			void audioEngine.enqueueAndPlay(handoff.tracks, handoff.startIndex)
+		}
+	}
+
+	const openSniffed = (item: DriveItem, sniff: SniffId): Promise<void> =>
+		openSniffedAudio(item, sniff, {
+			read: id =>
+				runContentSniff(id, { kind: "file", file: narrowToAnyFile(item) }, crypto.randomUUID(), {
+					access: "authed",
+					scope: previewCacheScope("authed", undefined),
+					signal: new AbortController().signal
+				}),
+			record: verdict => {
+				recordContentVerdict(
+					{ uuid: item.data.uuid, name: driveItemName(item), mime: driveItemMime(item), size: item.data.size },
+					verdict
+				)
+			},
+			handOff: () => {
+				handOff(item)
+			},
+			openPreview: () => {
+				const target = previewOpenTarget(items, item)
+
+				openPreview(target.siblings, target.index)
+			},
+			onReadFailed: error => {
+				log.warn("drive.open", "the content read before opening failed", error)
+			}
+		})
+
 	return function handleOpen(index: number) {
 		const item = items[index]
 
@@ -162,11 +204,17 @@ function useListingOpen({ items, variant, splat, searchActive, clearSearch, open
 			// non-playable, like mobile — canOpenItem already turned those away, and deriveAudioHandoff
 			// agrees (audio never opens the overlay, whose pager already excludes it via previewableSiblings).
 			if (isAudioItem(item)) {
-				const handoff = deriveAudioHandoff(items, item.data.uuid, variant === "trash")
+				// Audio only by its extension's usual meaning (a `.mod` a camcorder wrote as an MPEG program stream): its
+				// head is read first, and what it turns out to be opens.
+				const sniff = needsContentSniff(item)
 
-				if (handoff) {
-					void audioEngine.enqueueAndPlay(handoff.tracks, handoff.startIndex)
+				if (sniff !== null && gateRunsSniffer(SNIFFERS[sniff], "file")) {
+					void openSniffed(item, sniff)
+
+					return
 				}
+
+				handOff(item)
 
 				return
 			}
