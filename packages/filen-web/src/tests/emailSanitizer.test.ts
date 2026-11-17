@@ -82,31 +82,66 @@ describe("sanitizeEmailHtml", () => {
 		expect(result.remoteBlocked).toBe(5)
 	})
 
-	// Payloads that got past a single decode, or past a url() regex.
+	// Payloads that got past a single decode, a url() regex or a comment stripper that knew no strings, urls or newlines.
 	it.each([
-		["a double escape of url(", "<style>p{background:\\\\75 rl(https://e.vil/px.gif)}</style>"],
-		["an escaped backslash before url(", "<style>p{background:\\5c 75 rl(https://e.vil/px.gif)}</style>"],
-		["an escaped @import", '<style>@\\5c 69mport "https://e.vil/a.css";</style>'],
 		["an escaped image-set", '<style>p{background:\\69mage-set("https://e.vil/c.png" 1x)}</style>'],
+		["an escaped url(", "<style>p{background:\\75 rl(https://e.vil/px.gif)}</style>"],
 		["an escaped @font-face", "<style>@\\66ont-face{font-family:F;src:url(https://e.vil/f.woff)}</style>"],
 		[
 			"a data: URL swallowing a later one",
 			'<style>p{background:url("data:image/png,x"/**/)} q{background:url("https://e.vil/y")}</style>'
 		],
-		["a double escape in a style attribute", '<p style="background:\\\\75 rl(https://e.vil/px.gif)">x</p>'],
 		["an unquoted url() with a space", "<style>p{background:url( https://e.vil/a b)}</style>"],
 		["an @media block hiding a load", "<style>@media all{p{background:url(https://e.vil/m.png)}}</style>"],
+		["an escape that only looks like a comment", "<style>p{background:x\\2f*;background-image:url(https://e.vil/a)}</style>"],
+		["CRLF after a hex escape in a style attribute", '<p style="background-image:\\75&#13;&#10;rl(https://e.vil/x)">x</p>'],
+		["CRLF after a hex escape in an SVG fill", '<svg><rect fill="\\75&#13;&#10;rl(https://e.vil/x#g)"></rect></svg>'],
+		["CRLF after a hex escape in an SVG style", "<svg><style>rect{fill:\\75&#13;&#10;rl(https://e.vil/s#g)}</style></svg>"],
+		[
+			"a comment opener inside an unquoted url",
+			"<style>p{background:url(data:image/png,a/*)}q{background-image:url(https://e.vil/c)}r{x:y*/)}</style>"
+		],
+		["a comment opener inside a string", '<style>q{content:"/*";background-image:url(https://e.vil/b)}</style>'],
+		["a string ended by a newline", '<style>p{x:"/*\n}q{background-image:url(https://e.vil/z)}r{y:*/"}</style>'],
+		[
+			"a string ended by a newline in a style attribute",
+			'<p style="x:&quot;/*&#10;;background-image:url(https://e.vil/q);y:*/&quot;">x</p>'
+		],
 		["an SVG filter and cursor", '<svg><rect filter="url(https://e.vil/f.svg#f)" cursor="url(https://e.vil/c.png),auto"></rect></svg>'],
 		[
 			"an SVG fill, mask, clip-path and marker",
 			'<svg><path fill="url(https://e.vil/a#g)" mask="url(https://e.vil/m#m)" clip-path="url(https://e.vil/c#c)" marker-end="url(https://e.vil/k#k)"></path></svg>'
 		],
-		["an escaped SVG url", '<svg><rect fill="\\75 rl(https://e.vil/a#g)"></rect></svg>']
+		["an escaped SVG url", '<svg><rect fill="\\75 rl(https://e.vil/a#g)"></rect></svg>'],
+		["an image() function", '<style>p{background:image("https://e.vil/i.png")}</style>']
 	])("refuses %s", (_, html) => {
 		const result = sanitized(html)
 
 		expect(result.html).not.toContain("e.vil")
 		expect(result.remoteBlocked).toBeGreaterThan(0)
+	})
+
+	// A double escape reads as a plain name, which loads nothing: kept exactly as written (never decoded and rewritten).
+	it.each([
+		["a double escape of url(", "p{background:\\\\75 rl(https://e.vil/px.gif)}"],
+		["an escaped backslash before url(", "p{background:\\5c 75 rl(https://e.vil/px.gif)}"],
+		["an escaped @import", '@\\5c 69mport "https://e.vil/a.css";']
+	])("keeps %s as written, inert", (_, css) => {
+		const result = sanitized(`<style>${css}</style>`)
+
+		expect(result.html).toContain(`<style>${css}</style>`)
+		expect(result.remoteBlocked).toBe(0)
+	})
+
+	// Only the sanitizer marks links: a forged mark is removed, so no element becomes a link nobody wrote.
+	it("drops a link mark the document carries itself", () => {
+		const result = sanitizeEmailHtml(
+			'<div data-filen-href="whatsapp://send?text=hi" style="position:fixed;inset:0">Read more</div><span data-filen-href="https:/evil.com">x</span>',
+			NO_CID
+		)
+
+		expect(result.html).not.toContain("data-filen-href")
+		expect(result.links).toEqual([])
 	})
 
 	it("keeps an SVG's local paint and fill", () => {

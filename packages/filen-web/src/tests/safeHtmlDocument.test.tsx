@@ -101,6 +101,26 @@ describe("SafeHtmlDocument", () => {
 		expect(open).toHaveBeenCalledWith("https://example.com/a", "_blank", "noopener,noreferrer")
 		expect(screen.getByRole("button", { name: "Open write (a@b.c, with copies to others)" })).toBeTruthy()
 	})
+
+	// The app's link policy opens tel:, sms: and maps: links without asking; a document's never open.
+	it("opens only web and mail links", () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null)
+
+		render(
+			<SafeHtmlDocument
+				html={DOCUMENT}
+				links={[{ href: "tel:+15551234", text: "call" }]}
+				title="Message"
+				layout="fill"
+				paper
+			/>
+		)
+
+		fireEvent.click(screen.getByRole("button", { name: "Links (1)" }))
+		fireEvent.click(screen.getByRole("button", { name: /Open call/ }))
+
+		expect(open).not.toHaveBeenCalled()
+	})
 })
 
 describe("the frame's document", () => {
@@ -125,8 +145,8 @@ describe("fillSafeHtml", () => {
 		if (inner === null) throw new Error("no frame document")
 
 		inner.head.innerHTML = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'"><style>own{}</style>'
-		fillSafeHtml(inner, '<html lang="x"><head><style>p{margin:0}</style></head><body dir="rtl"><p>one</p></body></html>')
-		fillSafeHtml(inner, '<html lang="y"><head><style>p{margin:1px}</style></head><body><p>two</p></body></html>')
+		fillSafeHtml(inner, '<html lang="x"><head><style>p{margin:0}</style></head><body dir="rtl"><p>one</p></body></html>', false)
+		fillSafeHtml(inner, '<html lang="y"><head><style>p{margin:1px}</style></head><body><p>two</p></body></html>', false)
 
 		expect(inner.documentElement.getAttribute("lang")).toBe("y")
 		expect([...inner.head.children].map(child => child.outerHTML)).toEqual([
@@ -135,6 +155,26 @@ describe("fillSafeHtml", () => {
 			'<style data-filen-content="">p{margin:1px}</style>'
 		])
 		expect(inner.body.outerHTML).toBe("<body><p>two</p></body>")
+	})
+
+	// An auto-height frame is measured by its content: no stylesheet of the document may size html or body to the view.
+	it("sizes an auto-height document's html and body by their content, above the document's own important rules", () => {
+		const frame = document.createElement("iframe")
+
+		document.body.append(frame)
+
+		const inner = frame.contentDocument
+
+		if (inner === null) throw new Error("no frame document")
+
+		fillSafeHtml(inner, '<html style="min-height:100vh!important"><body style="height:120vh!important"><p>x</p></body></html>', true)
+
+		for (const element of [inner.documentElement, inner.body]) {
+			expect(element.style.getPropertyValue("height")).toBe("auto")
+			expect(element.style.getPropertyPriority("height")).toBe("important")
+			expect(element.style.getPropertyValue("min-height")).toBe("0px")
+			expect(element.style.getPropertyPriority("min-height")).toBe("important")
+		}
 	})
 })
 
@@ -194,12 +234,11 @@ describe("the frame's links", () => {
 })
 
 describe("nextAutoHeight", () => {
-	it("follows the content up to the cap, and holds where it only grows with the frame", () => {
-		expect(nextAutoHeight([], 300.2, 4000)).toBe(301)
-		expect(nextAutoHeight([301], 280, 4000)).toBe(280)
-		expect(nextAutoHeight([301], 600, 4000)).toBe(600)
-		expect(nextAutoHeight([300, 600], 5000, 4000)).toBe(4000)
-		// Grew by the 20 px the frame itself just grew: held.
-		expect(nextAutoHeight([300, 320], 340, 4000)).toBe(320)
+	it("follows the content up to the cap, and holds content that follows the frame's own height", () => {
+		expect(nextAutoHeight(150, { height: 300.2, followsFrame: false }, 4000)).toBe(301)
+		expect(nextAutoHeight(301, { height: 280, followsFrame: false }, 4000)).toBe(280)
+		expect(nextAutoHeight(600, { height: 5000, followsFrame: false }, 4000)).toBe(4000)
+		// min-height:120vh, or 100vh plus padding: held, it scrolls inside.
+		expect(nextAutoHeight(150, { height: 180, followsFrame: true }, 4000)).toBe(150)
 	})
 })

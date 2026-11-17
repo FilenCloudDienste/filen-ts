@@ -7,6 +7,7 @@ import {
 	interceptFrameLinks,
 	linkPlace,
 	fillSafeHtml,
+	measureFrameContent,
 	nextAutoHeight,
 	safeHtmlPrefix,
 	SAFE_HTML_MAX_CHARS,
@@ -29,6 +30,18 @@ export interface SafeHtmlDocumentProps {
 	layout: "fill" | "autoHeight"
 	// White paper whatever the app's theme.
 	paper: boolean
+}
+
+// The only links a document opens: the web and mail (the app's link policy admits more elsewhere, tel: or maps:, which
+// open without asking; an untrusted document gets none of them).
+function isFrameLink(href: string): boolean {
+	try {
+		const protocol = new URL(href).protocol
+
+		return protocol === "http:" || protocol === "https:" || protocol === "mailto:"
+	} catch {
+		return false
+	}
 }
 
 // Past this height an auto-height document scrolls inside its frame.
@@ -60,25 +73,26 @@ export function SafeHtmlDocument({ html, links, title, layout, paper }: SafeHtml
 			return undefined
 		}
 
-		fillSafeHtml(frameDocument, html)
+		fillSafeHtml(frameDocument, html, layout === "autoHeight")
 
 		const stopIntercepting = interceptFrameLinks(frameDocument, href => {
-			openRef.current(href)
+			if (isFrameLink(href)) {
+				openRef.current(href)
+			}
 		})
 
 		if (layout !== "autoHeight") {
 			return stopIntercepting
 		}
 
+		const frame = frameRef.current
 		const root = frameDocument.documentElement
-		const given: number[] = []
 		const observer = new ResizeObserver(() => {
-			const next = nextAutoHeight(given, root.scrollHeight, AUTO_HEIGHT_MAX)
-
-			if (next !== given.at(-1)) {
-				given.push(next)
-				setHeight(next)
+			if (frame === null) {
+				return
 			}
+
+			setHeight(nextAutoHeight(frame.offsetHeight, measureFrameContent(frame, root), AUTO_HEIGHT_MAX))
 		})
 
 		observer.observe(root)
@@ -140,7 +154,9 @@ export function SafeHtmlDocument({ html, links, title, layout, paper }: SafeHtml
 											className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
 											aria-label={t("previewHtmlLinkOpen", { text: link.text, place: where })}
 											onClick={() => {
-												requestOpen(link.href)
+												if (isFrameLink(link.href)) {
+													requestOpen(link.href)
+												}
 											}}
 										>
 											<bdi className="min-w-0 flex-1 truncate">{link.text}</bdi>

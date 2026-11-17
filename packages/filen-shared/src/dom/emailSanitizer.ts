@@ -13,6 +13,8 @@
 // frame can never navigate, and the host opens it through its own gate. They are also returned, once each, labelled
 // by their visible text, for the host to list beside the frame (a script-less frame runs no listener in WebKit).
 
+import { cssTokens, declarationChunks, preprocessCss, tokensLoad, topLevelChunks, withParts } from "./cssLoads"
+
 export interface EmailLink {
 	readonly href: string
 	// The link's visible text (format and bidi controls removed), or its address when it has none.
@@ -72,8 +74,9 @@ const FORBID_TAGS = [
 	"noscript"
 ]
 
-// Attributes that run, submit or report: never kept, whatever they hold.
-const FORBID_ATTR = ["srcdoc", "formaction", "action", "ping", "http-equiv"]
+// Attributes that run, submit or report, never kept whatever they hold; and the link attribute, which only the hook
+// writes (on a real link it checked).
+const FORBID_ATTR = ["srcdoc", "formaction", "action", "ping", "http-equiv", EMAIL_LINK_ATTRIBUTE]
 
 // Attributes holding a URL the browser loads.
 const LOADING_ATTRIBUTES = ["src", "srcset", "background", "poster", "lowsrc", "dynsrc", "data", "xlink:href", "longdesc"]
@@ -83,157 +86,6 @@ const PRESENTATION_ATTRIBUTES = ["fill", "stroke", "filter", "mask", "clip-path"
 const DATA_IMAGE = /^\s*data:image\//i
 const CID = /^\s*cid:\s*<?([^>\s]+)>?\s*$/i
 const LINK_SCHEMES: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"])
-
-// A data: URL that is one clean token: an image type, parameters, and a payload of URL-safe characters only.
-const CLEAN_DATA_IMAGE = /^data:image\/[a-z0-9.+-]+(?:;[a-z0-9-]+=[a-z0-9.+-]+)*(?:;base64)?,[a-z0-9+/=%._~!$&*,;:@-]*$/i
-
-// CSS escapes (`\75 rl(`, `\@import`) decoded once, for judging only: never written back.
-function decodeCssEscapes(css: string): string {
-	return css.replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([^\n0-9a-f]))/gi, (_whole, hex: string | undefined, char: string | undefined) => {
-		if (hex === undefined) {
-			return char ?? ""
-		}
-
-		const point = Number.parseInt(hex, 16)
-
-		return point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff) ? "�" : String.fromCodePoint(point)
-	})
-}
-
-// Comments out, so `ur/**/l(` and the like are judged as the parser reads them.
-function withoutComments(css: string): string {
-	return css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ")
-}
-
-const LOADS = /@import|@font-face|image-set\s*\(|(?:^|[^a-z0-9_-])src\s*:/i
-const URL_START = /url\s*\(/gi
-
-// The value of the url( token starting at `open` (just past its parenthesis), or null when it does not parse cleanly.
-function urlToken(css: string, open: number): string | null {
-	let at = open
-
-	while (/\s/.test(css[at] ?? "")) at++
-
-	const quote = css[at]
-
-	if (quote === "\"" || quote === "'") {
-		const end = css.indexOf(quote, at + 1)
-
-		if (end === -1) {
-			return null
-		}
-
-		let close = end + 1
-
-		while (/\s/.test(css[close] ?? "")) close++
-
-		return css[close] === ")" ? css.slice(at + 1, end) : null
-	}
-
-	const end = css.indexOf(")", at)
-	const value = end === -1 ? null : css.slice(at, end).trimEnd()
-
-	return value === null || /["'(\s]/.test(value) ? null : value
-}
-
-// Whether CSS could load anything from outside the message: judged on its escapes decoded and comments out. Escapes
-// left after one decode (a double escape the browser would decode again) and a url( that does not parse cleanly count
-// as loads. A url() is local only as one clean data:image token, or a cid: part (resolved by `cid`).
-function cssLoads(css: string, cid: (id: string) => boolean): boolean {
-	const decoded = withoutComments(decodeCssEscapes(css))
-
-	if (decoded.includes("\\") || LOADS.test(decoded)) {
-		return true
-	}
-
-	for (const match of decoded.matchAll(URL_START)) {
-		const value = urlToken(decoded, match.index + match[0].length)
-
-		if (value === null) {
-			return true
-		}
-
-		const part = CID.exec(value)?.[1]
-
-		if (!CLEAN_DATA_IMAGE.test(value) && (part === undefined || !cid(part))) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// CSS text split at its top level: statements (`@charset …;`) and blocks (`p{…}`, `@media{…}` whole), strings and
-// comments respected; a trailing unterminated part is one chunk.
-function topLevelChunks(css: string): string[] {
-	const chunks: string[] = []
-	let start = 0
-	let depth = 0
-
-	for (let at = 0; at < css.length; at++) {
-		const char = css[at]
-
-		if (char === "/" && css[at + 1] === "*") {
-			const end = css.indexOf("*/", at + 2)
-
-			at = end === -1 ? css.length : end + 1
-		} else if (char === "\"" || char === "'") {
-			while (++at < css.length && css[at] !== char) {
-				if (css[at] === "\\") at++
-			}
-		} else if (char === "\\") {
-			at++
-		} else if (char === "{") {
-			depth++
-		} else if (char === "}" && depth > 0) {
-			depth--
-
-			if (depth === 0) {
-				chunks.push(css.slice(start, at + 1))
-				start = at + 1
-			}
-		} else if (char === ";" && depth === 0) {
-			chunks.push(css.slice(start, at + 1))
-			start = at + 1
-		}
-	}
-
-	if (start < css.length) {
-		chunks.push(css.slice(start))
-	}
-
-	return chunks
-}
-
-// Declarations of a style attribute, split on top-level semicolons (strings and parentheses respected).
-function declarations(css: string): string[] {
-	const parts: string[] = []
-	let start = 0
-	let depth = 0
-
-	for (let at = 0; at < css.length; at++) {
-		const char = css[at]
-
-		if (char === "\"" || char === "'") {
-			while (++at < css.length && css[at] !== char) {
-				if (css[at] === "\\") at++
-			}
-		} else if (char === "\\") {
-			at++
-		} else if (char === "(") {
-			depth++
-		} else if (char === ")" && depth > 0) {
-			depth--
-		} else if (char === ";" && depth === 0) {
-			parts.push(css.slice(start, at))
-			start = at + 1
-		}
-	}
-
-	parts.push(css.slice(start))
-
-	return parts
-}
 
 interface Run {
 	resolveCid: (id: string) => string | null
@@ -251,48 +103,39 @@ function localUrl(value: string, run: Run): string | null {
 	return cid === undefined ? null : run.resolveCid(cid)
 }
 
-// A cid: url() token in CSS that loads nothing else, rewritten to its part's local URL; any other CSS as it was.
-function resolveCssParts(css: string, run: Run): string {
-	return css.replace(/url\(\s*(['"]?)\s*cid:\s*<?([^>\s'")]+)>?\s*\1\s*\)/gi, (whole, _quote: string, id: string) => {
-		const local = run.resolveCid(id)
-
-		return local === null ? whole : `url('${local}')`
-	})
-}
-
 const isPart = (run: Run) => (id: string) => run.resolveCid(id) !== null
+
+// CSS split into chunks, each kept as preprocessed (its parts' urls resolved) or dropped whole and counted when it could
+// load from outside the message.
+function keptChunks(css: string, split: (tokens: ReturnType<typeof cssTokens>) => ReturnType<typeof cssTokens>[], run: Run): string[] {
+	const text = preprocessCss(css)
+	const kept: string[] = []
+
+	for (const chunk of split(cssTokens(text))) {
+		if (tokensLoad(chunk, isPart(run))) {
+			run.remoteBlocked++
+		} else {
+			kept.push(withParts(text, chunk, run.resolveCid))
+		}
+	}
+
+	return kept
+}
 
 // A style element's CSS with every rule that could load from outside dropped whole (an @media block with one inside
 // it too).
 function cleanStyleSheet(css: string, run: Run): string {
-	return topLevelChunks(css)
-		.filter(chunk => {
-			if (!cssLoads(chunk, isPart(run))) {
-				return true
-			}
-
-			run.remoteBlocked++
-
-			return false
-		})
-		.map(chunk => resolveCssParts(chunk, run))
-		.join("")
+	return keptChunks(css, topLevelChunks, run).join("")
 }
 
 // A style attribute with every declaration that could load from outside dropped.
 function cleanStyleAttribute(css: string, run: Run): string {
-	return declarations(css)
-		.filter(declaration => {
-			if (!cssLoads(declaration, isPart(run))) {
-				return true
-			}
+	return keptChunks(css, declarationChunks, run).join(";")
+}
 
-			run.remoteBlocked++
-
-			return false
-		})
-		.map(declaration => resolveCssParts(declaration, run))
-		.join(";")
+// A CSS value attribute (SVG presentation) judged whole.
+function cssValueLoads(value: string, run: Run): boolean {
+	return tokensLoad(cssTokens(preprocessCss(value)), isPart(run))
 }
 
 function linkHref(value: string): string | null {
@@ -350,7 +193,7 @@ function cleanAttributes(node: Element, run: Run): void {
 	for (const name of PRESENTATION_ATTRIBUTES) {
 		const value = node.getAttribute(name)
 
-		if (value !== null && cssLoads(value, isPart(run))) {
+		if (value !== null && cssValueLoads(value, run)) {
 			node.removeAttribute(name)
 			run.remoteBlocked++
 		}

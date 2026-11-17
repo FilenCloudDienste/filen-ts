@@ -32,7 +32,9 @@ const CONTENT_MARK = "data-filen-content"
 // Imports the sanitized document (DOMPurify's whole-document output) into the loaded frame, after its policy: parsed in
 // an inert document first (nothing loads there), then its html element's attributes, its head's children and its body
 // moved in, where the frame's policy governs every load. A later fill replaces the earlier one.
-export function fillSafeHtml(frameDocument: Document, html: string): void {
+// `autoHeight`: html and body get height auto and no minimum inline, as important, which no stylesheet of the document
+// outranks.
+export function fillSafeHtml(frameDocument: Document, html: string, autoHeight: boolean): void {
 	const parsed = new DOMParser().parseFromString(html, "text/html")
 	const root = frameDocument.documentElement
 
@@ -56,6 +58,13 @@ export function fillSafeHtml(frameDocument: Document, html: string): void {
 	}
 
 	frameDocument.body.replaceWith(frameDocument.importNode(parsed.body, true))
+
+	if (autoHeight) {
+		for (const element of [root, frameDocument.body]) {
+			element.style.setProperty("height", "auto", "important")
+			element.style.setProperty("min-height", "0", "important")
+		}
+	}
 }
 
 // Clicks, middle clicks and Enter on a sanitized link (data-filen-href) open it through the host (its trust gate).
@@ -122,17 +131,28 @@ export function linkPlace(href: string): LinkPlace {
 	}
 }
 
-// The next height of an auto-height frame for the content height measured, given the heights it was given so far:
-// capped, and held where the content only grows by what the frame itself just grew (content sized by its viewport,
-// which would otherwise ratchet up to the cap one render at a time).
-export function nextAutoHeight(given: readonly number[], measured: number, cap: number): number {
-	const next = Math.min(Math.ceil(measured), cap)
-	const last = given.at(-1)
-	const before = given.at(-2)
+// How much taller a probe makes the frame: enough for any viewport-relative length to show.
+const PROBE_PX = 64
 
-	if (last === undefined || next <= last || before === undefined) {
-		return next
-	}
+// The content height of a loaded auto-height frame, and whether it follows the frame's own height (content sized in
+// viewport units, which would climb to the cap one render at a time by a constant or a factor): measured at the
+// frame's height and again at a taller probe, synchronously, so the probe is never painted.
+// The root element's own box, not its scroll height (which is never below the viewport).
+export function measureFrameContent(frame: HTMLIFrameElement, root: Element): { height: number; followsFrame: boolean } {
+	const height = root.getBoundingClientRect().height
+	const style = frame.style.height
 
-	return Math.abs(next - last - (last - before)) <= 1 ? last : next
+	frame.style.height = `${String(frame.offsetHeight + PROBE_PX)}px`
+
+	const probed = root.getBoundingClientRect().height
+
+	frame.style.height = style
+
+	return { height, followsFrame: probed > height }
+}
+
+// The next height of an auto-height frame: its content's, capped; held where the content follows the frame's height
+// (it then scrolls inside).
+export function nextAutoHeight(current: number, measured: { height: number; followsFrame: boolean }, cap: number): number {
+	return measured.followsFrame ? current : Math.min(Math.ceil(measured.height), cap)
 }
