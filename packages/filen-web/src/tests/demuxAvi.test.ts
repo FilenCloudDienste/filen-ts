@@ -267,6 +267,19 @@ describe("AVI demuxer over an OpenDML index", () => {
 		expect((await video.getNextPacket(picture))?.timestamp).toBeCloseTo(1.52, 6)
 	})
 
+	it("seeks with no more than three reads once open: the standard index, the run of chunks there, the picture", async () => {
+		const reads: [number, number][] = []
+		const input = inputOf(openDml(), reads)
+		const video = await sinkOf(input.getPrimaryVideoTrack())
+
+		await video.getFirstPacket()
+
+		const opened = reads.length
+
+		expect((await video.getKeyPacket(1.5))?.timestamp).toBeCloseTo(1.48, 6)
+		expect(reads.length - opened).toBeLessThanOrEqual(3)
+	})
+
 	it("survives truncation", async () => {
 		const bytes = openDml()
 

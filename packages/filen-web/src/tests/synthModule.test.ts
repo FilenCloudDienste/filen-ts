@@ -49,6 +49,15 @@ class InProcessWorker {
 
 vi.mock("@/workers/synth/module.worker.ts?worker", () => ({ default: InProcessWorker }))
 
+// A module playback never starts the MIDI synthesizer, so it never evaluates spessasynth.
+const midiWorkers = { started: 0 }
+
+vi.mock("@/workers/synth/midi.worker.ts?worker", () => ({
+	default: vi.fn(() => {
+		midiWorkers.started++
+	})
+}))
+
 beforeAll(async () => {
 	Object.assign(globalThis, {
 		self: {
@@ -107,6 +116,7 @@ describe("module synthesizer", () => {
 
 		await reader.close()
 		await input.close()
+		expect(midiWorkers.started).toBe(0)
 	})
 
 	it("reads a file once for every input of its key, and plays a 15-sample MOD the hint names", async () => {
