@@ -148,8 +148,10 @@ const LINE_BREAK = /\r\n|\r|\n/g
 export function eachContentLine(text: string, caps: ContentLineCaps, visit: (line: ContentLine) => boolean | void): boolean {
 	const pieces: string[] = []
 	let length = 0
-	// Quoted-printable: null while undecided (no value colon read yet).
+	// Quoted-printable: null while undecided (no value colon read yet, the parameters may still be folded on).
 	let quotedPrintable: boolean | null = null
+	// Where the search for the value colon goes on: each piece is scanned once, quotes carried across pieces.
+	const scan = { piece: 0, quoted: false }
 	let read = 0
 	let at = 0
 	let stopped = false
@@ -173,6 +175,27 @@ export function eachContentLine(text: string, caps: ContentLineCaps, visit: (lin
 		pieces.length = 0
 		length = 0
 		quotedPrintable = null
+		scan.piece = 0
+		scan.quoted = false
+	}
+
+	// The name and parameters up to and with the value colon, once one is read; null before.
+	const head = (): string | null => {
+		for (; scan.piece < pieces.length; scan.piece++) {
+			const piece = pieces[scan.piece] ?? ""
+
+			for (let index = 0; index < piece.length; index++) {
+				const char = piece[index]
+
+				if (char === "\"") {
+					scan.quoted = !scan.quoted
+				} else if (char === ":" && !scan.quoted) {
+					return pieces.slice(0, scan.piece).join("") + piece.slice(0, index + 1)
+				}
+			}
+		}
+
+		return null
 	}
 
 	const softBreak = (): boolean => {
@@ -183,11 +206,14 @@ export function eachContentLine(text: string, caps: ContentLineCaps, visit: (lin
 		}
 
 		if (quotedPrintable === null) {
-			const head = pieces.length === 1 ? last : pieces.join("")
-			const colon = valueStart(head)
+			const found = head()
 
-			// No value yet at a soft break: not a property a soft break can continue.
-			quotedPrintable = colon > 0 && isQuotedPrintable(head)
+			// No value yet: a parameter ends in "=" (folded on the next line), not a soft break. Decided once a colon is read.
+			if (found === null) {
+				return false
+			}
+
+			quotedPrintable = isQuotedPrintable(found)
 		}
 
 		return quotedPrintable

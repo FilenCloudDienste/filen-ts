@@ -234,6 +234,24 @@ describe("readContacts", () => {
 	})
 
 	// A long quoted parameter before a value continued by soft breaks on every line: decided once, joined in pieces.
+	// A parameter list folded right after a parameter's "=": no soft break until the value's colon is read.
+	it("reads quoted-printable whose parameters are folded", () => {
+		const file = readContacts(
+			[
+				"BEGIN:VCARD",
+				"FN:A",
+				"NOTE;CHARSET=",
+				" UTF-8;ENCODING=QUOTED-PRINTABLE:abc=",
+				"def",
+				"NOTE;ENCODING=",
+				" QUOTED-PRINTABLE:x",
+				"END:VCARD"
+			].join("\r\n")
+		)
+
+		expect(file.contacts[0]?.note).toBe("abcdef")
+	})
+
 	it("joins quoted-printable soft breaks in time linear in the text", () => {
 		const text = `BEGIN:VCARD\nNOTE;ENCODING=QUOTED-PRINTABLE;X="${"a".repeat(60_000)}":=\n${"=\n".repeat(100_000)}x\nEND:VCARD`
 		const started = Date.now()
