@@ -65,6 +65,22 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		return worker
 	}
 
+	// Another user of `worker`, current or retired, while it still runs; false, and no user counted, once it does not.
+	// Balanced by one release like an acquire.
+	public join(worker: Worker): boolean {
+		if (!this.current(worker)) {
+			return false
+		}
+
+		this.users.set(worker, (this.users.get(worker) ?? 0) + 1)
+
+		if (worker === this.worker) {
+			this.cancelIdle()
+		}
+
+		return true
+	}
+
 	public release(worker: Worker): void {
 		const count = this.users.get(worker)
 

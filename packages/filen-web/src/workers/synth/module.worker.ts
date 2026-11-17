@@ -124,7 +124,7 @@ async function load(key: string, data: ArrayBuffer): Promise<Omit<SynthResponse,
 
 	files.set(key, bytes)
 
-	return { duration }
+	return { duration, ...heap() }
 }
 
 async function probe(head: ArrayBuffer, size: number): Promise<Omit<SynthResponse, "id">> {
@@ -140,7 +140,7 @@ function open(lib: LibopenmptModule, bytes: Uint8Array, sampleRate: number): { h
 
 	renderers.set(handle, { module, sampleRate, buffer: 0, capacity: 0 })
 
-	return { handle }
+	return { handle, ...heap() }
 }
 
 function render(lib: LibopenmptModule, renderer: Renderer, frames: number): { data: ArrayBuffer; frames: number } {
@@ -161,10 +161,10 @@ function render(lib: LibopenmptModule, renderer: Renderer, frames: number): { da
 	return { data: data.buffer, frames: rendered }
 }
 
-// What the heap has grown to, once nothing renders: the remux worker replaces an instance that grew far (the heap
-// never shrinks).
-function idleHeap(): Omit<SynthResponse, "id"> {
-	return ready === null || renderers.size > 0 ? {} : { heap: ready._filen_heap_bytes() }
+// What the heap has grown to, answered to every load, open, close and unload: the remux worker replaces an instance
+// that grew far (the heap never shrinks), whatever still renders on it, which goes on there until its inputs close.
+function heap(): Omit<SynthResponse, "id"> {
+	return ready === null ? {} : { heap: ready._filen_heap_bytes() }
 }
 
 async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">> {
@@ -183,7 +183,7 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 		case "unload":
 			files.delete(request.key)
 
-			return idleHeap()
+			return heap()
 		case "close": {
 			const renderer = renderers.get(request.handle)
 
@@ -194,7 +194,7 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 				ready._free(renderer.buffer)
 			}
 
-			return idleHeap()
+			return heap()
 		}
 		case "open": {
 			const bytes = files.get(request.key)

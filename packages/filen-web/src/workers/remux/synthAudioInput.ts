@@ -35,8 +35,8 @@ const OPEN_TIMEOUT_MS: Readonly<Record<AudioSynthKind, number>> = { module: 20_0
 const RENDER_TIMEOUT_MS = 5_000
 const PROBE_TIMEOUT_MS = 5_000
 
-// A wasm heap never shrinks: an instance whose heap grew past this is replaced once nothing renders on it, which a
-// playlist of modules otherwise never lets happen.
+// A wasm heap never shrinks: an instance whose heap grew past this is replaced, new files going to a fresh one while
+// what it holds plays on there until its inputs close, which a playlist of modules otherwise never lets happen.
 const RECYCLE_HEAP_BYTES = 96 * 1024 * 1024
 
 // The buffer behind `bytes`, transferable as it is when they span it whole (a range read hands its bytes over that
@@ -72,11 +72,10 @@ class Synth {
 	// A renderer a closed reader left, by key: the next reader of the key seeks it rather than opening another, which
 	// would parse the song again (and, for a module, decode every sample). One per key, so it costs one renderer.
 	private readonly parked = new Map<string, { worker: Worker; handle: number }>()
-	// What a new instance is told first (the compiled libopenmpt, the MIDI synthesizer's sound bank), the instance last
-	// told, and the telling.
+	// What a new instance is told first (the compiled libopenmpt, the MIDI synthesizer's sound bank), and each
+	// instance's telling.
 	private readonly setup: Setup
-	private setUp: Worker | null = null
-	private told: Promise<void> = Promise.resolve()
+	private readonly told = new WeakMap<Worker, Promise<void>>()
 
 	public constructor(kind: AudioSynthKind, spawn: () => Worker, name: string, setup: Setup) {
 		this.kind = kind
@@ -98,29 +97,34 @@ class Synth {
 
 	// Tells a new instance its setup before anything else is asked of it (answered in order).
 	private tell(worker: Worker): Promise<void> {
-		if (this.setUp !== worker) {
-			this.setUp = worker
-			this.told = this.setup().then(
+		let telling = this.told.get(worker)
+
+		if (telling === undefined) {
+			telling = this.setup().then(
 				request => {
 					this.nested.request(worker, request).catch(() => undefined)
 				},
 				(error: unknown) => {
 					// The next user tells it again.
-					this.setUp = null
+					this.told.delete(worker)
 
 					throw error
 				}
 			)
+			this.told.set(worker, telling)
 		}
 
-		return this.told
+		return telling
 	}
 
 	// The worker holding `key`'s bytes, loaded from `source` when it does not yet (or no longer: a worker that failed
 	// took them with it), and the song's length. A file is read whole only once its head reads as the synthesizer's
 	// (a camcorder's `.mod` never is). Balanced by one release.
 	public async acquire(key: string, source: SynthSource): Promise<{ worker: Worker; duration: number }> {
-		const worker = this.nested.acquire()
+		// The instance holding the key's bytes, though it was retired since: another input of the key (the crossfade
+		// analysis of the playing track) is served there rather than loading the file into a second heap.
+		const holding = this.held.get(key)?.worker
+		const worker = holding !== undefined && this.nested.join(holding) ? holding : this.nested.acquire()
 		let counted = false
 
 		try {
@@ -138,7 +142,10 @@ class Synth {
 					await this.sniff(worker, await source.head(), source.size)
 
 					const data = standalone(await source.read())
-					const { duration } = await this.nested.request(worker, { type: "load", key, data }, [data], LOAD_TIMEOUT_MS)
+					const loaded = await this.nested.request(worker, { type: "load", key, data }, [data], LOAD_TIMEOUT_MS)
+					const { duration } = loaded
+
+					this.recycle(worker, loaded)
 
 					if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
 						throw new AudioUnsupportedError("the song has no length")
@@ -197,10 +204,15 @@ class Synth {
 	public async renderer(worker: Worker, key: string): Promise<number> {
 		const idle = this.parked.get(key)
 
-		if (idle?.worker === worker) {
+		if (idle !== undefined) {
 			this.parked.delete(key)
 
-			return idle.handle
+			if (idle.worker === worker) {
+				return idle.handle
+			}
+
+			// Left in an instance since replaced: not this reader's.
+			this.closeIn(idle.worker, idle.handle)
 		}
 
 		const response = await this.nested.request(worker, { type: "open", key, sampleRate: SAMPLE_RATE }, [], OPEN_TIMEOUT_MS[this.kind])
@@ -208,6 +220,8 @@ class Synth {
 		if (response.handle === undefined) {
 			throw new Error("the synthesizer opened no renderer")
 		}
+
+		this.recycle(worker, response)
 
 		return response.handle
 	}
@@ -219,16 +233,27 @@ class Synth {
 			return
 		}
 
-		if (this.held.get(key)?.worker === worker && !this.parked.has(key)) {
+		const kept = this.parked.get(key)
+
+		if (this.held.get(key)?.worker === worker && kept?.worker !== worker) {
+			// One kept in an instance since replaced gives way.
+			if (kept !== undefined) {
+				this.closeIn(kept.worker, kept.handle)
+			}
+
 			this.parked.set(key, { worker, handle })
 
 			return
 		}
 
-		this.close(worker, handle)
+		this.closeIn(worker, handle)
 	}
 
-	private close(worker: Worker, handle: number): void {
+	private closeIn(worker: Worker, handle: number): void {
+		if (!this.nested.current(worker)) {
+			return
+		}
+
 		this.nested
 			.request(worker, { type: "close", handle })
 			.then(response => {
@@ -267,8 +292,8 @@ class Synth {
 		this.nested.release(worker)
 	}
 
-	// Retires an instance that answered a heap grown past RECYCLE_HEAP_BYTES with nothing rendering: the next input
-	// starts a fresh one, and this one ends with the inputs it has.
+	// Retires an instance that answered a heap grown past RECYCLE_HEAP_BYTES: the next input starts a fresh one, and
+	// this one ends with the inputs it has, a playing track and the next one prefetched alike.
 	public recycle(worker: Worker, response: SynthResponse): void {
 		if ((response.heap ?? 0) > RECYCLE_HEAP_BYTES) {
 			this.nested.retire(worker)

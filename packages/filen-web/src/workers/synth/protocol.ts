@@ -25,7 +25,7 @@ export interface SynthResponse extends NestedResponse {
 	// Interleaved stereo float samples, `frames` of them; fewer than asked at the song's end.
 	data?: ArrayBuffer
 	frames?: number
-	// Bytes the instance's wasm heap has grown to, answered to a close or an unload that left nothing rendering.
+	// Bytes the instance's wasm heap has grown to, answered to every load, open, close and unload.
 	heap?: number
 }
 
