@@ -235,6 +235,11 @@ class Reader implements MupdfReader {
 	}
 }
 
+// Read afresh at each call (an abort can come in at any await).
+function aborted(signal: AbortSignal | undefined): boolean {
+	return signal?.aborted === true
+}
+
 // Opens the document in an engine of its own. Rejects a PdfEngineError: "overBudget" when the pixel budget is below
 // MUPDF_MIN_IMAGE_PIXELS (no engine is started) or the heap outgrew its budget, "notSupported" for a document MuPDF
 // does not read (damaged, empty, locked by DRM), "readFailed" for a byte read that failed, "closed" when aborted or
@@ -242,7 +247,7 @@ class Reader implements MupdfReader {
 export async function openMupdfReader(options: OpenMupdfReaderOptions): Promise<MupdfReader> {
 	const { format, signal } = options
 
-	if (signal?.aborted === true) throw new PdfEngineError("closed", "the open was aborted")
+	if (aborted(signal)) throw new PdfEngineError("closed", "the open was aborted")
 
 	if (!(options.maxImagePixels >= MUPDF_MIN_IMAGE_PIXELS)) {
 		throw new PdfEngineError("overBudget", `a pixel budget of ${String(options.maxImagePixels)} is below the floor`)
@@ -276,6 +281,13 @@ export async function openMupdfReader(options: OpenMupdfReaderOptions): Promise<
 		await engine.close()
 
 		throw error
+	}
+
+	// Aborted once the engine had opened: nobody will close the reader, so it is closed here.
+	if (aborted(signal)) {
+		await engine.close()
+
+		throw new PdfEngineError("closed", "the open was aborted")
 	}
 
 	return new Reader(engine, format, metadata, pageCount)

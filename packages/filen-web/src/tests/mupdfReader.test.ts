@@ -321,6 +321,30 @@ describe("the MuPDF read service", () => {
 		expect(workers[1]?.terminate).toHaveBeenCalledOnce()
 	})
 
+	it("closes an engine whose open was aborted after it opened, and returns no reader", async () => {
+		const abort = new AbortController()
+
+		engine(1, call => {
+			// Aborted while the metadata is read: the engine had opened.
+			if (call.op === "metadata") abort.abort()
+
+			return undefined
+		})
+
+		const opening = openMupdfReader({
+			origin: file(10),
+			access: "authed",
+			scope: null,
+			format: "tiff",
+			maxImagePixels: BUDGET,
+			signal: abort.signal
+		})
+
+		await expect(opening).rejects.toSatisfy(error => failure(error) === "closed")
+		expect(workers[0]?.terminate).toHaveBeenCalledOnce()
+		expect(closeRange).toHaveBeenCalledOnce()
+	})
+
 	it("rejects an open aborted before the transfer as closed, leaving the cached bytes in the cache", async () => {
 		engine(1)
 
