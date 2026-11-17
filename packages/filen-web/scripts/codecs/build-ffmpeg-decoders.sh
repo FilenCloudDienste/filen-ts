@@ -28,6 +28,11 @@ FFMPEG_URL="https://ffmpeg.org/releases/${FFMPEG_TARBALL}"
 FFMPEG_SHA256="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
 # Exactly as `emcc --version` prints it: a release and a -git build of it are different compilers.
 EMCC_VERSION="7.0.0-git"
+# `emcc --version` alone does not tell one 7.0.0-git build from another: the manifest also records the LLVM it
+# drives and, for Homebrew's emscripten, the formula's version, revision and SHA-256 (the committed module: formula
+# 7.0.0, revision 0, from the 7.0.0 tag tarball). A different build of the same version gives different bytes.
+EMSCRIPTEN_FORMULA_VERSION="7.0.0"
+EMSCRIPTEN_FORMULA_REVISION="0"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE="$(cd "${HERE}/../.." && pwd)"
@@ -95,6 +100,29 @@ emcc_version="$(emcc --version | sed -n '1s/^.*) //p')"
 if [[ "${emcc_version}" != "${EMCC_VERSION}" && "${ALLOW_EMCC_MISMATCH:-}" != "1" ]]; then
 	echo "emcc ${emcc_version} found, ${EMCC_VERSION} expected (ALLOW_EMCC_MISMATCH=1 builds anyway, with different bytes)" >&2
 	exit 1
+fi
+
+emcc_clang="$(emcc -v 2>&1 | sed -n 's/^clang version //p' | head -n 1)"
+emcc_homebrew="null"
+
+if command -v brew > /dev/null 2>&1 && brew list --versions emscripten > /dev/null 2>&1; then
+	emcc_homebrew="$(brew info --json=v2 emscripten | node -e '
+		const formula = JSON.parse(require("fs").readFileSync(0, "utf8")).formulae[0]
+		const installed = formula.installed[0] ?? {}
+
+		process.stdout.write(JSON.stringify({
+			version: installed.version ?? null,
+			revision: formula.revision,
+			formulaSha256: formula.ruby_source_checksum?.sha256 ?? null,
+			tarballSha256: formula.urls?.stable?.checksum ?? null,
+			bottle: installed.poured_from_bottle === true
+		}))
+	')"
+
+	if [[ "${emcc_homebrew}" != *"\"version\":\"${EMSCRIPTEN_FORMULA_VERSION}\",\"revision\":${EMSCRIPTEN_FORMULA_REVISION},"* && "${ALLOW_EMCC_MISMATCH:-}" != "1" ]]; then
+		echo "Homebrew emscripten ${emcc_homebrew} found, ${EMSCRIPTEN_FORMULA_VERSION} revision ${EMSCRIPTEN_FORMULA_REVISION} expected" >&2
+		exit 1
+	fi
 fi
 
 # The Emscripten checkout: its runtime, emmalloc and musl are linked into the module.
@@ -202,6 +230,10 @@ cat > "${OUT_DIR}/manifest.json" << EOF
 		"cflags": $(json_array "${OPT_FLAGS[@]}" "${FFMPEG_PREFIX_MAP}")
 	},
 	"emcc": $(json_string "${emcc_version}"),
+	"emccBuild": {
+		"clang": $(json_string "${emcc_clang}"),
+		"homebrew": ${emcc_homebrew}
+	},
 	"emscripten": {
 		"musl": $(json_string "${musl_version}"),
 		"licenses": {
