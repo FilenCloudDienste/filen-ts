@@ -38,7 +38,25 @@ describe("htmlText", () => {
 	})
 })
 
+describe("htmlText's tags", () => {
+	it("ends a tag at a > outside its quoted values, and keeps a bare < as text", () => {
+		expect(htmlText('<img alt="a>b" src="data:image/png;base64,iVBORw0KGgo"><p title=\'x>y\'>shown</p>1 < 2', 1000)).toBe(
+			"shown\n1 < 2"
+		)
+	})
+})
+
 describe("emailText", () => {
+	it("leaves out inline data a body carries as text", () => {
+		const base64 = "QUJD".repeat(40)
+
+		expect(
+			emailText({ ...MESSAGE, text: `see data:image/png;base64,iVBORw0KGgo and ${base64} end` }, 1000).endsWith(
+				"\n\nsee [data] and [data] end"
+			)
+		).toBe(true)
+	})
+
 	it("gives the headers, the text body and the attachment names", () => {
 		const attachment = {
 			name: "report.pdf",

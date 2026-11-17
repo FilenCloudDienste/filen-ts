@@ -45,6 +45,30 @@ function decodeEntities(text: string): string {
 	})
 }
 
+// Where the tag that starts before `from` ends: its first ">" outside a quoted attribute value; -1 for none.
+function tagEnd(html: string, from: number): number {
+	let quote = ""
+
+	for (let at = from; at < html.length; at++) {
+		const char = html[at]
+
+		if (quote !== "") {
+			if (char === quote) quote = ""
+		} else if (char === '"' || char === "'") {
+			quote = char
+		} else if (char === ">") {
+			return at
+		}
+	}
+
+	return -1
+}
+
+// Inline data (a data: URI, a long base64-looking run) never reaches the reader: no tag scan is the only guard.
+function withoutInlineData(text: string): string {
+	return text.replace(/data:[^\s"'<>]+/gi, "[data]").replace(/[A-Za-z0-9+/]{100,}={0,2}/g, "[data]")
+}
+
 // The text of an HTML body, read until `limit` characters: one pass of indexOf over the markup.
 export function htmlText(html: string, limit: number): string {
 	const lower = html.toLowerCase()
@@ -77,7 +101,14 @@ export function htmlText(html: string, limit: number): string {
 			continue
 		}
 
-		const close = html.indexOf(">", open + 1)
+		// Not a tag ("a < b"): text.
+		if (!/[a-zA-Z/!?]/.test(html[open + 1] ?? "")) {
+			push("<")
+			at = open + 1
+			continue
+		}
+
+		const close = tagEnd(html, open + 1)
 
 		if (close < 0) break
 
@@ -141,5 +172,5 @@ export function emailText(message: EmailMessage, limit: number): string {
 					? "(The message's HTML body is too large to read.)"
 					: ""
 
-	return `${head}${body}`.slice(0, limit + 1)
+	return withoutInlineData(`${head}${body}`).slice(0, limit + 1)
 }
