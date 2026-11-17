@@ -263,9 +263,11 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindPresentation",
 		assistantKind: null
 	},
+	// Read in ranges on a public link, held in MuPDF's heap all the same: the link's limit is the drive's cap.
 	ebook: {
 		streamed: false,
 		ranged: false,
+		rangedMax: ebookMaxBytes,
 		bufferCap: ebookMaxBytes,
 		aboveCap: "refuse",
 		entry: "whole",

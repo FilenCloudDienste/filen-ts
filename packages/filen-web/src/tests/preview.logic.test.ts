@@ -23,6 +23,7 @@ import {
 	decodeUtf8,
 	bufferedSizeCap,
 	previewCategoryForExtension,
+	linkAdmits,
 	PREVIEW_MAX_BYTES,
 	TEXT_MAX_BYTES,
 	RAW_IMAGE_EXTENSIONS,
@@ -618,6 +619,11 @@ describe("canPreview", () => {
 		}
 
 		expect(bufferedSizeCap("ebook", phone)).toBe(64n * MIB)
+
+		// A public link reads it in ranges, under the same cap.
+		expect(linkAdmits("ebook", 64n * MIB, phone)).toBe(true)
+		expect(linkAdmits("ebook", 64n * MIB + 1n, phone)).toBe(false)
+		expect(linkAdmits("ebook", 256n * MIB + 1n, desktop)).toBe(false)
 		// Kindle's own format stays a download.
 		expect(previewCategoryForExtension("azw3")).toBeNull()
 	})
