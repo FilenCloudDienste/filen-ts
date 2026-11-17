@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
 import { BasicMIDI } from "spessasynth_core"
 import { MIDI_MAX_EVENTS, midiEventCount } from "@filen/shared"
+import { importPristineSpessasynth, type PristineSpessasynth } from "@/tests/support/pristineSpessasynth"
 
 // The MIDI worker refuses a song by midiEventCount before spessasynth_core parses it, and the parser (patched) stops on
 // its own past BasicMIDI.maxEvents: the two must agree on what a file holds, or a song slips past one of them.
@@ -26,8 +27,9 @@ function be32(value: number): number[] {
 }
 
 // Tracks of random bytes leaning towards MIDI: status bytes, data, long and short quantities, meta and SysEx, and now
-// and then a chunk length that lies.
-function fuzzedSong(seed: number): Uint8Array {
+// and then a chunk length that lies. An `honest` one never lies and holds no end-of-track meta before its end (which
+// the parser's flush drops), so upstream's parse holds every event the count finds.
+function fuzzedSong(seed: number, honest = false): Uint8Array {
 	const next = random(seed)
 	const pick = (values: readonly number[]): number => values[Math.floor(next() * values.length)] ?? 0
 	const trackCount = 1 + Math.floor(next() * 3)
@@ -44,7 +46,9 @@ function fuzzedSong(seed: number): Uint8Array {
 			if (roll < 0.15) {
 				body.push(pick([0x80, 0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0]) | Math.floor(next() * 16))
 			} else if (roll < 0.2) {
-				body.push(0xff, Math.floor(next() * 0x80), Math.floor(next() * 6))
+				const type = Math.floor(next() * 0x80)
+
+				body.push(0xff, honest && type === 0x2f ? 0x01 : type, Math.floor(next() * 6))
 			} else if (roll < 0.23) {
 				body.push(pick([0xf0, 0xf7]), Math.floor(next() * 8))
 			} else if (roll < 0.26) {
@@ -56,7 +60,7 @@ function fuzzedSong(seed: number): Uint8Array {
 			}
 		}
 
-		const lies = next() < 0.1
+		const lies = next() < 0.1 && !honest
 
 		out.push(...Buffer.from("MTrk"), ...be32(lies ? body.length + 1 + Math.floor(next() * 1000) : body.length), ...body)
 	}
@@ -180,6 +184,125 @@ describe("midiEventCount against spessasynth_core's parse", () => {
 
 		try {
 			expect(midiEventCount(song, MIDI_MAX_EVENTS)).toBeGreaterThan(MIDI_MAX_EVENTS)
+			expect(() => BasicMIDI.fromArrayBuffer(song.slice().buffer)).toThrow(RangeError)
+		} finally {
+			BasicMIDI.maxEvents = previous
+		}
+	})
+})
+
+// The oracle no patch can bend: upstream's parser as published, for files where the patch's three behaviours (a chunk
+// longer than the file, an event's data past its track, the event cap) do not arise or change no count.
+describe("midiEventCount against spessasynth_core as published", () => {
+	let pristine: PristineSpessasynth
+
+	beforeAll(async () => {
+		pristine = await importPristineSpessasynth()
+	})
+
+	const upstreamEvents = (bytes: Uint8Array): number | null => {
+		try {
+			return pristine.BasicMIDI.fromArrayBuffer(bytes.slice().buffer).tracks.reduce((sum, track) => sum + track.events.length, 0)
+		} catch {
+			return null
+		}
+	}
+
+	it("is the unpatched parser", () => {
+		expect("maxEvents" in pristine.BasicMIDI).toBe(false)
+	})
+
+	it("counts every event upstream's parse holds, across an honest fuzzed corpus", () => {
+		let compared = 0
+
+		for (let seed = 1; seed <= 3000; seed++) {
+			const bytes = fuzzedSong(seed, true)
+			const upstream = upstreamEvents(bytes)
+
+			if (upstream === null) {
+				continue
+			}
+
+			expect({ seed, counted: midiEventCount(bytes) }).toEqual({ seed, counted: upstream })
+			compared++
+		}
+
+		expect(compared).toBeGreaterThan(1000)
+	})
+
+	it("refuses a chunk declaring more than the file holds, which upstream allocates and parses", () => {
+		const body = [0x00, 0x90, 0x3c, 0x40]
+		const lying = Uint8Array.from([
+			...Buffer.from("MThd"),
+			...be32(6),
+			0,
+			0,
+			0,
+			1,
+			0x01,
+			0xe0,
+			...Buffer.from("MTrk"),
+			...be32(body.length + 4096),
+			...body
+		])
+
+		expect(upstreamEvents(lying)).not.toBeNull()
+		expect(midiEventCount(lying)).toBeNull()
+		expect(() => BasicMIDI.fromArrayBuffer(lying.slice().buffer)).toThrow(RangeError)
+	})
+
+	it("clamps an event's data to its track where upstream reads past it, counting the same", () => {
+		// A SysEx declaring 100 bytes with 3 left in its track.
+		const body = [0x00, 0x90, 0x3c, 0x40, 0x00, 0xf0, 0x64, 0x01, 0x02, 0x03]
+		const song = Uint8Array.from([
+			...Buffer.from("MThd"),
+			...be32(6),
+			0,
+			0,
+			0,
+			1,
+			0x01,
+			0xe0,
+			...Buffer.from("MTrk"),
+			...be32(body.length),
+			...body
+		])
+		// The SysEx's data, as either parser holds it.
+		const sysEx = (midi: unknown): number | undefined =>
+			(midi as { tracks: { events: { data: Uint8Array }[] }[] }).tracks[0]?.events[1]?.data.length
+
+		expect(midiEventCount(song)).toBe(upstreamEvents(song))
+		expect(sysEx(pristine.BasicMIDI.fromArrayBuffer(song.slice().buffer))).toBe(100)
+		expect(sysEx(BasicMIDI.fromArrayBuffer(song.slice().buffer))).toBe(3)
+	})
+
+	it("stops past the cap the worker sets, where upstream parses on", () => {
+		const body: number[] = [0x00, 0x90, 0x3c, 0x40]
+
+		for (let i = 0; i < 50; i++) {
+			body.push(0x00, 0x3c, 0x40)
+		}
+
+		const song = Uint8Array.from([
+			...Buffer.from("MThd"),
+			...be32(6),
+			0,
+			0,
+			0,
+			1,
+			0x01,
+			0xe0,
+			...Buffer.from("MTrk"),
+			...be32(body.length),
+			...body
+		])
+		const previous = BasicMIDI.maxEvents
+
+		BasicMIDI.maxEvents = 40
+
+		try {
+			expect(upstreamEvents(song)).toBe(51)
+			expect(midiEventCount(song)).toBe(51)
 			expect(() => BasicMIDI.fromArrayBuffer(song.slice().buffer)).toThrow(RangeError)
 		} finally {
 			BasicMIDI.maxEvents = previous
