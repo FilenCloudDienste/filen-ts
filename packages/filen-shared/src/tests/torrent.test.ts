@@ -201,6 +201,29 @@ describe("readTorrent", () => {
 		expect(info.totalSize).toBe(200_000n)
 	})
 
+	// 300k one-byte names: the tree is read into a flat table, not a dictionary per entry.
+	it("reads a wide v2 file tree without a dictionary per entry", () => {
+		const parts: Buffer[] = [Buffer.from("d4:infod9:file treed")]
+		const names: string[] = []
+
+		for (let index = 0; index < 300_000; index++) names.push(index.toString(36).padStart(4, "0"))
+
+		for (const leaf of names.sort()) parts.push(Buffer.from(`${String(leaf.length)}:${leaf}d0:d6:lengthi1eee`))
+
+		parts.push(Buffer.from("e12:meta versioni2e4:name4:Wide12:piece lengthi16384eee"))
+
+		const bytes = Buffer.concat(parts)
+		const before = process.memoryUsage().heapUsed
+		const started = Date.now()
+		const info = readTorrent(bytes)
+
+		expect(Date.now() - started).toBeLessThan(5000)
+		expect(process.memoryUsage().heapUsed - before).toBeLessThan(160 * 1024 * 1024)
+		expect(info.files.length + info.filesOmitted).toBe(300_000)
+		expect(info.files[0]?.path).toBe("Wide/0000")
+		expect(info.totalSize).toBe(300_000n)
+	})
+
 	it("refuses a dictionary key past a few KiB as too large", () => {
 		expect(() => readTorrent(bencode({ ["k".repeat(8193)]: 0, info: { name: "x", length: 1 } }))).toThrow(
 			expect.objectContaining({ kind: "tooLarge" })

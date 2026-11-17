@@ -66,7 +66,16 @@ const MAX_ADDRESSES = 500
 // A dictionary key's bytes at most: real keys are short, and a file name is cut to MAX_PART anyway.
 const MAX_KEY_BYTES = 8192
 
-type Value = bigint | Uint8Array | Value[] | Dict
+type Value = bigint | Uint8Array | Value[] | Dict | FileTree
+
+// A v2 `file tree` (BEP 52) read straight into a flat table, not a dictionary per entry: each node (a directory, or a
+// file's own name) is its name's bytes and its parent; each file is its node and length, in the tree's order.
+class FileTree {
+	readonly names: Uint8Array[] = []
+	readonly parents: number[] = []
+	readonly fileNodes: number[] = []
+	readonly lengths: bigint[] = []
+}
 
 // A dictionary as its keys (one character a byte) and values, in the file's order.
 class Dict {
@@ -145,7 +154,8 @@ class Reader {
 		return BigInt(text)
 	}
 
-	private value(depth: number): Value {
+	// `info`: this is the root's `info` dictionary, whose `file tree` is read as a flat table.
+	private value(depth: number, info = false): Value {
 		if (depth > MAX_DEPTH) {
 			throw new TorrentError("tooLarge", "nested too deep")
 		}
@@ -206,7 +216,7 @@ class Reader {
 				seen?.add(key)
 
 				const start = this.offset
-				const value = this.value(depth + 1)
+				const value = info && key === "file tree" ? this.fileTree(depth + 1) : this.value(depth + 1, depth === 0 && key === "info")
 
 				if (depth === 0 && key === "info") {
 					this.infoSpan = [start, this.offset]
@@ -222,6 +232,77 @@ class Reader {
 		}
 
 		return this.string()
+	}
+
+	private fileTree(depth: number): FileTree {
+		const tree = new FileTree()
+
+		this.treeNode(tree, -1, new Uint8Array(0), depth)
+
+		return tree
+	}
+
+	// A directory dictionary: its "" key holds a file's properties (the file is this node), every other key a child node.
+	// Keys unique, as for any dictionary.
+	private treeNode(tree: FileTree, parent: number, name: Uint8Array, depth: number): void {
+		if (depth > MAX_DEPTH) {
+			throw new TorrentError("tooLarge", "nested too deep")
+		}
+
+		if (++this.values > MAX_VALUES) {
+			throw new TorrentError("tooLarge", "too many values")
+		}
+
+		if (this.byte() !== 0x64) {
+			throw new TorrentError("malformed", "malformed file tree")
+		}
+
+		this.offset++
+
+		const node = tree.names.push(name) - 1
+		let last: string | null = null
+		let seen: Set<string> | null = null
+		const keys: string[] = []
+
+		tree.parents.push(parent)
+
+		while (this.byte() !== 0x65) {
+			const raw = this.string()
+
+			if (raw.length > MAX_KEY_BYTES) {
+				throw new TorrentError("tooLarge", "dictionary key too long")
+			}
+
+			const key = byteString(raw)
+
+			if (last !== null && key <= last) {
+				seen ??= new Set(keys)
+
+				if (seen.has(key)) {
+					throw new TorrentError("malformed", "duplicate dictionary key")
+				}
+			}
+
+			seen?.add(key)
+			// Kept only until the dictionary ends, for the duplicate check of a key out of order.
+			keys.push(key)
+			last = key
+
+			if (key === "") {
+				const props = this.value(depth + 1)
+
+				if (!(props instanceof Dict)) {
+					throw new TorrentError("malformed", "malformed file tree")
+				}
+
+				tree.fileNodes.push(node)
+				tree.lengths.push(integer(props.get("length")) ?? 0n)
+			} else {
+				this.treeNode(tree, node, raw, depth + 1)
+			}
+		}
+
+		this.offset++
 	}
 
 	// <length>:<bytes>
@@ -370,51 +451,40 @@ function v1Files(info: Dict, name: string, files: Files): void {
 }
 
 // A file tree key as a path part: only the bytes a part can show are decoded.
-function keyPart(key: string): string {
-	return display(
-		Uint8Array.from(key.slice(0, MAX_PART * 4), char => char.charCodeAt(0)),
-		MAX_PART
-	)
+function keyPart(key: Uint8Array): string {
+	return display(key, MAX_PART)
 }
 
-// v2: `file tree` of nested directories, each key a file or directory name, a file's value holding props under its ""
-// key ({ length, pieces root }). Depth first in the file's order, without recursion; each directory's path is built
-// (and cut) once, when it is entered, and a file only appends its own name.
-function v2Files(tree: Dict, name: string, files: Files): void {
-	const stack: { dict: Dict; prefix: PathPrefix; index: number }[] = [{ dict: tree, prefix: { path: name, cut: false }, index: 0 }]
+// v2: the file tree's files in its order. Each directory's path is built (and cut) once, the first time a file under
+// it is listed; a file appends only its own name. Past the file limit or the path budget, files are only counted: no
+// name is decoded.
+function v2Files(tree: FileTree, name: string, files: Files): void {
+	const prefixes = new Map<number, PathPrefix>([[0, { path: name, cut: false }]])
 
-	for (let frame = stack.at(-1); frame !== undefined; frame = stack.at(-1)) {
-		if (frame.index >= frame.dict.keys.length) {
-			stack.pop()
-			continue
+	const prefixOf = (node: number): PathPrefix => {
+		const known = prefixes.get(node)
+
+		if (known !== undefined) {
+			return known
 		}
 
-		const index = frame.index++
-		const key = frame.dict.keys[index] ?? ""
-		const value = frame.dict.values[index]
+		const prefix = withPart(prefixOf(tree.parents[node] ?? 0), keyPart(tree.names[node] ?? new Uint8Array(0)))
 
-		if (!(value instanceof Dict)) {
-			throw new TorrentError("malformed", "malformed file tree")
-		}
+		prefixes.set(node, prefix)
 
-		if (key === "") {
-			const size = integer(value.get("length")) ?? 0n
+		return prefix
+	}
 
-			if (admits(files, size)) addFile(files, frame.prefix.path, size)
+	for (let index = 0; index < tree.fileNodes.length; index++) {
+		const node = tree.fileNodes[index] ?? 0
+		const size = tree.lengths[index] ?? 0n
 
-			continue
-		}
+		if (!admits(files, size)) continue
 
-		const leaf = value.get("")
+		// A file's own node is no directory: its path is not kept.
+		const path = node === 0 ? name : withPart(prefixOf(tree.parents[node] ?? 0), keyPart(tree.names[node] ?? new Uint8Array(0))).path
 
-		if (leaf instanceof Dict) {
-			const size = integer(leaf.get("length")) ?? 0n
-
-			if (admits(files, size)) addFile(files, withPart(frame.prefix, keyPart(key)).path, size)
-		} else {
-			// Past the budget, a directory's files are only counted: its name is not decoded.
-			stack.push({ dict: value, prefix: files.full ? frame.prefix : withPart(frame.prefix, keyPart(key)), index: 0 })
-		}
+		addFile(files, path, size)
 	}
 }
 
@@ -444,7 +514,7 @@ export function readTorrent(bytes: Uint8Array): TorrentInfo {
 	const pieces = info.get("pieces")
 	const tree = info.get("file tree")
 	const v1 = pieces instanceof Uint8Array
-	const v2 = integer(info.get("meta version")) === 2n && tree instanceof Dict
+	const v2 = integer(info.get("meta version")) === 2n && tree instanceof FileTree
 
 	if (!v1 && !v2) {
 		throw new TorrentError("malformed", "neither a v1 nor a v2 torrent")
