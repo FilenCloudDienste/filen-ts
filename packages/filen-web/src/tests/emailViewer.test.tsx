@@ -10,6 +10,8 @@ import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import { readEmail } from "@/features/preview/lib/emailReading"
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
+import { cfbBytes } from "@filen/office/core/cfb"
+import { storageEntries } from "@filen/office/testing/msg"
 
 // A message (E1): its headers, its HTML sanitized with its remote content counted and its inline pictures resolved,
 // its text and source; attachments listed (inline pictures not), opened in place and back.
@@ -389,5 +391,27 @@ describe("EmailViewer", () => {
 		expect(await screen.findByText("Attachments (1)")).toBeTruthy()
 		expect(screen.getByText("also.pdf")).toBeTruthy()
 		expect(screen.queryByText("shown.png")).toBeNull()
+	})
+
+	it("shows what a damaged .msg still holds, and says how many parts were left out", async () => {
+		const broken = Uint8Array.from([0x10, 0, 0, 0, 0x10, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0])
+
+		message.current = await cfbBytes(
+			storageEntries(
+				[],
+				32,
+				[],
+				new Map([
+					[0x0037, "Damaged"],
+					[0x1000, "plain body"]
+				]),
+				new Map([[0x1009, broken]])
+			)
+		)
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByRole("heading", { name: "Damaged" })).toBeTruthy()
+		expect(screen.getByText("1 part of this message could not be read and is left out.")).toBeTruthy()
+		expect(screen.getByText("plain body")).toBeTruthy()
 	})
 })

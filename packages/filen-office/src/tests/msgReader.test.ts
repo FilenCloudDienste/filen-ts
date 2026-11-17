@@ -4,6 +4,7 @@ import { decompressRtf, readMsg, rtfBody, MsgError, type MsgReading } from "@fil
 import {
 	PT_INT32,
 	attachmentStorage,
+	messageEntries,
 	msgBytes,
 	recipientEntries,
 	storageEntries,
@@ -248,18 +249,28 @@ describe("readMsg", () => {
 		expect(await readMsg(await cfbBytes(many))).toEqual({ status: "tooLarge" })
 	})
 
-	it("is too large for an embedded message nested past the storage limit", async () => {
+	it("leaves out an embedded message nested past the storage limit, and shows the rest", async () => {
 		const deep = Array.from({ length: 70 }, (_, k) => `s${String(k)}`)
-
-		expect(
+		const message = ok(
 			await readMsg(
 				await cfbBytes([
-					...storageEntries([], 32, []),
-					...storageEntries([attachmentStorage(0)], 8, [[0x3705, PT_INT32, 5n]]),
-					{ path: [attachmentStorage(0), "__substg1.0_3701000D", ...deep, "x"], bytes: new Uint8Array(1) }
+					...messageEntries({ subject: "Still here", text: "body", attachments: [{ name: "kept.txt", bytes: ascii("kept") }] }),
+					...storageEntries([attachmentStorage(1)], 8, [[0x3705, PT_INT32, 5n]]),
+					{ path: [attachmentStorage(1), "__substg1.0_3701000D", ...deep, "x"], bytes: new Uint8Array(1) }
 				])
 			)
-		).toEqual({ status: "tooLarge" })
+		)
+
+		expect(message).toMatchObject({ subject: "Still here", text: "body", partsSkipped: 1 })
+		expect(message.attachments.map(attachment => attachment.name)).toEqual(["kept.txt"])
+	})
+
+	it("keeps a message's text when its RTF body is damaged", async () => {
+		const broken = Uint8Array.from([0x10, 0, 0, 0, 0x10, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0])
+
+		expect(
+			ok(await readMsg(await cfbBytes(storageEntries([], 32, [], new Map([[0x1000, "plain body"]]), new Map([[0x1009, broken]])))))
+		).toMatchObject({ html: null, text: "plain body", partsSkipped: 1 })
 	})
 
 	it("reads only the head of an oversized property stream", async () => {

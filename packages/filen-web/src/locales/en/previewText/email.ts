@@ -56,6 +56,9 @@ export const previewTextEmail = {
 	previewEmailReplyTo: "Reply to",
 	/** Email preview — under the sender's address (shown with its domain in ASCII) when the domain has non-ASCII characters; the domain as written follows */
 	previewEmailIdnDomain: "Domain written as:",
+	/** Email preview — under the headers when parts of a damaged message (a body, an attachment) could not be read */
+	previewEmailPartsSkipped_one: "{{count}} part of this message could not be read and is left out.",
+	previewEmailPartsSkipped_other: "{{count}} parts of this message could not be read and are left out.",
 	/** Email preview — reading the message failed */
 	previewEmailFailed: "The message could not be read."
 }

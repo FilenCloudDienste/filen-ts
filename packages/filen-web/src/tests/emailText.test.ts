@@ -20,6 +20,7 @@ const MESSAGE: EmailMessage = {
 	text: "Hello",
 	textTruncated: false,
 	attachments: [],
+	partsSkipped: 0,
 	hasSource: true
 }
 

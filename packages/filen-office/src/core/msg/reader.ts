@@ -107,6 +107,8 @@ export interface MsgMessage {
 	readonly cc: readonly MsgAddress[]
 	// Recipients past MAX_RECIPIENTS, counted.
 	readonly recipientsOmitted: number
+	// Parts (a body, an attachment) left out because they could not be read; the rest is the message's.
+	readonly partsSkipped: number
 	// ISO 8601; null for none.
 	readonly date: string | null
 	readonly html: string | null
@@ -185,6 +187,8 @@ class Reader {
 	private readonly maxSize: number
 	// Bytes the embedded messages' own files take, together.
 	private produced = 0
+	// Parts (a body, an attachment) left out because they could not be read.
+	skipped = 0
 
 	private readonly parts: boolean
 
@@ -192,6 +196,20 @@ class Reader {
 		this.cfb = cfb
 		this.maxSize = maxSize
 		this.parts = parts
+	}
+
+	// An optional part read on its own: damaged (a broken chain, a bad RTF header, storages nested past the limit), it is
+	// left out and counted rather than failing the message. Past the total size limit nothing more is read.
+	private async optional<T>(read: () => Promise<T>): Promise<T | null> {
+		try {
+			return await read()
+		} catch (e) {
+			if (this.produced > this.maxSize || !(e instanceof MsgError || e instanceof CfbError)) throw e
+
+			this.skipped++
+
+			return null
+		}
 	}
 
 	private child(path: readonly string[], name: string): CfbEntry | undefined {
@@ -288,7 +306,8 @@ class Reader {
 			recipientsOmitted: Math.max(0, recipients.length - MAX_RECIPIENTS),
 			date: properties.time(CLIENT_SUBMIT_TIME) ?? properties.time(DELIVERY_TIME) ?? properties.time(CREATION_TIME),
 			...(await this.bodies(path, properties, codepage)),
-			attachments: await this.attachments(path, attachments, codepage)
+			attachments: await this.attachments(path, attachments, codepage),
+			partsSkipped: this.skipped
 		}
 	}
 
@@ -297,23 +316,25 @@ class Reader {
 		properties: Properties,
 		codepage: number
 	): Promise<{ readonly html: string | null; readonly text: string | null }> {
-		const htmlBytes = await this.binary(path, HTML)
-		let html =
-			htmlBytes === null
+		let html = await this.optional(async () => {
+			const htmlBytes = await this.binary(path, HTML)
+
+			return htmlBytes === null
 				? await this.string(path, HTML, codepage)
 				: decodeHtml(htmlBytes, properties.int32(INTERNET_CODEPAGE) ?? properties.int32(MESSAGE_CODEPAGE))
-		let text = await this.string(path, BODY, codepage)
+		})
+		let text = await this.optional(() => this.string(path, BODY, codepage))
 
 		// The RTF body only where it can give HTML: a text body alone does not need it.
 		if (html === null) {
-			const compressed = await this.binary(path, RTF_COMPRESSED)
+			const body = await this.optional(async () => {
+				const compressed = await this.binary(path, RTF_COMPRESSED)
 
-			if (compressed !== null) {
-				const body = rtfBody(decompressRtf(compressed, this.maxSize))
+				return compressed === null ? null : rtfBody(decompressRtf(compressed, this.maxSize))
+			})
 
-				html ??= body.html
-				text ??= body.text
-			}
+			html ??= body?.html ?? null
+			text ??= body?.text ?? null
 		}
 
 		return { html, text }
@@ -323,35 +344,45 @@ class Reader {
 		const out: MsgAttachment[] = []
 
 		for (const storage of storages) {
-			const at = [...path, storage.name]
-			const properties = await this.properties(at, ITEM_HEADER)
-			const method = properties.int32(ATTACH_METHOD) ?? METHOD_BY_VALUE
-			const data = this.child(at, streamName(ATTACH_DATA, method === METHOD_EMBEDDED ? PT_OBJECT : PT_BINARY))
+			// A damaged attachment is left out (and counted); the rest of the message still shows.
+			await this.optional(async () => {
+				const at = [...path, storage.name]
+				const properties = await this.properties(at, ITEM_HEADER)
+				const method = properties.int32(ATTACH_METHOD) ?? METHOD_BY_VALUE
+				const data = this.child(at, streamName(ATTACH_DATA, method === METHOD_EMBEDDED ? PT_OBJECT : PT_BINARY))
 
-			// By reference, OLE and other methods carry nothing this can show.
-			if (data?.kind !== (method === METHOD_EMBEDDED ? "storage" : "stream")) continue
+				// By reference, OLE and other methods carry nothing this can show.
+				if (data?.kind !== (method === METHOD_EMBEDDED ? "storage" : "stream")) return
 
-			// Names only: no part is read, no embedded message made a file.
-			const bytes = !this.parts
-				? null
-				: method === METHOD_EMBEDDED
-					? await this.standalone([...at, data.name])
-					: await this.cfb.read(data)
+				// Names only: no part is read, no embedded message made a file.
+				const bytes = !this.parts
+					? null
+					: method === METHOD_EMBEDDED
+						? await this.standalone([...at, data.name])
+						: await this.cfb.read(data)
 
-			if (this.parts && bytes === null) continue
+				// An embedded message whose names a file cannot hold.
+				if (this.parts && bytes === null) {
+					this.skipped++
 
-			const name =
-				(await this.short(at, ATTACH_LONG_FILENAME, codepage)) ??
-				(await this.short(at, ATTACH_FILENAME, codepage)) ??
-				(await this.short(at, DISPLAY_NAME, codepage))
-			const contentId = await this.short(at, ATTACH_CONTENT_ID, codepage)
+					return
+				}
 
-			out.push({
-				name: method === METHOD_EMBEDDED ? withExtension(name, ".msg") : name,
-				mimeType: method === METHOD_EMBEDDED ? "application/vnd.ms-outlook" : await this.short(at, ATTACH_MIME, codepage),
-				contentId,
-				message: method === METHOD_EMBEDDED,
-				bytes
+				const name =
+					(await this.short(at, ATTACH_LONG_FILENAME, codepage)) ??
+					(await this.short(at, ATTACH_FILENAME, codepage)) ??
+					(await this.short(at, DISPLAY_NAME, codepage))
+				const contentId = await this.short(at, ATTACH_CONTENT_ID, codepage)
+
+				const attachment: MsgAttachment = {
+					name: method === METHOD_EMBEDDED ? withExtension(name, ".msg") : name,
+					mimeType: method === METHOD_EMBEDDED ? "application/vnd.ms-outlook" : await this.short(at, ATTACH_MIME, codepage),
+					contentId,
+					message: method === METHOD_EMBEDDED,
+					bytes
+				}
+
+				out.push(attachment)
 			})
 		}
 

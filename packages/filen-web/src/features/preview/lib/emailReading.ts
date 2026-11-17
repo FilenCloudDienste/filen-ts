@@ -55,6 +55,8 @@ export interface EmailMessage<A = EmailAttachment> {
 	readonly text: string | null
 	readonly textTruncated: boolean
 	readonly attachments: readonly A[]
+	// Parts left out because they could not be read (a damaged .msg body or attachment); the rest still shows.
+	readonly partsSkipped: number
 	// Whether the file is text a Source view can show (a .msg is not).
 	readonly hasSource: boolean
 }
@@ -299,6 +301,7 @@ function readMessage<A>(email: Email, part: (attachment: Email["attachments"][nu
 		date: display(email.date),
 		...bodies(email.html ?? null, email.text ?? null),
 		attachments: email.attachments.map(part),
+		partsSkipped: 0,
 		hasSource: true
 	}
 }
@@ -347,6 +350,7 @@ function readMsgMessage<A>(
 		date: display(message.date),
 		...bodies(message.html, message.text),
 		attachments: message.attachments.map(part),
+		partsSkipped: message.partsSkipped,
 		hasSource: false
 	}
 }

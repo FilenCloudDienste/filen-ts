@@ -480,6 +480,12 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 					label={t("previewEmailCc")}
 					list={message.cc}
 				/>
+				{message.partsSkipped > 0 ? (
+					<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+						<InfoIcon className="size-3.5 shrink-0" />
+						{t("previewEmailPartsSkipped", { count: message.partsSkipped })}
+					</p>
+				) : null}
 				{message.addressesOmitted > 0 ? (
 					<p className="text-xs text-muted-foreground">
 						{t("previewEmailAddressesOmitted", { count: message.addressesOmitted })}
