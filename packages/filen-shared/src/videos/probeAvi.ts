@@ -270,7 +270,9 @@ export async function aviFirstChunk(read: ReadAt, movi: ByteRange, index: number
 	return null
 }
 
-function spsCodecString(data: Uint8Array | null): string | null {
+// The codec string of the first H.264 SPS in Annex B `data` (a stream's first chunk, a container's head); null without
+// one.
+export function spsCodecString(data: Uint8Array | null): string | null {
 	const nal = data === null ? null : annexBNal(data, header => (header & 0x1f) === 7)
 	const sps = nal === null ? null : parseAvcSps(nal)
 

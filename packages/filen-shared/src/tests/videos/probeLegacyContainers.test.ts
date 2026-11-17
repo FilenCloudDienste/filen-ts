@@ -250,7 +250,13 @@ function streamProperties(type: string, number: number, specific: number[]): num
 	])
 }
 
-function asf(withIndex: boolean): Uint8Array {
+// x264's SPS for High at level 3.1, Annex B.
+const H264_SPS = [
+	0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0xac, 0xd9, 0x40, 0x50, 0x05, 0xbb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03,
+	0x03, 0x00, 0xf1, 0x83, 0x19, 0x60
+]
+
+function asf(withIndex: boolean, fourcc = "WMV3", payload: number[] = new Array<number>(50).fill(0)): Uint8Array {
 	const fileProperties = asfObject("a1dcab8c47a9cf118ee400c00c205365", [
 		...new Array<number>(40).fill(0),
 		...le(1_230_000_000, 8),
@@ -265,11 +271,11 @@ function asf(withIndex: boolean): Uint8Array {
 		...le(720, 4),
 		2,
 		...le(40, 2),
-		...bitmapInfo("WMV3", 1280, 720)
+		...bitmapInfo(fourcc, 1280, 720)
 	])
 	const children = [...fileProperties, ...video, ...audio]
 	const header = asfObject("3026b2758e66cf11a6d900aa0062ce6c", [...le(3, 4), 1, 2, ...children])
-	const data = asfObject("3626b2758e66cf11a6d900aa0062ce6c", new Array<number>(50).fill(0))
+	const data = asfObject("3626b2758e66cf11a6d900aa0062ce6c", payload)
 
 	return concat(header, data, withIndex ? asfObject("90080033b1e5cf1189f400a0c90349cb", new Array<number>(8).fill(0)) : [])
 }
@@ -285,6 +291,12 @@ describe("probeVideo — ASF", () => {
 			partial: false
 		})
 		expect(await probe(asf(false))).toMatchObject({ index: "none" })
+	})
+
+	it("names H.264 by the SPS its first packets carry in band", async () => {
+		const file = asf(true, "H264", [...new Array<number>(26).fill(0), ...H264_SPS, ...new Array<number>(40).fill(0)])
+
+		expect(await probe(file)).toMatchObject({ video: { codec: "h264", fourcc: "H264", codecString: "avc1.64001f" } })
 	})
 
 	it("survives truncation", async () => {

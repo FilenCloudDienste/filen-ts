@@ -1,6 +1,6 @@
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
 import { readBytes, seconds } from "./probeBytes"
-import { bitmapVideo, uint16le, uint32le, waveFormatAudio } from "./probeAvi"
+import { bitmapVideo, spsCodecString, uint16le, uint32le, waveFormatAudio } from "./probeAvi"
 import type { ParsedContainer, ProbeAudio, ProbeVideo } from "./probeTypes"
 
 // ASF (Windows Media: .wmv, .wma, .asf): the header object's file and stream properties, read from the head, and
@@ -208,7 +208,19 @@ export async function walkAsf(source: BlockSource, result: ParsedContainer): Pro
 
 	for (const stream of header.streams) {
 		if ("video" in stream) {
-			result.tracks.push({ kind: "video", enabled: true, video: stream.video })
+			// H.264 is named by its SPS: in the format data past the BITMAPINFOHEADER where the muxer put it, else in
+			// band, in the first packets of the data object, which the head holds.
+			const video =
+				stream.video.codec === "h264" && stream.video.codecString === null
+					? {
+							...stream.video,
+							codecString:
+								spsCodecString(stream.specific.subarray(11 + 40)) ??
+								spsCodecString(bytes.subarray(Math.min(headerSize, bytes.length)))
+						}
+					: stream.video
+
+			result.tracks.push({ kind: "video", enabled: true, video })
 		} else {
 			result.tracks.push({
 				kind: "audio",
