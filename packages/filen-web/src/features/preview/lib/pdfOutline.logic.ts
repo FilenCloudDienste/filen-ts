@@ -126,3 +126,32 @@ export function outlineKeyMove(
 		}
 	}
 }
+
+// Each item's place among its siblings (the items under the same parent): aria-posinset (1-based) and aria-setsize, which
+// a virtualized tree has to state as only some rows are in the DOM.
+export function outlinePositions(items: readonly PdfOutlineItem[]): { readonly posInSet: number; readonly setSize: number }[] {
+	const groups = new Map<number, number[]>()
+	const groupOf: number[] = []
+	const parents: number[] = []
+
+	items.forEach((item, index) => {
+		parents.length = item.depth
+		const parent = item.depth > 0 ? (parents[item.depth - 1] ?? -1) : -1
+		let group = groups.get(parent)
+
+		if (group === undefined) {
+			group = []
+			groups.set(parent, group)
+		}
+
+		group.push(index)
+		groupOf.push(parent)
+		parents[item.depth] = index
+	})
+
+	return items.map((_, index) => {
+		const group = groups.get(groupOf[index] ?? -1) ?? []
+
+		return { posInSet: group.indexOf(index) + 1, setSize: group.length }
+	})
+}

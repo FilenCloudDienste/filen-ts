@@ -12,6 +12,7 @@ import {
 	currentSection,
 	hasChildren,
 	outlineKeyMove,
+	outlinePositions,
 	rowsToResolve,
 	visibleRows,
 	type OutlineKey
@@ -81,6 +82,11 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 	const first = range?.startIndex ?? 0
 	const last = range?.endIndex ?? -1
 	const current = currentSection(resolved, page)
+	const positions = outlinePositions(outline)
+	const virtualRows = virtualizer.getVirtualItems()
+	// The roving tab stop is the focused row while it is rendered; scrolled away, the tree itself takes Tab and hands
+	// focus to the first row on screen.
+	const focusedRendered = virtualRows.some(row => rows[row.index] === focused)
 
 	// The rows on screen and the margin, resolved in idle time a few at a time; never the rest.
 	useEffect(() => {
@@ -183,14 +189,25 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 				ref={setScrollElement}
 				role="tree"
 				aria-label={t("previewPdfOutlinePane")}
+				tabIndex={focusedRendered ? -1 : 0}
 				className="min-h-0 flex-1 overflow-y-auto py-1 outline-none"
 				onKeyDown={onKeyDown}
+				onFocus={event => {
+					if (event.target !== event.currentTarget) return
+
+					const first = virtualRows.map(row => rows[row.index]).find(index => index !== undefined)
+
+					if (first !== undefined) {
+						setFocused(first)
+						event.currentTarget.querySelector<HTMLElement>(`[data-item="${String(first)}"]`)?.focus()
+					}
+				}}
 			>
 				<div
 					className="relative w-full"
 					style={{ height: virtualizer.getTotalSize() }}
 				>
-					{virtualizer.getVirtualItems().map(row => {
+					{virtualRows.map(row => {
 						const index = rows[row.index]
 						const item = index === undefined ? undefined : outline[index]
 
@@ -205,6 +222,8 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 								role="treeitem"
 								data-item={index}
 								aria-level={item.depth + 1}
+								aria-posinset={positions[index]?.posInSet}
+								aria-setsize={positions[index]?.setSize}
 								aria-expanded={parent ? open : undefined}
 								aria-current={current === index ? "location" : undefined}
 								aria-disabled={item.dest === null ? true : undefined}

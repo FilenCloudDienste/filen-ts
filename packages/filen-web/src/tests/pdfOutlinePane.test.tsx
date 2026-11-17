@@ -152,4 +152,40 @@ describe("PdfOutlinePane", () => {
 		// Chapter 1 now starts on page 12: the current section follows the new outline.
 		expect(screen.getByRole("treeitem", { current: "location" }).textContent).toContain("Chapter 1")
 	})
+
+	it("states each row's place among its siblings, and keeps the tree in the tab order when the focused row scrolls away", async () => {
+		mockViewportHeight(element => element.getAttribute("role") === "tree", 280)
+		render(
+			<PdfOutlinePane
+				document={DOCUMENT}
+				outline={outline(500)}
+				page={1}
+				onGo={vi.fn()}
+			/>
+		)
+		await settle()
+
+		const tree = screen.getByRole("tree")
+		const rows = screen.getAllByRole("treeitem")
+
+		// Depths alternate 0, 1, 0, 1...: 250 top-level items, each with one child.
+		expect([rows[0]?.getAttribute("aria-posinset"), rows[0]?.getAttribute("aria-setsize")]).toEqual(["1", "250"])
+		expect([rows[1]?.getAttribute("aria-posinset"), rows[1]?.getAttribute("aria-setsize")]).toEqual(["1", "1"])
+		expect([rows[2]?.getAttribute("aria-posinset"), rows[2]?.getAttribute("aria-setsize")]).toEqual(["2", "250"])
+		expect(tree.tabIndex).toBe(-1)
+		expect(rows[0]?.tabIndex).toBe(0)
+
+		// Scrolled far down: the focused first row is no longer rendered.
+		tree.scrollTop = 5000
+		fireEvent.scroll(tree)
+		await settle()
+		expect(screen.queryByText("Chapter 0")).toBeNull()
+		expect(tree.tabIndex).toBe(0)
+
+		act(() => {
+			tree.focus()
+		})
+		await settle()
+		expect(document.activeElement?.getAttribute("role")).toBe("treeitem")
+	})
 })
