@@ -9,16 +9,41 @@ import { preview } from "@/locales/en/preview"
 const ROOT = process.cwd()
 const CATALOGUES = ["previewDocx", "previewSheet", "previewOffice", "previewPdf"] as const
 
-function sources(directory: string, into: string[] = []): string[] {
+// A word of the app's code (outside locales and tests) holding a catalogue's prefix. A key is all word characters, so
+// the code names it exactly when one of these words contains it: one pass over the sources, instead of a search of
+// all of them per key.
+const NAMING_WORD = /\w*preview(?:Docx|Sheet|Pdf)\w*/g
+
+function collectNamingWords(directory: string, into: Set<string>): void {
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
 		const path = join(directory, entry.name)
 
 		if (entry.isDirectory()) {
-			if (entry.name !== "locales" && entry.name !== "tests") sources(path, into)
-		} else if (/\.tsx?$/.test(entry.name)) into.push(readFileSync(path, "utf8"))
+			if (entry.name !== "locales" && entry.name !== "tests") collectNamingWords(path, into)
+		} else if (/\.tsx?$/.test(entry.name)) {
+			for (const word of readFileSync(path, "utf8").match(NAMING_WORD) ?? []) into.add(word)
+		}
+	}
+}
+
+let namingWords: ReadonlySet<string> | null = null
+
+// Read once for every catalogue's check.
+function codeNamingWords(): ReadonlySet<string> {
+	if (namingWords === null) {
+		const words = new Set<string>()
+
+		collectNamingWords(join(ROOT, "src"), words)
+		namingWords = words
 	}
 
-	return into
+	return namingWords
+}
+
+function codeNames(key: string): boolean {
+	const words = codeNamingWords()
+
+	return words.has(key) || [...words].some(word => word.includes(key))
 }
 
 function catalogueFiles(name: (typeof CATALOGUES)[number]): string[] {
@@ -58,7 +83,6 @@ describe("the office editors' string catalogues", () => {
 		["previewSheet", "previewSheet"],
 		["previewPdf", "previewPdf"]
 	] as const)("ship no %s string the app never names", (name, prefix) => {
-		const code = sources(join(ROOT, "src")).join("\n")
 		const directory = join(ROOT, "src/locales/en", name)
 		const unused = catalogueFiles(name)
 			.flatMap(file =>
@@ -68,7 +92,7 @@ describe("the office editors' string catalogues", () => {
 					)
 				].map(match => match[1] ?? "")
 			)
-			.filter(key => !code.includes(key))
+			.filter(key => !codeNames(key))
 
 		expect(unused).toEqual([])
 	})
