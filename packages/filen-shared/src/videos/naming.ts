@@ -61,9 +61,9 @@ export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<str
 	["m2ts", container("ts")],
 	// Plays only where the browser plays Ogg from a plain src; nothing remuxes it.
 	["ogv", container("ogg", { editorReads: false, photo: false, keyframes: false })],
-	["avi", unplayable("avi", "video")],
+	["avi", unplayable("avi", "unsupportedVideo")],
 	["divx", unplayable("avi", undefined)],
-	["flv", unplayable("flv", "video")],
+	["flv", unplayable("flv", "unsupportedVideo")],
 	["f4v", unplayable("flv", undefined)],
 	["asf", unplayable("asf", undefined)],
 	["wmv", unplayable("asf", "unsupportedVideo")],

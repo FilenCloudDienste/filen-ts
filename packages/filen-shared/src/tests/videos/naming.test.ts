@@ -444,7 +444,7 @@ describe("VIDEO_CONTAINERS", () => {
 
 	it("changes the library's signature, so a stored index re-walks its names once", () => {
 		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("qt=video")
-		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("avi=video")
+		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("avi=unsupportedVideo")
 		expect(VIDEO_FILE_KINDS_SIGNATURE).not.toContain("divx")
 	})
 })
@@ -467,8 +467,8 @@ describe("videoFileKind", () => {
 		["qt", big, "video"],
 		["ts", big, "video"],
 		["ts", 4096, null],
-		["avi", big, "video"],
-		["flv", big, "video"],
+		["avi", big, "unsupportedVideo"],
+		["flv", big, "unsupportedVideo"],
 		["divx", big, null],
 		["f4v", big, null],
 		["asf", big, null],
