@@ -242,7 +242,7 @@ class Reader implements MupdfReader {
 export async function openMupdfReader(options: OpenMupdfReaderOptions): Promise<MupdfReader> {
 	const { format, signal } = options
 
-	signal?.throwIfAborted()
+	if (signal?.aborted === true) throw new PdfEngineError("closed", "the open was aborted")
 
 	if (!(options.maxImagePixels >= MUPDF_MIN_IMAGE_PIXELS)) {
 		throw new PdfEngineError("overBudget", `a pixel budget of ${String(options.maxImagePixels)} is below the floor`)

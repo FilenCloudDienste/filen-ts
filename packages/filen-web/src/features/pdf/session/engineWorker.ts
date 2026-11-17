@@ -3,6 +3,7 @@ import { PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY, shouldRespawn, type PdfMemoryPro
 import {
 	PDF_ENGINE_WASM,
 	PdfEngineClient,
+	PdfEngineError,
 	type MupdfFormat,
 	type MupdfLayout,
 	type PdfByteChannel,
@@ -22,7 +23,7 @@ import { createOwnedWorker } from "@/lib/workers/ownedWorker"
 import { originKey, originSize, originWhole, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { openOriginSyncSource } from "@/features/preview/lib/origin/syncSource"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
-import { takePreviewBytes } from "@/features/preview/lib/previewCache"
+import { getPreviewBytes, takePreviewBytes } from "@/features/preview/lib/previewCache"
 
 // One PDF engine: a worker with MuPDF and one document, reading the file through its own sync range bridge from the
 // SDK worker (a document of the read role read whole, an archive entry or bytes the page holds, is transferred to it
@@ -103,16 +104,17 @@ export interface EngineStart {
 	readonly onPoisoned?: (message: string) => void
 }
 
-// A whole origin's bytes, to transfer to the engine: taken out of the preview cache when it holds them (a transfer would
-// leave a detached view there), else loaded without keeping them.
+// A whole origin's bytes, to transfer to the engine: the preview cache's when it holds them (`cached`: they are taken out
+// of it only as they are transferred, as a transfer leaves a detached view behind), else loaded without keeping them.
 async function wholeOriginBytes(
 	source: Extract<EngineSource, { readonly kind: "origin" }>,
 	token: string,
 	signal: AbortSignal | undefined
-): Promise<Uint8Array> {
+): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly cached: boolean }> {
 	const { origin, access, scope } = source
+	const held = getPreviewBytes(scope, originKey(origin))
 	const bytes =
-		takePreviewBytes(scope, originKey(origin)) ??
+		held ??
 		(await loadOriginBytes(origin, token, {
 			access,
 			cap: originSize(origin),
@@ -121,10 +123,11 @@ async function wholeOriginBytes(
 			...(signal === undefined ? {} : { signal })
 		}))
 
-	// Only a buffer of exactly these bytes is transferred whole.
+	// Only a buffer of exactly these bytes is transferred whole; a view into a larger one is copied (and the cache keeps
+	// its own).
 	return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
-		? bytes
-		: bytes.slice()
+		? { bytes: bytes as Uint8Array<ArrayBuffer>, cached: held !== undefined }
+		: { bytes: bytes.slice(), cached: false }
 }
 
 export async function startEngine(options: EngineStart): Promise<PdfEngine> {
@@ -172,7 +175,12 @@ export async function startEngine(options: EngineStart): Promise<PdfEngine> {
 			let transfer: unknown[]
 
 			if (source.kind === "origin" && originWhole(source.origin)) {
-				const bytes = await wholeOriginBytes(source, token, options.signal)
+				const { bytes, cached } = await wholeOriginBytes(source, token, options.signal)
+
+				if (life.ended) throw new PdfEngineError("closed", "the engine was closed")
+
+				// Out of the cache in the same task as the transfer below, now that nothing can stop it.
+				if (cached) takePreviewBytes(source.scope, originKey(source.origin))
 
 				opening = { bytes }
 				transfer = [bytes.buffer]
@@ -224,8 +232,11 @@ export async function startEngine(options: EngineStart): Promise<PdfEngine> {
 				}
 			})
 		} catch (error) {
+			// Ended meanwhile (aborted, signed out): whatever the step under way threw, the engine is closed.
+			const closed = life.ended && !(error instanceof PdfEngineError && error.failure === "poisoned")
+
 			end()
-			ready.reject(error)
+			ready.reject(closed ? new PdfEngineError("closed", "the engine was closed") : error)
 		}
 
 		return engineDone.promise

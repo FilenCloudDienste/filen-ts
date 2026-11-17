@@ -10,15 +10,17 @@ import type { DeviceProfile } from "@/lib/deviceProfile"
 type Call = Extract<ToPdfEngine, { t: "call" }>
 type Answer = { readonly value: unknown } | { readonly failure: string } | "hang"
 
-const { workers, respond, closeRange, openOriginSyncSource, loadOriginBytes, takePreviewBytes, cancelPreviewDownload } = vi.hoisted(() => ({
-	workers: [] as FakeEngineWorker[],
-	respond: { current: (_call: Call): Answer => ({ value: null }) },
-	closeRange: vi.fn(),
-	openOriginSyncSource: vi.fn(),
-	loadOriginBytes: vi.fn(),
-	takePreviewBytes: vi.fn((): Uint8Array | undefined => undefined),
-	cancelPreviewDownload: vi.fn(() => Promise.resolve())
-}))
+const { workers, respond, closeRange, openOriginSyncSource, loadOriginBytes, getPreviewBytes, takePreviewBytes, cancelPreviewDownload } =
+	vi.hoisted(() => ({
+		workers: [] as FakeEngineWorker[],
+		respond: { current: (_call: Call): Answer => ({ value: null }) },
+		closeRange: vi.fn(),
+		openOriginSyncSource: vi.fn(),
+		loadOriginBytes: vi.fn(),
+		getPreviewBytes: vi.fn((): Uint8Array | undefined => undefined),
+		takePreviewBytes: vi.fn((): Uint8Array | undefined => undefined),
+		cancelPreviewDownload: vi.fn(() => Promise.resolve())
+	}))
 
 class FakeEngineWorker extends EventTarget {
 	readonly terminate = vi.fn()
@@ -72,7 +74,7 @@ vi.mock("@/features/pdf/session/engineModule", () => ({
 }))
 vi.mock("@/features/preview/lib/origin/syncSource", () => ({ openOriginSyncSource }))
 vi.mock("@/features/preview/lib/origin/loadBytes", () => ({ loadOriginBytes }))
-vi.mock("@/features/preview/lib/previewCache", () => ({ takePreviewBytes }))
+vi.mock("@/features/preview/lib/previewCache", () => ({ getPreviewBytes, takePreviewBytes }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload } }))
 vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild: vi.fn() }))
 
@@ -166,10 +168,11 @@ describe("the MuPDF read service", () => {
 
 		const cached = new Uint8Array([9, 9])
 
-		takePreviewBytes.mockReturnValueOnce(cached)
+		getPreviewBytes.mockReturnValueOnce(cached)
 		await openMupdfReader({ origin: wholeEntry(2), access: "authed", scope: "s", format: "psd", maxImagePixels: BUDGET })
 
-		expect(takePreviewBytes).toHaveBeenLastCalledWith("s", "archive#0")
+		expect(getPreviewBytes).toHaveBeenLastCalledWith("s", "archive#0")
+		expect(takePreviewBytes).toHaveBeenCalledExactlyOnceWith("s", "archive#0")
 		expect(Reflect.get(workers[1]?.args("open")[0] ?? {}, "bytes")).toBe(cached)
 		expect(loadOriginBytes).toHaveBeenCalledOnce()
 	})
@@ -316,6 +319,63 @@ describe("the MuPDF read service", () => {
 
 		await expect(book.relayout({ width: 300, height: 500, em: 11 }, 0)).rejects.toSatisfy(error => failure(error) === "overBudget")
 		expect(workers[1]?.terminate).toHaveBeenCalledOnce()
+	})
+
+	it("rejects an open aborted before the transfer as closed, leaving the cached bytes in the cache", async () => {
+		engine(1)
+
+		const loading = new AbortController()
+
+		loadOriginBytes.mockImplementationOnce((_origin: unknown, _token: string, options: { readonly signal?: AbortSignal }) => {
+			loading.abort()
+			options.signal?.throwIfAborted()
+
+			return Promise.resolve(new Uint8Array(1))
+		})
+		await expect(
+			openMupdfReader({
+				origin: bytesOrigin(new Blob([new Uint8Array(1)]), "x#0"),
+				access: "authed",
+				scope: "s",
+				format: "tiff",
+				maxImagePixels: BUDGET,
+				signal: loading.signal
+			})
+		).rejects.toSatisfy(error => failure(error) === "closed")
+
+		const cachedAbort = new AbortController()
+
+		getPreviewBytes.mockImplementationOnce(() => {
+			cachedAbort.abort()
+
+			return new Uint8Array([9, 9])
+		})
+		await expect(
+			openMupdfReader({
+				origin: wholeEntry(2),
+				access: "authed",
+				scope: "s",
+				format: "psd",
+				maxImagePixels: BUDGET,
+				signal: cachedAbort.signal
+			})
+		).rejects.toSatisfy(error => failure(error) === "closed")
+		expect(takePreviewBytes).not.toHaveBeenCalled()
+		expect(workers.flatMap(worker => worker.ops())).not.toContain("open")
+
+		const before = new AbortController()
+
+		before.abort()
+		await expect(
+			openMupdfReader({
+				origin: file(10),
+				access: "authed",
+				scope: null,
+				format: "tiff",
+				maxImagePixels: BUDGET,
+				signal: before.signal
+			})
+		).rejects.toSatisfy(error => failure(error) === "closed")
 	})
 
 	it("budgets pixels with the file only for formats MuPDF reads whole", () => {
