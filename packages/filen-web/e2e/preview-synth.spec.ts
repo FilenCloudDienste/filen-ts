@@ -38,7 +38,11 @@ async function playsDecoded(page: Page, row: Locator): Promise<void> {
 	await expect(page.getByRole("dialog")).toHaveCount(0)
 }
 
-test("tracker modules and a MIDI song play as decoded streams, with nothing fetched from elsewhere", async ({ page, context }) => {
+test("tracker modules and a MIDI song play as decoded streams, with nothing fetched from elsewhere", async ({
+	page,
+	context,
+	browserName
+}) => {
 	const cspViolations = trackCspViolations(page)
 	const foreign = trackForeignRequests(context, { strictPreview: true })
 	const soundFonts: string[] = []
@@ -63,8 +67,14 @@ test("tracker modules and a MIDI song play as decoded streams, with nothing fetc
 		}
 	}
 
-	// The bank, where the browser lets a nested worker's request be seen, is the app's own.
+	// The bank is the app's own. Chromium reports a nested worker's requests, so there it must have been seen; elsewhere
+	// the engine may hide them, and the strict foreign-request check above stands in.
+	if (browserName === "chromium") {
+		expect(soundFonts.length).toBeGreaterThan(0)
+	}
+
 	for (const url of soundFonts) {
+		expect(new URL(url).origin).toBe(new URL(page.url()).origin)
 		expect(new URL(url).pathname).toMatch(/^\/assets\//)
 	}
 

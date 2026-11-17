@@ -8,7 +8,8 @@ import { trackCspViolations } from "./helpers/csp"
 // an MP4's second audio track picked from the controls: WebKit switches it in place on its direct stream (no
 // MediaSource), every other browser moves it to the ladder.
 
-async function playing(page: Page): Promise<void> {
+// Plays the dialog's video until `seconds` of it have played.
+async function playing(page: Page, seconds = 0.3): Promise<void> {
 	const video = page.getByRole("dialog").locator("video")
 
 	await expect(video).toHaveCount(1, { timeout: LAZY_VIEWER_TIMEOUT_MS })
@@ -20,7 +21,7 @@ async function playing(page: Page): Promise<void> {
 	})
 	await expect
 		.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime).catch(() => 0), { timeout: LAZY_VIEWER_TIMEOUT_MS })
-		.toBeGreaterThan(0.3)
+		.toBeGreaterThan(seconds)
 }
 
 test("AVI, ASF and MPEG-PS files play, and a transport stream's MP2 plays with sound", async ({ page }) => {
@@ -32,8 +33,9 @@ test("AVI, ASF and MPEG-PS files play, and a transport stream's MP2 plays with s
 
 	for (const row of rows) {
 		await row.dblclick()
-		await playing(page)
-		// No "No sound" notice: the sound plays (decoded by FFmpeg where the browser cannot).
+		// No "No sound" notice once a second and a half has played, past where a silent track is found out: the sound
+		// plays (decoded by FFmpeg where the browser cannot).
+		await playing(page, 1.5)
 		await expect(page.getByRole("dialog").getByText(/^No sound:/)).toHaveCount(0)
 		await page.keyboard.press("Escape")
 		await expect(page.getByRole("dialog")).toHaveCount(0)
@@ -61,13 +63,12 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 	await page.getByRole("menuitemradio", { name: /German/ }).click()
 	await expect(page.getByRole("menuitemradio", { name: /German/ })).toHaveCount(0)
 
-	const src = await dialog.locator("video").evaluate(el => (el as HTMLVideoElement).currentSrc)
+	const video = dialog.locator("video")
 
 	if (browserName === "webkit") {
-		expect(src.startsWith("blob:")).toBe(false)
 		await expect
 			.poll(() =>
-				dialog.locator("video").evaluate(el => {
+				video.evaluate(el => {
 					const tracks = (el as HTMLVideoElement & { audioTracks?: { length: number; [index: number]: { enabled: boolean } } })
 						.audioTracks
 
@@ -77,5 +78,19 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 			.toBe(true)
 	}
 
-	await playing(page)
+	// Played on a while after the pick, which a move to the ladder would have made by then.
+	const at = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
+
+	await playing(page, at + 1)
+
+	if (browserName === "webkit") {
+		// Still the direct stream: no MediaSource took it over.
+		expect(await video.evaluate(el => (el as HTMLVideoElement).currentSrc.startsWith("blob:"))).toBe(false)
+	}
+
+	// The pick holds, whichever way the browser plays it.
+	await controls.hover()
+	await controls.getByRole("button", { name: "Audio" }).click()
+	await expect(page.getByRole("menuitemradio", { name: /German/ })).toHaveAttribute("aria-checked", "true")
+	await page.keyboard.press("Escape")
 })
