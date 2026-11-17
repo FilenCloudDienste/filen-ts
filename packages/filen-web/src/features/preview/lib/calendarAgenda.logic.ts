@@ -100,17 +100,127 @@ function zoneOffset(format: Intl.DateTimeFormat, instant: number): number {
 	return wall - Math.floor(instant / 1000) * 1000
 }
 
+const DAY_MS = 86_400_000
+const WEEKDAYS: Readonly<Record<string, number>> = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 }
+// Fixed onsets (DTSTARTs and RDATEs) kept per zone: real zones list a handful.
+const MAX_ZONE_ONSETS = 256
+
+// A yearly observance rule this reads: a month and either its nth weekday, the first of some month days that is a given
+// weekday (BYDAY=SU;BYMONTHDAY=8,…,14), or one fixed day; every `interval` years from the onset's, `count` times at most,
+// until `until`.
+type OnsetDay =
+	| { readonly weekday: number; readonly nth: number }
+	| { readonly weekday: number; readonly among: readonly number[] }
+	| { readonly day: number }
+
+interface CompiledRule {
+	readonly month: number
+	readonly day: OnsetDay
+	readonly interval: number
+	readonly count: number | null
+	readonly until: number | null
+	readonly startYear: number
+}
+
+interface CompiledObservance {
+	readonly offsetFrom: number
+	readonly offsetTo: number
+	readonly onset: number
+	// The onset and the extra dates, ascending.
+	readonly fixed: readonly number[]
+	readonly rule: CompiledRule | null
+	// The rule's onset by year, computed once each.
+	readonly years: Map<number, number | null>
+}
+
+// A file's zone, compiled once per reading. `readable`: every observance's rule is one this reads; when not, the
+// platform's zone of that name is used if it has one, and the time is otherwise not converted.
+export interface CompiledZone {
+	readonly observances: readonly CompiledObservance[]
+	readonly readable: boolean
+}
+
 // The time zones a file defines, by TZID.
-export type ZoneTable = ReadonlyMap<string, CalendarZone>
+export type ZoneTable = ReadonlyMap<string, CompiledZone>
 
 const NO_ZONES: ZoneTable = new Map()
 
-export function zoneTable(zones: readonly CalendarZone[]): ZoneTable {
-	return new Map(zones.map(zone => [zone.tzid, zone]))
+function compileRule(observance: CalendarObservance): CompiledRule | null | undefined {
+	const rule = observance.rule
+
+	if (rule === null) {
+		return null
+	}
+
+	const month = rule.byMonth[0]
+
+	if (rule.frequency !== "yearly" || rule.custom || month === undefined || rule.byMonth.length !== 1) {
+		return undefined
+	}
+
+	let day: OnsetDay
+
+	if (rule.byDay.length === 1) {
+		const match = /^([+-]?\d{1,2})?([A-Z]{2})$/.exec(rule.byDay[0] ?? "")
+		const weekday = WEEKDAYS[match?.[2] ?? ""]
+
+		if (weekday === undefined) {
+			return undefined
+		}
+
+		if (match?.[1] !== undefined) {
+			day = { weekday, nth: Number(match[1]) }
+		} else if (rule.byMonthDay.length > 0 && rule.byMonthDay.every(monthDay => monthDay > 0)) {
+			day = { weekday, among: [...rule.byMonthDay].sort((a, b) => a - b) }
+		} else {
+			return undefined
+		}
+	} else if (rule.byDay.length === 0 && rule.byMonthDay.length === 1 && (rule.byMonthDay[0] ?? 0) > 0) {
+		day = { day: rule.byMonthDay[0] ?? 1 }
+	} else {
+		return undefined
+	}
+
+	return {
+		month,
+		day,
+		interval: rule.interval,
+		count: rule.count,
+		until: rule.until === null ? null : wallMs(rule.until),
+		startYear: Number(observance.onset.date.slice(0, 4))
+	}
 }
 
-const DAY_MS = 86_400_000
-const WEEKDAYS: Readonly<Record<string, number>> = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 }
+function compileZone(zone: CalendarZone): CompiledZone {
+	let budget = MAX_ZONE_ONSETS
+	let readable = true
+	const observances: CompiledObservance[] = []
+
+	for (const observance of zone.observances) {
+		const rule = compileRule(observance)
+
+		if (rule === undefined) readable = false
+
+		const onset = wallMs(observance.onset)
+		const fixed = [onset, ...observance.dates.slice(0, Math.max(0, budget - 1)).map(wallMs)].sort((a, b) => a - b)
+
+		budget -= fixed.length
+		observances.push({
+			offsetFrom: observance.offsetFrom,
+			offsetTo: observance.offsetTo,
+			onset,
+			fixed,
+			rule: rule ?? null,
+			years: new Map()
+		})
+	}
+
+	return { observances, readable: readable && observances.length > 0 }
+}
+
+export function zoneTable(zones: readonly CalendarZone[]): ZoneTable {
+	return new Map(zones.map(zone => [zone.tzid, compileZone(zone)]))
+}
 
 // Day of the month of a month's `nth` `weekday` (0 Sunday; nth negative counts from the end); null when it has none.
 function nthWeekday(year: number, month: number, weekday: number, nth: number): number | null {
@@ -129,74 +239,79 @@ function nthWeekday(year: number, month: number, weekday: number, nth: number): 
 	return day >= 1 ? day : null
 }
 
-// Where an observance's yearly rule puts its onset in `year`, as a wall time; null for a rule this does not read (only
-// the yearly month-and-weekday rules zones use) or a year it does not reach.
-function yearlyOnset(observance: CalendarObservance, year: number): number | null {
+function onsetDay(rule: CompiledRule, year: number): number | null {
+	const spec = rule.day
+
+	if ("day" in spec) {
+		return spec.day <= new Date(utcMs(year, rule.month, 0)).getUTCDate() ? spec.day : null
+	}
+
+	if ("nth" in spec) {
+		return nthWeekday(year, rule.month, spec.weekday, spec.nth)
+	}
+
+	return spec.among.find(monthDay => new Date(utcMs(year, rule.month - 1, monthDay)).getUTCDay() === spec.weekday) ?? null
+}
+
+// Where an observance's rule puts its onset in `year`, as a wall time; null for a year it does not reach. Memoised.
+function yearlyOnset(observance: CompiledObservance, year: number): number | null {
 	const rule = observance.rule
 
-	if (rule?.frequency !== "yearly" || rule.byMonth.length !== 1 || rule.byDay.length !== 1) {
+	if (rule === null) {
 		return null
 	}
 
-	const month = rule.byMonth[0] ?? 1
+	const known = observance.years.get(year)
 
-	const match = /^([+-]?\d{1,2})?([A-Z]{2})$/.exec(rule.byDay[0] ?? "")
-	const weekday = WEEKDAYS[match?.[2] ?? ""]
-
-	if (weekday === undefined) {
-		return null
+	if (known !== undefined) {
+		return known
 	}
 
-	let day: number | null = null
+	const step = year - rule.startYear
+	const day =
+		step >= 0 && step % rule.interval === 0 && (rule.count === null || step / rule.interval < rule.count) ? onsetDay(rule, year) : null
+	const at = day === null ? null : utcMs(year, rule.month - 1, day) + (((observance.onset % DAY_MS) + DAY_MS) % DAY_MS)
+	const onset = at === null || at < observance.onset || (rule.until !== null && at > rule.until + DAY_MS) ? null : at
 
-	if (match?.[1] !== undefined) {
-		day = nthWeekday(year, month, weekday, Number(match[1]))
-	} else {
-		// BYDAY=SU;BYMONTHDAY=8,9,…,14: the first of those days that is that weekday.
-		for (const monthDay of [...rule.byMonthDay].sort((a, b) => a - b)) {
-			if (monthDay > 0 && new Date(utcMs(year, month - 1, monthDay)).getUTCDay() === weekday) {
-				day = monthDay
-				break
-			}
-		}
+	observance.years.set(year, onset)
+
+	return onset
+}
+
+// The latest of ascending numbers at or before `value`; null for none.
+function latestAtOrBefore(sorted: readonly number[], value: number): number | null {
+	let low = 0
+	let high = sorted.length
+
+	while (low < high) {
+		const middle = (low + high) >>> 1
+
+		if ((sorted[middle] ?? Infinity) <= value) low = middle + 1
+		else high = middle
 	}
 
-	if (day === null) {
-		return null
-	}
-
-	const onset = wallMs(observance.onset)
-	const at = utcMs(year, month - 1, day) + (((onset % DAY_MS) + DAY_MS) % DAY_MS)
-
-	if (at < onset || (rule.until !== null && at > wallMs(rule.until) + DAY_MS)) {
-		return null
-	}
-
-	return at
+	return low === 0 ? null : (sorted[low - 1] ?? null)
 }
 
 // The offset (seconds) a file's own zone gives a wall time: the observance whose latest onset is at or before it; before
 // every onset, the earliest observance's offset before it. Onsets are local times in the offset before them, so a time
 // repeated when clocks go back reads as its first occurrence; a time skipped when they go forward reads in the offset
-// before the gap (RFC 5545 §3.3.5).
-export function definedOffset(zone: CalendarZone, wall: number): number | null {
+// before the gap (RFC 5545 §3.3.5). Each observance costs a binary search and two memoised years.
+export function definedOffset(zone: CompiledZone, wall: number): number | null {
 	const year = new Date(wall).getUTCFullYear()
 	let latest = -Infinity
-	let current: CalendarObservance | null = null
-	let earliest: CalendarObservance | null = null
+	let current: CompiledObservance | null = null
+	let earliest: CompiledObservance | null = null
 
 	for (const observance of zone.observances) {
-		const onset = wallMs(observance.onset)
-		const onsets = [onset, ...observance.dates.map(wallMs), yearlyOnset(observance, year), yearlyOnset(observance, year - 1)]
-
-		for (const at of onsets) {
+		for (const at of [latestAtOrBefore(observance.fixed, wall), yearlyOnset(observance, year), yearlyOnset(observance, year - 1)]) {
 			if (at !== null && at <= wall && at > latest) {
 				latest = at
 				current = observance
 			}
 		}
 
-		if (earliest === null || onset < wallMs(earliest.onset)) earliest = observance
+		if (earliest === null || observance.onset < earliest.onset) earliest = observance
 	}
 
 	if (current === null) {
@@ -226,7 +341,7 @@ function platformZone(tzid: string): Intl.DateTimeFormat | null {
 
 // Whether the zone a TZID names can be converted at all: the file defines it, or the platform knows it.
 export function zoneKnown(tzid: string, zones: ZoneTable = NO_ZONES): boolean {
-	return zones.has(tzid) || platformZone(tzid) !== null
+	return zones.get(tzid)?.readable === true || platformZone(tzid) !== null
 }
 
 // The instant of a wall time in a platform zone. Of the offsets a day before and a day after, the one whose instant
@@ -266,7 +381,8 @@ export function instantOf(time: CalendarTime, zones: ZoneTable = NO_ZONES): numb
 
 	const wall = wallMs(time)
 	const defined = zones.get(time.tzid)
-	const definedSeconds = defined === undefined ? null : definedOffset(defined, wall)
+	// A zone whose rules this cannot read gives way to the platform's zone of that name.
+	const definedSeconds = defined?.readable === true ? definedOffset(defined, wall) : null
 
 	if (definedSeconds !== null) {
 		return wall - definedSeconds * 1000

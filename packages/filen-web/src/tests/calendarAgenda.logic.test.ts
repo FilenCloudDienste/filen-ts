@@ -210,3 +210,119 @@ describe("the zone cache", () => {
 		expect(cachedZoneCount()).toBe(0)
 	})
 })
+
+describe("zones a file defines, compiled", () => {
+	const zones = (lines: string[]) => zoneTable(readCalendar(["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n")).zones)
+
+	// Iran's rules as fixed dates (BYMONTHDAY, no BYDAY).
+	it("reads fixed-date yearly rules", () => {
+		const table = zones([
+			"BEGIN:VTIMEZONE",
+			"TZID:Custom Tehran",
+			"BEGIN:STANDARD",
+			"DTSTART:19700922T000000",
+			"TZOFFSETFROM:+0430",
+			"TZOFFSETTO:+0330",
+			"RRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=22",
+			"END:STANDARD",
+			"BEGIN:DAYLIGHT",
+			"DTSTART:19700322T000000",
+			"TZOFFSETFROM:+0330",
+			"TZOFFSETTO:+0430",
+			"RRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=22",
+			"END:DAYLIGHT",
+			"END:VTIMEZONE"
+		])
+
+		expect(instantOf(time("2021-06-01", "12:00:00", { tzid: "Custom Tehran" }), table)).toBe(Date.UTC(2021, 5, 1, 7, 30))
+		expect(instantOf(time("2021-12-01", "12:00:00", { tzid: "Custom Tehran" }), table)).toBe(Date.UTC(2021, 11, 1, 8, 30))
+	})
+
+	it("honours COUNT and INTERVAL", () => {
+		const table = zones([
+			"BEGIN:VTIMEZONE",
+			"TZID:Counted",
+			"BEGIN:STANDARD",
+			"DTSTART:20000101T000000",
+			"TZOFFSETFROM:+0000",
+			"TZOFFSETTO:+0000",
+			"END:STANDARD",
+			"BEGIN:DAYLIGHT",
+			"DTSTART:20200601T000000",
+			"TZOFFSETFROM:+0000",
+			"TZOFFSETTO:+0100",
+			"RRULE:FREQ=YEARLY;INTERVAL=2;BYMONTH=6;BYMONTHDAY=1;COUNT=2",
+			"END:DAYLIGHT",
+			"BEGIN:STANDARD",
+			"DTSTART:20200901T000000",
+			"TZOFFSETFROM:+0100",
+			"TZOFFSETTO:+0000",
+			"RRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=1",
+			"END:STANDARD",
+			"END:VTIMEZONE"
+		])
+		const offset = (date: string) =>
+			(wallMs(time(date, "12:00:00")) - (instantOf(time(date, "12:00:00", { tzid: "Counted" }), table) ?? 0)) / 3_600_000
+
+		// 2020 and 2022 only: every second year, twice.
+		expect(["2020-07-01", "2021-07-01", "2022-07-01", "2024-07-01"].map(offset)).toEqual([1, 0, 1, 0])
+	})
+
+	it("gives way to the platform's zone when a rule cannot be read, and converts nothing when neither can", () => {
+		const unreadable = (tzid: string) => [
+			"BEGIN:VTIMEZONE",
+			`TZID:${tzid}`,
+			"BEGIN:STANDARD",
+			"DTSTART:19700101T000000",
+			"TZOFFSETFROM:+0300",
+			"TZOFFSETTO:+0300",
+			"RRULE:FREQ=MONTHLY;BYMONTHDAY=1",
+			"END:STANDARD",
+			"END:VTIMEZONE"
+		]
+		const table = zones([...unreadable("Europe/Berlin"), ...unreadable("Nowhere/Odd")])
+
+		expect(instantOf(time("2024-07-15", "10:00:00", { tzid: "Europe/Berlin" }), table)).toBe(Date.UTC(2024, 6, 15, 8))
+		expect(instantOf(time("2024-07-15", "10:00:00", { tzid: "Nowhere/Odd" }), table)).toBeNull()
+		expect(agendaTime(time("2024-07-15", "10:00:00", { tzid: "Nowhere/Odd" }), table)).toMatchObject({ unconverted: true })
+	})
+
+	// 64 observances × 64 extra dates, 10k events in the zone: compiled once, a binary search per observance per event.
+	it("builds the agenda of a hostile zone's 10k events in bounded time", () => {
+		const lines = ["BEGIN:VTIMEZONE", "TZID:Hostile"]
+
+		for (let observance = 0; observance < 64; observance++) {
+			const dates = Array.from({ length: 64 }, (_, index) => `${String(1950 + index)}0${String(1 + (observance % 9))}15T020000`).join(
+				","
+			)
+
+			lines.push(
+				"BEGIN:STANDARD",
+				`DTSTART:19${String(10 + (observance % 80)).padStart(2, "0")}0101T000000`,
+				"TZOFFSETFROM:+0100",
+				`TZOFFSETTO:+0${String(observance % 10)}00`,
+				"RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+				`RDATE:${dates}`,
+				"END:STANDARD"
+			)
+		}
+
+		lines.push("END:VTIMEZONE")
+
+		for (let index = 0; index < 10_000; index++) {
+			lines.push(
+				"BEGIN:VEVENT",
+				`SUMMARY:E${String(index)}`,
+				`DTSTART;TZID=Hostile:${String(2000 + (index % 30))}0601T100000`,
+				"END:VEVENT"
+			)
+		}
+
+		const calendar = readCalendar(["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n"))
+		const started = Date.now()
+		const days = agendaDays(calendar.entries, zoneTable(calendar.zones))
+
+		expect(Date.now() - started).toBeLessThan(1500)
+		expect(days.reduce((sum, day) => sum + day.items.length, 0)).toBe(10_000)
+	})
+})
