@@ -407,8 +407,13 @@ class AviReader implements ContainerReader {
 			}
 
 			const duration = header.samples / header.rate
+			const previous = out?.at(-1)
 
-			if (part < MAX_PARTS) {
+			// Past the parts a unit has, the chunk's remaining frames go whole into its last packet.
+			if (part >= MAX_PARTS && previous !== undefined && previous.payload === undefined) {
+				previous.size += frameBytes
+				previous.duration += duration
+			} else if (part < MAX_PARTS) {
 				out?.push({
 					track: track.index + 1,
 					pts,

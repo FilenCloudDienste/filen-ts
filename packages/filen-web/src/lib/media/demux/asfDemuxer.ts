@@ -44,6 +44,8 @@ const MAX_PENDING_BYTES = 32 * 1024 * 1024
 const MAX_PACKET_BYTES = 64 * 1024
 // The Simple Index read no further than this.
 const MAX_SIMPLE_INDEX_BYTES = BLOCK_BYTES
+// Parts an MPEG audio object takes in its unit: one per frame it holds, its frames past them in its last packet.
+const MPEG_OBJECT_PARTS = 64
 // The head of the data read for a stream's first key object, for H.264's parameter sets.
 const PARAMETER_SEARCH_PACKETS = 512
 
@@ -275,12 +277,16 @@ class AsfReader implements ContainerReader {
 					continue
 				}
 
+				// An object's parts in this unit: one, or a run for the frames of MPEG audio, so the frames of one object
+				// never take another's sequence numbers.
+				const reserve = track.mpegAudio ? MPEG_OBJECT_PARTS : 1
+
 				if (payload.parts !== undefined) {
 					for (const sub of payload.parts) {
-						if (at < windowEnd && part < MAX_PARTS) {
+						if (at < windowEnd && part + reserve <= MAX_PARTS) {
 							this.emit(track, packets, timelines, {
 								unit: at,
-								part: part++,
+								part,
 								key: payload.key,
 								time: sub.time,
 								size: sub.length,
@@ -288,6 +294,7 @@ class AsfReader implements ContainerReader {
 								whole: { pos: at + sub.start, data: packet.subarray(sub.start, sub.start + sub.length) },
 								bytes: null
 							})
+							part += reserve
 						}
 					}
 
@@ -299,7 +306,7 @@ class AsfReader implements ContainerReader {
 
 				if (object === undefined) {
 					// An object is taken up only at its first fragment, and only inside the window.
-					if (payload.offset !== 0 || at >= windowEnd || part >= MAX_PARTS || payload.time === null) {
+					if (payload.offset !== 0 || at >= windowEnd || part + reserve > MAX_PARTS || payload.time === null) {
 						continue
 					}
 
@@ -309,7 +316,8 @@ class AsfReader implements ContainerReader {
 						continue
 					}
 
-					object = { unit: at, part: part++, key: payload.key, time: payload.time, size, received: 0, whole: null, bytes: null }
+					object = { unit: at, part, key: payload.key, time: payload.time, size, received: 0, whole: null, bytes: null }
+					part += reserve
 					pending.set(id, object)
 					pendingBytes += size
 				}
@@ -377,7 +385,7 @@ class AsfReader implements ContainerReader {
 		const base = { track: track.number, pts, unit: object.unit, part: object.part, key }
 
 		if (track.mpegAudio) {
-			this.mpegFrames(track, out, object, base)
+			this.mpegFrames(out, object, base)
 
 			return
 		}
@@ -389,42 +397,48 @@ class AsfReader implements ContainerReader {
 		}
 	}
 
-	// MPEG audio objects hold several frames: one packet each, at the object's time onward, numbered on from the
-	// object's part so they stay in order within its unit.
-	private mpegFrames(track: Track, out: DemuxPacket[], object: Pending, base: Omit<DemuxPacket, "duration" | "pos" | "size">): void {
-		const data = object.bytes
+	// MPEG audio objects hold several frames: one packet each, at the object's time onward, numbered within the parts
+	// the object took in its unit; frames past those go whole into its last packet.
+	private mpegFrames(out: DemuxPacket[], object: Pending, base: Omit<DemuxPacket, "duration" | "pos" | "size">): void {
+		const data = object.bytes ?? object.whole?.data ?? null
+		const frames: { offset: number; bytes: number; duration: number }[] = []
 
-		if (data === null) {
-			// The object came whole in one payload: the frames are read from where it lies, then split here.
-			out.push({ ...base, duration: track.frame, pos: object.whole?.pos ?? object.unit, size: object.size })
-
-			return
-		}
-
-		let pts = base.pts
-		let part = base.part
-
-		for (let offset = 0; offset + 4 <= data.length && part < MAX_PARTS;) {
+		for (let offset = 0; data !== null && offset + 4 <= data.length;) {
 			const header = mpegAudioHeader(data, offset)
 			const frameBytes = header === null ? null : header.frameBytes
 
 			if (header === null || frameBytes === null || offset + frameBytes > data.length) {
-				return
+				break
 			}
 
-			const duration = header.samples / header.rate
+			frames.push({ offset, bytes: frameBytes, duration: header.samples / header.rate })
+			offset += frameBytes
+		}
+
+		let pts = base.pts
+
+		for (let i = 0; data !== null && i < Math.min(frames.length, MPEG_OBJECT_PARTS); i++) {
+			const taken = i === MPEG_OBJECT_PARTS - 1 ? frames.slice(i) : frames.slice(i, i + 1)
+			const first = taken[0]
+			const last = taken.at(-1)
+
+			if (first === undefined || last === undefined) {
+				break
+			}
+
+			const duration = taken.reduce((sum, frame) => sum + frame.duration, 0)
 
 			out.push({
 				...base,
-				part: part++,
+				part: base.part + i,
 				pts,
 				duration,
 				pos: object.unit,
-				size: frameBytes,
-				payload: data.slice(offset, offset + frameBytes)
+				size: last.offset + last.bytes - first.offset,
+				// A copy: the object's bytes may be a view of the read window.
+				payload: data.slice(first.offset, last.offset + last.bytes)
 			})
 			pts += duration
-			offset += frameBytes
 		}
 	}
 

@@ -278,3 +278,37 @@ describe("AVI demuxer over an OpenDML index", () => {
 		}
 	})
 })
+
+describe("AVI demuxer over a large MP3 chunk", () => {
+	it("keeps every frame of a chunk holding more frames than a unit has parts", async () => {
+		const FRAME_COUNT = 4200
+		// MPEG-1 layer III, 32 kbit/s at 44.1 kHz: 104-byte frames of 1152 samples.
+		const frame = [0xff, 0xfb, 0x10, 0x00, ...new Array<number>(100).fill(0)]
+		const strh = chunk("strh", [
+			...encoder.encode("auds"),
+			...le(0, 4),
+			...le(0, 12),
+			...le(1152, 4),
+			...le(44100, 4),
+			...le(0, 4),
+			...le(FRAME_COUNT, 4),
+			...le(0, 8),
+			...le(0, 4),
+			...le(0, 8)
+		])
+		const strf = chunk("strf", [...le(0x55, 2), ...le(2, 2), ...le(44100, 4), ...le(4000, 4), ...le(1, 2), ...le(0, 2)])
+		const hdrl = list("hdrl", chunk("avih", [...le(0, 4), ...le(0, 8), ...le(0, 4), ...le(0, 40)]), list("strl", strh, strf))
+		const movi = list("movi", chunk("00wb", Array.from({ length: FRAME_COUNT }, () => frame).flat()))
+		const riff = [...encoder.encode("AVI "), ...hdrl, ...movi]
+		const input = new Input({
+			formats: [AVI],
+			source: new BufferSource(Uint8Array.from([...encoder.encode("RIFF"), ...le(riff.length, 4), ...riff]))
+		})
+		const packets = await all(await sinkOf(input.getPrimaryAudioTrack()))
+		const seconds = packets.reduce((sum, packet) => sum + packet.duration, 0)
+
+		expect(packets.length).toBeGreaterThan(4000)
+		expect(seconds).toBeCloseTo((FRAME_COUNT * 1152) / 44100, 3)
+		expect(packets.reduce((sum, packet) => sum + packet.data.length, 0)).toBe(FRAME_COUNT * frame.length)
+	})
+})

@@ -34,7 +34,8 @@ export interface DemuxPacket {
 	payload?: Uint8Array
 }
 
-export const MAX_PARTS = 64
+// Room for every frame of a large audio chunk; a sequence number stays exact for files up to 2^53 / MAX_PARTS bytes.
+export const MAX_PARTS = 4096
 
 // A packet's identity, which also orders packets in decode order and gives back its unit.
 function sequenceOf(packet: DemuxPacket): number {
