@@ -38,7 +38,8 @@ vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/features/preview/lib/rasterDecode", () => ({
 	displayRaster,
 	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 70 },
-	transformHeicBytes: vi.fn()
+	transformHeicBytes: vi.fn(),
+	transformHeicBytesOwned: vi.fn()
 }))
 
 const { ImageViewer } = await import("@/features/preview/components/imageViewer")

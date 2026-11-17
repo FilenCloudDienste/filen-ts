@@ -121,6 +121,8 @@ export interface PdfCommandBarProps {
 	outlinePane?: { readonly open: boolean; readonly toggle: () => void }
 	// A host's own groups, before Find (the e-book reader's text size).
 	extraGroups?: readonly RibbonGroup[]
+	// False for a document without text (an image's pages): no Find.
+	searchable?: boolean
 }
 
 // The fit keys the zoom menu's fit entries show.
@@ -147,7 +149,8 @@ export function usePdfCommandParts({
 	onProperties,
 	pageInputRef,
 	outlinePane,
-	extraGroups
+	extraGroups,
+	searchable
 }: PdfCommandBarProps): PdfCommandParts {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -268,22 +271,25 @@ export function usePdfCommandParts({
 	}
 
 	groups.push(...(extraGroups ?? []))
-	groups.push({
-		id: "find",
-		label: t("previewEditorFind"),
-		icon: SearchIcon,
-		width: BAR_BUTTON,
-		priority: Infinity,
-		single: true,
-		content: (
-			<RibbonButton
-				label={t("previewDocxFindAction")}
-				icon={<SearchIcon />}
-				shortcut={<Kbd action="editor.find" />}
-				onClick={command({ type: "find.open" })}
-			/>
-		)
-	})
+
+	if (searchable !== false) {
+		groups.push({
+			id: "find",
+			label: t("previewEditorFind"),
+			icon: SearchIcon,
+			width: BAR_BUTTON,
+			priority: Infinity,
+			single: true,
+			content: (
+				<RibbonButton
+					label={t("previewDocxFindAction")}
+					icon={<SearchIcon />}
+					shortcut={<Kbd action="editor.find" />}
+					onClick={command({ type: "find.open" })}
+				/>
+			)
+		})
+	}
 
 	return {
 		file: (

@@ -1,8 +1,7 @@
-import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react"
+import { useEffect, useEffectEvent, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { PdfEngineError } from "@filen/office/dom/pdfedit"
-import { PdfPages, usePdfViewer } from "@filen/office/react/pdf"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { PreviewKey } from "@/lib/i18n"
 import type { DeviceProfile } from "@/lib/deviceProfile"
@@ -14,27 +13,12 @@ import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
 import { fitLongSide, fullResolution } from "@/features/preview/lib/rasterCodecs/display"
 import { readerPageSource, type ImagePageSlot, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
-import { usePreviewAccessMode, usePreviewCacheScope, usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { BitmapImage } from "@/features/preview/components/zoomableImage"
 import { HeldImageGate, ReducedChip } from "@/features/preview/components/decodedImage"
-import { PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
-import { usePdfCommandParts } from "@/features/preview/components/pdfCommandParts"
-import { toggleViewerFullScreen } from "@/features/preview/components/commandBar.logic"
-import { OfficeCommandBar } from "@/features/office/components/ribbon/officeRibbon"
-import { pdfViewerSetup } from "@/features/preview/lib/pdfViewerSetup"
-import { PDF_PAGE_CLASS_NAMES } from "@/features/preview/lib/pdfPageColumn"
-import { PDFJS } from "@/features/preview/lib/pdfjsModule"
-import { isPdfHostAction, pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
-import { keyForEditor } from "@/lib/keymap/dialogGuard"
-import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
-import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
-import { isImeKeydown } from "@filen/shared/keymap"
-import { fullscreenSupported } from "@/lib/media/fullscreen"
+import { PdfReaderShell } from "@/features/preview/components/pdfReaderShell"
+import { usePreviewAccessMode, usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
-import { LoadingState } from "@/components/loadingState"
-import "@filen/office/css/pdf.css"
-import "@/features/preview/components/pdfTheme.css"
 
 // A TIFF, read by the MuPDF read role in an engine of its own (sign-out and unmount end it): one page drawn whole as a
 // bitmap at the display long side, its full resolution a click away; several pages in the PDF viewer's page column
@@ -359,7 +343,8 @@ function TiffPage({
 	)
 }
 
-// Several pages: the PDF viewer's page column over the engine's document, with its page, zoom and turn commands.
+// Several pages: the PDF reader over the engine's document (pages, zoom, turn, page keys, print, properties), with no
+// find: an image has no text.
 function TiffPages({
 	item,
 	alt,
@@ -371,128 +356,38 @@ function TiffPages({
 	reader: MupdfReader
 	pageSourceRef: TiffImageProps["pageSourceRef"]
 }) {
-	const { t } = useTranslation("preview")
-	const viewer = usePdfViewer(reader.document)
-	const { state, dispatch } = viewer
-	const rootRef = useRef<HTMLDivElement | null>(null)
-	const pageInputRef = useRef<HTMLInputElement | null>(null)
-	const [properties, setProperties] = useState(false)
-	const download = usePreviewDownload()
-	const overrides = useBindings()
-	const parts = usePdfCommandParts({
-		state,
-		dispatch,
-		document: reader.document,
-		outline: [],
-		findFocus: 0,
-		onFindClosed: () => undefined,
-		onDownload: download,
-		onPrint: undefined,
-		onProperties: () => {
-			setProperties(true)
-		},
-		pageInputRef
-	})
+	const [page, setPage] = useState(1)
 
 	useEffect(() => {
 		if (pageSourceRef === undefined) {
 			return
 		}
 
-		pageSourceRef.current = readerPageSource(reader, state.page - 1)
+		pageSourceRef.current = readerPageSource(reader, page - 1)
 
 		return () => {
 			pageSourceRef.current = null
 		}
-	}, [reader, pageSourceRef, state.page])
-
-	// The viewer's page, zoom and turn keys for the layer it is shown in, never a dialog over it; kept from the browser
-	// even at a limit, as the PDF viewer does. Find is not offered.
-	const onViewerKey = (event: KeyboardEvent, root: HTMLElement): boolean => {
-		if (event.defaultPrevented || isImeKeydown(event) || isRecordingCombo() || !keyForEditor(root, event.target)) {
-			return false
-		}
-
-		const action = pdfViewerKey(event, overrides)
-
-		if (action === undefined) {
-			return false
-		}
-
-		event.preventDefault()
-
-		if (isPdfHostAction(action)) {
-			if (event.repeat) {
-				return true
-			}
-
-			if (action === "preview.pdfGoToPage") {
-				pageInputRef.current?.focus()
-			} else if (action === "preview.pdfProperties") {
-				setProperties(true)
-			} else if (fullscreenSupported()) {
-				toggleViewerFullScreen().catch((error: unknown) => {
-					log.warn("preview", "full screen refused", { error })
-				})
-			}
-
-			return true
-		}
-
-		const command = pdfViewerKeyCommand(action, state)
-
-		if (command !== null) {
-			dispatch(command)
-		}
-
-		return true
-	}
-
-	useEditorLayerKeys(rootRef, (event, root) => {
-		onViewerKey(event, root)
-	})
+	}, [reader, pageSourceRef, page])
 
 	return (
-		<div
-			ref={rootRef}
-			className="flex size-full flex-col"
-			onKeyDown={event => {
-				onViewerKey(event.nativeEvent, event.currentTarget)
-			}}
-		>
-			<OfficeCommandBar
-				label={t("previewOfficeRibbonCommands")}
-				file={parts.file}
-				groups={parts.groups.filter(group => group.id !== "find")}
-				replacement={undefined}
-				status={parts.status}
-			/>
-			<div
-				data-preview-surface=""
-				className="relative flex min-h-0 flex-1 flex-col"
-			>
-				<PdfPages
-					pdfjs={PDFJS}
-					{...viewer.pages}
-					className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none [overflow-anchor:none]"
-					classNames={PDF_PAGE_CLASS_NAMES}
-					pageLabel={(page, total) => `${alt} — ${t("previewPdfPageIndicator", { current: page, total })}`}
-					placeholder={
-						<LoadingState
-							size="sm"
-							className="absolute inset-0 text-inherit"
-						/>
-					}
-					maxCanvasBytes={pdfViewerSetup().limits.canvasMaxAreaInBytes}
-					tabIndex={-1}
-				/>
-			</div>
-			<PdfPropertiesDialog
-				open={properties}
-				onOpenChange={setProperties}
-				document={reader.document}
-				size={Number(item.data.size)}
-			/>
-		</div>
+		<PdfReaderShell
+			item={item}
+			notice={null}
+			document={reader.document}
+			viewerDocument={reader.document}
+			edit={null}
+			alt={alt}
+			size={Number(item.data.size)}
+			fullyRead={false}
+			ranged={false}
+			resident={false}
+			onReopen={() => undefined}
+			signatures={{ kind: "current", verify: null, onViewSignedVersion: () => undefined }}
+			// The engine holds the whole file already.
+			fullReadGuard={false}
+			searchable={false}
+			onPageChange={setPage}
+		/>
 	)
 }

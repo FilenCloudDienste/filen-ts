@@ -1,5 +1,4 @@
 import { sanitizePdfMathML } from "@/features/preview/lib/pdfMathSanitizer"
-import { PDF_PAGE_CLASS_NAMES } from "@/features/preview/lib/pdfPageColumn"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { loadPdfOutline, type PdfOutlineItem, type PdfViewerCommand, type PdfViewport } from "@filen/office/dom/pdf"
@@ -51,6 +50,15 @@ import { closePdfOutlinePane, setPdfRailTab, togglePdfOutlinePane, usePdfOutline
 // their find, links, print and properties, and the editor's surfaces when it edits. The PDF viewer and the e-book
 // reader share it.
 
+// The column grows to its widest page (w-max) and at least fills the view (min-w-full), so narrower pages stay
+// centred while a page zoomed wider than the view overflows to the right only, keeping its left side scrollable.
+const CLASS_NAMES = {
+	column: "flex w-max min-w-full flex-col items-center gap-4 py-4",
+	page: "flex shrink-0 items-center justify-center bg-white shadow-sm",
+	canvas: (rendered: boolean) => (rendered ? "block max-w-full" : "invisible"),
+	link: "rounded-xs focus-ring-row"
+}
+
 export interface PdfReaderShellProps {
 	item: DriveItem
 	// A one-line notice under the ribbon (the file is too large to edit here).
@@ -87,6 +95,8 @@ export interface PdfReaderShellProps {
 	fullReadGuard?: boolean
 	// The pages area's size (its scroller's content box, CSS pixels), each time it changes.
 	onPagesResize?: (width: number, height: number) => void
+	// False for a document without text (an image's pages): no Find, and its keys stay the browser's.
+	searchable?: boolean
 }
 
 // The signature status of the document shown: its verifier (null: none), and either the way to open the byte prefix a
@@ -114,7 +124,8 @@ export function PdfReaderShell({
 	goTo,
 	renderProperties,
 	fullReadGuard,
-	onPagesResize
+	onPagesResize,
+	searchable
 }: PdfReaderShellProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
@@ -269,7 +280,7 @@ export function PdfReaderShell({
 		keyboardEvent => {
 			const root = rootRef.current
 
-			if (root === null) {
+			if (root === null || searchable === false) {
 				return
 			}
 
@@ -286,7 +297,7 @@ export function PdfReaderShell({
 			}
 		},
 		IN_EDITORS,
-		[state.find.open, dispatch]
+		[state.find.open, dispatch, searchable]
 	)
 
 	// The next and previous match, from anywhere in the layer but the find field (which steps on its own, DocxFindField);
@@ -294,7 +305,7 @@ export function PdfReaderShell({
 	const onFindStepKey = (keyboardEvent: KeyboardEvent, direction: 1 | -1): void => {
 		const root = rootRef.current
 
-		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+		if (root === null || searchable === false || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
 			return
 		}
 
@@ -317,7 +328,7 @@ export function PdfReaderShell({
 			onFindStepKey(keyboardEvent, 1)
 		},
 		IN_EDITORS,
-		[state.find, dispatch]
+		[state.find, dispatch, searchable]
 	)
 	useAction(
 		"editor.findPrevious",
@@ -325,7 +336,7 @@ export function PdfReaderShell({
 			onFindStepKey(keyboardEvent, -1)
 		},
 		IN_EDITORS,
-		[state.find, dispatch]
+		[state.find, dispatch, searchable]
 	)
 
 	// Undo and redo of the editor's changes, from anywhere in the layer but a field (which keeps its own text undo).
@@ -555,6 +566,7 @@ export function PdfReaderShell({
 					pageInputRef={pageInputRef}
 					outlinePane={{ open: paneOpen, toggle: togglePdfOutlinePane }}
 					{...(commandGroups === undefined ? {} : { extraGroups: commandGroups })}
+					{...(searchable === undefined ? {} : { searchable })}
 				/>
 			) : (
 				<PdfRibbon
@@ -633,7 +645,7 @@ export function PdfReaderShell({
 						pdfjs={PDFJS}
 						{...viewer.pages}
 						className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none [overflow-anchor:none]"
-						classNames={PDF_PAGE_CLASS_NAMES}
+						classNames={CLASS_NAMES}
 						pageLabel={(page, total) => `${alt} — ${t("previewPdfPageIndicator", { current: page, total })}`}
 						placeholder={
 							<LoadingState
