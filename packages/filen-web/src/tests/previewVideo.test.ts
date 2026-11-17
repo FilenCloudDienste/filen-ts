@@ -718,15 +718,34 @@ describe("PreviewVideo — audio tracks", () => {
 		}
 	})
 
-	it("switches in place by the element's own tracks where the probe lists others", async () => {
+	it("moves to the ladder when the picked track is the probe's and the element's own tracks are others", async () => {
 		const audioTracks = twoTracks()
-		// The probe's tracks are not the element's: its codec for the second says nothing about the element's second.
+		// WebKit lists two of the three tracks the probe found: the probe's second is not the element's second.
 		const probe = probeOf(["aac", "dts", "aac"])
 		const harness = setUp({ route: "direct", audioTracks, probe })
 
 		await flush()
 		harness.video.loadMetadata()
 		await flush()
+		// The menu lists the probe's tracks: the pick is the probe's track 1.
+		harness.controller.ensureProbe()
+		await flush()
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(audioTracks.map(track => track.enabled)).toEqual([true, false])
+		expect(harness.open).toHaveBeenCalledOnce()
+		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 1, subtitle: "none" })
+	})
+
+	it("switches the element's own track in place when the menu listed the element's tracks, whatever probe came after", async () => {
+		const audioTracks = twoTracks()
+		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "dts", "aac"]) })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		// No probe read yet: the menu lists the element's two tracks, and the pick is the element's.
 		harness.controller.selectAudio(1)
 		await flush()
 

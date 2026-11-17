@@ -22,6 +22,7 @@ import { CODECS, browserCanPlay } from "@/features/preview/lib/containerTracks"
 import { confirmedGap, silentAudioCodec, type PreviewVideoRoute } from "@/features/preview/lib/previewPlayback.logic"
 import { STREAM_STALL_MS, STREAM_STALL_POLL_MS, expectsProgress } from "@/lib/media/playback/directSession.logic"
 import { audioTracksOf, enableAudioTrack } from "@/lib/media/playback/audioTrackList"
+import { menuListsProbeAudio } from "@/features/preview/lib/audioTrackMenu.logic"
 import {
 	holdPreviewStreamAlive,
 	previewStreamIdOf,
@@ -327,11 +328,12 @@ export class PreviewVideo {
 		}
 
 		if (this.snapshot.route === "direct" && !this.escalated) {
-			void this.switchDirectAudio(index)
+			// The menu the pick came from: the probe's tracks, or the element's own.
+			void this.switchDirectAudio(index, menuListsProbeAudio(this.snapshot.probe))
 		}
 	}
 
-	private async switchDirectAudio(index: number): Promise<void> {
+	private async switchDirectAudio(index: number, probeIndexed: boolean): Promise<void> {
 		const video = this.video
 		const native = this.snapshot.nativeAudio
 
@@ -348,7 +350,17 @@ export class PreviewVideo {
 		}
 
 		const probe = result.status === "probed" ? result.probe : null
-		const codec = probe !== null && describesTracks(probe.audio, native) ? (probe.audio[index]?.codec ?? null) : null
+		const described = probe !== null && describesTracks(probe.audio, native)
+
+		// A pick of the probe's tracks the element's own cannot be matched to (WebKit lists fewer, or others) would switch
+		// the wrong one: the ladder plays the probe's.
+		if (probeIndexed && !described) {
+			await this.escalate(index)
+
+			return
+		}
+
+		const codec = described ? (probe.audio[index]?.codec ?? null) : null
 
 		// Only a codec the probe names for that very track, which the element cannot play, moves the stream to the ladder.
 		// Without one (no probe, none that reads the file, a track it cannot name) the element switches its own track.

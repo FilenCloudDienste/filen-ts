@@ -19,6 +19,7 @@ import { useTranscodedTracks } from "@/lib/media/playback/useTranscodedTracks"
 import { seekMedia, useMediaCurrentTime } from "@/lib/media/useMediaState"
 import { audioTrackDetail, audioTrackName } from "@/features/videos/lib/player/trackLabels.logic"
 import type { NativeAudioTrack } from "@/features/preview/lib/previewVideo"
+import { menuListsProbeAudio } from "@/features/preview/lib/audioTrackMenu.logic"
 import type { PreviewSubtitleOption, PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
 
 // The preview player's track menus over the picture: audio and subtitles in one, chapters in another. Both are built
@@ -71,7 +72,7 @@ function useAudioOptions(params: {
 	const transcoded = useTranscodedTracks(params.probe, params.size, params.open)
 	const { probe, nativeAudio } = params
 
-	if (probe !== null && probe.audio.length >= 2) {
+	if (menuListsProbeAudio(probe)) {
 		return probe.audio.map((track, index) => ({
 			label: audioTrackName(track, index, t),
 			detail: audioTrackDetail(track, t),
