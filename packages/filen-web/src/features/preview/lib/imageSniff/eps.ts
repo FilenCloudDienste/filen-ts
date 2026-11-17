@@ -1,14 +1,12 @@
 import { startsWith, viewOf, type ByteSpan } from "@/features/preview/lib/imageSniff/bytes"
+import { isEpsiDepth, type EpsiSize } from "@/features/preview/lib/rasterCodecs/epsi"
 
 // Encapsulated PostScript (Adobe EPSF 3.0, Technical Note 5002). A DOS EPS binary header (C5 D0 D3 C6, then the
 // PostScript, WMF and TIFF sections' offsets and lengths as 32-bit little endian) carries an optional preview picture;
 // a plain EPS may carry an EPSI preview in its comments: "%%BeginPreview: width height depth lines", then that many
 // lines of hex, each at most 255 characters.
 
-export interface EpsiPreview {
-	readonly width: number
-	readonly height: number
-	readonly depth: 1 | 2 | 4 | 8
+export interface EpsiPreview extends EpsiSize {
 	readonly lines: number
 	// The first byte after the %%BeginPreview line.
 	readonly dataStart: number
@@ -25,7 +23,7 @@ export type EpsHeader =
 	| { readonly kind: "epsi"; readonly preview: EpsiPreview }
 	| { readonly kind: "plain" }
 
-// 16 MiB of hex at 256 bytes a line (255 characters and the line end).
+// The most lines a preview may declare: 16 MiB of hex at 256 characters a line.
 export const MAX_EPSI_LINES = 65_536
 
 const DOS_EPS_MAGIC = [0xc5, 0xd0, 0xd3, 0xc6]
@@ -52,10 +50,6 @@ function indexOf(head: Uint8Array, needle: readonly number[], from: number): num
 	return -1
 }
 
-function isDepth(value: number): value is 1 | 2 | 4 | 8 {
-	return value === 1 || value === 2 || value === 4 || value === 8
-}
-
 // The preview a %%BeginPreview line declares, or null.
 function readPreview(head: Uint8Array, at: number): EpsiPreview | null {
 	let lineEnd = at
@@ -78,7 +72,7 @@ function readPreview(head: Uint8Array, at: number): EpsiPreview | null {
 	// CR LF ends a line as one.
 	const dataStart = lineEnd + (head[lineEnd] === 0x0d && head[lineEnd + 1] === 0x0a ? 2 : 1)
 
-	if (width === 0 || height === 0 || lines === 0 || lines > MAX_EPSI_LINES || !isDepth(depth)) {
+	if (width === 0 || height === 0 || lines === 0 || lines > MAX_EPSI_LINES || !isEpsiDepth(depth)) {
 		return null
 	}
 

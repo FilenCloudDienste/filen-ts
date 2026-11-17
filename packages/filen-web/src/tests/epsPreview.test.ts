@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { epsPreview, type EpsRangeReader } from "@/features/preview/lib/epsPreview"
-import { decodeEpsi } from "@/features/preview/lib/rasterCodecs/epsi"
+import { decodeEpsi, epsiSize, packEpsi } from "@/features/preview/lib/rasterCodecs/epsi"
 import { RasterBudgetError } from "@/features/preview/lib/rasterCodecs/raster"
 import { dosEps, epsiEps, plainEps } from "@/tests/support/epsBytes"
 import { encodeTiff } from "@/tests/support/tiffBytes"
@@ -35,25 +35,56 @@ describe("epsPreview", () => {
 		await expect(epsPreview(readerOf(dosEps(null)), live)).resolves.toEqual({ kind: "none" })
 	})
 
-	it("hands an EPSI preview's hex on with its declaration, and says plain PostScript has none", async () => {
+	it("hands an EPSI preview's lines on with its declared size, and says plain PostScript has none", async () => {
 		const preview = await epsPreview(readerOf(epsiEps(8, 1, ["F0", "0F"])), live)
 
 		expect(preview.kind).toBe("epsi")
 
 		if (preview.kind === "epsi") {
-			expect(new TextDecoder().decode(preview.bytes)).toMatch(/^%%BeginPreview: 8 2 1 2\n%F0\n%0F/u)
+			expect(epsiSize(preview.bytes)).toEqual({ width: 8, height: 2, depth: 1 })
+			expect(new TextDecoder().decode(preview.bytes.subarray(9))).toMatch(/^%F0\n%0F/u)
 		}
 
 		await expect(epsPreview(readerOf(plainEps()), live)).resolves.toEqual({ kind: "none" })
 		await expect(epsPreview(readerOf(new Uint8Array(64)), live)).resolves.toEqual({ kind: "unreadable" })
 	})
+
+	it("reads only what the preview's hex needs, never the PostScript after it", async () => {
+		const eps = epsiEps(
+			16,
+			1,
+			Array.from({ length: 24 }, () => "FFFF")
+		)
+		const program = new TextEncoder().encode("0 0 moveto 1 1 lineto stroke\n".repeat(1000))
+		const file = new Uint8Array(eps.length + program.length)
+
+		file.set(eps)
+		file.set(program, eps.length)
+
+		const reader = readerOf(file)
+
+		await epsPreview(reader, live)
+
+		// 24 rows of 4 hex digits, and 4 bytes a line for "%" and its line end.
+		expect(reader.reads[1]?.[1]).toBe(24 * 4 + 24 * 4)
+	})
+
+	it("refuses a preview declaring more hex than one may hold", async () => {
+		const head = new TextEncoder().encode("%!PS-Adobe-3.0 EPSF-3.0\n%%BeginPreview: 8200 8200 1 24\n%FF\n")
+
+		await expect(epsPreview(readerOf(head), live)).resolves.toEqual({ kind: "tooLarge" })
+	})
 })
 
 describe("decodeEpsi", () => {
-	function section(width: number, depth: 1 | 2 | 4 | 8, rows: readonly string[]): Uint8Array {
-		return new TextEncoder().encode(
-			`%%BeginPreview: ${String(width)} ${String(rows.length)} ${String(depth)} ${String(rows.length)}\n${rows.map(row => `%${row}`).join("\n")}\n%%EndPreview\n`
-		)
+	function section(
+		width: number,
+		depth: 1 | 2 | 4 | 8,
+		rows: readonly string[],
+		height = rows.length,
+		after = "%%EndPreview\n"
+	): Uint8Array {
+		return packEpsi({ width, height, depth }, new TextEncoder().encode(`${rows.map(row => `%${row}`).join("\n")}\n${after}`))
 	}
 
 	function greys(data: Uint8ClampedArray): number[] {
@@ -75,5 +106,15 @@ describe("decodeEpsi", () => {
 	it("refuses a size over the budget before decoding, and hex that ends before the image", () => {
 		expect(() => decodeEpsi(section(4, 1, ["A0", "50"]), 7)).toThrow(RasterBudgetError)
 		expect(() => decodeEpsi(section(16, 8, ["00"]), 100)).toThrow(/ends before/u)
+	})
+
+	it("ends the hex at %%EndPreview, never reading the PostScript after it as pixels", () => {
+		const short = section(8, 8, ["00"], 1, "%%EndPreview\n%%EndComments\n0 0 add def 1 1 add def DEAD BEEF CAFE FACE\n")
+
+		expect(() => decodeEpsi(short, 100)).toThrow(/ends before/u)
+	})
+
+	it("refuses a size its bytes cannot hold before allocating for it", () => {
+		expect(() => decodeEpsi(section(0xffff_ffff, 8, ["00"], 0xffff_ffff), Number.POSITIVE_INFINITY)).toThrow(/ends before/u)
 	})
 })

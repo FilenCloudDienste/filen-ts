@@ -1,14 +1,15 @@
-import { MAX_EPSI_LINES, sniffEps } from "@/features/preview/lib/imageSniff/eps"
+import { sniffEps } from "@/features/preview/lib/imageSniff/eps"
+import { EPSI_MAX_HEX_DIGITS, epsiHexDigits, packEpsi } from "@/features/preview/lib/rasterCodecs/epsi"
 
-// The preview picture an EPS file carries, read by range from its head: a DOS EPS's TIFF section, or the hex of an EPSI
-// preview (handed on with its %%BeginPreview line, which its decoder reads the size from). Its PostScript is never read.
+// The preview picture an EPS file carries, read by range from its head: a DOS EPS's TIFF section, or the lines of an
+// EPSI preview (packed with the size its %%BeginPreview line declares). Its PostScript is never read.
 
 export type EpsPreview =
 	| { readonly kind: "tiff"; readonly bytes: Uint8Array }
 	| { readonly kind: "epsi"; readonly bytes: Uint8Array }
 	// A WMF preview (nothing here draws one), or none.
 	| { readonly kind: "none" }
-	// A TIFF section larger than the reader holds whole.
+	// A TIFF section larger than the reader holds whole, or an EPSI preview with more hex than one may hold.
 	| { readonly kind: "tooLarge" }
 	// Not an EPS file.
 	| { readonly kind: "unreadable" }
@@ -22,8 +23,8 @@ export interface EpsRangeReader {
 const EPS_HEAD_BYTES = 64 * 1024
 // The most of a TIFF section read; the engine holds it whole.
 export const EPS_TIFF_MAX_BYTES = 64 * 1024 * 1024
-// An EPSI preview line: at most 255 characters and its line end.
-const EPSI_LINE_BYTES = 257
+// What an EPSI preview line adds to its hex: its "%", a space and a CR LF.
+const EPSI_LINE_OVERHEAD = 4
 
 export async function epsPreview(reader: EpsRangeReader, signal: AbortSignal, maxTiffBytes = EPS_TIFF_MAX_BYTES): Promise<EpsPreview> {
 	const head = await reader.read(0, EPS_HEAD_BYTES, signal)
@@ -44,17 +45,16 @@ export async function epsPreview(reader: EpsRangeReader, signal: AbortSignal, ma
 				: { kind: "tiff", bytes: (await reader.read(eps.tiff.offset, eps.tiff.length, signal)).slice() }
 		case "epsi": {
 			const { preview } = eps
-			const line = new TextEncoder().encode(
-				`%%BeginPreview: ${String(preview.width)} ${String(preview.height)} ${String(preview.depth)} ${String(preview.lines)}\n`
-			)
-			const length = Math.min(Math.min(preview.lines, MAX_EPSI_LINES) * EPSI_LINE_BYTES, reader.size - preview.dataStart)
-			const hex = await reader.read(preview.dataStart, length, signal)
-			const bytes = new Uint8Array(line.length + hex.length)
+			const digits = epsiHexDigits(preview)
 
-			bytes.set(line)
-			bytes.set(hex, line.length)
+			if (digits > EPSI_MAX_HEX_DIGITS) {
+				return { kind: "tooLarge" }
+			}
 
-			return { kind: "epsi", bytes }
+			// What the rows' hex needs and no more: the PostScript after the preview is never read.
+			const length = Math.min(digits + preview.lines * EPSI_LINE_OVERHEAD, reader.size - preview.dataStart)
+
+			return { kind: "epsi", bytes: packEpsi(preview, await reader.read(preview.dataStart, length, signal)) }
 		}
 		case "plain":
 			return { kind: "none" }
