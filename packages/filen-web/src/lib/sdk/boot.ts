@@ -36,6 +36,7 @@ import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import { loadPdfOutlinePreferences } from "@/features/preview/lib/pdfOutlineOpen"
+import { loadEbookTextSize } from "@/features/preview/lib/ebookTextSize"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 
@@ -180,6 +181,7 @@ function preloadDevicePreferences(): Promise<void> {
 		loadOcrLanguages(),
 		loadPdfPagesRailOpen(),
 		loadPdfOutlinePreferences(),
+		loadEbookTextSize(),
 		loadCollapsedChatSections()
 	]).then(() => undefined)
 }

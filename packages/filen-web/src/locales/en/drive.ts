@@ -657,6 +657,8 @@ export const drive = {
 	drivePreviewKindSpreadsheet: "Spreadsheet",
 	/** Info panel — Kind row value for a PowerPoint or OpenDocument presentation */
 	drivePreviewKindPresentation: "Presentation",
+	/** Info panel — Kind row value: an e-book (EPUB, MOBI or FB2) */
+	drivePreviewKindEbook: "E-book",
 	/** Info panel — Kind row value: a plain-text file */
 	drivePreviewKindText: "Text",
 	/** Info panel — Kind row value: a source-code file */

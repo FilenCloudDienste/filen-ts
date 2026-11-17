@@ -6,6 +6,7 @@ import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { DocxViewer } from "@/features/preview/components/docxViewer"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
+import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
@@ -60,6 +61,13 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 		case "presentation":
 			return (
 				<PresentationViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "ebook":
+			return (
+				<EbookViewer
 					item={item}
 					alt={alt}
 				/>

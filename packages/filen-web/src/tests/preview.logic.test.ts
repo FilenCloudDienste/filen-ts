@@ -22,6 +22,7 @@ import {
 	codeMirrorLanguageFor,
 	decodeUtf8,
 	bufferedSizeCap,
+	previewCategoryForExtension,
 	PREVIEW_MAX_BYTES,
 	TEXT_MAX_BYTES,
 	RAW_IMAGE_EXTENSIONS,
@@ -601,6 +602,24 @@ describe("canPreview", () => {
 		expect(canPreviewWith(fileNamed("doc.pdf", { size: 2n * GIB + 1n }), desktop)).toBe(true)
 		expect(canPreviewWith(fileNamed("doc.pdf", { size: 8n * GIB }), desktop)).toBe(true)
 		expect(canPreviewWith(fileNamed("doc.pdf", { size: 8n * GIB + 1n }), desktop)).toBe(false)
+	})
+
+	it("opens an e-book up to the device's cap: 256 MiB on a desktop, 64 MiB on a phone", () => {
+		const MIB = 1024n * 1024n
+		const desktop = { ...deviceProfile(), mobile: false }
+		const phone = { ...deviceProfile(), mobile: true }
+
+		for (const name of ["book.epub", "book.mobi", "book.fb2"]) {
+			expect(previewCategoryForExtension(extensionOf(name))).toBe("ebook")
+			expect(canPreviewWith(fileNamed(name, { size: 256n * MIB }), desktop)).toBe(true)
+			expect(canPreviewWith(fileNamed(name, { size: 256n * MIB + 1n }), desktop)).toBe(false)
+			expect(canPreviewWith(fileNamed(name, { size: 64n * MIB }), phone)).toBe(true)
+			expect(canPreviewWith(fileNamed(name, { size: 64n * MIB + 1n }), phone)).toBe(false)
+		}
+
+		expect(bufferedSizeCap("ebook", phone)).toBe(64n * MIB)
+		// Kindle's own format stays a download.
+		expect(previewCategoryForExtension("azw3")).toBeNull()
 	})
 
 	it("opens a deck at any size", () => {

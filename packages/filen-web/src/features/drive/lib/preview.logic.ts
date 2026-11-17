@@ -36,6 +36,7 @@ export type PreviewCategory =
 	| "docx"
 	| "spreadsheet"
 	| "presentation"
+	| "ebook"
 	| "text"
 	| "code"
 	| "markdown"
@@ -57,6 +58,13 @@ export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 export const TEXT_MAX_BYTES = 33_554_432n // 32 MiB
 // A font is held whole twice (the cache for its FontFace, the face's own copy); real ones stay far below.
 export const FONT_MAX_BYTES = 67_108_864n // 64 MiB
+// An e-book is read through ranges, but MuPDF keeps the parsed book (and a MOBI or FB2 whole) in its heap, which on a
+// phone is a quarter of a desktop's: the same bound as the other documents MuPDF reads whole there.
+export const EBOOK_MAX_BYTES_MOBILE = 67_108_864n // 64 MiB
+
+export function ebookMaxBytes(profile: DeviceProfile): bigint {
+	return profile.mobile ? EBOOK_MAX_BYTES_MOBILE : PREVIEW_MAX_BYTES
+}
 
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
@@ -255,6 +263,20 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindPresentation",
 		assistantKind: null
 	},
+	ebook: {
+		streamed: false,
+		ranged: false,
+		bufferCap: ebookMaxBytes,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindEbook",
+		assistantKind: null
+	},
 	text: {
 		streamed: false,
 		ranged: false,
@@ -424,6 +446,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["ttf", "otf", "woff", "woff2"], "font"],
 	// A `.db` is many programs' data: a database only once a read of its head finds the SQLite header.
 	[["sqlite", "sqlite3", "db3", "s3db", "sl3"], "sqlite"],
+	// Read by MuPDF, laid out to the view (azw3 and other Kindle formats stay downloads).
+	[["epub", "mobi", "fb2"], "ebook"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],

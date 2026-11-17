@@ -39,6 +39,7 @@ import { PdfPagesNotices, PdfPagesSide } from "@/features/pdf/pages/pagesSurface
 import { PdfPagesSurfaceContext, type PdfPagesSurfaceValue } from "@/features/pdf/pages/pagesSurfaceContext"
 import { usePdfPageKeys } from "@/features/pdf/pages/pagesKeys"
 import { pageShown } from "@/features/pdf/pages/pagesSurface.logic"
+import type { RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
 import { togglePdfPagesRail, usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import { PdfOutlinePane } from "@/features/preview/components/pdfOutlinePane"
 import { closePdfOutlinePane, setPdfRailTab, togglePdfOutlinePane, usePdfOutlinePaneOpen } from "@/features/preview/lib/pdfOutlineOpen"
@@ -76,6 +77,17 @@ export interface PdfReaderShellProps {
 	resident: boolean
 	onReopen: () => void
 	signatures: PdfSignatures
+	// --- A host's own parts (the e-book reader) ---
+	// Groups after the viewer's own in the command bar.
+	commandGroups?: readonly RibbonGroup[]
+	// Over the pages (a relayout's frozen view).
+	pagesOverlay?: ReactNode
+	// The page shown changed (1-based).
+	onPageChange?: (page: number) => void
+	// Goes to `page` (1-based) each time `key` changes.
+	goTo?: { readonly page: number; readonly key: number } | null
+	// Its own properties dialog instead of the PDF's.
+	renderProperties?: (open: boolean, onOpenChange: (open: boolean) => void) => ReactNode
 }
 
 // The signature status of the document shown: its verifier (null: none), and either the way to open the byte prefix a
@@ -96,11 +108,34 @@ export function PdfReaderShell({
 	ranged,
 	resident,
 	onReopen,
-	signatures
+	signatures,
+	commandGroups,
+	pagesOverlay,
+	onPageChange,
+	goTo,
+	renderProperties
 }: PdfReaderShellProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
+	const pageChanged = useEffectEvent((page: number) => {
+		onPageChange?.(page)
+	})
+	const goToHostPage = useEffectEvent((page: number) => {
+		viewer.dispatch({ type: "page.goto", page })
+	})
+	const goToKey = goTo?.key ?? null
+	const goToTarget = goTo?.page ?? null
+
+	useEffect(() => {
+		pageChanged(state.page)
+	}, [state.page])
+
+	useEffect(() => {
+		if (goToKey !== null && goToTarget !== null) {
+			goToHostPage(goToTarget)
+		}
+	}, [goToKey, goToTarget])
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const [findFocus, setFindFocus] = useState(0)
 	const fullRead = usePdfFullReadGuard(size)
@@ -490,6 +525,7 @@ export function PdfReaderShell({
 					}}
 					pageInputRef={pageInputRef}
 					outlinePane={{ open: paneOpen, toggle: togglePdfOutlinePane }}
+					{...(commandGroups === undefined ? {} : { extraGroups: commandGroups })}
 				/>
 			) : (
 				<PdfRibbon
@@ -545,6 +581,7 @@ export function PdfReaderShell({
 				data-preview-surface=""
 				className="relative flex min-h-0 flex-1 flex-col"
 			>
+				{pagesOverlay}
 				{edit === null ? null : (
 					<>
 						<PdfLiveRegion owner={edit.swap} />
@@ -618,12 +655,16 @@ export function PdfReaderShell({
 			{edit?.dialogs}
 			{print.dialog}
 			{fullRead.dialog}
-			<PdfPropertiesDialog
-				open={properties}
-				onOpenChange={setProperties}
-				document={document}
-				size={size}
-			/>
+			{renderProperties === undefined ? (
+				<PdfPropertiesDialog
+					open={properties}
+					onOpenChange={setProperties}
+					document={document}
+					size={size}
+				/>
+			) : (
+				renderProperties(properties, setProperties)
+			)}
 		</div>
 	)
 

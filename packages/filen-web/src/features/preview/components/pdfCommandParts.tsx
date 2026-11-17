@@ -119,6 +119,8 @@ export interface PdfCommandBarProps {
 	pageInputRef: RefObject<HTMLInputElement | null>
 	// The outline pane beside the pages, where the host shows one: its toggle replaces the bookmarks menu from sm up.
 	outlinePane?: { readonly open: boolean; readonly toggle: () => void }
+	// A host's own groups, before Find (the e-book reader's text size).
+	extraGroups?: readonly RibbonGroup[]
 }
 
 // The fit keys the zoom menu's fit entries show.
@@ -144,7 +146,8 @@ export function usePdfCommandParts({
 	onPrint,
 	onProperties,
 	pageInputRef,
-	outlinePane
+	outlinePane,
+	extraGroups
 }: PdfCommandBarProps): PdfCommandParts {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -264,6 +267,7 @@ export function usePdfCommandParts({
 		})
 	}
 
+	groups.push(...(extraGroups ?? []))
 	groups.push({
 		id: "find",
 		label: t("previewEditorFind"),

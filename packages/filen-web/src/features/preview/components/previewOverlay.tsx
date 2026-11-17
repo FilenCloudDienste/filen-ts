@@ -90,6 +90,7 @@ import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
+import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
@@ -2814,6 +2815,13 @@ function PreviewBody({
 									onAutosave
 								}
 							})}
+				/>
+			)
+		case "ebook":
+			return (
+				<EbookViewer
+					item={item}
+					alt={alt}
 				/>
 			)
 		case "text":

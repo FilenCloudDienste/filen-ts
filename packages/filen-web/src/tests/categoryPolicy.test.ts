@@ -72,6 +72,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	docx: "drivePreviewKindDocx",
 	spreadsheet: "drivePreviewKindSpreadsheet",
 	presentation: "drivePreviewKindPresentation",
+	ebook: "drivePreviewKindEbook",
 	text: "drivePreviewKindText",
 	code: "drivePreviewKindCode",
 	markdown: "drivePreviewKindMarkdown",
@@ -263,7 +264,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 

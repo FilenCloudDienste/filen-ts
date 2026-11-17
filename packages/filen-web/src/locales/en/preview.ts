@@ -39,6 +39,7 @@ import { previewRichShell } from "@/locales/en/previewRich/shell"
 import { previewRichFont } from "@/locales/en/previewRich/font"
 import { previewRichSqlite } from "@/locales/en/previewRich/sqlite"
 import { previewTextMetadata } from "@/locales/en/previewText/metadata"
+import { previewEbookReader } from "@/locales/en/previewEbook/reader"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -875,5 +876,6 @@ export const preview = {
 	...previewRichShell,
 	...previewRichFont,
 	...previewRichSqlite,
-	...previewTextMetadata
+	...previewTextMetadata,
+	...previewEbookReader
 } as const
