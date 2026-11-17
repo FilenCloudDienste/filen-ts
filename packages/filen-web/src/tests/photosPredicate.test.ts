@@ -58,6 +58,11 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("render.qoi"))).toBe(true)
 	})
 
+	it("drops an image format that is no photo by its own row (a gzipped SVG)", () => {
+		expect(isPhotoItem(fileNamed("logo.svgz"))).toBe(false)
+		expect(isPhotoItem(fileNamed("logo.svg"))).toBe(true)
+	})
+
 	// A camera RAW is a photo by any user's reckoning, and the grid tile is thumbnail-driven — the SDK
 	// produces those for RAW (usually straight off the embedded preview), so the row renders normally
 	// even though no full-size viewer exists yet.

@@ -12,7 +12,8 @@ import { displayRaster, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/ra
 import { rasterHeader } from "@/features/preview/lib/imageSniff/raster"
 import type { DisplayRasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
 import { PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
-import { BitmapImage } from "@/features/preview/components/zoomableImage"
+import { BitmapImage, BlobImage } from "@/features/preview/components/zoomableImage"
+import { gunzipSvg } from "@/features/preview/lib/svgz"
 import { Button } from "@/components/ui/button"
 
 // An image held whole to decode it ourselves: nothing above its held cap is loaded (bytes already held decode at any
@@ -190,4 +191,97 @@ export function ReducedChip({ width, height, onShowFull }: { width: number; heig
 			</Button>
 		</div>
 	)
+}
+
+// The most an SVG may inflate to in the preview: the compressed file's own cap.
+const SVGZ_INFLATED_MAX = 32 * 1024 * 1024
+
+// A gzipped SVG: its whole bytes (32 MiB at most), inflated by the browser's gzip and stopped past 32 MiB, then shown
+// as an SVG through a blob <img>, which runs no script and fetches nothing.
+export function SvgzImage({ item, alt }: { item: DriveItem; alt: string }) {
+	return (
+		<HeldImageGate
+			item={item}
+			tooLarge="previewTooLargeToShowHere"
+		>
+			<SvgzImageLoad
+				item={item}
+				alt={alt}
+			/>
+		</HeldImageGate>
+	)
+}
+
+function SvgzImageLoad({ item, alt }: { item: DriveItem; alt: string }) {
+	return (
+		<PreviewGate result={usePreviewBytes(item)}>
+			{ready => (
+				<SvgzImageBytes
+					item={item}
+					bytes={ready.bytes}
+					alt={alt}
+				/>
+			)}
+		</PreviewGate>
+	)
+}
+
+type Inflated =
+	| { readonly status: "pending" }
+	| { readonly status: "tooLarge" }
+	| { readonly status: "failed" }
+	| { readonly status: "shown"; readonly blob: Blob }
+
+function SvgzImageBytes({ item, bytes, alt }: { item: DriveItem; bytes: Uint8Array; alt: string }) {
+	const { t } = useTranslation("preview")
+	const [inflated, setInflated] = useState<{ bytes: Uint8Array; inflated: Inflated }>({ bytes, inflated: { status: "pending" } })
+
+	useEffect(() => {
+		let live = true
+
+		gunzipSvg(bytes, SVGZ_INFLATED_MAX).then(
+			blob => {
+				if (live) {
+					setInflated({ bytes, inflated: blob === null ? { status: "tooLarge" } : { status: "shown", blob } })
+				}
+			},
+			() => {
+				if (live) {
+					setInflated({ bytes, inflated: { status: "failed" } })
+				}
+			}
+		)
+
+		return () => {
+			live = false
+		}
+	}, [bytes])
+
+	const current: Inflated = inflated.bytes === bytes ? inflated.inflated : { status: "pending" }
+
+	switch (current.status) {
+		case "pending":
+			return <PreviewLoading />
+		case "tooLarge":
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewSvgzTooLarge")}
+				/>
+			)
+		case "failed":
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewImageDecodeFailed")}
+				/>
+			)
+		case "shown":
+			return (
+				<BlobImage
+					blob={current.blob}
+					alt={alt}
+				/>
+			)
+	}
 }

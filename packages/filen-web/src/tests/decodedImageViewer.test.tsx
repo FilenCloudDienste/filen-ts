@@ -11,7 +11,8 @@ import "@/lib/i18n"
 // An image only our own code decodes (QOI): its whole bytes, decoded in the raster decode pool into a bitmap drawn at
 // the display long side with a chip that draws it whole, or a card when its header names more than the device decodes.
 
-const { downloadFileBytes, displayRaster } = vi.hoisted(() => ({
+const { downloadFileBytes, displayRaster, gunzipSvg } = vi.hoisted(() => ({
+	gunzipSvg: vi.fn<(bytes: Uint8Array, maxBytes: number) => Promise<Blob | null>>(),
 	downloadFileBytes: vi.fn<(file: AnyFile, token: string) => Promise<Uint8Array>>(),
 	displayRaster:
 		vi.fn<
@@ -31,6 +32,7 @@ vi.mock("@/lib/sdk/client", async () => {
 		threadCount: () => 1
 	}
 })
+vi.mock("@/features/preview/lib/svgz", () => ({ gunzipSvg }))
 vi.mock("@/features/preview/lib/rasterDecode", () => ({
 	displayRaster,
 	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 20 },
@@ -135,6 +137,28 @@ describe("ImageViewer on a QOI", () => {
 		})
 		expect(displayRaster.mock.calls[0]?.[0]).toBe("jxl")
 		expect(displayRaster.mock.calls[0]?.[2].maxPixels).toBe(Math.floor((1024 * 1024 * 1024 - 6) / 20))
+	})
+
+	it("shows a gzipped SVG inflated, through a blob <img>, and a card for one that inflates past its cap", async () => {
+		URL.createObjectURL = vi.fn(() => "blob:svg")
+		URL.revokeObjectURL = vi.fn()
+		downloadFileBytes.mockResolvedValue(new Uint8Array([0x1f, 0x8b]))
+		gunzipSvg.mockResolvedValueOnce(new Blob(["<svg/>"], { type: "image/svg+xml" }))
+
+		const svgz = (uuid: LinkedFile["uuid"]): DriveItem =>
+			linkedFileItem("logo.svgz", { uuid, size: 2n, mime: { Decrypted: "image/svg+xml" } })
+		const view = render(createElement(ImageViewer, { item: svgz("eeeeeeee-0000-0000-0000-000000000016"), alt: "logo" }))
+
+		await waitFor(() => {
+			expect(screen.getByRole("img", { name: "logo" }).getAttribute("src")).toBe("blob:svg")
+		})
+		expect(gunzipSvg.mock.calls[0]?.[1]).toBe(32 * 1024 * 1024)
+		view.unmount()
+
+		gunzipSvg.mockResolvedValueOnce(null)
+		render(createElement(ImageViewer, { item: svgz("eeeeeeee-0000-0000-0000-000000000017"), alt: "logo" }))
+
+		await screen.findByText("This image is too large to show once uncompressed.")
 	})
 
 	it("refuses a file above the held cap before downloading it", async () => {

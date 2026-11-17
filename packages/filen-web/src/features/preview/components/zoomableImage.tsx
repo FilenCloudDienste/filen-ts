@@ -6,6 +6,7 @@ import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { isImeKeydown } from "@filen/shared/keymap"
+import { useObjectUrl } from "@/lib/useObjectUrl"
 
 // What the zoom hands the picture it wraps: its pointer and double-click handlers, and its fit and transform.
 interface ZoomBinding {
@@ -209,6 +210,22 @@ export function ZoomableImage({
 				{...binding}
 			/>
 		</div>
+	)
+}
+
+// A Blob already in hand (a RAW's embedded preview, an inflated SVG).
+export function BlobImage({ blob, alt }: { blob: Blob; alt: string }) {
+	const url = useObjectUrl(blob)
+
+	if (!url) {
+		return null
+	}
+
+	return (
+		<ZoomableImage
+			url={url}
+			alt={alt}
+		/>
 	)
 }
 

@@ -13,11 +13,10 @@ import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 // side-effect: registers the generators getThumbnailUrl needs, as useThumbnail.ts does.
 import "@/features/drive/lib/thumbGenerators"
-import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
-import { ZoomableImage } from "@/features/preview/components/zoomableImage"
-import { DecodedImage, HeldImageGate } from "@/features/preview/components/decodedImage"
+import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomableImage"
+import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
 
 export interface ImageViewerProps {
 	item: DriveItem
@@ -135,22 +134,6 @@ function TransformedImageLoad({ item, alt }: { item: DriveItem; alt: string }) {
 	)
 }
 
-// A Blob already in hand (a RAW's embedded preview).
-function BlobImage({ blob, alt }: { blob: Blob; alt: string }) {
-	const url = useObjectUrl(blob)
-
-	if (!url) {
-		return null
-	}
-
-	return (
-		<ZoomableImage
-			url={url}
-			alt={alt}
-		/>
-	)
-}
-
 // The SDK's documented fallback for a RAW with no usable embedded preview is its thumbnail (made from
 // the smaller stamp the SDK still accepts for one). The URL belongs to the thumbnail service's cache,
 // so it is never revoked here; if that cache evicts it before the <img> loads, onError drops to the
@@ -245,6 +228,15 @@ function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
 // The decoded route: the format's own decoder.
 function DecodedRoute({ item, alt, route }: { item: DriveItem; alt: string; route: Exclude<ImageRoute, "native"> }) {
 	const decode = imageDecodeFor(item)
+
+	if (decode === "svgz") {
+		return (
+			<SvgzImage
+				item={item}
+				alt={alt}
+			/>
+		)
+	}
 
 	if (decode === "qoi" || decode === "jxl") {
 		return (

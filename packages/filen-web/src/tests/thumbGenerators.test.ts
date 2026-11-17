@@ -9,6 +9,7 @@ import {
 	THUMB_SDK_MAX_HEIGHT,
 	THUMB_SDK_LOSSY_QUALITY,
 	THUMB_PDF_READ_MAX,
+	THUMB_SVG_SIZE_GATE,
 	THUMB_WARM_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
@@ -722,6 +723,19 @@ describe("rasterizeSvgThumb — two renders at a time", () => {
 })
 
 describe("generateSvgThumb", () => {
+	it("settles a gzipped SVG that is no gzip stream as corrupt, and one inflating past the gate as over budget", async () => {
+		const { gzipSync } = await import("node:zlib")
+		const item = itemAsBaseFile(narrowItem(namedFile("logo.svgz", "image/svg+xml")))
+
+		downloadFileBytesMock.mockResolvedValue(new TextEncoder().encode("<svg/>"))
+
+		await expect(generateSvgThumb(item, live())).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+
+		downloadFileBytesMock.mockResolvedValue(new Uint8Array(gzipSync(new Uint8Array(Number(THUMB_SVG_SIZE_GATE) + 1).fill(0x20))))
+
+		await expect(generateSvgThumb(item, live())).resolves.toEqual({ type: "unavailable", reason: "overBudget" })
+	})
+
 	it("fails, counting toward the blacklist, when the download fails", async () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))
 

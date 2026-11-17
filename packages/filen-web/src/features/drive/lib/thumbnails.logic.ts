@@ -123,7 +123,7 @@ const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
 // the client-side generators that DO handle them — they have to be claimed by extension first.
 //
 //   1. directory / undecryptable -> none   (nothing to route on)
-//   2. svg, at/under the gate    -> svg    (client-side: rasterised through an <img>, whose secure
+//   2. svg/svgz, at/under gate   -> svg    (client-side: rasterised through an <img>, whose secure
 //                                           mode runs no script; never handed to the SDK's decoders)
 //   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
 //   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
@@ -145,7 +145,8 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 
 	const ext = itemTypeExtension(item, verdict)
 
-	if (ext === "svg") {
+	// A gzipped one as well, inflated no further than the same ceiling.
+	if (ext === "svg" || ext === "svgz") {
 		return base.data.size <= THUMB_SVG_SIZE_GATE ? "svg" : "none"
 	}
 

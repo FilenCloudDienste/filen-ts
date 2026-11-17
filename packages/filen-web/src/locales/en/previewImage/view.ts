@@ -8,5 +8,7 @@ export const previewImageView = {
 	/** Image preview — an image with more pixels than this device can decode */
 	previewImageTooLarge: "This image is too large to display on this device.",
 	/** Image preview — an image whose data could not be decoded (damaged or not what its name says) */
-	previewImageDecodeFailed: "This image couldn't be read."
+	previewImageDecodeFailed: "This image couldn't be read.",
+	/** Image preview — a compressed SVG (.svgz) that inflates to more than the preview holds */
+	previewSvgzTooLarge: "This image is too large to show once uncompressed."
 } as const

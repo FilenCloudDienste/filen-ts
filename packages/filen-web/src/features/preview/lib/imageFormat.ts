@@ -3,9 +3,10 @@ import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
 // route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi",
-// "jxl" in libjxl). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
-// tier of the preview's category table is this table's keys.
-export type ImageDecode = "native" | "heic" | "qoi" | "jxl"
+// "jxl" in libjxl), or inflated first ("svgz", then shown as the SVG it is). HEIC and JPEG XL stream like a native
+// image where a probe found the browser decodes them. The image tier of the preview's category table is this table's
+// keys.
+export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz"
 
 export interface ImageFormat {
 	decode: ImageDecode
@@ -27,6 +28,9 @@ const HEIC: ImageFormat = { decode: "heic", editable: true }
 const QOI: ImageFormat = { decode: "qoi", editable: true, cap: 256n * MIB }
 // Streamed where the browser decodes it; elsewhere held whole (its cap) and decoded by libjxl in the pool.
 const JXL: ImageFormat = { decode: "jxl", editable: true, cap: 256n * MIB }
+// Gzipped SVG: held whole (32 MiB compressed at most) and inflated by the browser's gzip, never served as it is.
+// Markup, not pixels: no raster editor, and no photo.
+const SVGZ: ImageFormat = { decode: "svgz", editable: false, cap: 32n * MIB, photo: false }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -49,7 +53,8 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["heif", HEIC],
 	["hif", HEIC],
 	["qoi", QOI],
-	["jxl", JXL]
+	["jxl", JXL],
+	["svgz", SVGZ]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.
@@ -68,6 +73,7 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 		case "jxl":
 			return profile.jxlNative === "yes"
 		case "qoi":
+		case "svgz":
 			return false
 	}
 }

@@ -11,6 +11,7 @@ import { QOI_SIZE } from "./fixtures/images"
 
 const [QOI] = FIXTURE_FILES["images-qoi"]
 const [JXL] = FIXTURE_FILES["images-jxl"]
+const [SVGZ, SVGZ_BOMB] = FIXTURE_FILES["images-svgz"]
 
 test("a QOI image is decoded and drawn, and opens in the editor", async ({ page, context, browserName }) => {
 	const cspViolations = trackCspViolations(page)
@@ -67,6 +68,36 @@ test("a JPEG XL is shown by the browser where it decodes one, else decoded in th
 
 	await page.keyboard.press("Escape")
 	await expect(picture).toHaveCount(0)
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a gzipped SVG is inflated and shown as an SVG, and one inflating past the cap is refused", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-svgz")
+
+	await itemRow(listbox, SVGZ).dblclick()
+
+	const picture = page.getByRole("img", { name: SVGZ })
+
+	await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// Shown from a blob of the inflated markup, never served by the inline route.
+	await expect(picture).toHaveAttribute("src", /^blob:/)
+	await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(80)
+
+	await page.keyboard.press("Escape")
+	await expect(picture).toHaveCount(0)
+
+	await itemRow(listbox, SVGZ_BOMB).dblclick()
+	await expect(page.getByText("This image is too large to show once uncompressed.", { exact: true })).toBeVisible({
+		timeout: LAZY_VIEWER_TIMEOUT_MS
+	})
+	await page.keyboard.press("Escape")
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])

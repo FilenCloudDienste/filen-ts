@@ -125,6 +125,11 @@ describe("thumbnailCategory", () => {
 
 	// The inverse of what this file used to pin. The browser decode that ignored this flag is gone;
 	// the SDK is the only producer for a still image, so its own "I cannot thumbnail this" is final.
+	it("routes a gzipped SVG with the SVGs, under the same size gate", () => {
+		expect(thumbnailCategory(fileNamed("logo.svgz", { canMakeThumbnail: false }))).toBe("svg")
+		expect(thumbnailCategory(fileNamed("logo.svgz", { canMakeThumbnail: false, size: THUMB_SVG_SIZE_GATE + 1n }))).toBe("none")
+	})
+
 	it("routes a JPEG XL to the browser's own decoder, whatever the SDK says", () => {
 		expect(thumbnailCategory(fileNamed("photo.jxl", { canMakeThumbnail: false }))).toBe("raster")
 		expect(thumbnailCategory(fileNamed("photo.JXL", { canMakeThumbnail: true }))).toBe("raster")

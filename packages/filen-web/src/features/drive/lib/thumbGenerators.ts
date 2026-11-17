@@ -20,6 +20,7 @@ import {
 	THUMB_SDK_LOSSY_QUALITY,
 	THUMB_WARM_SIZE_GATE,
 	THUMB_RASTER_READ_MAX,
+	THUMB_SVG_SIZE_GATE,
 	pdfThumbReadBudget,
 	thumbnailCategory
 } from "@/features/drive/lib/thumbnails.logic"
@@ -65,6 +66,8 @@ import type { FrameCaptureParams, FrameCaptureResult, FrameWorkerApi } from "@/f
 import { rangeReads } from "@/lib/media/rangeReads"
 import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
 import { thumbnailRaster } from "@/features/drive/lib/thumbRaster"
+import { gunzipSvg } from "@/features/preview/lib/svgz"
+import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
 import { supportsNativeImage } from "@/lib/nativeImageSupport"
 import { thumbnail } from "@/lib/pixelBudget"
@@ -164,7 +167,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	// which the drive-side arm would read identically; only a failure leaves the uuid to it.
 	if (category === "svg") {
 		seedThumbnail(item, async () => {
-			const result = await rasterizeSvgThumb(await file.text())
+			const result = await svgThumbOf(new Uint8Array(await file.arrayBuffer()), itemTypeExtension(item) === "svgz")
 
 			return result.type === "bytes" ? result : { type: result.type === "unavailable" ? "none" : "unanswered" }
 		})
@@ -842,6 +845,22 @@ export async function rasterizeSvgThumb(text: string): Promise<ThumbGenerationRe
 	return result.data
 }
 
+// An svg document's thumbnail from its bytes; a gzipped one is inflated first, no further than THUMB_SVG_SIZE_GATE
+// (past it, or as no gzip stream, it has none).
+async function svgThumbOf(bytes: Uint8Array, gzipped: boolean): Promise<ThumbGenerationResult> {
+	if (!gzipped) {
+		return await rasterizeSvgThumb(new TextDecoder().decode(bytes))
+	}
+
+	const inflated = await gunzipSvg(bytes, Number(THUMB_SVG_SIZE_GATE)).catch(() => undefined)
+
+	if (inflated === undefined) {
+		return { type: "unavailable", reason: "corrupt" }
+	}
+
+	return inflated === null ? { type: "unavailable", reason: "overBudget" } : await rasterizeSvgThumb(await inflated.text())
+}
+
 // Small by construction (THUMB_SVG_SIZE_GATE), so the whole document is read like a small pdf's: the
 // rasteriser needs the markup, not a stream. Once the markup is in hand the render always runs.
 export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
@@ -857,7 +876,7 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 		return { type: "failed" }
 	}
 
-	return await rasterizeSvgThumb(new TextDecoder().decode(bytes))
+	return await svgThumbOf(bytes, itemTypeExtension(item) === "svgz")
 }
 
 // A decode error from the browser's own decoder (createImageBitmap): a verdict about the bytes.
