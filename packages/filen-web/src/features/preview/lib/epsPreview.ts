@@ -42,7 +42,7 @@ export async function epsPreview(reader: EpsRangeReader, signal: AbortSignal, ma
 
 			return eps.tiff.length > maxTiffBytes
 				? { kind: "tooLarge" }
-				: { kind: "tiff", bytes: (await reader.read(eps.tiff.offset, eps.tiff.length, signal)).slice() }
+				: { kind: "tiff", bytes: await reader.read(eps.tiff.offset, eps.tiff.length, signal) }
 		case "epsi": {
 			const { preview } = eps
 			const digits = epsiHexDigits(preview)

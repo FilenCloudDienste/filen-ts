@@ -5,16 +5,21 @@ import { RasterBudgetError } from "@/features/preview/lib/rasterCodecs/raster"
 import { dosEps, epsiEps, plainEps } from "@/tests/support/epsBytes"
 import { encodeTiff } from "@/tests/support/tiffBytes"
 
-function readerOf(bytes: Uint8Array): EpsRangeReader & { reads: [number, number][] } {
+function readerOf(bytes: Uint8Array): EpsRangeReader & { reads: [number, number][]; returned: Uint8Array[] } {
 	const reads: [number, number][] = []
+	const returned: Uint8Array[] = []
 
 	return {
 		size: bytes.length,
 		reads,
+		returned,
 		read: (offset, length) => {
-			reads.push([offset, length])
+			const read = bytes.slice(offset, offset + length)
 
-			return Promise.resolve(bytes.slice(offset, offset + length))
+			reads.push([offset, length])
+			returned.push(read)
+
+			return Promise.resolve(read)
 		}
 	}
 }
@@ -28,6 +33,13 @@ describe("epsPreview", () => {
 
 		await expect(epsPreview(reader, live)).resolves.toEqual({ kind: "tiff", bytes: tiff })
 		expect(reader.reads[1]).toEqual([30 + plainEps().length, tiff.length])
+	})
+
+	it("hands the TIFF section on as read, without a copy", async () => {
+		const reader = readerOf(dosEps(encodeTiff([{ width: 4, height: 2, rgb: [1, 2, 3] }])))
+		const preview = await epsPreview(reader, live)
+
+		expect(preview.kind === "tiff" ? preview.bytes : null).toBe(reader.returned[1])
 	})
 
 	it("refuses a TIFF section larger than the reader holds, and says a DOS EPS without one has none", async () => {
