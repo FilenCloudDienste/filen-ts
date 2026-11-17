@@ -1,9 +1,8 @@
 import { zipFits, type ZipEntrySize } from "@/features/preview/lib/zipBudget.logic"
 
 // Checks a model file before a loader allocates anything for it: counts read from headers or a byte scan (a binary
-// STL's triangle count, an OBJ's vertex and face lines, a PLY's element counts, a glTF's accessor and meshopt counts, a
-// binary FBX's arrays), a zip's declared sizes, a texture's dimensions; and after parsing, the GPU memory the scene
-// would take.
+// STL's triangle count, an OBJ's vertex and face lines, a PLY's element counts, a glTF's accessor and meshopt counts),
+// a zip's declared sizes, a texture's dimensions; and after parsing, the GPU memory the scene would take.
 
 // A model and every file it references together.
 export const MODEL_MAX_BYTES = 128 * 1024 * 1024
@@ -13,19 +12,15 @@ export const MODEL_MAX_VERTICES = 30_000_000
 // a uv and a colour each), about eight times a typed array's footprint: an OBJ gets a tenth of the corners and vertices.
 export const OBJ_MAX_CORNERS = 3_000_000
 export const OBJ_MAX_VERTICES = 3_000_000
-// What a 3MF or USDZ may unpack to in all (the model cap), each entry also within the zip ratio.
+// What a 3MF may unpack to in all (the model cap), each entry also within the zip ratio.
 export const MODEL_MAX_UNPACKED_BYTES = MODEL_MAX_BYTES
-// The JS heap a parse may build in plain arrays and objects: a binary FBX's (FBXLoader turns every array into a plain JS
-// array, 8 bytes an element, a boolean as much as a double, every node into an object and every property into a
-// value), and the numbers of an ASCII FBX's or USDA layer's text.
-export const MODEL_MAX_HEAP_BYTES = 512 * 1024 * 1024
 // The GPU memory a scene may take: attributes, textures with mipmaps, the framebuffer.
 export const MODEL_MAX_GPU_BYTES = 768 * 1024 * 1024
 // A texture's decoded RGBA bytes per pixel before resizing (W2's pixel budget figure).
 export const TEXTURE_BPP = 4
 
 // The 3D viewer's formats by extension: the one list the category table and the viewer read.
-export const MODEL_FORMATS = ["stl", "obj", "gltf", "glb", "3mf", "fbx", "ply", "usdz"] as const
+export const MODEL_FORMATS = ["stl", "obj", "gltf", "glb", "3mf", "ply"] as const
 
 export type ModelFormat = (typeof MODEL_FORMATS)[number]
 
@@ -303,186 +298,9 @@ export function preflightGltf(bytes: Uint8Array, binary: boolean): Preflight {
 		: OK
 }
 
-// A 3MF's or USDZ's central directory: within the unpacked cap in all, each entry within the zip ratio.
+// A 3MF's central directory: within the unpacked cap in all, each entry within the zip ratio.
 export function preflightZip(entries: readonly ZipEntrySize[]): Preflight {
 	return zipFits(entries, MODEL_MAX_UNPACKED_BYTES) ? OK : { ok: false, reason: "tooLarge" }
-}
-
-const FBX_MAGIC = "Kaydara FBX Binary  \0"
-// Element sizes of the array property types ('c' is a boolean array as 'b' is).
-const FBX_ARRAY_SIZES: Readonly<Record<string, number>> = { b: 1, c: 1, d: 8, f: 4, i: 4, l: 8 }
-const FBX_SCALAR_SIZES: Readonly<Record<string, number>> = { C: 1, D: 8, F: 4, I: 4, L: 8, Y: 2 }
-// Records nested deeper than this are refused (FBXLoader recurses).
-const FBX_MAX_DEPTH = 1024
-// What the parse builds in the JS heap: a plain array's element, a node object, a property value.
-const JS_ELEMENT_BYTES = 8
-const JS_NODE_BYTES = 256
-const JS_PROPERTY_BYTES = 16
-
-export function isBinaryFbx(bytes: Uint8Array): boolean {
-	return bytes.length >= 27 && new TextDecoder("latin1").decode(bytes.subarray(0, FBX_MAGIC.length)) === FBX_MAGIC
-}
-
-class FbxEnd extends Error {}
-
-// A binary FBX walked exactly as FBXLoader's BinaryParser reads it, reading no array: top-level records until its end of
-// content (the footer's 160 bytes and alignment); a record's properties, then its children while its end offset lies
-// ahead (null records included, and records past them); an uncompressed array taking its element count's bytes
-// whatever its length field says, a compressed one its compressed length (which the patched loader inflates into its
-// declared size, never past it). Returns the JS heap the parse would build, and the face corners its geometry builds
-// (every PolygonVertexIndex entry fans into at most three corners, rebuilt once per blend-shape geometry); null when the
-// bytes would not parse.
-export function fbxCosts(bytes: Uint8Array): { heap: number; corners: number } | null {
-	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-	const size = bytes.length
-	let offset = 23
-	let heap = 0
-	let polygonIndices = 0
-	let shapes = 0
-
-	const need = (count: number): void => {
-		if (count < 0 || offset + count > size) throw new FbxEnd()
-	}
-	const uint8 = (): number => {
-		need(1)
-
-		return view.getUint8(offset++)
-	}
-	const uint32 = (): number => {
-		need(4)
-
-		const value = view.getUint32(offset, true)
-
-		offset += 4
-
-		return value
-	}
-	const uint64 = (): number => {
-		const low = uint32()
-
-		return uint32() * 0x1_0000_0000 + low
-	}
-	const skip = (count: number): void => {
-		need(count)
-		offset += count
-	}
-
-	const version = uint32()
-
-	if (version < 6400) return null
-
-	const wide = version >= 7500
-	const endOfContent = (): boolean => (size % 16 === 0 ? ((offset + 160 + 16) & ~0xf) >= size : offset + 160 + 16 >= size)
-
-	const node = (depth: number): void => {
-		if (depth > FBX_MAX_DEPTH) throw new FbxEnd()
-
-		const endOffset = wide ? uint64() : uint32()
-		const properties = wide ? uint64() : uint32()
-
-		if (wide) uint64()
-		else uint32()
-
-		const nameLength = uint8()
-		const name = new TextDecoder("latin1").decode(bytes.subarray(offset, offset + nameLength))
-
-		skip(nameLength)
-		heap += JS_NODE_BYTES
-
-		if (endOffset === 0) return
-
-		for (let p = 0; p < properties; p++) {
-			const type = String.fromCharCode(uint8())
-			const scalar = FBX_SCALAR_SIZES[type]
-			const element = FBX_ARRAY_SIZES[type]
-
-			heap += JS_PROPERTY_BYTES
-
-			if (scalar !== undefined) {
-				skip(scalar)
-			} else if (type === "R" || type === "S") {
-				const length = uint32()
-
-				// A blend shape is a Geometry whose type is "Shape": FBXLoader builds the base geometry's buffers again for it.
-				if (
-					type === "S" &&
-					name === "Geometry" &&
-					length === 5 &&
-					new TextDecoder("latin1").decode(bytes.subarray(offset, offset + 5)) === "Shape"
-				)
-					shapes++
-
-				skip(length)
-				heap += length
-			} else if (element !== undefined) {
-				const count = uint32()
-				const encoding = uint32()
-				const compressed = uint32()
-
-				skip(encoding === 0 ? count * element : compressed)
-				heap += count * JS_ELEMENT_BYTES + (encoding === 0 ? 0 : count * element)
-
-				if (name === "PolygonVertexIndex") polygonIndices += count
-			} else {
-				throw new FbxEnd()
-			}
-
-			if (heap > MODEL_MAX_HEAP_BYTES) return
-		}
-
-		while (endOffset > offset && heap <= MODEL_MAX_HEAP_BYTES) node(depth + 1)
-	}
-
-	try {
-		while (!endOfContent() && heap <= MODEL_MAX_HEAP_BYTES) node(0)
-	} catch (error) {
-		if (error instanceof FbxEnd || error instanceof RangeError) return null
-
-		throw error
-	}
-
-	return { heap, corners: 3 * polygonIndices * (1 + shapes) }
-}
-
-// An ASCII FBX's numbers, each a JS value of the arrays FBXLoader builds from its text: counted, not parsed.
-export function textNumbers(text: string): number {
-	let count = 0
-	let inNumber = false
-
-	for (let at = 0; at < text.length; at++) {
-		const code = text.charCodeAt(at)
-		const digit = code >= 0x30 && code <= 0x39
-
-		if (digit && !inNumber) count++
-
-		inNumber = digit || (inNumber && (code === 0x2e || code === 0x65 || code === 0x45 || code === 0x2d || code === 0x2b))
-	}
-
-	return count
-}
-
-// A USDZ's text layers (.usda): their numbers against the heap they become.
-export function preflightUsdaText(texts: readonly string[]): Preflight {
-	let numbers = 0
-
-	for (const text of texts) numbers += textNumbers(text)
-
-	return numbers * JS_ELEMENT_BYTES > MODEL_MAX_HEAP_BYTES ? { ok: false, reason: "tooLarge" } : OK
-}
-
-export function preflightFbx(bytes: Uint8Array): Preflight {
-	// ASCII FBX: every number of its text a value of an array FBXLoader builds, against the same heap.
-	if (!isBinaryFbx(bytes)) {
-		return textNumbers(new TextDecoder().decode(bytes)) * JS_ELEMENT_BYTES > MODEL_MAX_HEAP_BYTES
-			? { ok: false, reason: "tooLarge" }
-			: OK
-	}
-
-	const costs = fbxCosts(bytes)
-
-	if (costs === null) return { ok: false, reason: "malformed" }
-
-	return costs.heap > MODEL_MAX_HEAP_BYTES || costs.corners > OBJ_MAX_CORNERS ? { ok: false, reason: "tooLarge" } : OK
 }
 
 // How large a texture of `width` × `height` is drawn: within `maxSide` a side. Null for no size.

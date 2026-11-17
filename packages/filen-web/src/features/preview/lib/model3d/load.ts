@@ -22,19 +22,15 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js"
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js"
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js"
-import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js"
-import { USDLoader } from "three/examples/jsm/loaders/USDLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js"
 import { ZipArchive, ZipError, bytesSource } from "@filen/office/core/opc"
 import { THREE_ASSETS } from "virtual:three-assets"
 import {
 	MODEL_MAX_UNPACKED_BYTES,
-	preflightFbx,
 	preflightGltf,
 	preflightObj,
 	preflightPly,
 	preflightStl,
-	preflightUsdaText,
 	preflightZip,
 	type ModelFormat,
 	type Preflight
@@ -97,10 +93,10 @@ function geometryObject(geometry: BufferGeometry): Object3D {
 	)
 }
 
-// A 3MF's or USDZ's parts, unpacked by our zip reader rather than three's (whose unzipSync trusts the last end record
+// A 3MF's parts, unpacked by our zip reader rather than three's (whose unzipSync trusts the last end record
 // it finds and inflates without limit): within the unpacked cap in all and the ratio per entry, checked from the central
-// directory before anything inflates, each entry cut off at its declared size. The loaders take them through the
-// `unzip` the patched loaders accept, in the archive's order (USDZ's first entry is its layer).
+// directory before anything inflates, each entry cut off at its declared size. ThreeMFLoader takes them through the
+// `unzip` the patched loader accepts.
 async function unpack(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
 	let archive: ZipArchive
 
@@ -221,8 +217,7 @@ export function releaseSource(bytes: Uint8Array): void {
 }
 
 // Parses `bytes` as `format`. Rejects with ModelRefusedError when a preflight refuses it, with the loader's error when
-// it does not parse (the patched loaders' own limits included: an FBX array inflating past its declared length, a USDC
-// buffer past the unpacked cap).
+// it does not parse.
 export async function loadModel(
 	bytes: Uint8Array,
 	format: ModelFormat,
@@ -251,30 +246,6 @@ export async function loadModel(
 			loader.unzip = () => parts
 
 			return { root: loader.parse(new ArrayBuffer(0)), animations: [] }
-		}
-		case "fbx": {
-			refuse(preflightFbx(bytes))
-
-			const root = new FBXLoader().parse(buffer(bytes), REFERENCE_BASE)
-
-			return { root, animations: root.animations }
-		}
-		case "usdz": {
-			const parts = await unpack(bytes)
-
-			refuse(
-				preflightUsdaText(
-					Object.entries(parts)
-						.filter(([name]) => name.toLowerCase().endsWith(".usda"))
-						.map(([, part]) => new TextDecoder().decode(part))
-				)
-			)
-			const loader = new USDLoader()
-
-			loader.unzip = () => parts
-
-			// USDLoader tells a package by its zip signature; the parts come through `unzip`.
-			return { root: loader.parse(buffer(bytes.subarray(0, 4)), REFERENCE_BASE), animations: [] }
 		}
 	}
 }

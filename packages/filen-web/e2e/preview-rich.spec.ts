@@ -17,7 +17,7 @@ const [FONT_TTF, FONT_WOFF2] = FIXTURE_FILES["rich-fonts"]
 const [APP_DB, WAL_DB, NOT_DB] = FIXTURE_FILES["rich-sqlite"]
 const [DB_ARCHIVE] = FIXTURE_FILES["rich-sqlite-archive"]
 const [RIDE, PLACES_KML, PLACES_KMZ, AREA] = FIXTURE_FILES["rich-geo"]
-const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF, SCENE_USDZ] = FIXTURE_FILES["rich-models"]
+const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF] = FIXTURE_FILES["rich-models"]
 const [LONE_OBJ] = FIXTURE_FILES["rich-models-lone"]
 const [MODELS_ZIP, MODELS_LOCKED_ZIP] = FIXTURE_FILES["rich-models-archive"]
 
@@ -231,15 +231,12 @@ test("a 3D model is drawn in a worker from its own files, and references outside
 	await expect(dialog.getByText("mtllib rich-mesh.mtl")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await closePreview(page)
 
-	// Draco geometry and an embedded texture (the decoders served from 'self'), a 3MF's mesh, a USDZ's textured quad.
+	// Draco geometry and an embedded texture (the decoders served from 'self'), and a 3MF's mesh.
 	await itemRow(listbox, MODEL_GLB).dblclick()
 	await expectModel(dialog, webgl, { triangles: RICH_CUBE_TRIANGLES, textures: 1, text: false })
 	await closePreview(page)
 	await itemRow(listbox, PRINT_3MF).dblclick()
 	await expectModel(dialog, webgl, { triangles: RICH_CUBE_TRIANGLES, text: false })
-	await closePreview(page)
-	await itemRow(listbox, SCENE_USDZ).dblclick()
-	await expectModel(dialog, webgl, { triangles: 2, textures: 1, text: false })
 	await closePreview(page)
 
 	listbox = await gotoFixture(page, "rich-models-lone")

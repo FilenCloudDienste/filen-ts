@@ -1,4 +1,4 @@
-// "preview" namespace, rich viewers — the 3D model viewer (stl, obj, gltf, glb, 3mf, fbx, ply, usdz). Spread into
+// "preview" namespace, rich viewers — the 3D model viewer (stl, obj, gltf, glb, 3mf, ply). Spread into
 // preview.ts; same catalog rules.
 export const previewRichModel3d = {
 	/** 3D viewer — accessible name of the model's canvas */

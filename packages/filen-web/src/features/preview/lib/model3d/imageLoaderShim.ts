@@ -3,7 +3,7 @@ import { ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/prefligh
 import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 
 // Every texture a loader reads goes through one pixel budget, in the 3D worker. three's image paths are replaced, once
-// per worker: ImageLoader (an <img>, which a worker has none of: MTL, FBX, 3MF and USDZ textures), ImageBitmapLoader
+// per worker: ImageLoader (an <img>, which a worker has none of: MTL and 3MF textures), ImageBitmapLoader
 // (glTF's) and KTX2Loader's transcode.
 //   An image is read whole and its dimensions taken from its header (a JPEG's frame header may sit past large APPn
 //   segments; a GIF is as large as its first frame reaches). One whose dimensions cannot be read is skipped, never

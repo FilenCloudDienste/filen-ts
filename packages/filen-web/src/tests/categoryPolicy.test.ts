@@ -563,7 +563,7 @@ describe("the geo row", () => {
 describe("the model3d row", () => {
 	const CAP = 128n * MIB
 
-	it.each(["part.stl", "mesh.obj", "scene.gltf", "scene.glb", "print.3mf", "rig.fbx", "scan.ply", "scene.usdz"])(
+	it.each(["part.stl", "mesh.obj", "scene.gltf", "scene.glb", "print.3mf", "scan.ply"])(
 		"%s opens as a model up to 128 MiB, everywhere",
 		name => {
 			expect(previewType(fileNamed(name, 1024n))).toBe("model3d")
@@ -577,7 +577,12 @@ describe("the model3d row", () => {
 	it("reads an extensionless model by its stored type, and a .obj whose head is not text as nothing", () => {
 		expect(previewType(fileNamed("part", 1024n, "model/stl"))).toBe("model3d")
 		expect(previewType(fileNamed("scene", 1024n, "model/gltf-binary"))).toBe("model3d")
-		expect(previewType(fileNamed("scene", 1024n, "model/vnd.usdz+zip"))).toBe("model3d")
+		// FBX and USDZ are not previewed: the download card.
+		expect(previewType(fileNamed("scene", 1024n, "model/vnd.usdz+zip"))).toBe("other")
+		expect(previewType(fileNamed("rig.fbx", 1024n))).toBe("other")
+		expect(previewType(fileNamed("scene.usdz", 1024n))).toBe("other")
+		expect(canPreview(fileNamed("rig.fbx", 1024n))).toBe(false)
+		expect(canPreview(fileNamed("scene.usdz", 1024n))).toBe(false)
 		expect(previewType(fileNamed("mesh.obj", 1024n), "wavefront")).toBe("model3d")
 		expect(previewType(fileNamed("main.obj", 1024n), "notWavefront")).toBe("other")
 		expect(previewKindLabelKey("model3d")).toBe("drivePreviewKindModel3d")

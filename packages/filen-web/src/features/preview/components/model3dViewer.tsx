@@ -50,9 +50,7 @@ const FORMAT_LABELS: Record<ModelFormat, string> = {
 	gltf: "glTF",
 	glb: "glTF binary",
 	"3mf": "3MF",
-	fbx: "FBX",
-	ply: "PLY",
-	usdz: "USDZ"
+	ply: "PLY"
 }
 
 function InfoPanel({ item, scene }: { item: DriveItem; scene: SceneLoad }) {
@@ -418,7 +416,7 @@ const STATE_MESSAGES = {
 	noWebgl: "previewModelNoWebgl"
 } as const
 
-// A 3D model (STL, OBJ with its MTL, glTF, GLB, 3MF, FBX, PLY, USDZ), drawn in a worker with an orbit camera, only when
+// A 3D model (STL, OBJ with its MTL, glTF, GLB, 3MF, PLY), drawn in a worker with an orbit camera, only when
 // something changed. Its referenced files come from its own directory and those below it. A text format's source is a
 // button away.
 export function Model3dViewer({ item }: { item: DriveItem }) {

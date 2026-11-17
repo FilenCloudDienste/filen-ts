@@ -1,4 +1,4 @@
-// A zip a viewer unpacks itself (a KMZ's KML, a 3MF's or USDZ's parts) is checked against its viewer's budget from the
+// A zip a viewer unpacks itself (a KMZ's KML, a 3MF's parts) is checked against its viewer's budget from the
 // central directory, before anything inflates: what it declares in all, and how far one entry expands. Inflating
 // stops at the declared size (@filen/office's ZipArchive), so a lying header is cut off there.
 

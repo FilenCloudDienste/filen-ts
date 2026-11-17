@@ -9,7 +9,6 @@ import {
 	type Ktx2LoaderLike,
 	type TextureShim
 } from "@/features/preview/lib/model3d/imageLoaderShim"
-import { doubleArray, fbxFile } from "@/tests/support/fbx"
 import { installModelGlobals } from "@/features/preview/lib/model3d/workerGlobals"
 import { XmlDomParser } from "@/features/preview/lib/model3d/xmlDom"
 import { ModelRefusedError, REFERENCE_BASE, loadModel, modelInfo, mtlLibraries, releaseSource } from "@/features/preview/lib/model3d/load"
@@ -124,58 +123,6 @@ describe("loadModel", () => {
 		const loaded = await loadModel(zip, "3mf", null, () => Promise.resolve(null))
 
 		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 4, vertices: 4, meshes: 1 })
-	})
-
-	it("reads a USDZ's layer and asks for its texture through the ImageLoader", async () => {
-		const layer = `#usda 1.0
-(
-	defaultPrim = "Root"
-)
-
-def Xform "Root"
-{
-	def Mesh "Quad" (
-		prepend apiSchemas = ["MaterialBindingAPI"]
-	)
-	{
-		int[] faceVertexCounts = [4]
-		int[] faceVertexIndices = [0, 1, 2, 3]
-		point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
-		texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
-			interpolation = "vertex"
-		)
-		rel material:binding = </Root/Skin>
-	}
-
-	def Material "Skin"
-	{
-		token outputs:surface.connect = </Root/Skin/Surface.outputs:surface>
-
-		def Shader "Surface"
-		{
-			uniform token info:id = "UsdPreviewSurface"
-			color3f inputs:diffuseColor.connect = </Root/Skin/Texture.outputs:rgb>
-			token outputs:surface
-		}
-
-		def Shader "Texture"
-		{
-			uniform token info:id = "UsdUVTexture"
-			asset inputs:file = @textures/skin.png@
-			float3 outputs:rgb
-		}
-	}
-}
-`
-		const zip = zipSync({ "scene.usda": [strToU8(layer), { level: 0 }], "textures/skin.png": [PNG, { level: 0 }] })
-		const before = requested.length
-		const loaded = await loadModel(zip, "usdz", null, () => Promise.resolve(null))
-
-		await images.settled()
-
-		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 2, meshes: 1 })
-		// An embedded texture is a blob: URL, answered by the sandbox in the worker.
-		expect(requested.slice(before).some(url => url.startsWith("blob:"))).toBe(true)
 	})
 
 	it("refuses a binary STL above the triangle limit before parsing", async () => {
@@ -371,14 +318,6 @@ describe("bounded loaders", () => {
 
 		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 1, vertices: 3 })
 		expect(loaded.animations).toHaveLength(1)
-	})
-
-	it("stops an FBX array inflating past its declared length, in FBXLoader itself", async () => {
-		// Declares 10 doubles (80 bytes); its stream inflates to 8 MB. The preflight sees 80 bytes; the patched loader
-		// stops at them.
-		const bomb = fbxFile([{ name: "Geometry", properties: [doubleArray(10, new Uint8Array(8_000_000))] }])
-
-		await expect(loadModel(bomb, "fbx", null, () => Promise.resolve(null))).rejects.toThrow(/inflates past its declared length/)
 	})
 
 	it("unpacks a 3MF with its own zip reader, never three's: a trailing fake end record's bomb is never read", async () => {

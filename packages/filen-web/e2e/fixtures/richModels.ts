@@ -144,64 +144,6 @@ export function print3mf(): Buffer {
 	])
 }
 
-// A USDZ (an uncompressed zip whose first entry is the layer): a textured quad through a UsdPreviewSurface.
-export function sceneUsdz(): Buffer {
-	const layer = `#usda 1.0
-(
-	defaultPrim = "Root"
-	upAxis = "Y"
-)
-
-def Xform "Root"
-{
-	def Mesh "Quad" (
-		prepend apiSchemas = ["MaterialBindingAPI"]
-	)
-	{
-		int[] faceVertexCounts = [4]
-		int[] faceVertexIndices = [0, 1, 2, 3]
-		point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
-		texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
-			interpolation = "vertex"
-		)
-		rel material:binding = </Root/Checker>
-	}
-
-	def Material "Checker"
-	{
-		token outputs:surface.connect = </Root/Checker/Surface.outputs:surface>
-
-		def Shader "Surface"
-		{
-			uniform token info:id = "UsdPreviewSurface"
-			color3f inputs:diffuseColor.connect = </Root/Checker/Texture.outputs:rgb>
-			token outputs:surface
-		}
-
-		def Shader "Reader"
-		{
-			uniform token info:id = "UsdPrimvarReader_float2"
-			token inputs:varname = "st"
-			float2 outputs:result
-		}
-
-		def Shader "Texture"
-		{
-			uniform token info:id = "UsdUVTexture"
-			asset inputs:file = @textures/checker.png@
-			float2 inputs:st.connect = </Root/Checker/Reader.outputs:result>
-			float3 outputs:rgb
-		}
-	}
-}
-`
-
-	return buildZip([
-		{ name: "scene.usda", data: layer, method: "stored" },
-		{ name: "textures/checker.png", data: checkerPng(), method: "stored" }
-	])
-}
-
 export function modelGlb(): Buffer {
 	return readFileSync(`${MODELS}rich-model.glb`)
 }
