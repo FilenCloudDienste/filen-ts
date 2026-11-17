@@ -1,8 +1,8 @@
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6f14f300d22a8b787dae393f372409a22f97b1c5..1aa0b444a3926fda845391d97dba6cae302b88ea 100644
+index 6f14f300d22a8b787dae393f372409a22f97b1c5..95d9bee0240112d947665a4eeff068e460a46a8c 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -1461,6 +1461,11 @@ export declare class BasicInstrument {
+@@ -1461,6 +1461,16 @@ export declare class BasicInstrument {
   * @group Sound Banks.Samples
   */
  export declare class BasicSample {
@@ -11,10 +11,15 @@ index 6f14f300d22a8b787dae393f372409a22f97b1c5..1aa0b444a3926fda845391d97dba6cae
 +   * silence. Infinity by default.
 +   */
 +  static maxDecodedBytes: number;
++  /**
++   * Asked before a compressed sample decodes, with the most bytes it may decode to: false refuses it, and it plays as
++   * silence. Admits every one by default.
++   */
++  static admitDecode: (bytes: number) => boolean;
    /**
     * The sample's name.
     */
-@@ -4249,6 +4254,20 @@ export declare class SpessaSynthProcessor {
+@@ -4249,6 +4259,25 @@ export declare class SpessaSynthProcessor {
     * It is only counted when a budget is set.
     */
    get decodedSampleBytes(): number;
@@ -32,10 +37,15 @@ index 6f14f300d22a8b787dae393f372409a22f97b1c5..1aa0b444a3926fda845391d97dba6cae
 +   * @param sample The sample.
 +   */
 +  holdsDecodedSample(sample: BasicSample): boolean;
++  /**
++   * The decoded sample data this synthesizer keeps alive: what its budget tracks, what its voice cache and its sounding
++   * voices play from. A voice no longer sounding first lets go of the data it last played.
++   */
++  decodedSampleData(): Set<Float32Array>;
    /**
     * Locks or unlocks a given {@link GlobalMIDIParameter}.
     * This prevents any changes to it until it's unlocked.
-@@ -7243,6 +7262,10 @@ export declare class BasicMIDI {
+@@ -7243,6 +7272,10 @@ export declare class BasicMIDI {
     * It also handles embedded soundbanks in RMIDI and XMF files.
     * Tracker modules are converted into MIDI with an embedded sound bank.
     */
@@ -47,7 +57,7 @@ index 6f14f300d22a8b787dae393f372409a22f97b1c5..1aa0b444a3926fda845391d97dba6cae
    /**
     * Loads a MIDI file (SMF, RMIDI, XMF, Tracker Modules) from a given file.
 diff --git a/dist/index.js b/dist/index.js
-index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca3b6cbecd 100644
+index 071a2d107b2db450dfcc632cf031abef490f51fe..8953954a0b7fcdafe5917be9dc66f641861ee355 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -6271,6 +6271,7 @@ function parseSMFInternal(outputMIDI, smfFileBinary, fileName) {
@@ -75,7 +85,7 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
  			const eventData = new IndexedByteArray(dataSize);
  			eventData.set(trackData.slice(trackData.currentIndex, trackData.currentIndex + dataSize));
  			track.pushEvents(new MIDIMessage(totalTicks, statusByte, eventData));
-@@ -7386,7 +7390,42 @@ function getVorbisLength(data) {
+@@ -7386,7 +7390,51 @@ function getVorbisLength(data) {
  *
  * @group Sound Banks.Samples
  */
@@ -110,24 +120,42 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
 +	if (channels === 0 || halfBlock === 0) return null;
 +	return Math.max(0, packets - 3) * halfBlock * channels * 4;
 +}
++/** What an idle voice holds in place of the sample data it last played. */
++const NO_SAMPLE_DATA = new Float32Array(0);
++/** The length of the silence a sample that is not decoded plays. */
++const SILENT_SAMPLE_FRAMES = 64;
 +var BasicSample = class BasicSample {
 +	/**
 +	* The most bytes a compressed sample may decode to: a stream whose pages allow more is not decoded, and plays as
 +	* silence. Infinity by default.
 +	*/
 +	static maxDecodedBytes = Infinity;
++	/**
++	* Asked before a compressed sample decodes, with the most bytes it may decode to: false refuses it, and it plays as
++	* silence. Admits every one by default.
++	*/
++	static admitDecode = (_bytes) => true;
  	/**
  	* The sample's name.
  	*/
-@@ -7846,19 +7885,26 @@ var BasicSample = class {
+@@ -7846,19 +7894,39 @@ var BasicSample = class {
  	decodeVorbis() {
  		if (this.audioData) return this.audioData;
  		if (!this.compressedData) throw new Error("Compressed data is missing.");
-+		// Silence for what is not decoded, no longer than the decode limit lets a sample be.
-+		const silence = () => new Float32Array(Math.min(this.loopEnd, Math.floor(BasicSample.maxDecodedBytes / 4)));
++		// A few frames of silence for what is not decoded, its loop held within them until a later decode restores it.
++		const silence = () => {
++			this.silencedLoop ??= [this.loopStart, this.loopEnd];
++			this.loopStart = Math.min(this.silencedLoop[0], SILENT_SAMPLE_FRAMES - 1);
++			this.loopEnd = Math.min(this.silencedLoop[1], SILENT_SAMPLE_FRAMES - 1);
++			return new Float32Array(SILENT_SAMPLE_FRAMES);
++		};
 +		const bound = vorbisDecodedBytesBound(this.compressedData);
 +		if (bound === null || bound > BasicSample.maxDecodedBytes) {
 +			SpessaLog.warn(`Sample ${this.name}: not decoded, as it may decode to more than ${BasicSample.maxDecodedBytes} bytes.`);
++			return silence();
++		}
++		if (!BasicSample.admitDecode(bound)) {
++			SpessaLog.warn(`Sample ${this.name}: not decoded, as the decoded sample data held leaves no room for it.`);
 +			return silence();
 +		}
  		try {
@@ -140,6 +168,10 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
  			} else if (vorbis.channels.length > 1) SpessaLog.warn(`Sample ${this.name}: Returned ${vorbis.channels.length} channels instead of mono.`);
  			const decoded = vorbis.channels[0];
  			for (let i = 0; i < decoded.length; i++) decoded[i] = Math.max(-1, Math.min(decoded[i], .999969482421875));
++			if (this.silencedLoop !== void 0) {
++				[this.loopStart, this.loopEnd] = this.silencedLoop;
++				this.silencedLoop = void 0;
++			}
  			return decoded;
  		} catch (error) {
  			SpessaLog.warn(`Error decoding sample ${this.name}: ${error}`);
@@ -148,7 +180,7 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
  		}
  	}
  };
-@@ -17877,6 +17923,10 @@ var BasicMIDI = class BasicMIDI {
+@@ -17877,6 +17945,10 @@ var BasicMIDI = class BasicMIDI {
  	* It also handles embedded soundbanks in RMIDI and XMF files.
  	* Tracker modules are converted into MIDI with an embedded sound bank.
  	*/
@@ -159,7 +191,7 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
  	static fromArrayBuffer(arrayBuffer, fileName = "") {
  		const mid = new BasicMIDI();
  		const binaryData = new IndexedByteArray(arrayBuffer);
-@@ -63445,6 +63495,30 @@ var SpessaSynthProcessor = class {
+@@ -63445,6 +63517,45 @@ var SpessaSynthProcessor = class {
  		return this.decodedSamples.totalBytes;
  	}
  	/**
@@ -185,6 +217,21 @@ index 071a2d107b2db450dfcc632cf031abef490f51fe..348d824b09e6a303d7cbe11cda8ac7ca
 +	*/
 +	holdsDecodedSample(sample) {
 +		return this.decodedSamples.entries.has(sample);
++	}
++	/**
++	* The decoded sample data this synthesizer keeps alive: what its budget tracks, what its voice cache and its sounding
++	* voices play from. A voice no longer sounding first lets go of the data it last played, which it would otherwise
++	* keep alive until it is reused.
++	*/
++	decodedSampleData() {
++		const held = /* @__PURE__ */ new Set();
++		for (const sample of this.decodedSamples.entries.keys()) if (sample.audioData) held.add(sample.audioData);
++		for (const cached of this.cachedVoices.values()) for (const voice of cached) if (voice.sampleData) held.add(voice.sampleData);
++		for (const voice of this.voices) for (const oscillator of voice.oscillators) {
++			if (!voice.isActive) oscillator.sampleData = NO_SAMPLE_DATA;
++			else if (oscillator.sampleData) held.add(oscillator.sampleData);
++		}
++		return held;
 +	}
 +	/**
  	* Locks or unlocks a given {@link GlobalMIDIParameter}.

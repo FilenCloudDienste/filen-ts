@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { BasicMIDI, BasicSample, SoundBankLoader, SpessaSynthProcessor, SpessaSynthSequencer, type BasicSoundBank } from "spessasynth_core"
 import { MIDI_MAX_EVENTS, midiEventCount, synthCap } from "@filen/shared"
+import { SampleBudget } from "@/workers/synth/sampleBudget"
 import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
 
 // MIDI songs rendered by spessasynth with the bundled SoundFont, started by the remux worker for MIDI playback and
@@ -10,9 +11,11 @@ import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type S
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
 
-// Decoded sample data the worker's renderers keep together, in bytes, shared out between those open; what a closed
-// one decoded goes with it, but for the samples another open renderer holds.
+// Decoded sample data the worker keeps alive, in bytes, a cap no decode passes; the renderers' caches share it out
+// between those open, and what a closed one decoded goes with it, but for the samples another open renderer holds.
 const DECODED_SAMPLE_BUDGET = 32 * 1024 * 1024
+// The most a single compressed sample may decode to.
+const MAX_SAMPLE_BYTES = 8 * 1024 * 1024
 // The id an RMI's own bank is added under, ahead of the bundled one; not spessasynth's own embedded id, which its
 // sequencer clears and parses again for every song it loads.
 const SONG_BANK = "song"
@@ -48,18 +51,14 @@ let bankUrl: string | null = null
 
 // The parse itself stops at the cap too, so no file gets past it whatever the count above makes of it.
 BasicMIDI.maxEvents = MIDI_MAX_EVENTS
-// A compressed sample (an RMI's own bank's, as the bundled one's) whose pages allow it to decode past the whole budget
-// is not decoded at all: a Vorbis stream could otherwise ask for gigabytes before any budget sees it.
-BasicSample.maxDecodedBytes = DECODED_SAMPLE_BUDGET
+// A compressed sample (an RMI's own bank's, as the bundled one's) whose pages allow it to decode past this is not decoded
+// at all: a Vorbis stream could otherwise ask for gigabytes. It also bounds the Vorbis decoder's own heap, which grows
+// to about 2.3 times its largest output and never shrinks.
+BasicSample.maxDecodedBytes = MAX_SAMPLE_BYTES
+// And none decodes unless what is held decoded, with its bound, stays within the budget.
+BasicSample.admitDecode = bytes => budget.admit(bytes)
 
-// The budget split between the renderers open: together they keep no more than it decoded.
-function shareBudget(): void {
-	const share = Math.floor(DECODED_SAMPLE_BUDGET / Math.max(1, renderers.size))
-
-	for (const renderer of renderers.values()) {
-		renderer.synth.decodedSampleBudget = share
-	}
-}
+const budget = new SampleBudget(DECODED_SAMPLE_BUDGET, () => [...renderers.values()].map(renderer => renderer.synth))
 
 class Unsupported extends Error {}
 class SourceLost extends Error {}
@@ -184,7 +183,7 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number }
 		left: new Float32Array(QUANTUM),
 		right: new Float32Array(QUANTUM)
 	})
-	shareBudget()
+	budget.share()
 
 	return { handle }
 }
@@ -203,7 +202,7 @@ function close(handle: number): void {
 	const others = [...renderers.values()]
 
 	renderer.synth.releaseDecodedSamples(sample => others.some(other => other.synth.holdsDecodedSample(sample)))
-	shareBudget()
+	budget.share()
 }
 
 function seek(renderer: Renderer, seconds: number): number {

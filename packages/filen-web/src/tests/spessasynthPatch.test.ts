@@ -51,6 +51,7 @@ function warnings(): string[] {
 
 afterEach(() => {
 	BasicSample.maxDecodedBytes = Number.POSITIVE_INFINITY
+	BasicSample.admitDecode = () => true
 	vi.restoreAllMocks()
 })
 
@@ -64,16 +65,33 @@ describe("the spessasynth_core patch's compressed-sample bound", () => {
 		const decoded = sample(vorbisStream(4000), 1000).getAudioData()
 
 		expect(seen).toEqual([expect.stringContaining("not decoded, as it may decode to more than")])
-		expect(decoded.length).toBe(1000)
+		expect(decoded.length).toBe(64)
 		expect(decoded.every(value => value === 0)).toBe(true)
 	})
 
-	it("plays what cannot be read as silence no longer than the limit, whatever loop end the header claims", () => {
+	it("plays what cannot be read as a few frames of silence, its loop held within them, whatever its header claims", () => {
 		BasicSample.maxDecodedBytes = 32 * 1024 * 1024
 
-		const garbage = sample(new Uint8Array(64).fill(0x5a), 0xffff_fff0).getAudioData()
+		const garbage = sample(new Uint8Array(64).fill(0x5a), 0xffff_fff0)
 
-		expect(garbage.length).toBe(8 * 1024 * 1024)
+		expect(garbage.getAudioData().length).toBe(64)
+		expect(garbage.loopEnd).toBeLessThan(64)
+	})
+
+	it("refuses a sample the admission hook has no room for, before decoding it", () => {
+		const seen = warnings()
+		const asked: number[] = []
+
+		BasicSample.admitDecode = bytes => {
+			asked.push(bytes)
+
+			return false
+		}
+
+		expect(sample(vorbisStream(10), 100).getAudioData().length).toBe(64)
+		// Ten audio packets, each at most half an 8192-sample block of mono floats.
+		expect(asked).toEqual([10 * 4096 * 4])
+		expect(seen).toEqual([expect.stringContaining("leaves no room")])
 	})
 
 	it("hands a stream within the limit to the decoder", () => {
