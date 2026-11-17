@@ -20,6 +20,7 @@ import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
 import { patchedListingsWritten } from "@/features/drive/queries/drive"
 import { clearPhotosRoots } from "@/e2e-hooks/photosLibrary"
 import { probeNativeImage } from "@/lib/nativeImageSupport"
+import { refineDeviceProfile } from "@/lib/deviceProfile"
 import {
 	pruneDeadVideoRoots,
 	videosSyncFileText,
@@ -214,6 +215,9 @@ interface E2eHooks {
 	clearPhotosRoots: () => Promise<number>
 	// The boot probe's answers (nativeImageSupport.ts), awaited: which formats this browser decodes by itself.
 	nativeImageSupport: () => Promise<{ heic: boolean; jxl: boolean }>
+	// Once the boot probes answered, has the device profile say this browser decodes neither HEIC nor JPEG XL, so the
+	// next image opened takes the route of a browser without them (our own decoders).
+	forceDecodedImages: () => Promise<void>
 }
 
 interface ArchiveCatalogueRow {
@@ -540,6 +544,10 @@ export function installE2eHooks(): void {
 			const [heic, jxl] = await Promise.all([probeNativeImage("heic"), probeNativeImage("jxl")])
 
 			return { heic, jxl }
+		},
+		forceDecodedImages: async () => {
+			await Promise.all([probeNativeImage("heic"), probeNativeImage("jxl")])
+			refineDeviceProfile({ heicNative: "no", jxlNative: "no" })
 		}
 	}
 }

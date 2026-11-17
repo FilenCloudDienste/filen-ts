@@ -1,20 +1,38 @@
-import { test, expect } from "./fixtures"
-import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
+import type { Locator, Page } from "@playwright/test"
+import { test, expect, readFixtureManifest, settleLeases } from "./fixtures"
+import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
-import { itemRow } from "./helpers/archive"
+import { itemRow, openArchive } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
-import { QOI_SIZE, TIFF_PAGE } from "./fixtures/images"
+import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
+import { PDF_BYTES } from "./helpers/fixtureBytes"
+import { IMAGE_ENTRIES, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
+import { preview } from "@/locales/en/preview"
 
-// Images only the app's own decoders show: decoded in the raster decode pool and drawn from a bitmap on a canvas.
-// Every leg reads the shared fixture tree; entering the editor writes nothing.
+// Images only the app's own decoders show (QOI, JPEG XL where the browser has no decoder, gzipped SVG, TIFF): decoded
+// in the raster decode pool or the MuPDF engine and drawn from a bitmap on a canvas. The viewer legs read the shared
+// fixture tree (on the drive, in an archive, behind a forced fallback); the editor, stamp and public-link legs work in
+// scratch directories of their own.
+
+// The engine worker compiles MuPDF (about 10 MB of wasm) on its first use.
+const ENGINE_TIMEOUT_MS = 60_000
+
+// The shown picture: an <img> (the browser's decode) or a canvas (ours), named for the file.
+function picture(page: Page, name: string): Locator {
+	return page.getByRole("img", { name, exact: true })
+}
+
+async function tagOf(locator: Locator): Promise<string> {
+	return await locator.evaluate(element => element.tagName)
+}
 
 const [QOI] = FIXTURE_FILES["images-qoi"]
 const [JXL] = FIXTURE_FILES["images-jxl"]
 const [SVGZ, SVGZ_BOMB] = FIXTURE_FILES["images-svgz"]
 const [TIFF_SINGLE, TIFF_PAGES, TIFF_BIG] = FIXTURE_FILES["images-tiff"]
 
-test("a QOI image is decoded and drawn, and opens in the editor", async ({ page, context, browserName }) => {
+test("a QOI image is decoded and drawn", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
 	const foreign = trackForeignRequests(context, { strictPreview: false })
 
@@ -31,15 +49,6 @@ test("a QOI image is decoded and drawn, and opens in the editor", async ({ page,
 	await expect(picture).toHaveAttribute("width", String(QOI_SIZE.width))
 	// Smaller than the display long side: drawn whole, no reduced chip.
 	await expect(page.getByRole("button", { name: "Full res ▸" })).toHaveCount(0)
-
-	// The editor decodes its own copy (the viewer shows a canvas, not an <img> to take pixels from). It needs WebGL 2,
-	// which only Chromium has on the Linux runners.
-	if (browserName === "chromium") {
-		await page.getByRole("button", { name: "Edit", exact: true }).click()
-		// A QOI with alpha saves as a PNG copy beside it.
-		await expect(page.getByRole("button", { name: "Save as PNG copy" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		await page.getByRole("button", { name: "Cancel", exact: true }).click()
-	}
 
 	await page.keyboard.press("Escape")
 	await expect(picture).toHaveCount(0)
@@ -67,6 +76,15 @@ test("a JPEG XL is shown by the browser where it decodes one, else decoded in th
 
 	expect(await picture.evaluate(element => element.tagName)).toBe(native ? "IMG" : "CANVAS")
 
+	await page.keyboard.press("Escape")
+	await expect(picture).toHaveCount(0)
+
+	// Forced onto the route of a browser without a decoder: libjxl in the pool, drawn on a canvas, in every engine.
+	await page.evaluate(() => window.__filenE2E.forceDecodedImages())
+	await itemRow(listbox, JXL).dblclick()
+	await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	expect(await picture.evaluate(element => element.tagName)).toBe("CANVAS")
+	await expect(picture).toHaveAttribute("width", "1")
 	await page.keyboard.press("Escape")
 	await expect(picture).toHaveCount(0)
 
@@ -146,4 +164,217 @@ test("a TIFF is read by the MuPDF engine: one page as a picture, several in the 
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+})
+
+test("QOI, JPEG XL and TIFF entries of an archive open through the entry's bytes", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const [ARCHIVE] = FIXTURE_FILES["images-archive"]
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-archive")
+	const browser = await openArchive(page, listbox, ARCHIVE)
+
+	for (const [format, name] of Object.entries(IMAGE_ENTRIES)) {
+		await expect(browser.row(name)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await browser.row(name).dblclick()
+
+		const shown = picture(page, name)
+
+		await expect(shown, format).toBeVisible({ timeout: format === "tiff" ? ENGINE_TIMEOUT_MS : LAZY_VIEWER_TIMEOUT_MS })
+
+		// QOI and TIFF are always ours; JPEG XL is the browser's where it decodes it.
+		if (format !== "jxl") {
+			expect(await tagOf(shown), format).toBe("CANVAS")
+		}
+
+		await page.getByRole("button", { name: preview.previewArchiveEntryBack, exact: true }).click()
+		await expect(shown).toHaveCount(0)
+	}
+
+	await browser.close()
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("a PDF stamp takes a TIFF's and a QOI's picture from Filen, and is never offered a gzipped SVG", async ({ page }) => {
+	test.slow()
+
+	const cspViolations = trackCspViolations(page)
+	const { fixtureRoot } = readFixtureManifest()
+
+	await withScratchDirectory(page, "images-stamp", async ({ listbox, runId }) => {
+		const name = `e2e-images-stamp-${runId}.pdf`
+
+		await uploadFiles(page, [{ name, mimeType: "application/pdf", buffer: PDF_BYTES }], listbox)
+		await itemRow(listbox, name).dblclick()
+
+		const dialog = page.getByRole("dialog").first()
+		const pageRegion = dialog.getByRole("region", { name: /Page 1 of/u })
+
+		await expect(pageRegion).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+		const stamps = dialog.locator('[data-annotation-type="Stamp"]')
+		const picker = page.getByRole("dialog", { name: preview.previewPdfAnnotImageFromFilen, exact: true })
+
+		// Stamp ▾ › Image from Filen, then a click on the page asks for the picture.
+		const place = async (at: number): Promise<void> => {
+			await dialog
+				.getByRole("button", { name: preview.previewPdfToolVariants.replace("{{tool}}", preview.previewPdfAnnotToolStamp) })
+				.click()
+			await page.getByRole("menuitem", { name: preview.previewPdfAnnotImageFromFilen }).click()
+
+			const box = await pageRegion.boundingBox()
+
+			if (box === null) throw new Error("the page is not shown")
+
+			await page.mouse.click(box.x + box.width * at, box.y + box.height * 0.5)
+
+			const author = page.getByRole("textbox", { name: preview.previewOfficeAuthorNameLabel })
+
+			if (await author.isVisible().catch(() => false)) {
+				await author.fill("E2E Author")
+				await page.getByRole("button", { name: preview.previewOfficeAuthorNameSave }).click()
+			}
+
+			await expect(picker).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+			await picker.getByRole("button", { name: fixtureRoot }).click()
+		}
+
+		// A gzipped SVG is not offered (markup, not pixels); its directory shows no file.
+		await place(0.3)
+		await picker.getByRole("button", { name: "images-svgz" }).click()
+		await expect(picker.getByRole("button", { name: /\.svgz$/u })).toHaveCount(0)
+		await page.keyboard.press("Escape")
+		await expect(picker).toHaveCount(0)
+
+		// A TIFF's first page, drawn by an engine of its own.
+		await place(0.3)
+		await picker.getByRole("button", { name: "images-tiff" }).click()
+		await picker.getByRole("button", { name: FIXTURE_FILES["images-tiff"][0], exact: true }).click()
+		await expect(picker).toHaveCount(0, { timeout: ENGINE_TIMEOUT_MS })
+		await expect(stamps).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
+
+		// A QOI, decoded in the raster decode pool.
+		await place(0.7)
+		await picker.getByRole("button", { name: "images-qoi" }).click()
+		await picker.getByRole("button", { name: QOI, exact: true }).click()
+		await expect(picker).toHaveCount(0, { timeout: ENGINE_TIMEOUT_MS })
+		await expect(stamps).toHaveCount(2, { timeout: ENGINE_TIMEOUT_MS })
+
+		// Left unsaved.
+		await page.keyboard.press("Escape")
+		await page
+			.getByRole("alertdialog", { name: preview.previewUnsavedChangesTitle })
+			.getByRole("button", { name: /Discard/u })
+			.click()
+		await expect(page.getByRole("dialog")).toHaveCount(0)
+	})
+
+	expect(cspViolations).toEqual([])
+})
+
+test("a QOI is edited from the pool's decode and saved as a PNG copy beside it", async ({ page }) => {
+	test.slow()
+
+	const cspViolations = trackCspViolations(page)
+
+	await withScratchDirectory(page, "images-qoi-edit", async ({ listbox, runId }) => {
+		const stem = `e2e-qoi-edit-${runId}`
+		const name = `${stem}.qoi`
+
+		await uploadFiles(page, [{ name, mimeType: "image/x-qoi", buffer: qoiSample() }], listbox)
+		await itemRow(listbox, name).dblclick()
+		await expect(picture(page, name)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await page.getByRole("button", { name: preview.previewImageSaveEditAction, exact: true }).click()
+
+		// The editor runs where the browser gives a worker WebGL 2; elsewhere it says so, and the leg ends there.
+		const save = page.getByRole("button", { name: preview.previewImageSaveAsPngCopyAction, exact: true })
+		const refused = page.getByText(preview.previewImageSaveRefusedNoGraphics, { exact: true })
+
+		await expect(save.or(refused)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+		if (await refused.isVisible()) {
+			test.info().annotations.push({ type: "skip-leg", description: "no WebGL 2 in a worker: the editor does not run here" })
+			await page.keyboard.press("Escape")
+
+			return
+		}
+
+		// A quarter turn, then the copy (a QOI with alpha saves as PNG).
+		await page.getByRole("tab", { name: preview.previewImageEditTabCrop }).click()
+		await page.getByRole("button", { name: preview.previewImageEditRotateLeft, exact: true }).click()
+		await expect(save).toBeEnabled()
+		await save.click()
+
+		const copy = `${stem} (edited).png`
+
+		await expect(page.getByText(`Saved as ${copy}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		// Out of edit mode, then out of the preview.
+		await expect(async () => {
+			if ((await page.getByRole("dialog").count()) > 0) {
+				await page.keyboard.press("Escape")
+			}
+
+			await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 2_000 })
+		}).toPass({ timeout: 15_000 })
+		await expect(itemRow(listbox, copy)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	})
+
+	expect(cspViolations).toEqual([])
+})
+
+test.describe("public links", () => {
+	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account (E2E_PREMIUM)")
+
+	test("a link's QOI, JPEG XL and TIFF are read without a session and shown", async ({ page }) => {
+		test.slow()
+
+		const cspViolations = trackCspViolations(page)
+
+		await withScratchDirectory(page, "images-links", async ({ listbox, runId }) => {
+			const files = [
+				{ name: `e2e-link-${runId}.qoi`, mimeType: "image/x-qoi", buffer: qoiSample(), ours: true },
+				{ name: `e2e-link-${runId}.jxl`, mimeType: "image/jxl", buffer: jxlSample(), ours: false },
+				{ name: `e2e-link-${runId}.tif`, mimeType: "image/tiff", buffer: tiffSample(), ours: true }
+			]
+
+			await uploadFiles(
+				page,
+				files.map(({ name, mimeType, buffer }) => ({ name, mimeType, buffer })),
+				listbox
+			)
+
+			const links: string[] = []
+
+			for (const { name } of files) {
+				const dialog = await openLinkDialog(page, listbox, name)
+
+				links.push(await createLink(dialog))
+				await closeLinkDialog(page, dialog)
+			}
+
+			try {
+				for (const [index, { name, ours }] of files.entries()) {
+					await settleLeases(page)
+					await page.goto(links[index] ?? "")
+
+					const shown = picture(page, name)
+
+					await expect(shown, name).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+
+					if (ours) {
+						expect(await tagOf(shown), name).toBe("CANVAS")
+					}
+				}
+			} finally {
+				// Back on the drive for the scratch directory's teardown (a link page has no sidebar).
+				await bootTo(page)
+			}
+		})
+
+		expect(cspViolations).toEqual([])
+	})
 })
