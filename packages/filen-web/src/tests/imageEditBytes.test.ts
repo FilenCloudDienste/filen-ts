@@ -813,6 +813,19 @@ describe("sniffImage — GIF, BMP, ICO", () => {
 		expect(sniffImage(animated, animated.length)?.animated).toBe(true)
 	})
 
+	it("sizes a GIF by its first frame's bounds where they reach past its logical screen", () => {
+		const file = concat(
+			ascii("GIF89a"),
+			[10, 0, 8, 0, 0, 0, 0],
+			// At (4, 2), 4000 × 6000.
+			[0x2c, 4, 0, 2, 0, 0xa0, 0x0f, 0x70, 0x17, 0],
+			[2, 2, 0x4c, 0x01, 0],
+			[0x3b]
+		)
+
+		expect(sniffImage(file, file.length)).toMatchObject({ mime: "image/gif", width: 4004, height: 6002 })
+	})
+
 	it("treats a looping GIF read only in part as animated", () => {
 		const file = gif(3, { loop: true })
 		const head = file.subarray(0, 40)

@@ -459,8 +459,9 @@ function sniffGif(head: Uint8Array, totalSize: number): SourceInfo | null {
 	}
 
 	const view = viewOf(head)
-	const width = view.getUint16(6, true)
-	const height = view.getUint16(8, true)
+	// The logical screen; a first frame reaching past it widens what decoders draw.
+	let width = view.getUint16(6, true)
+	let height = view.getUint16(8, true)
 	const screenFlags = view.getUint8(10)
 	let pos = 13 + ((screenFlags & 0x80) !== 0 ? 3 * 2 ** ((screenFlags & 7) + 1) : 0)
 	let frames = 0
@@ -494,6 +495,11 @@ function sniffGif(head: Uint8Array, totalSize: number): SourceInfo | null {
 		} else if (introducer === 0x2c) {
 			// Image Descriptor (§20): 9 bytes, an optional local colour table, the LZW code size, then the data.
 			const flags = head[pos + 9] ?? 0
+
+			if (frames === 0 && pos + 9 <= head.length) {
+				width = Math.max(width, view.getUint16(pos + 1, true) + view.getUint16(pos + 5, true))
+				height = Math.max(height, view.getUint16(pos + 3, true) + view.getUint16(pos + 7, true))
+			}
 
 			frames++
 			pos = skipSubBlocks(head, pos + 10 + ((flags & 0x80) !== 0 ? 3 * 2 ** ((flags & 7) + 1) : 0) + 1)
