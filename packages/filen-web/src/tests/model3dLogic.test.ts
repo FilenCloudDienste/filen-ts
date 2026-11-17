@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { zlibSync } from "fflate"
 import {
 	cameraPosition,
@@ -36,7 +36,15 @@ import {
 	textureSize
 } from "@/features/preview/lib/model3d/preflight.logic"
 import { bitmapOptions } from "@/features/preview/lib/model3d/imageLoaderShim"
-import { animationEntries, referenceOutcomes, referenceSummary } from "@/features/preview/components/model3dViewer.logic"
+import {
+	MAX_REFERENCES,
+	animationEntries,
+	referenceOutcomes,
+	referenceServer,
+	referenceSummary,
+	type ReferenceOutcome
+} from "@/features/preview/components/model3dViewer.logic"
+import type { ResolvedReference } from "@/features/preview/lib/referenceResolver"
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
 const deflate = (bytes: Uint8Array): Uint8Array => zlibSync(bytes)
@@ -330,5 +338,46 @@ describe("the viewer's references and animations", () => {
 		expect(new Set(entries.map(entry => entry.key)).size).toBe(4)
 		expect(entries.map(entry => entry.name)).toEqual(["Walk", null, "Walk", null])
 		expect(entries.map(entry => entry.clip)).toEqual([0, 1, 2, 3])
+	})
+})
+
+describe("referenceServer", () => {
+	function resolver(size: number) {
+		const reads = vi.fn(() => Promise.resolve(new Uint8Array(size)))
+		const resolve = vi.fn((path: string): Promise<ResolvedReference> =>
+			Promise.resolve(path.includes("missing") ? { status: "missing" } : { status: "found", size, read: reads })
+		)
+
+		return { resolve, reads }
+	}
+
+	it("looks up and reads a file once however often, and however the model spells it, it is named", async () => {
+		const { resolve, reads } = resolver(10)
+		const outcomes: ReferenceOutcome[] = []
+		const serve = referenceServer(resolve, 1000, new AbortController().signal, outcome => outcomes.push(outcome))
+
+		const blobs = await Promise.all(["tex/Wood.png", "tex/wood.png", "./tex/WOOD.png", "tex%2Fwood.png"].map(serve))
+
+		expect(blobs.every(blob => blob instanceof Blob)).toBe(true)
+		expect(resolve).toHaveBeenCalledOnce()
+		expect(reads).toHaveBeenCalledOnce()
+		expect(outcomes).toHaveLength(1)
+	})
+
+	it("holds references read together against the cap, and stops looking past the distinct-file limit", async () => {
+		const { resolve, reads } = resolver(600)
+		const outcomes: ReferenceOutcome[] = []
+		const serve = referenceServer(resolve, 1000, new AbortController().signal, outcome => outcomes.push(outcome))
+
+		const [a, b] = await Promise.all([serve("a.png"), serve("b.png")])
+
+		expect([a, b].filter(blob => blob !== null)).toHaveLength(1)
+		expect(reads).toHaveBeenCalledOnce()
+
+		const many = referenceServer(resolver(0).resolve, 1000, new AbortController().signal, outcome => outcomes.push(outcome))
+
+		await Promise.all(Array.from({ length: MAX_REFERENCES + 5 }, (_, i) => many(`missing-${String(i)}.png`)))
+
+		expect(outcomes.filter(outcome => outcome.status === "refused" && outcome.path.startsWith("missing-"))).toHaveLength(5)
 	})
 })

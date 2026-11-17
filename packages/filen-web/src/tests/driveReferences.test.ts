@@ -4,16 +4,19 @@ import type { DriveItem } from "@/features/drive/lib/item"
 // The drive's references: the model's directory as a cached listing holds it, else its parent listed once (a model
 // opened from Recents, search or Favorites); a subdirectory listed once, only when named; each found file read whole.
 
-const { cachedSiblings, cachedListing, fetchDirectoryListing, loadOriginBytes } = vi.hoisted(() => ({
-	cachedSiblings: vi.fn<(uuid: string) => readonly DriveItem[]>(() => []),
-	cachedListing: vi.fn<(variant: string, uuid: string | null) => DriveItem[] | undefined>(() => undefined),
+interface CachedQuery {
+	queryKey: readonly unknown[]
+	state: { data: DriveItem[] }
+}
+
+const { cached, fetchDirectoryListing, loadOriginBytes } = vi.hoisted(() => ({
+	cached: [] as CachedQuery[],
 	fetchDirectoryListing: vi.fn<(variant: string, uuid: string | null) => Promise<DriveItem[]>>(),
 	loadOriginBytes: vi.fn(() => Promise.resolve(new Uint8Array(4)))
 }))
 
-vi.mock("@/features/preview/lib/previewSubtitles", () => ({ cachedSiblings }))
-vi.mock("@/features/drive/queries/drive", () => ({ cachedListing, fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX: ["drive", "listing"] }))
-vi.mock("@/queries/patch", () => ({ cachedQueriesWithPrefix: () => [] }))
+vi.mock("@/features/drive/queries/drive", () => ({ fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX: ["drive", "listing"] }))
+vi.mock("@/queries/patch", () => ({ cachedQueriesWithPrefix: () => cached }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root" }))
 vi.mock("@/features/preview/lib/origin/loadBytes", () => ({ loadOriginBytes }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: () => Promise.resolve() } }))
@@ -28,7 +31,12 @@ function directory(name: string, uuid: string): DriveItem {
 
 const MODEL = file("mesh.obj")
 
+function listing(variant: string, uuid: string | null, rows: DriveItem[]): CachedQuery {
+	return { queryKey: ["drive", "listing", { variant, uuid }], state: { data: rows } }
+}
+
 beforeEach(() => {
+	cached.length = 0
 	fetchDirectoryListing.mockImplementation((_variant, uuid) =>
 		Promise.resolve(
 			uuid === "models"
@@ -70,10 +78,23 @@ describe("driveReferences", () => {
 	it("uses the cached listing that holds the model, listing nothing", async () => {
 		const { driveReferences } = await import("@/features/preview/lib/referenceResolver")
 
-		cachedSiblings.mockReturnValueOnce([MODEL, file("mesh.mtl")])
+		cached.push(listing("drive", "models", [MODEL, file("mesh.mtl")]))
 
 		expect((await driveReferences(MODEL)("mesh.mtl")).status).toBe("found")
 		expect(fetchDirectoryListing).not.toHaveBeenCalled()
+	})
+
+	it("never lists a shared directory through the SDK, only reads one the cache holds", async () => {
+		const { driveReferences } = await import("@/features/preview/lib/referenceResolver")
+
+		cached.push(listing("sharedIn", "share", [MODEL, directory("Textures", "shared-textures")]))
+
+		expect((await driveReferences(MODEL)("Textures/wood.png")).status).toBe("missing")
+		expect(fetchDirectoryListing).not.toHaveBeenCalled()
+
+		cached.push(listing("sharedIn", "shared-textures", [file("wood.png", "shared-textures")]))
+
+		expect((await driveReferences(MODEL)("Textures/wood.png")).status).toBe("found")
 	})
 
 	it("lists the drive's root by its own target", async () => {

@@ -4,7 +4,8 @@
 export type ResourceRequest =
 	| { kind: "blob"; href: string }
 	| { kind: "data"; href: string }
-	// The path after `filen-ref:///`, still percent-encoded; the resolver decodes and normalises it.
+	// The path after `filen-ref:///` exactly as the loader wrote it (still percent-encoded, `..`, `#` and `?` kept, as
+	// URL parsing would drop or fold them); the resolver decodes and normalises it, and refuses what climbs out.
 	| { kind: "ref"; path: string }
 	| { kind: "asset"; href: string }
 	| { kind: "external" }
@@ -13,6 +14,8 @@ export const REFERENCE_SCHEME = "filen-ref:"
 
 // `assets` are same-origin path prefixes ("/assets/three/"); anything else on any origin is external.
 export function classifyResourceUrl(raw: string, base: string, assets: readonly string[]): ResourceRequest {
+	if (raw.toLowerCase().startsWith(REFERENCE_SCHEME)) return { kind: "ref", path: raw.slice(REFERENCE_SCHEME.length).replace(/^\/+/, "") }
+
 	let url: URL
 
 	try {
@@ -28,10 +31,6 @@ export function classifyResourceUrl(raw: string, base: string, assets: readonly 
 
 		case "data:": {
 			return { kind: "data", href: url.href }
-		}
-
-		case REFERENCE_SCHEME: {
-			return { kind: "ref", path: url.pathname.replace(/^\/+/, "") }
 		}
 
 		case "http:":

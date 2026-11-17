@@ -24,8 +24,10 @@ describe("classifyResourceUrl", () => {
 		expect(classifyResourceUrl("filen-ref:///sub%20dir/a.png", BASE, ASSETS)).toEqual({ kind: "ref", path: "sub%20dir/a.png" })
 	})
 
-	it("never lets a reference climb above its root", () => {
-		expect(classifyResourceUrl("filen-ref:///../../etc/x", BASE, ASSETS)).toEqual({ kind: "ref", path: "etc/x" })
+	it("hands `..`, `#` and `?` over as written, for the resolver to refuse or find", () => {
+		expect(classifyResourceUrl("filen-ref:///../../etc/x", BASE, ASSETS)).toEqual({ kind: "ref", path: "../../etc/x" })
+		expect(classifyResourceUrl("filen-ref:///maps/a#1.png", BASE, ASSETS)).toEqual({ kind: "ref", path: "maps/a#1.png" })
+		expect(classifyResourceUrl("filen-ref:///x?.png", BASE, ASSETS)).toEqual({ kind: "ref", path: "x?.png" })
 	})
 })
 
@@ -72,6 +74,7 @@ describe("resourceBudget", () => {
 describe("installResourceSandbox", () => {
 	const saved = {
 		fetch: globalThis.fetch,
+		Request: globalThis.Request,
 		create: URL.createObjectURL.bind(URL),
 		revoke: URL.revokeObjectURL.bind(URL),
 		XMLHttpRequest: (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest,
@@ -87,6 +90,7 @@ describe("installResourceSandbox", () => {
 
 	afterEach(() => {
 		globalThis.fetch = saved.fetch
+		globalThis.Request = saved.Request
 		URL.createObjectURL = saved.create
 		URL.revokeObjectURL = saved.revoke
 		Object.assign(globalThis, { XMLHttpRequest: saved.XMLHttpRequest, WebSocket: saved.WebSocket, EventSource: saved.EventSource })
@@ -140,6 +144,15 @@ describe("installResourceSandbox", () => {
 		await expect((await fetch("filen-ref:///tex.png")).text()).resolves.toBe("pixels")
 		expect((await fetch("filen-ref:///missing.png")).status).toBe(404)
 		await expect(fetch("filen-ref:///tex.png")).rejects.toMatchObject({ name: "ResourceBudgetExceeded" })
+	})
+
+	it("resolves a reference fetched through a Request by the string it was built from", async () => {
+		const resolve = vi.fn((path: string) => Promise.resolve(path === "../a#1.png" ? new Blob(["x"]) : null))
+
+		install(10, resolve)
+
+		await expect((await fetch(new Request("filen-ref:///../a#1.png"))).text()).resolves.toBe("x")
+		expect(resolve).toHaveBeenCalledWith("../a#1.png")
 	})
 
 	it("passes same-origin assets to the real fetch and refuses everything else, counting it", async () => {

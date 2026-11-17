@@ -33,9 +33,13 @@ export interface ResourceSandbox {
 	blocked(): number
 }
 
+// The string each Request was built from: its `url` is parsed, which folds a reference's `..` and drops what follows a
+// `#` (a file name's own character in an MTL).
+const requestSources = new WeakMap<Request, string>()
+
 function requestUrl(input: RequestInfo | URL): string {
 	if (input instanceof Request) {
-		return input.url
+		return requestSources.get(input) ?? input.url
 	}
 
 	return input instanceof URL ? input.href : input
@@ -53,6 +57,18 @@ export function installResourceSandbox({ assets, resolve, budget: limit }: Resou
 		blocked++
 
 		throw new ExternalReferenceBlockedError()
+	}
+
+	const RealRequest = globalThis.Request
+
+	// Loaders build a Request from the URL string before they fetch it (three's FileLoader).
+	globalThis.Request = class extends RealRequest {
+		constructor(input: RequestInfo | URL, init?: RequestInit) {
+			super(input, init)
+
+			if (typeof input === "string") requestSources.set(this, input)
+			else if (input instanceof RealRequest) requestSources.set(this, requestUrl(input))
+		}
 	}
 
 	globalThis.fetch = async (input, init) => {

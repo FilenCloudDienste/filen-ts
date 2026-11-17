@@ -14,7 +14,7 @@ import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewAccessMode, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
 import { usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
-import { usePreviewReferences, type ReferenceResolver } from "@/features/preview/lib/referenceResolver"
+import { usePreviewReferences } from "@/features/preview/lib/referenceResolver"
 import { CanvasViewerShell } from "@/features/preview/components/canvasViewerShell"
 import { MetadataCard } from "@/features/preview/components/metadataCard"
 import { TextViewer } from "@/features/preview/components/textViewer"
@@ -22,8 +22,10 @@ import { PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features
 import type { MetadataSectionData } from "@/features/preview/lib/metadataCard.types"
 import { MODEL_MAX_BYTES, TEXTURE_BPP, isTextModel, modelFormat, type ModelFormat } from "@/features/preview/lib/model3d/preflight.logic"
 import {
+	PANEL_REFERENCES,
 	animationEntries,
 	referenceOutcomes,
+	referenceServer,
 	referenceSummary,
 	type ReferenceOutcome
 } from "@/features/preview/components/model3dViewer.logic"
@@ -53,47 +55,6 @@ const FORMAT_LABELS: Record<ModelFormat, string> = {
 	usdz: "USDZ"
 }
 
-// Serves the worker's references through the surface's resolver, every file within what the model left of the cap.
-// Each outcome is recorded for the information panel.
-function referenceServer(
-	resolver: ReferenceResolver | null,
-	budget: number,
-	signal: AbortSignal,
-	record: (outcome: ReferenceOutcome) => void
-): (path: string) => Promise<Blob | null> {
-	let left = budget
-
-	return async path => {
-		const found =
-			resolver === null ? ({ status: "missing" } as const) : await resolver(path).catch(() => ({ status: "missing" }) as const)
-
-		if (found.status !== "found") {
-			record({ path, status: found.status })
-
-			return null
-		}
-
-		if (found.size > left) {
-			record({ path, status: "refused" })
-
-			return null
-		}
-
-		const bytes = await found.read(left, signal).catch(() => null)
-
-		if (bytes === null) {
-			record({ path, status: "missing" })
-
-			return null
-		}
-
-		left -= bytes.byteLength
-		record({ path, status: "found" })
-
-		return new Blob([bytes as Uint8Array<ArrayBuffer>])
-	}
-}
-
 function InfoPanel({ item, scene }: { item: DriveItem; scene: SceneLoad }) {
 	const { t } = useTranslation("preview")
 	const { load, references } = scene
@@ -120,10 +81,17 @@ function InfoPanel({ item, scene }: { item: DriveItem; scene: SceneLoad }) {
 	}
 
 	const summary = referenceSummary(references)
+	// The first few of each kind, then how many more: a model may name thousands.
+	const listed = (paths: readonly string[], label: string) => [
+		...paths.slice(0, PANEL_REFERENCES).map(path => ({ label, value: path, mono: true })),
+		...(paths.length > PANEL_REFERENCES
+			? [{ label, value: t("previewModelInfoMore", { count: paths.length - PANEL_REFERENCES }) }]
+			: [])
+	]
 	const fields = [
-		...summary.missing.map(path => ({ label: t("previewModelInfoMissing"), value: path, mono: true })),
-		...summary.unreadable.map(path => ({ label: t("previewModelInfoUnreadable"), value: path, mono: true })),
-		...summary.refused.map(path => ({ label: t("previewModelInfoRefused"), value: path, mono: true })),
+		...listed(summary.missing, t("previewModelInfoMissing")),
+		...listed(summary.unreadable, t("previewModelInfoUnreadable")),
+		...listed(summary.refused, t("previewModelInfoRefused")),
 		...(load.blocked > 0 ? [{ label: t("previewModelInfoBlocked"), value: number(load.blocked) }] : []),
 		...(load.skippedTextures > 0 ? [{ label: t("previewModelInfoSkipped"), value: number(load.skippedTextures) }] : [])
 	]
@@ -261,7 +229,7 @@ function ModelScene({
 		return target
 			.run(remote =>
 				remote.load(
-					Comlink.transfer({ bytes: sent, format, texturePixels: workerDecodePixels(profile, bytes.byteLength, TEXTURE_BPP) }, [
+					Comlink.transfer({ bytes: sent, format, texturePixels: workerDecodePixels(profile, MODEL_MAX_BYTES, TEXTURE_BPP) }, [
 						sent.buffer
 					]),
 					Comlink.proxy(serve)

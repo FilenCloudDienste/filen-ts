@@ -47,6 +47,9 @@ export const previewRichModel3d = {
 	previewModelInfoUnreadable: "Not readable on its own",
 	/** 3D viewer — information panel: a referenced file outside the model's directory, or one that did not fit */
 	previewModelInfoRefused: "Not loaded",
+	/** 3D viewer — information panel: how many more referenced files of the kind above are not listed */
+	previewModelInfoMore_one: "and {{count, number}} more",
+	previewModelInfoMore_other: "and {{count, number}} more",
 	/** 3D viewer — information panel: references to the network, refused */
 	previewModelInfoBlocked: "Network references blocked",
 	/** 3D viewer — information panel: textures too large to load */

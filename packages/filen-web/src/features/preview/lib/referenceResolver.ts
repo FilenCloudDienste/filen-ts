@@ -1,9 +1,8 @@
 import { createContext, useContext } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { cachedListing, fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX } from "@/features/drive/queries/drive"
+import { fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX } from "@/features/drive/queries/drive"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { cachedQueriesWithPrefix } from "@/queries/patch"
-import { cachedSiblings } from "@/features/preview/lib/previewSubtitles"
 import { originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { sdkApi } from "@/lib/sdk/client"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
@@ -92,49 +91,68 @@ function driveOrigin(item: DriveItem): ByteOrigin {
 	return { kind: "file", file: base.data }
 }
 
-// A directory's rows as any cached listing of it holds them (its own directory's, or a shared one's).
-function cachedDirectory(uuid: string): readonly DriveItem[] | undefined {
-	const own = cachedListing("drive", uuid === currentRootUuid() ? null : uuid)
-
-	if (own !== undefined) return own
-
-	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
-		const params = query.queryKey[2] as { variant?: unknown; uuid?: unknown } | undefined
-		const data = query.state.data as DriveItem[] | undefined
-
-		if (data !== undefined && params?.uuid === uuid && (params.variant === "sharedIn" || params.variant === "sharedOut")) return data
-	}
-
-	return undefined
+// A drive directory in the walk, and whether its listing is the owner's own (the drive's): only an own directory is ever
+// listed through the SDK. A shared one's listing needs the share's path, which only its own view has.
+interface DriveDirectory {
+	readonly item: DriveItem
+	readonly own: boolean
 }
 
-async function driveDirectory(item: DriveItem): Promise<readonly DriveItem[]> {
-	const cached = cachedDirectory(item.data.uuid)
+function directoryListing(items: readonly DriveItem[], own: boolean): ReferenceListing<DriveDirectory, ByteOrigin> {
+	const listing = itemListing(items, driveOrigin)
 
-	if (cached !== undefined) return cached
+	return { files: listing.files, dirs: listing.dirs.map(([name, item]) => [name, { item, own }] as const) }
+}
 
-	// Only an own directory is listed; a shared one's listing needs the share's path, which only its own view has.
-	return item.type === "directory" ? await fetchDirectoryListing("drive", item.data.uuid) : []
+// The directory listing holding `uuid` (a row of it, or the directory itself), as the cache holds it: the drive's own,
+// or a shared directory's.
+function cachedListingOf(
+	match: (params: { variant?: unknown; uuid?: unknown }, rows: readonly DriveItem[]) => boolean
+): { rows: readonly DriveItem[]; own: boolean } | null {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
+		const params = query.queryKey[2] as { variant?: unknown; uuid?: unknown } | undefined
+		const rows = query.state.data as DriveItem[] | undefined
+		const directory =
+			params?.variant === "drive" || ((params?.variant === "sharedIn" || params?.variant === "sharedOut") && params.uuid !== null)
+
+		if (rows !== undefined && params !== undefined && directory && match(params, rows)) return { rows, own: params.variant === "drive" }
+	}
+
+	return null
+}
+
+function cachedDirectory(uuid: string): readonly DriveItem[] | undefined {
+	const root = uuid === currentRootUuid() ? null : uuid
+
+	return cachedListingOf(params => params.uuid === root || params.uuid === uuid)?.rows
+}
+
+async function driveDirectory(directory: DriveDirectory): Promise<ReferenceListing<DriveDirectory, ByteOrigin>> {
+	const cached = cachedDirectory(directory.item.data.uuid)
+
+	if (cached !== undefined) return directoryListing(cached, directory.own)
+
+	return directory.own && directory.item.type === "directory"
+		? directoryListing(await fetchDirectoryListing("drive", directory.item.data.uuid), true)
+		: { dirs: [], files: [] }
 }
 
 export function driveReferences(item: DriveItem): ReferenceResolver {
-	return originResolver<DriveItem>(
+	return originResolver<DriveDirectory>(
 		async () => {
-			const cached = cachedSiblings(item.data.uuid)
+			const holding = cachedListingOf((_params, rows) => rows.some(row => row.data.uuid === item.data.uuid))
 
-			if (cached.length > 0) return itemListing(cached, driveOrigin)
+			if (holding !== null) return directoryListing(holding.rows, holding.own)
 
-			// Opened from a flat listing (recents, favorites, search, links): its directory is listed once.
+			// Opened from a flat listing (recents, favorites, search, links): an own file's directory is listed once.
 			if (item.type !== "file") return { dirs: [], files: [] }
 
 			const parent = item.data.parent
+			const cached = cachedDirectory(parent)
 
-			return itemListing(
-				cachedDirectory(parent) ?? (await fetchDirectoryListing("drive", parent === currentRootUuid() ? null : parent)),
-				driveOrigin
-			)
+			return directoryListing(cached ?? (await fetchDirectoryListing("drive", parent === currentRootUuid() ? null : parent)), true)
 		},
-		async dir => itemListing(await driveDirectory(dir), driveOrigin),
+		driveDirectory,
 		"authed"
 	)
 }
