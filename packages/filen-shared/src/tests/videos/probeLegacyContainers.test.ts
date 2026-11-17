@@ -361,6 +361,7 @@ describe("probeVideo — MPEG-PS", () => {
 		expect((await probe(lpcm(0x01)))?.audio[0]).toMatchObject({ codec: "pcm", ch: 2, rate: 48000 })
 		expect((await probe(lpcm(0x81)))?.audio[0]).toMatchObject({ codec: "lpcm", ch: 2 })
 		expect((await probe(lpcm(0x41)))?.audio[0]?.codec).toBe("lpcm")
+		expect((await probe(lpcm(0xc1)))?.audio[0]?.codec).toBeNull()
 	})
 
 	it("tells MPEG-1 video by its missing sequence extension, and reads a tail blocks away", async () => {

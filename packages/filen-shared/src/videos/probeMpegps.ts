@@ -279,8 +279,11 @@ function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 		stream.rate = ((format >> 4) & 0x03) === 1 ? 96000 : 48000
 		stream.ch = (format & 0x07) + 1
 
-		if (format >> 6 !== 0) {
-			stream.codec = "lpcm"
+		// 20 and 24 bits are packed in sample groups; the fourth quantisation is reserved, and nothing reads it.
+		const quantisation = format >> 6
+
+		if (quantisation !== 0) {
+			stream.codec = quantisation === 3 ? null : "lpcm"
 		}
 	}
 
