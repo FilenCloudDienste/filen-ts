@@ -34,6 +34,10 @@ function writeLayout(path: string, parts: readonly LayoutPart[]): number {
 	return at
 }
 
+function layoutLength(parts: readonly LayoutPart[]): number {
+	return parts.reduce<number>((length, part) => length + (typeof part === "number" ? part : part.length), 0)
+}
+
 const latin1 = (text: string): Buffer => Buffer.from(text, "latin1")
 
 interface SparseObject {
@@ -101,25 +105,28 @@ function pageText(label: string): string {
 // ---- a 100 MiB PDF whose page 1 sits in its first block --------------------------------------------------------
 
 export const PDF_THUMB_LARGE_BYTES = 100 * MIB
-// Room left for everything but the filler, so the file stays within its 100 blocks.
-const PDF_THUMB_SYNTAX_BYTES = 4096
 
 // Catalog, page tree, font, page 1 and its text in the first block, then an object nothing references (zeros, to
-// just under 100 MiB), then the cross-reference table in the last block: a reader drawing page 1 reads the first and
-// the last block and nothing between. Returns the file's length.
+// fill the file to exactly 100 MiB), then the cross-reference table in the last block: a reader drawing page 1 reads
+// the first and the last block and nothing between. Returns the file's length.
 export function writeLargeThumbPdf(path: string): number {
-	const objects: SparseObject[] = [
-		{ dict: "<< /Type /Catalog /Pages 2 0 R >>" },
-		{ dict: "<< /Type /Pages /Kids [4 0 R] /Count 1 >>" },
-		{ dict: HELVETICA },
-		{
-			dict: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(PAGE_WIDTH)} ${String(PAGE_HEIGHT)}] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>`
-		},
-		{ dict: "<< >>", stream: pageText("Large PDF thumbnail") },
-		{ dict: "<< >>", zeros: PDF_THUMB_LARGE_BYTES - PDF_THUMB_SYNTAX_BYTES }
-	]
+	const layout = (filler: number): PdfLayout =>
+		pdfLayout([
+			{ dict: "<< /Type /Catalog /Pages 2 0 R >>" },
+			{ dict: "<< /Type /Pages /Kids [4 0 R] /Count 1 >>" },
+			{ dict: HELVETICA },
+			{
+				dict: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(PAGE_WIDTH)} ${String(PAGE_HEIGHT)}] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>`
+			},
+			{ dict: "<< >>", stream: pageText("Large PDF thumbnail") },
+			{ dict: "<< >>", zeros: filler }
+		])
+	// The syntax around the filler, measured at a filler of the final one's digit count (its /Length and the
+	// startxref grow with it).
+	const probe = PDF_THUMB_LARGE_BYTES - MIB
+	const syntax = layoutLength(layout(probe).parts) - probe
 
-	return writeLayout(path, pdfLayout(objects).parts)
+	return writeLayout(path, layout(PDF_THUMB_LARGE_BYTES - syntax).parts)
 }
 
 // ---- a 300 MiB image and a resident PDF ---------------------------------------------------------------------------
