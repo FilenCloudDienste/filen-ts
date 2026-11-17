@@ -91,4 +91,18 @@ describe("MarkdownView math (opt-in)", () => {
 			'<p>from <code class="language-math math-inline">x</code> to <code class="language-math math-inline">y</code></p>'
 		)
 	})
+
+	it("parses what lies between two prices as usual", () => {
+		expect(html("Pay $5 for [the book](https://x.y) and $3 shipping.", undefined, MATH)).toBe(
+			'<p>Pay $5 for <a href="https://x.y">the book</a> and $3 shipping.</p>'
+		)
+		expect(html("costs $5 and `code` $10", undefined, MATH)).toBe("<p>costs $5 and <code>code</code> $10</p>")
+		expect(html("**$5** and **$10**", undefined, MATH)).toBe("<p><strong>$5</strong> and <strong>$10</strong></p>")
+		expect(html("~~$5~~ now $4", undefined, MATH)).toBe("<p><del>$5</del> now $4</p>")
+		expect(html("> $5 and\n> $10 c", undefined, MATH)).toBe("<blockquote>\n<p>$5 and\n$10 c</p>\n</blockquote>")
+	})
+
+	it("keeps a math span whose closing sign a line ending follows", () => {
+		expect(html("$x$\nnext", undefined, MATH)).toBe('<p><code class="language-math math-inline">x</code>\nnext</p>')
+	})
 })
