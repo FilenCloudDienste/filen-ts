@@ -8,6 +8,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { narrowItem } from "@/features/drive/lib/item"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import { encodeTiff } from "@/tests/support/tiffBytes"
+import { mockScrollablePageColumn } from "@/tests/support/viewport"
 
 // The next-page key pressed straight after a document opens in the preview, focus still on the overlay itself: a PDF,
 // and a multi-page TIFF in the same page column (the MuPDF read role, its document a stand-in pdf.js one here).
@@ -151,7 +152,7 @@ afterEach(() => {
 	vi.unstubAllGlobals()
 })
 
-async function openAndPressN(item: ReturnType<typeof file>): Promise<void> {
+async function open(item: ReturnType<typeof file>): Promise<Element> {
 	render(
 		createElement(PreviewOverlay, {
 			variant: "drive",
@@ -176,6 +177,14 @@ async function openAndPressN(item: ReturnType<typeof file>): Promise<void> {
 		return element ?? document.body
 	})
 
+	return focused
+}
+
+async function openAndPressN(item: ReturnType<typeof file>): Promise<void> {
+	mockScrollablePageColumn()
+
+	const focused = await open(item)
+
 	expect(fireEvent.keyDown(focused, { key: "n", code: "KeyN" })).toBe(false)
 	await waitFor(() => {
 		expect(scrolled.at(-1)?.getAttribute("data-page")).toBe("2")
@@ -183,6 +192,16 @@ async function openAndPressN(item: ReturnType<typeof file>): Promise<void> {
 }
 
 describe("the next-page key straight after a document opens in the preview", () => {
+	it("does nothing where every page is in view, the key still kept from the browser", async () => {
+		const focused = await open(file("11111111-1111-1111-1111-111111111111", "doc.pdf", "application/pdf"))
+
+		await waitFor(() => {
+			expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next page" }).disabled).toBe(true)
+		})
+		expect(fireEvent.keyDown(focused, { key: "n", code: "KeyN" })).toBe(false)
+		expect(scrolled).toEqual([])
+	})
+
 	it("pages a PDF", async () => {
 		await openAndPressN(file("11111111-1111-1111-1111-111111111111", "doc.pdf", "application/pdf"))
 	})

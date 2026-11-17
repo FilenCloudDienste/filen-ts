@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { PDF_BASE_SCALE, type PdfViewerState } from "@filen/office/dom/pdf"
 import { isPdfHostAction, pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
+import { PDF_SCROLL_ROOM_ANY } from "@/features/preview/lib/pdfScrollRoom.logic"
 import { imageKeyTransform, imageViewerKey } from "@/features/preview/lib/imageViewerKeys.logic"
 import { codeViewKey, codeViewSettingsChange, stepFontSize } from "@/features/preview/lib/codeViewKeys.logic"
 import { imageEditorKey, imageOverlayKey } from "@/features/preview/imageEdit/lib/keys"
@@ -41,10 +42,26 @@ describe("the PDF viewer's page keys", () => {
 	it("runs the page commands, none past the last page", () => {
 		const state = { page: 3, pageCount: 3, scale: PDF_BASE_SCALE, zoomMode: "custom" } as PdfViewerState
 
-		expect(pdfViewerKeyCommand("preview.pdfPreviousPage", state)).toEqual({ type: "page.previous" })
-		expect(pdfViewerKeyCommand("preview.pdfFirstPage", state)).toEqual({ type: "page.first" })
-		expect(pdfViewerKeyCommand("preview.pdfNextPage", state)).toBeNull()
-		expect(pdfViewerKeyCommand("preview.pdfFitPage", state)).toEqual({ type: "zoom.fitPage" })
+		expect(pdfViewerKeyCommand("preview.pdfPreviousPage", state, PDF_SCROLL_ROOM_ANY)).toEqual({ type: "page.previous" })
+		expect(pdfViewerKeyCommand("preview.pdfFirstPage", state, PDF_SCROLL_ROOM_ANY)).toEqual({ type: "page.first" })
+		expect(pdfViewerKeyCommand("preview.pdfNextPage", state, PDF_SCROLL_ROOM_ANY)).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfFitPage", state, PDF_SCROLL_ROOM_ANY)).toEqual({ type: "zoom.fitPage" })
+	})
+
+	it("steps no page the column cannot scroll toward: N and P do nothing there, zoom still does", () => {
+		const state = { page: 1, pageCount: 3, scale: PDF_BASE_SCALE, zoomMode: "custom" } as PdfViewerState
+		const allInView = { back: false, forward: false }
+
+		expect(pdfViewerKeyCommand("preview.pdfNextPage", state, allInView)).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfLastPage", state, allInView)).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfNextPage", state, { back: false, forward: true })).toEqual({ type: "page.next" })
+
+		const last = { ...state, page: 2 }
+
+		expect(pdfViewerKeyCommand("preview.pdfPreviousPage", last, { back: false, forward: true })).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfFirstPage", last, { back: false, forward: true })).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfPreviousPage", last, { back: true, forward: false })).toEqual({ type: "page.previous" })
+		expect(pdfViewerKeyCommand("preview.pdfFitPage", state, allInView)).toEqual({ type: "zoom.fitPage" })
 	})
 
 	it("hands go to page, full screen and properties to the host; fit and properties ship unbound", () => {

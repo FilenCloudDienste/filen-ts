@@ -22,6 +22,7 @@ import {
 	type FitShortcuts
 } from "@/features/preview/components/commandBarControls"
 import { BAR_BUTTON, BAR_MENU, pageControlsWidth, ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
+import { pdfPageCommandEnabled, type PdfScrollRoom } from "@/features/preview/lib/pdfScrollRoom.logic"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import type { DocxFindControls } from "@/features/preview/components/docxViewer.logic"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -123,6 +124,8 @@ export interface PdfCommandBarProps {
 	extraGroups?: readonly RibbonGroup[]
 	// False for a document without text (an image's pages): no Find.
 	searchable?: boolean
+	// The page column's room to scroll: a page step with none that way is off.
+	scrollRoom: PdfScrollRoom
 }
 
 // The fit keys the zoom menu's fit entries show.
@@ -150,7 +153,8 @@ export function usePdfCommandParts({
 	pageInputRef,
 	outlinePane,
 	extraGroups,
-	searchable
+	searchable,
+	scrollRoom
 }: PdfCommandBarProps): PdfCommandParts {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -169,8 +173,8 @@ export function usePdfCommandParts({
 					page={state.page}
 					total={state.pageCount}
 					ends={!phone}
-					canPrevious={isPdfCommandEnabled(state, "page.previous")}
-					canNext={isPdfCommandEnabled(state, "page.next")}
+					canPrevious={pdfPageCommandEnabled(state, "page.previous", scrollRoom)}
+					canNext={pdfPageCommandEnabled(state, "page.next", scrollRoom)}
 					onGo={page => {
 						dispatch({ type: "page.goto", page })
 					}}

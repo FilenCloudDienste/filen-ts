@@ -1,4 +1,5 @@
-import { isPdfCommandEnabled, PDF_BASE_SCALE, type PdfViewerCommand, type PdfViewerState } from "@filen/office/dom/pdf"
+import { PDF_BASE_SCALE, type PdfViewerCommand, type PdfViewerState } from "@filen/office/dom/pdf"
+import { pdfPageCommandEnabled, type PdfScrollRoom } from "@/features/preview/lib/pdfScrollRoom.logic"
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import { PDF_VIEWER_ACTIONS, type PdfViewerAction } from "@/features/preview/lib/keymap"
 import { browserZoomKey, zoomKeyAction, type BrowserZoomKey } from "@/lib/keymap/browserZoom"
@@ -48,9 +49,13 @@ export function isPdfHostAction(action: PdfViewerAction): action is PdfHostActio
 	)
 }
 
-// The command an action runs in `state`, or null when it cannot run (zoom at its limit, the last page): the key is
-// still the viewer's, so the browser does not zoom or scroll the page in its place.
-export function pdfViewerKeyCommand(action: Exclude<PdfViewerAction, PdfHostAction>, state: PdfViewerState): PdfViewerCommand | null {
+// The command an action runs in `state`, or null when it cannot run (zoom at its limit, the last page, no room to
+// scroll that way): the key is still the viewer's, so the browser does not zoom or scroll the page in its place.
+export function pdfViewerKeyCommand(
+	action: Exclude<PdfViewerAction, PdfHostAction>,
+	state: PdfViewerState,
+	room: PdfScrollRoom
+): PdfViewerCommand | null {
 	let command: PdfViewerCommand
 
 	switch (action) {
@@ -92,5 +97,5 @@ export function pdfViewerKeyCommand(action: Exclude<PdfViewerAction, PdfHostActi
 			break
 	}
 
-	return isPdfCommandEnabled(state, command.type) ? command : null
+	return pdfPageCommandEnabled(state, command.type, room) ? command : null
 }

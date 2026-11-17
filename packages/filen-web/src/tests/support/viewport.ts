@@ -21,3 +21,31 @@ export function mockViewportHeight(isViewport: (element: HTMLElement) => boolean
 		})
 	}
 }
+
+// A PDF page column with room to scroll either way (jsdom's is 0 tall, every page "in view"), so its page steps are
+// on: `[tabindex]` elements, the scroller, report a column taller than the view, scrolled part way, until the test
+// finishes. Writes to scrollTop are dropped.
+export function mockScrollablePageColumn(): void {
+	const metrics = { scrollHeight: 10_000, clientHeight: 500, scrollTop: 100 }
+
+	for (const property of ["scrollHeight", "clientHeight", "scrollTop"] as const) {
+		const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, property)
+
+		Object.defineProperty(HTMLElement.prototype, property, {
+			configurable: true,
+			get(this: HTMLElement) {
+				return this.hasAttribute("tabindex") ? metrics[property] : 0
+			},
+			set() {
+				// Nothing scrolls in jsdom.
+			}
+		})
+		onTestFinished(() => {
+			if (original === undefined) {
+				Reflect.deleteProperty(HTMLElement.prototype, property)
+			} else {
+				Object.defineProperty(HTMLElement.prototype, property, original)
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { PDF_BASE_SCALE, PDF_MAX_SCALE, type PdfViewerState } from "@filen/office/dom/pdf"
 import { pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
+import { PDF_SCROLL_ROOM_ANY } from "@/features/preview/lib/pdfScrollRoom.logic"
 
 // The PDF viewer's keys on Mac and elsewhere, by physical key with the browser's zoom keys by character, and the command
 // each runs.
@@ -61,20 +62,29 @@ describe("pdfViewerKey", () => {
 
 describe("pdfViewerKeyCommand", () => {
 	it("maps each action to the viewer's command", () => {
-		expect(pdfViewerKeyCommand("preview.pdfZoomIn", state({}))).toEqual({ type: "zoom.in" })
-		expect(pdfViewerKeyCommand("preview.pdfZoomOut", state({}))).toEqual({ type: "zoom.out" })
-		expect(pdfViewerKeyCommand("preview.pdfZoomReset", state({ scale: 3 }))).toEqual({ type: "zoom.set", scale: PDF_BASE_SCALE })
-		expect(pdfViewerKeyCommand("preview.pdfRotateCw", state({}))).toEqual({ type: "rotate.clockwise" })
-		expect(pdfViewerKeyCommand("preview.pdfRotateCcw", state({}))).toEqual({ type: "rotate.counterClockwise" })
+		expect(pdfViewerKeyCommand("preview.pdfZoomIn", state({}), PDF_SCROLL_ROOM_ANY)).toEqual({ type: "zoom.in" })
+		expect(pdfViewerKeyCommand("preview.pdfZoomOut", state({}), PDF_SCROLL_ROOM_ANY)).toEqual({ type: "zoom.out" })
+		expect(pdfViewerKeyCommand("preview.pdfZoomReset", state({ scale: 3 }), PDF_SCROLL_ROOM_ANY)).toEqual({
+			type: "zoom.set",
+			scale: PDF_BASE_SCALE
+		})
+		expect(pdfViewerKeyCommand("preview.pdfRotateCw", state({}), PDF_SCROLL_ROOM_ANY)).toEqual({ type: "rotate.clockwise" })
+		expect(pdfViewerKeyCommand("preview.pdfRotateCcw", state({}), PDF_SCROLL_ROOM_ANY)).toEqual({ type: "rotate.counterClockwise" })
 	})
 
 	it("toggles between fit to width and fit to page", () => {
-		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "custom" }))).toEqual({ type: "zoom.fitWidth" })
-		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "fitPage" }))).toEqual({ type: "zoom.fitWidth" })
-		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "fitWidth" }))).toEqual({ type: "zoom.fitPage" })
+		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "custom" }), PDF_SCROLL_ROOM_ANY)).toEqual({
+			type: "zoom.fitWidth"
+		})
+		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "fitPage" }), PDF_SCROLL_ROOM_ANY)).toEqual({
+			type: "zoom.fitWidth"
+		})
+		expect(pdfViewerKeyCommand("preview.pdfToggleFit", state({ zoomMode: "fitWidth" }), PDF_SCROLL_ROOM_ANY)).toEqual({
+			type: "zoom.fitPage"
+		})
 	})
 
 	it("runs nothing at a zoom limit", () => {
-		expect(pdfViewerKeyCommand("preview.pdfZoomIn", state({ scale: PDF_MAX_SCALE }))).toBeNull()
+		expect(pdfViewerKeyCommand("preview.pdfZoomIn", state({ scale: PDF_MAX_SCALE }), PDF_SCROLL_ROOM_ANY)).toBeNull()
 	})
 })

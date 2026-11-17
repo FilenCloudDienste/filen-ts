@@ -8,6 +8,7 @@ import type { PdfViewerState } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { fakeToolContext } from "@/tests/support/pdfToolContext"
 import "@/lib/i18n"
+import { PDF_SCROLL_ROOM_ANY } from "@/features/preview/lib/pdfScrollRoom.logic"
 
 // The PDF ribbon: the viewer's commands first on Home, each tab's tools in their groups, a mode tool pressed while
 // active, a tool not offered carrying its reason, and Undo / Redo / Save / Discard once the document has changes.
@@ -55,6 +56,7 @@ function setup(overrides: Partial<Props>): Props {
 		onPrint: undefined,
 		onProperties: vi.fn(),
 		pageInputRef: createRef<HTMLInputElement>(),
+		scrollRoom: PDF_SCROLL_ROOM_ANY,
 		tools: [
 			{
 				id: "draw",

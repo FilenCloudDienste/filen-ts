@@ -6,6 +6,7 @@ import type { PdfViewerState } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { usePdfCommandParts } from "@/features/preview/components/pdfCommandParts"
 import "@/lib/i18n"
+import { PDF_SCROLL_ROOM_ANY } from "@/features/preview/lib/pdfScrollRoom.logic"
 
 // A document without text (an image's pages) has no Find in the reader's bar.
 
@@ -32,6 +33,7 @@ function groupIds(searchable?: boolean): string[] {
 			onPrint: undefined,
 			onProperties: () => undefined,
 			pageInputRef: { current: null },
+			scrollRoom: PDF_SCROLL_ROOM_ANY,
 			...(searchable === undefined ? {} : { searchable })
 		})
 	)

@@ -6,6 +6,7 @@ import { PdfPages, usePdfViewer, type PdfDomDocument } from "@filen/office/react
 import { PDFJS } from "@/features/preview/lib/pdfjsModule"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePdfFullReadGuard } from "@/features/preview/hooks/usePdfFullReadGuard"
+import { usePdfScrollRoom } from "@/features/preview/hooks/usePdfScrollRoom"
 import { PDF_FULL_READ_WARN_BYTES } from "@/features/preview/lib/pdfLimits"
 import { pdfViewerSetup } from "@/features/preview/lib/pdfViewerSetup"
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
@@ -156,6 +157,7 @@ export function PdfReaderShell({
 		onPagesResize?.(width, height)
 	})
 	const scroller = viewer.pages.scrollerRef
+	const scrollRoom = usePdfScrollRoom(scroller)
 
 	useEffect(() => {
 		const element = scroller.current
@@ -506,7 +508,7 @@ export function PdfReaderShell({
 			return true
 		}
 
-		const command = pdfViewerKeyCommand(action, state)
+		const command = pdfViewerKeyCommand(action, state, scrollRoom)
 
 		if (command !== null) {
 			dispatch(command)
@@ -564,6 +566,7 @@ export function PdfReaderShell({
 						setProperties(true)
 					}}
 					pageInputRef={pageInputRef}
+					scrollRoom={scrollRoom}
 					outlinePane={{ open: paneOpen, toggle: togglePdfOutlinePane }}
 					{...(commandGroups === undefined ? {} : { extraGroups: commandGroups })}
 					{...(searchable === undefined ? {} : { searchable })}
@@ -584,6 +587,7 @@ export function PdfReaderShell({
 						setProperties(true)
 					}}
 					pageInputRef={pageInputRef}
+					scrollRoom={scrollRoom}
 					tools={PDF_TOOLS}
 					policy={edit.policy}
 					toolContext={edit.toolContext}

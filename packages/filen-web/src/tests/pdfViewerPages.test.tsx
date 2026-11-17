@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { mockViewportHeight } from "@/tests/support/viewport"
+import { mockScrollablePageColumn, mockViewportHeight } from "@/tests/support/viewport"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
@@ -280,6 +280,7 @@ describe("PdfViewer", () => {
 	})
 
 	it("goes to a typed page, and to the first and last", async () => {
+		mockScrollablePageColumn()
 		await mount()
 
 		const field = screen.getByRole("textbox", { name: "Page number" })
