@@ -779,6 +779,17 @@ describe("generateRasterThumb", () => {
 		expect(thumbnailRasterMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/jxl", { width: 1000, height: 750 }, THUMB_MAX_DIM)
 	})
 
+	it("draws a JPEG XL turned by its orientation at its upright size", async () => {
+		supportsNativeImageMock.mockResolvedValue(true)
+		// 1000 × 750 as coded, orientation 6: 750 × 1000 as shown.
+		downloadFileBytesMock.mockResolvedValue(Uint8Array.from([0xff, 0x0a, 0x6a, 0x17, 0xb3, 0x40, 0x00, 0x00]))
+		thumbnailRasterMock.mockResolvedValue(new Uint8Array([9]))
+
+		await generateRasterThumb(jxlItem(8n), live())
+
+		expect(thumbnailRasterMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/jxl", { width: 750, height: 1000 }, THUMB_MAX_DIM)
+	})
+
 	it("settles bytes that are no JPEG XL, or that the browser cannot decode, as corrupt", async () => {
 		supportsNativeImageMock.mockResolvedValue(true)
 		downloadFileBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]))

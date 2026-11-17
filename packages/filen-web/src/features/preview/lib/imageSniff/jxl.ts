@@ -405,6 +405,18 @@ export function sniffJxl(head: Uint8Array, fileSize: number): JxlHeader | null {
 	return start < 0 ? null : (readHeaders(head, start)?.size ?? null)
 }
 
+// The size as shown: turned by its orientation (5–8 swap the axes), as every decoder of ours and the browser's draw
+// it. As coded when the head ends before the orientation.
+export function sniffJxlUpright(head: Uint8Array, fileSize: number): JxlHeader | null {
+	const image = sniffJxlImage(head, fileSize)
+
+	if (image === null) {
+		return sniffJxl(head, fileSize)
+	}
+
+	return image.orientation >= 5 ? { width: image.height, height: image.width } : { width: image.width, height: image.height }
+}
+
 // The size and the metadata the editor needs (orientation, animation); null when the head ends before them.
 export function sniffJxlImage(head: Uint8Array, fileSize: number): JxlImage | null {
 	const start = codestreamStart(head, fileSize)

@@ -68,7 +68,7 @@ import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
 import { thumbnailRaster } from "@/features/drive/lib/thumbRaster"
 import { gunzipSvg } from "@/features/preview/lib/svgz"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
-import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
+import { sniffJxlUpright } from "@/features/preview/lib/imageSniff/jxl"
 import { supportsNativeImage } from "@/lib/nativeImageSupport"
 import { thumbnail } from "@/lib/pixelBudget"
 
@@ -909,7 +909,8 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 		return { type: "failed" }
 	}
 
-	const header = sniffJxl(bytes, bytes.length)
+	// Upright: the browser turns it by its orientation before scaling it to the tile.
+	const header = sniffJxlUpright(bytes, bytes.length)
 
 	if (header === null) {
 		return { type: "unavailable", reason: "corrupt" }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { MAX_EPSI_LINES, sniffEps } from "@/features/preview/lib/imageSniff/eps"
 import { JXL_PREVIEW_SIZE, sniffJxl, sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
+import { rasterHeader } from "@/features/preview/lib/imageSniff/raster"
 import { MAX_PSD_RESOURCE_BLOCKS, sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 import { MAX_TIFF_IFDS, sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
@@ -166,6 +167,24 @@ describe("sniffJxlImage", () => {
 			[10, 321],
 			[12, 1065]
 		])
+	})
+
+	it("gives the drawn size of an image turned by its orientation, and the coded one when the head stops short", () => {
+		const turned = codestream([
+			[0, 1],
+			[1, 1],
+			[5, 3],
+			[0, 1],
+			[0, 1],
+			[0, 1],
+			[0, 1],
+			[0, 2],
+			[1, 1],
+			[0, 2]
+		])
+
+		expect(rasterHeader("jxl", turned)).toEqual({ width: 750, height: 1000 })
+		expect(rasterHeader("jxl", Uint8Array.from(JXL_CODESTREAM))).toEqual({ width: 1000, height: 750 })
 	})
 
 	it("tells an animation", () => {
