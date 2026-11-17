@@ -1,0 +1,114 @@
+import { describe, expect, it } from "vitest"
+import { readEmail } from "@/features/preview/lib/emailReading"
+
+// A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
+// past the nesting, part or size bounds it is "tooLarge".
+
+const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text)
+const CRLF = (lines: string[]): string => lines.join("\r\n")
+
+describe("readEmail", () => {
+	it("reads headers, both bodies, an inline picture by its Content-ID and an attachment, as Blobs", async () => {
+		const reading = await readEmail(
+			encode(
+				CRLF([
+					'From: "Anna Berg" <anna@example.com>',
+					"To: me@example.com, Bob <bob@example.com>",
+					"Cc: ana@x.io",
+					"Subject: =?UTF-8?Q?Quarterly_numbers_=E2=80=AE?=",
+					"Date: Mon, 16 Nov 2026 09:14:00 +0000",
+					"MIME-Version: 1.0",
+					'Content-Type: multipart/mixed; boundary="outer"',
+					"",
+					"--outer",
+					'Content-Type: multipart/related; boundary="rel"',
+					"",
+					"--rel",
+					'Content-Type: multipart/alternative; boundary="alt"',
+					"",
+					"--alt",
+					"Content-Type: text/plain; charset=utf-8",
+					"",
+					"Hello",
+					"--alt",
+					"Content-Type: text/html; charset=utf-8",
+					"",
+					'<p>Hello <img src="cid:chart@x"></p>',
+					"--alt--",
+					"--rel",
+					"Content-Type: image/png",
+					"Content-ID: <chart@x>",
+					"Content-Disposition: inline",
+					"Content-Transfer-Encoding: base64",
+					"",
+					"iVBORw0KGgo=",
+					"--rel--",
+					"--outer",
+					'Content-Type: application/pdf; name="report.pdf"',
+					'Content-Disposition: attachment; filename="report.pdf"',
+					"Content-Transfer-Encoding: base64",
+					"",
+					"JVBERi0xLjcK",
+					"--outer",
+					"Content-Type: message/rfc822",
+					"",
+					"Subject: Forwarded",
+					"",
+					"Inner body",
+					"--outer--",
+					""
+				])
+			)
+		)
+
+		expect(reading.status).toBe("ok")
+
+		if (reading.status !== "ok") return
+
+		expect(reading).toMatchObject({
+			subject: "Quarterly numbers",
+			from: "Anna Berg <anna@example.com>",
+			to: ["me@example.com", "Bob <bob@example.com>"],
+			cc: ["ana@x.io"],
+			addressesOmitted: 0
+		})
+		expect(reading.text).toContain("Hello")
+		expect(reading.html).toContain("cid:chart@x")
+		expect(reading.date?.startsWith("2026-11-16")).toBe(true)
+		expect(
+			reading.attachments.map(attachment => [attachment.name, attachment.mimeType, attachment.contentId, attachment.inline])
+		).toEqual([
+			["attachment-1", "image/png", "chart@x", true],
+			["report.pdf", "application/pdf", null, false],
+			["attachment-3.eml", "message/rfc822", null, false]
+		])
+		expect(reading.attachments[1]?.blob).toBeInstanceOf(Blob)
+		expect(new TextDecoder().decode(await reading.attachments[1]?.blob.arrayBuffer())).toBe("%PDF-1.7\n")
+	})
+
+	it("reads at most 200 recipients and counts the rest", async () => {
+		const to = Array.from({ length: 250 }, (_, index) => `u${String(index)}@example.com`).join(", ")
+		const reading = await readEmail(encode(CRLF([`To: ${to}`, "Subject: Many", "", "x"])))
+
+		expect(reading).toMatchObject({ status: "ok", addressesOmitted: 50 })
+		expect(reading.status === "ok" && reading.to.length).toBe(200)
+	})
+
+	it("calls a message past its nesting or part bounds too large", async () => {
+		const nested: string[] = ["Subject: Deep", "MIME-Version: 1.0"]
+
+		for (let depth = 0; depth < 40; depth++)
+			nested.push(`Content-Type: multipart/mixed; boundary="b${String(depth)}"`, "", `--b${String(depth)}`)
+
+		nested.push("Content-Type: text/plain", "", "bottom")
+
+		const parts: string[] = ["Subject: Parts", 'Content-Type: multipart/mixed; boundary="p"', ""]
+
+		for (let index = 0; index < 1100; index++) parts.push("--p", "Content-Type: text/plain", "", String(index))
+
+		parts.push("--p--")
+
+		expect(await readEmail(encode(CRLF(nested)))).toEqual({ status: "tooLarge" })
+		expect(await readEmail(encode(CRLF(parts)))).toEqual({ status: "tooLarge" })
+	})
+})

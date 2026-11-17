@@ -5,6 +5,7 @@ import { readCalendar, type CalendarFile } from "@filen/shared/calendarFile"
 import { readContacts, type ContactFile } from "@filen/shared/contactFile"
 import { cmsSigner } from "@filen/office/core/pdfsign"
 import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
+import { readEmail, type EmailReading } from "@/features/preview/lib/emailReading"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
@@ -34,6 +35,8 @@ const api = {
 	},
 	// The text the page already decoded (in the encoding it shows), parsed by its extension's format: cue times as
 	// transferred arrays, cue text as plain text.
+	// A message: a copy of its bytes, parsed and dropped; attachments come back as Blobs (no copy on the way).
+	email: (bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> => readEmail(bytes),
 	subtitles: (text: string, extension: string): SubtitleReading => {
 		const reading = readSubtitleText(text, extension)
 

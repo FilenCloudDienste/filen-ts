@@ -23,7 +23,14 @@ vi.mock("@/features/drive/lib/actions", async importOriginal => ({
 	moveItems
 }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
-vi.mock("@/features/drive/lib/ownAncestry", () => ({ cachedOwnParents: () => (uuid: string) => parents.get(uuid) }))
+vi.mock("@/features/drive/lib/ownAncestry", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/ownAncestry")>()
+
+	return {
+		...actual,
+		cachedOwnChain: (uuid: string | null) => actual.ownChain(uuid, id => parents.get(id))
+	}
+})
 // The picker opens in "docs", whose listing is empty; the path it was opened with is recorded.
 vi.mock("@/features/drive/hooks/useDirectoryPicker", () => ({
 	useDirectoryPicker: (initialPath?: readonly string[]) => {

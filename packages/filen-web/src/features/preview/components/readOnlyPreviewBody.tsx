@@ -10,6 +10,7 @@ import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
+import { EmailViewer } from "@/features/preview/components/emailViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
 import { ContactViewer } from "@/features/preview/components/contactViewer"
@@ -119,6 +120,8 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 			return <FontViewer item={item} />
 		case "torrent":
 			return <TorrentViewer item={item} />
+		case "email":
+			return <EmailViewer item={item} />
 		case "binaryInfo":
 			return <BinaryInfoViewer item={item} />
 		case "sqlite":

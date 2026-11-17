@@ -1,0 +1,53 @@
+// "preview" namespace, text family — an e-mail message. Spread into preview.ts; same catalog rules.
+export const previewTextEmail = {
+	/** Email preview — the view switch's accessible name (HTML | Text | Source) */
+	previewEmailView: "Message view",
+	/** Email preview — the view switch: the message's HTML body */
+	previewEmailViewHtml: "HTML",
+	/** Email preview — the view switch: the message's plain-text body */
+	previewEmailViewText: "Text",
+	/** Email preview — the view switch: the message as it is stored, read-only */
+	previewEmailViewSource: "Source",
+	/** Email preview — the title of a message without a subject */
+	previewEmailNoSubject: "(No subject)",
+	/** Email preview — header label: the sender */
+	previewEmailFrom: "From",
+	/** Email preview — header label: the recipients */
+	previewEmailTo: "To",
+	/** Email preview — header label: the copied recipients */
+	previewEmailCc: "Cc",
+	/** Email preview — the button that shows the rest of a recipient list; {{count}} recipients hidden */
+	previewEmailMore_one: "+{{count}} more",
+	/** Email preview — the button that shows the rest of a recipient list; {{count}} recipients hidden */
+	previewEmailMore_other: "+{{count}} more",
+	/** Email preview — the button that folds a recipient list again */
+	previewEmailLess: "Show less",
+	/** Email preview — recipients past the cap, not read; {{count}} of them */
+	previewEmailAddressesOmitted_one: "{{count}} more recipient not shown",
+	/** Email preview — recipients past the cap, not read; {{count}} of them */
+	previewEmailAddressesOmitted_other: "{{count}} more recipients not shown",
+	/** Email preview — notice above the body: pictures, styles and other content from the internet the message asked for and that was not loaded; {{count}} of them */
+	previewEmailRemoteBlocked_one: "{{count}} remote resource was not loaded.",
+	/** Email preview — notice above the body: pictures, styles and other content from the internet the message asked for and that was not loaded; {{count}} of them */
+	previewEmailRemoteBlocked_other: "{{count}} remote resources were not loaded.",
+	/** Email preview — a message with no body */
+	previewEmailNoBody: "This message has no text.",
+	/** Email preview — the attachments heading; {{count}} attachments */
+	previewEmailAttachments: "Attachments ({{count}})",
+	/** Email preview — an attachment's action: view it here */
+	previewEmailOpen: "Open",
+	/** Email preview — an attachment's action: save it to the device */
+	previewEmailDownload: "Download",
+	/** Email preview — an attachment's action: upload it into the user's drive */
+	previewEmailSaveToDrive: "Save to drive",
+	/** Email preview — the directory picker's title when saving an attachment; {{name}} is its file name */
+	previewEmailSaveTitle: "Save “{{name}}” to",
+	/** Email preview — the directory picker's confirm button when saving an attachment */
+	previewEmailSaveConfirm: "Save here",
+	/** Email preview — the back button of an opened attachment */
+	previewEmailBack: "Back to the message",
+	/** Email preview — the message is past what the preview reads */
+	previewEmailTooLarge: "This message is too large to show here.",
+	/** Email preview — reading the message failed */
+	previewEmailFailed: "The message could not be read."
+}

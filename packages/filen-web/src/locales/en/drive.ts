@@ -679,6 +679,8 @@ export const drive = {
 	drivePreviewKindModel3d: "3D model",
 	/** Info panel — Kind row value: a BitTorrent metadata file (.torrent) */
 	drivePreviewKindTorrent: "Torrent",
+	/** Info panel — Kind row value: an e-mail message (.eml) */
+	drivePreviewKindEmail: "Email message",
 	/** Info dialog "Kind" value — a subtitle file */
 	drivePreviewKindSubtitle: "Subtitles",
 	/** Info dialog "Kind" value — a calendar file (ics) */

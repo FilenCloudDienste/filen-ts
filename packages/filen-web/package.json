@@ -88,6 +88,7 @@
 		"node-forge": "1.4.3",
 		"pdfjs-dist": "6.4.299",
 		"pkijs": "3.4.3",
+		"postal-mime": "4.2.1",
 		"prosemirror-history": "1.5.1",
 		"prosemirror-model": "1.25.12",
 		"prosemirror-state": "1.4.4",

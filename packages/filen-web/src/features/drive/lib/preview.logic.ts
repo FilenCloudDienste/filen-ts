@@ -27,6 +27,7 @@ import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.l
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 import { VIDEO_CONTAINERS, type VideoContainer } from "@filen/shared/videos"
+import { EMAIL_MAX_BYTES } from "@/features/preview/lib/emailLimits"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -50,6 +51,7 @@ export type PreviewCategory =
 	| "geo"
 	| "model3d"
 	| "torrent"
+	| "email"
 	| "subtitle"
 	| "calendar"
 	| "contact"
@@ -429,6 +431,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindModel3d",
 		assistantKind: null
 	},
+	// A message read whole in the text-family worker: its body in a script-less frame, nothing remote loaded; kept as it
+	// arrived (its source is read-only).
+	email: {
+		streamed: false,
+		ranged: false,
+		bufferCap: BigInt(EMAIL_MAX_BYTES),
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindEmail",
+		assistantKind: null
+	},
 	// Read whole in the text-family worker; its trackers are text, never contacted.
 	torrent: {
 		streamed: false,
@@ -588,6 +606,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
 	[MODEL_FORMATS, "model3d"],
 	[["torrent"], "torrent"],
+	[["eml"], "email"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// A `.sub` is MicroDVD text until a read of its head finds VobSub images (no kind).
 	[[...SUBTITLE_FILE_EXTENSIONS, "sub"], "subtitle"],
@@ -596,8 +615,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["vcf", "vcard"], "contact"],
 	// Executables and disk images, shown by their headers (an installer package, `.msi`, stays a download).
 	[["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"], "binaryInfo"],
-	// E-mail reads as plain text until a viewer of its own takes it.
-	[["txt", "log", "eml"], "text"],
+	[["txt", "log"], "text"],
 	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],
 	// A `.key` is one only once a read of its head found a zip (resolveFileKind gives it no kind until then).
 	[IWORK_EXTENSIONS, "iwork"],

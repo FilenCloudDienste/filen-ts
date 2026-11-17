@@ -1,41 +1,12 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { FolderIcon } from "lucide-react"
-import { MAX_ANCESTRY_DEPTH, type JobDestination } from "@filen/shared"
+import type { JobDestination } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
+import { cachedOwnChain } from "@/features/drive/lib/ownAncestry"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-
-// The destination's chain from the root as the cached listings know it, to open the picker there; the
-// root when a link is missing (the picker then starts where copy's does).
-function cachedOwnChain(uuid: string | null): string[] {
-	if (uuid === null) {
-		return []
-	}
-
-	const parentOf = cachedOwnParents()
-	const chain = [uuid]
-	let current = uuid
-
-	for (let depth = 0; depth < MAX_ANCESTRY_DEPTH; depth++) {
-		const parent = parentOf(current)
-
-		if (parent === null) {
-			return chain
-		}
-
-		if (parent === undefined || chain.includes(parent)) {
-			return []
-		}
-
-		chain.unshift(parent)
-		current = parent
-	}
-
-	return []
-}
 
 export interface DestinationFieldProps {
 	// "Save in", "Extract to", …

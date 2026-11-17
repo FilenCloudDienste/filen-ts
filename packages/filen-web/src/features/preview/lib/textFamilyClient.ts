@@ -4,6 +4,7 @@ import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/wor
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
 import { workerJob, type JobClock } from "@/features/preview/lib/workerJob"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
+import type { EmailReading } from "@/features/preview/lib/emailReading"
 import type { CalendarFile } from "@filen/shared/calendarFile"
 import type { ContactFile } from "@filen/shared/contactFile"
 import type { BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
@@ -29,6 +30,16 @@ export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading
 		const copy = bytes.slice()
 
 		return await remote.torrent(Comlink.transfer(copy, [copy.buffer]))
+	})
+}
+
+// A message's headers, bodies and attachments (Blobs), from a copy of its bytes.
+export async function readEmailFile(bytes: Uint8Array): Promise<EmailReading> {
+	return await job<EmailReading>(async remote => {
+		// A copy per attempt: a transferred one is gone.
+		const copy = bytes.slice()
+
+		return await remote.email(Comlink.transfer(copy, [copy.buffer]))
 	})
 }
 

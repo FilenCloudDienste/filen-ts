@@ -86,6 +86,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	geo: "drivePreviewKindGeo",
 	model3d: "drivePreviewKindModel3d",
 	torrent: "drivePreviewKindTorrent",
+	email: "drivePreviewKindEmail",
 	subtitle: "drivePreviewKindSubtitle",
 	calendar: "drivePreviewKindCalendar",
 	contact: "drivePreviewKindContact",
@@ -283,6 +284,7 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"geo",
 	"model3d",
 	"torrent",
+	"email",
 	"subtitle",
 	"calendar",
 	"contact",
@@ -627,6 +629,22 @@ describe("the torrent row", () => {
 		expect(previewKindLabelKey("torrent")).toBe("drivePreviewKindTorrent")
 		expect(isPhotoCategory("torrent")).toBe(false)
 		expect(isTextCategory("torrent")).toBe(false)
+	})
+})
+
+describe("the email row", () => {
+	// Read whole up to 64 MiB on the drive, a link and in an archive; read-only, its source too.
+	it("opens a message up to 64 MiB everywhere, by its name or its stored type", () => {
+		const CAP = 64n * MIB
+
+		expect(previewType(fileNamed("mail.eml", 1024n))).toBe("email")
+		expect(previewType(fileNamed("forwarded", 1024n, "message/rfc822"))).toBe("email")
+		expect(canPreview(fileNamed("mail.eml", CAP))).toBe(true)
+		expect(canPreview(fileNamed("mail.eml", CAP + 1n))).toBe(false)
+		expect(anonPreviewability(fileNamed("mail.eml", CAP))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: "mail.eml", access: DIRECT, size: Number(CAP) }]), 0)).toBe(true)
+		expect(isTextCategory("email")).toBe(false)
+		expect(previewKindLabelKey("email")).toBe("drivePreviewKindEmail")
 	})
 })
 

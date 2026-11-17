@@ -198,6 +198,43 @@ function isoBytes(): Buffer {
 	return bytes
 }
 
+// A message whose HTML asks for a remote picture, a remote stylesheet background and a link, shows its own inline
+// picture (cid:), and carries a text attachment: nothing remote may load.
+export const EMAIL_REMOTE = "https://mail.e2e-never-contacted.example"
+export const EMAIL_SUBJECT = "E2E quarterly numbers"
+export const EMAIL_ATTACHMENT_TEXT = "notes from an attachment"
+const EMAIL_TEXT = [
+	'From: "Anna Berg" <anna@example.com>',
+	"To: me@example.com",
+	`Subject: ${EMAIL_SUBJECT}`,
+	"Date: Mon, 16 Nov 2026 09:14:00 +0000",
+	"MIME-Version: 1.0",
+	'Content-Type: multipart/mixed; boundary="outer"',
+	"",
+	"--outer",
+	'Content-Type: multipart/related; boundary="rel"',
+	"",
+	"--rel",
+	"Content-Type: text/html; charset=utf-8",
+	"",
+	`<html><head><style>body{background:url(${EMAIL_REMOTE}/bg.png)}</style></head><body><p>Hello <a href="${EMAIL_REMOTE}/q">the report</a></p><img src="cid:chart@e2e" alt="chart"><img src="${EMAIL_REMOTE}/pixel.gif" alt="pixel"></body></html>`,
+	"--rel",
+	"Content-Type: image/png",
+	"Content-ID: <chart@e2e>",
+	"Content-Disposition: inline",
+	"Content-Transfer-Encoding: base64",
+	"",
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+	"--rel--",
+	"--outer",
+	'Content-Type: text/plain; name="notes.txt"',
+	'Content-Disposition: attachment; filename="notes.txt"',
+	"",
+	EMAIL_ATTACHMENT_TEXT,
+	"--outer--",
+	""
+].join("\r\n")
+
 export const TEXT_SCENARIOS = scenarioModule(
 	{
 		"preview-text-legacy": ["cyrillic-notes.txt"],
@@ -205,7 +242,8 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"preview-torrent": ["album.torrent"],
 		"preview-subtitles": ["e2e-cues.srt", "e2e-microdvd.sub", "e2e-vobsub.sub"],
 		"preview-pim": ["e2e-team.ics", "e2e-people.vcf", "e2e-variants.vcf"],
-		"preview-binary-info": ["e2e-tool", "e2e-setup.exe", "e2e-disc.iso"]
+		"preview-binary-info": ["e2e-tool", "e2e-setup.exe", "e2e-disc.iso"],
+		"preview-email": ["e2e-message.eml"]
 	},
 	() => ({
 		"cyrillic-notes.txt": { buffer: encodeSingleByte(LEGACY_CYRILLIC_TEXT, "windows-1251"), mimeType: "text/plain" },
@@ -222,6 +260,7 @@ export const TEXT_SCENARIOS = scenarioModule(
 		// No extension: opened as text, its head is an executable.
 		"e2e-tool": { buffer: elfBytes(), mimeType: "application/octet-stream" },
 		"e2e-setup.exe": { buffer: peBytes(), mimeType: "application/x-msdownload" },
-		"e2e-disc.iso": { buffer: isoBytes(), mimeType: "application/x-iso9660-image" }
+		"e2e-disc.iso": { buffer: isoBytes(), mimeType: "application/x-iso9660-image" },
+		"e2e-message.eml": { buffer: Buffer.from(EMAIL_TEXT, "utf8"), mimeType: "message/rfc822" }
 	})
 )

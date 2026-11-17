@@ -1,6 +1,6 @@
 import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
-import { type ParentLookup } from "@filen/shared"
+import { MAX_ANCESTRY_DEPTH, type ParentLookup } from "@filen/shared"
 import { ownDirectoryUuids } from "@/features/drive/components/moveTargetDialog.logic"
 import { cachedQueriesWithPrefix } from "@/queries/patch"
 
@@ -62,4 +62,37 @@ export function targetOwnParents({ uuid, parent, rootUuid }: { uuid: string; par
 
 		return next === rootUuid ? null : next
 	}
+}
+
+// A directory's chain from the root through `parentOf`; the root ([]) when a link is missing.
+export function ownChain(uuid: string | null, parentOf: ParentLookup): string[] {
+	if (uuid === null) {
+		return []
+	}
+
+	const chain = [uuid]
+	let current = uuid
+
+	for (let depth = 0; depth < MAX_ANCESTRY_DEPTH; depth++) {
+		const parent = parentOf(current)
+
+		if (parent === null) {
+			return chain
+		}
+
+		if (parent === undefined || chain.includes(parent)) {
+			return []
+		}
+
+		chain.unshift(parent)
+		current = parent
+	}
+
+	return []
+}
+
+// The destination's chain from the root as the cached listings know it, to open the picker there; the
+// root when a link is missing (the picker then starts where copy's does).
+export function cachedOwnChain(uuid: string | null): string[] {
+	return uuid === null ? [] : ownChain(uuid, cachedOwnParents())
 }

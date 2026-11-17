@@ -10,6 +10,9 @@ import {
 	LEGACY_CYRILLIC_AS_KOI8_PREFIX,
 	LEGACY_CYRILLIC_TEXT,
 	MATH_REMOTE_IMAGES,
+	EMAIL_ATTACHMENT_TEXT,
+	EMAIL_REMOTE,
+	EMAIL_SUBJECT,
 	ISO_VOLUME,
 	TORRENT_INFOHASH,
 	TORRENT_TRACKER,
@@ -28,6 +31,7 @@ const [TORRENT] = FIXTURE_FILES["preview-torrent"]
 const [CUES, MICRODVD, VOBSUB] = FIXTURE_FILES["preview-subtitles"]
 const [CALENDAR, CONTACTS, VARIANTS] = FIXTURE_FILES["preview-pim"]
 const [TOOL, SETUP, DISC] = FIXTURE_FILES["preview-binary-info"]
+const [MESSAGE] = FIXTURE_FILES["preview-email"]
 const NEVER_RUN = "Never run. Read from the file's headers only."
 const NO_PREVIEW = "Preview isn't available for this file type yet."
 
@@ -254,6 +258,49 @@ test("executables and a disc image show what their headers say, and an extension
 	await expect(dialog.getByText("This file isn't text.", { exact: true })).toHaveCount(0)
 	await close(page)
 
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("a message shows its own picture and attachment, and nothing remote it names is ever loaded", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+	const remote: string[] = []
+
+	context.on("request", request => {
+		if (request.url().startsWith(EMAIL_REMOTE)) remote.push(request.url())
+	})
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-email")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, MESSAGE).dblclick()
+	await expect(dialog.getByRole("heading", { name: EMAIL_SUBJECT })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByText("Anna Berg <anna@example.com>", { exact: true })).toBeVisible()
+	// The remote picture and the stylesheet's background, both refused and counted.
+	await expect(dialog.getByText("2 remote resources were not loaded.", { exact: true })).toBeVisible()
+
+	// The body in its script-less frame: the message's own picture resolved, the remote one gone.
+	const frame = page.frameLocator(`iframe[title="${EMAIL_SUBJECT}"]`)
+
+	await expect(frame.getByText("the report")).toBeVisible()
+	await expect(frame.locator('img[alt="chart"]')).toHaveAttribute("src", /^blob:/u)
+	await expect(frame.locator('img[alt="pixel"]')).toHaveCount(1)
+	await expect(frame.locator('img[alt="pixel"]')).not.toHaveAttribute("src", /.+/u)
+
+	await expect(dialog.getByText("Attachments (1)", { exact: true })).toBeVisible()
+	await dialog.getByRole("button", { name: "Open", exact: true }).click()
+	await expect(dialog.getByText(EMAIL_ATTACHMENT_TEXT, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: "Back to the message", exact: true }).click()
+
+	await dialog.getByRole("button", { name: "Source", exact: true }).click()
+	await expect(dialog.locator(".cm-content")).toHaveAttribute("contenteditable", "false")
+	await close(page)
+
+	expect(remote).toEqual([])
 	expect(foreign).toEqual([])
 	expect(cspBlocked).toEqual([])
 	expect(cspViolations).toEqual([])

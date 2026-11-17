@@ -367,8 +367,8 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("contact")
 	})
 
-	it.each(["eml"])("%s -> text", ext => {
-		expect(previewType(fileNamed(`file.${ext}`))).toBe("text")
+	it.each(["eml"])("%s -> email", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("email")
 	})
 
 	it("reads a mailbox as code (its grammar), geo files as maps, and notebook JSON as nothing yet", () => {
@@ -419,7 +419,14 @@ describe("previewType — extension category map", () => {
 			const item = fileNamed("download", { mime })
 
 			expect(itemTypeExtension(item), mime).toBe(extension)
-			const category: Record<string, string> = { mbox: "code", vtt: "subtitle", srt: "subtitle", ics: "calendar", vcf: "contact" }
+			const category: Record<string, string> = {
+				mbox: "code",
+				vtt: "subtitle",
+				srt: "subtitle",
+				ics: "calendar",
+				vcf: "contact",
+				eml: "email"
+			}
 
 			expect(previewType(item), mime).toBe(category[extension] ?? "text")
 		}

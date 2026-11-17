@@ -51,6 +51,7 @@ import { previewTextSubtitles } from "@/locales/en/previewText/subtitles"
 import { previewTextCalendar } from "@/locales/en/previewText/calendar"
 import { previewTextContacts } from "@/locales/en/previewText/contacts"
 import { previewTextBinary } from "@/locales/en/previewText/binary"
+import { previewTextEmail } from "@/locales/en/previewText/email"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -905,5 +906,6 @@ export const preview = {
 	...previewTextSubtitles,
 	...previewTextCalendar,
 	...previewTextContacts,
-	...previewTextBinary
+	...previewTextBinary,
+	...previewTextEmail
 } as const
