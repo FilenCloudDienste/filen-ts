@@ -1,10 +1,18 @@
 import { beforeAll, describe, expect, it, vi } from "vitest"
 import { zipSync, strToU8 } from "fflate"
-import { ImageLoader } from "three"
-import { installImageLoaderShim, type ImageLoaderLike, type ImageLoaderShim } from "@/features/preview/lib/model3d/imageLoaderShim"
+import { ImageBitmapLoader, ImageLoader, type Texture } from "three"
+import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js"
+import {
+	installTextureShim,
+	type ImageBitmapLoaderLike,
+	type ImageLoaderLike,
+	type Ktx2LoaderLike,
+	type TextureShim
+} from "@/features/preview/lib/model3d/imageLoaderShim"
+import { AllocationRefusedError, withAllocationBudget } from "@/features/preview/lib/model3d/allocationBudget"
 import { installModelGlobals } from "@/features/preview/lib/model3d/workerGlobals"
 import { XmlDomParser } from "@/features/preview/lib/model3d/xmlDom"
-import { ModelRefusedError, REFERENCE_BASE, loadModel, modelInfo, mtlLibraries } from "@/features/preview/lib/model3d/load"
+import { ModelRefusedError, REFERENCE_BASE, loadModel, modelInfo, mtlLibraries, releaseSource } from "@/features/preview/lib/model3d/load"
 
 // The worker's loading path without a GPU: each format parsed as the 3D worker parses it (its globals, the ImageLoader
 // shim answering texture reads), and its figures counted. Draco and KTX2 need decoder workers and are left to the e2e.
@@ -19,24 +27,49 @@ const PNG = Uint8Array.from([
 	0x00, 0x02, 0x08, 0x06, 0x00, 0x00, 0x00
 ])
 const requested: string[] = []
-let images: ImageLoaderShim
+const budget = { pixels: 1_000_000 }
+const decodes: ImageBitmapOptions[] = []
+const skipped: string[] = []
+// A file's bytes by URL, else a 2×2 PNG for any .png.
+const files = new Map<string, Uint8Array>()
+let images: TextureShim
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
 
 beforeAll(() => {
 	installModelGlobals()
-	images = installImageLoaderShim(ImageLoader as unknown as ImageLoaderLike, {
-		fetch: url => {
-			requested.push(url)
-
-			return Promise.resolve(url.endsWith(".png") ? new Response(PNG) : new Response(null, { status: 404 }))
+	images = installTextureShim(
+		{
+			ImageLoader: ImageLoader as unknown as ImageLoaderLike,
+			ImageBitmapLoader: ImageBitmapLoader as unknown as ImageBitmapLoaderLike,
+			KTX2Loader: KTX2Loader as unknown as Ktx2LoaderLike
 		},
-		decode: (_blob, options) =>
-			Promise.resolve({ width: options.resizeWidth ?? 2, height: options.resizeHeight ?? 2, close: () => undefined } as ImageBitmap),
-		maxSide: 4096,
-		budget: { pixels: 1_000_000 },
-		onSkipped: () => undefined
-	})
+		{
+			fetch: url => {
+				requested.push(url)
+
+				const bytes = files.get(url) ?? (url.endsWith(".png") ? PNG : null)
+
+				return Promise.resolve(
+					bytes === null ? new Response(null, { status: 404 }) : new Response(new Blob([bytes as Uint8Array<ArrayBuffer>]))
+				)
+			},
+			decode: (_blob, options) => {
+				decodes.push(options)
+
+				return Promise.resolve({
+					width: options.resizeWidth ?? 2,
+					height: options.resizeHeight ?? 2,
+					close: () => undefined
+				} as ImageBitmap)
+			},
+			maxSide: 4096,
+			budget,
+			onSkipped: url => {
+				skipped.push(url)
+			}
+		}
+	)
 })
 
 function cubeStl(): Uint8Array {
@@ -153,6 +186,206 @@ def Xform "Root"
 		await expect(
 			loadModel(encode("ply\nformat ascii 1.0\nelement vertex 40000000\nend_header\n"), "ply", null, () => Promise.resolve(null))
 		).rejects.toBeInstanceOf(ModelRefusedError)
+	})
+})
+
+// A PNG header declaring `width` × `height`: all the shim reads before it reserves.
+function pngOf(width: number, height: number): Uint8Array {
+	const bytes = PNG.slice()
+	const view = new DataView(bytes.buffer)
+
+	view.setUint32(16, width)
+	view.setUint32(20, height)
+
+	return bytes
+}
+
+function loadTexture(
+	loader: { load: (url: string, onLoad: (texture: never) => void, onProgress: undefined, onError: (error: unknown) => void) => unknown },
+	url: string
+): Promise<unknown> {
+	return new Promise(resolve => {
+		loader.load(url, resolve, undefined, () => {
+			resolve(null)
+		})
+	})
+}
+
+describe("the texture budget", () => {
+	it("reserves each texture's full size before decoding, so textures asked for in one tick cannot all pass", async () => {
+		budget.pixels = 3000 * 3000
+		skipped.length = 0
+
+		for (const name of ["a", "b", "c"]) files.set(`${REFERENCE_BASE}${name}.png`, pngOf(2000, 2000))
+
+		const loader = new ImageLoader()
+		const results = await Promise.all(["a", "b", "c"].map(name => loadTexture(loader as never, `${REFERENCE_BASE}${name}.png`)))
+
+		// 9M pixels hold two 4M-pixel textures, not three.
+		expect(results.filter(result => result !== null)).toHaveLength(2)
+		expect(skipped).toEqual([`${REFERENCE_BASE}c.png`])
+		// Drawn at full size (under the side cap): both stay charged.
+		expect(budget.pixels).toBe(3000 * 3000 - 2 * 2000 * 2000)
+	})
+
+	it("keeps only the drawn size charged once a texture over the side cap is decoded smaller", async () => {
+		budget.pixels = 9000 * 9000
+		files.set(`${REFERENCE_BASE}wide.png`, pngOf(8192, 8192))
+
+		expect(await loadTexture(new ImageLoader() as never, `${REFERENCE_BASE}wide.png`)).not.toBeNull()
+		expect(decodes.at(-1)).toMatchObject({ resizeWidth: 4096, resizeHeight: 4096, imageOrientation: "flipY" })
+		expect(budget.pixels).toBe(9000 * 9000 - 4096 * 4096)
+	})
+
+	it("skips an image whose dimensions cannot be read, never decoding it", async () => {
+		budget.pixels = 1_000_000
+		decodes.length = 0
+		files.set(`${REFERENCE_BASE}odd.avif`, encode("not an image header"))
+
+		expect(await loadTexture(new ImageLoader() as never, `${REFERENCE_BASE}odd.avif`)).toBeNull()
+		expect(decodes).toHaveLength(0)
+	})
+
+	it("budgets glTF's ImageBitmapLoader too, keeping the options its caller set", async () => {
+		budget.pixels = 100
+		decodes.length = 0
+		files.set(`${REFERENCE_BASE}big.png`, pngOf(4096, 4096))
+
+		const loader = new ImageBitmapLoader().setOptions({ imageOrientation: "none", premultiplyAlpha: "none" })
+
+		expect(await loadTexture(loader as never, `${REFERENCE_BASE}big.png`)).toBeNull()
+
+		budget.pixels = 1_000_000
+
+		expect(await loadTexture(loader as never, `${REFERENCE_BASE}skin.png`)).not.toBeNull()
+		expect(decodes.at(-1)).toMatchObject({ imageOrientation: "none", premultiplyAlpha: "none", colorSpaceConversion: "none" })
+	})
+
+	it("refuses a KTX2 whose header does not fit before it transcodes", async () => {
+		const header = new Uint8Array(80)
+
+		header.set([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a])
+		new DataView(header.buffer).setUint32(20, 16384, true)
+		new DataView(header.buffer).setUint32(24, 16384, true)
+		budget.pixels = 1_000_000
+
+		const loader = new KTX2Loader() as unknown as { _createTexture: (buffer: ArrayBuffer) => Promise<Texture> }
+
+		await expect(loader._createTexture(header.buffer)).rejects.toMatchObject({ name: "TextureSkipped" })
+		expect(budget.pixels).toBe(1_000_000)
+	})
+})
+
+describe("the parse's allocation budget", () => {
+	it("refuses a typed array over the limit before allocating it, and restores the constructors", async () => {
+		const real = Float32Array
+
+		await expect(
+			withAllocationBudget({ each: 1024, total: 4096 }, () => Promise.resolve(new Float32Array(1024)))
+		).rejects.toBeInstanceOf(AllocationRefusedError)
+		await expect(
+			withAllocationBudget({ each: 1024, total: 2048 }, () => {
+				const first = new Uint8Array(1000)
+
+				// A view over an existing buffer allocates nothing; the third allocation takes the total past 2048.
+				new Float32Array(first.buffer)
+				new Uint8Array(1000)
+
+				return Promise.resolve(new ArrayBuffer(100))
+			})
+		).rejects.toBeInstanceOf(AllocationRefusedError)
+		await expect(withAllocationBudget({ each: 1024, total: 4096 }, () => Promise.resolve(new Uint8Array(10).length))).resolves.toBe(10)
+		expect(Float32Array).toBe(real)
+		expect(new Float32Array(2) instanceof Float32Array).toBe(true)
+	})
+
+	it("refuses a USDZ whose layer asks for a buffer past the unpacked cap", async () => {
+		// A USDC crate whose LZ4 token block declares 4 GiB uncompressed is caught where it allocates.
+		const refused = withAllocationBudget({ each: 1024, total: 1024 }, () => Promise.resolve(new Uint8Array(2 ** 32 - 1)))
+
+		await expect(refused).rejects.toBeInstanceOf(AllocationRefusedError)
+	})
+
+	it("turns a refused allocation into a too-large model, the loader's own wrapping included", async () => {
+		// Within the preflight's meshopt cap, past what one allocation may take: GLTFLoader's new ArrayBuffer(count ×
+		// stride) is refused before it allocates 720 MB.
+		const gltf = {
+			asset: { version: "2.0" },
+			extensionsUsed: ["EXT_meshopt_compression"],
+			buffers: [{ byteLength: 4 }],
+			bufferViews: [
+				{
+					buffer: 0,
+					byteLength: 4,
+					extensions: {
+						EXT_meshopt_compression: { buffer: 0, byteLength: 4, count: 45_000_000, byteStride: 16, mode: "ATTRIBUTES" }
+					}
+				}
+			],
+			accessors: [{ bufferView: 0, componentType: 5126, count: 1, type: "VEC4" }],
+			meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+			nodes: [{ mesh: 0 }],
+			scenes: [{ nodes: [0] }]
+		}
+
+		const json = encode(JSON.stringify(gltf).padEnd(Math.ceil(JSON.stringify(gltf).length / 4) * 4, " "))
+		const glb = new Uint8Array(12 + 8 + json.length + 8 + 4)
+		const view = new DataView(glb.buffer)
+
+		view.setUint32(0, 0x46546c67, true)
+		view.setUint32(4, 2, true)
+		view.setUint32(8, glb.length, true)
+		view.setUint32(12, json.length, true)
+		view.setUint32(16, 0x4e4f534a, true)
+		glb.set(json, 20)
+		view.setUint32(20 + json.length, 4, true)
+		view.setUint32(24 + json.length, 0x004e4942, true)
+
+		await expect(loadModel(glb, "glb", null, () => Promise.resolve(null))).rejects.toMatchObject({
+			name: "ModelRefused",
+			reason: "tooLarge"
+		})
+	})
+
+	it("frees the file's bytes once parsed, the scene intact", async () => {
+		const stl = new Uint8Array(84 + 12 * 50)
+
+		new DataView(stl.buffer).setUint32(80, 12, true)
+		new DataView(stl.buffer).setFloat32(84 + 12, 5, true)
+
+		const loaded = await loadModel(stl, "stl", null, () => Promise.resolve(null))
+
+		releaseSource(stl)
+
+		expect(stl.byteLength).toBe(0)
+		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 12, size: [5, 0, 0] })
+	})
+})
+
+describe("mtllib", () => {
+	it("names several MTLs or one with spaces, each once, and every MTL's materials apply", async () => {
+		expect(mtlLibraries("mtllib a.mtl b.mtl\nmtllib my model.mtl\nmtllib a.mtl\n")).toEqual(["a.mtl", "b.mtl", "my model.mtl"])
+
+		const obj = "mtllib a.mtl b.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl red\nf 1 2 3\nusemtl blue\nf 1 3 2\n"
+		const mtl: Record<string, string> = { "a.mtl": "newmtl red\nKd 1 0 0\n", "b.mtl": "newmtl blue\nKd 0 0 1\n" }
+		const loaded = await loadModel(encode(obj), "obj", null, url => Promise.resolve(mtl[url.slice(REFERENCE_BASE.length)] ?? null))
+		const names: string[] = []
+
+		loaded.root.traverse(object => {
+			const material = (object as { material?: { name: string } | { name: string }[] }).material
+
+			for (const one of Array.isArray(material) ? material : material === undefined ? [] : [material]) names.push(one.name)
+		})
+
+		expect(names.sort()).toEqual(["blue", "red"])
+	})
+
+	it("refuses an OBJ whose faces fan past the triangle cap before parsing", async () => {
+		await expect(
+			loadModel(encode(`v 0 0 0\nf ${"1 ".repeat(1_100_000)}\n`), "obj", null, () => Promise.resolve(null))
+		).rejects.toMatchObject({
+			reason: "tooLarge"
+		})
 	})
 })
 

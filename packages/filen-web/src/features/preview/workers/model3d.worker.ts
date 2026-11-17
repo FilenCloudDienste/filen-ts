@@ -9,6 +9,7 @@ import * as Comlink from "comlink"
 import {
 	AnimationMixer,
 	HemisphereLight,
+	ImageBitmapLoader,
 	ImageLoader,
 	PMREMGenerator,
 	PerspectiveCamera,
@@ -19,13 +20,21 @@ import {
 	type Object3D
 } from "three"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
-import { installImageLoaderShim, type ImageLoaderLike } from "@/features/preview/lib/model3d/imageLoaderShim"
+import { IMAGE_WHEEL_SENSITIVITY } from "@/features/preview/components/imageViewer.logic"
+import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js"
+import {
+	installTextureShim,
+	type ImageBitmapLoaderLike,
+	type ImageLoaderLike,
+	type Ktx2LoaderLike
+} from "@/features/preview/lib/model3d/imageLoaderShim"
 import {
 	ModelRefusedError,
 	asGroup,
 	boundingSphere,
 	loadModel,
 	modelInfo,
+	releaseSource,
 	setWireframe,
 	type ModelInfo
 } from "@/features/preview/lib/model3d/load"
@@ -83,17 +92,24 @@ const sandbox = installResourceSandbox({
 	budget: MODEL_MAX_BYTES * 2
 })
 installModelGlobals()
-const images = installImageLoaderShim(ImageLoader as unknown as ImageLoaderLike, {
-	fetch: url => fetch(url),
-	decode: (blob, options) => createImageBitmap(blob, options),
-	get maxSide() {
-		return maxSide
+const images = installTextureShim(
+	{
+		ImageLoader: ImageLoader as unknown as ImageLoaderLike,
+		ImageBitmapLoader: ImageBitmapLoader as unknown as ImageBitmapLoaderLike,
+		KTX2Loader: KTX2Loader as unknown as Ktx2LoaderLike
 	},
-	budget: textures,
-	onSkipped: () => {
-		skipped++
+	{
+		fetch: url => fetch(url),
+		decode: (blob, options) => createImageBitmap(blob, options),
+		get maxSide() {
+			return maxSide
+		},
+		budget: textures,
+		onSkipped: () => {
+			skipped++
+		}
 	}
-})
+)
 
 let shell: MessagePort | null = null
 let renderer: WebGLRenderer | null = null
@@ -225,11 +241,16 @@ function input(events: readonly CanvasInput[]): void {
 				break
 			}
 			case "wheel":
-				next = zoomOrbit(next, Math.exp(-event.deltaY * 0.0015), fitted)
+				next = zoomOrbit(next, Math.exp(-event.deltaY * IMAGE_WHEEL_SENSITIVITY), fitted)
 
 				break
 			case "key":
 				if (event.phase !== "down") break
+				// 0 frames the model again, as the toolbar's Fit (and the track viewer's 0).
+				if (event.key === "0") {
+					next = fitOrbit(next, sphere, FOV, camera.aspect)
+					fitted = next.radius
+				}
 				if (event.key === "+" || event.key === "=") next = zoomOrbit(next, 1.25, fitted)
 				if (event.key === "-") next = zoomOrbit(next, 0.8, fitted)
 				if (event.key === "ArrowLeft") next = rotateOrbit(next, -32, 0, height)
@@ -322,6 +343,7 @@ const api = {
 			loaded = await loadModel(init.bytes, init.format, built, fetchText)
 			// Counted and drawn with its textures.
 			await images.settled()
+			releaseSource(init.bytes)
 		} catch (error) {
 			return outcome(error instanceof ModelRefusedError ? error.reason : "failed")
 		}

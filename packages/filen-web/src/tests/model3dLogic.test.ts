@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { zlibSync } from "fflate"
 import {
 	cameraPosition,
 	fitOrbit,
@@ -10,7 +11,18 @@ import {
 	zoomOrbit
 } from "@/features/preview/lib/model3d/orbit.logic"
 import {
+	FBX_MAX_ARRAY_BYTES,
+	MODEL_MAX_BYTES,
 	MODEL_MAX_TRIANGLES,
+	MODEL_MAX_UNPACKED_BYTES,
+	OBJ_MAX_TRIANGLES,
+	fbxArrays,
+	gltfMeshoptBytes,
+	inflatesWithin,
+	ktx2Pixels,
+	objCounts,
+	preflightFbx,
+	preflightObj,
 	binaryStlTriangles,
 	gltfElements,
 	gpuBytes,
@@ -27,6 +39,45 @@ import { bitmapOptions } from "@/features/preview/lib/model3d/imageLoaderShim"
 import { animationEntries, referenceOutcomes, referenceSummary } from "@/features/preview/components/model3dViewer.logic"
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+const deflate = (bytes: Uint8Array): Uint8Array => zlibSync(bytes)
+
+// A binary FBX (7.4, 32-bit records) with one top-level node holding one zlib-encoded double array per entry.
+function fbx(arrays: readonly { count: number; data: Uint8Array }[]): Uint8Array {
+	const name = encode("Geometry")
+	const properties = arrays.map(({ count, data }) => {
+		const property = new Uint8Array(13 + data.length)
+		const view = new DataView(property.buffer)
+
+		property[0] = 0x64
+		view.setUint32(1, count, true)
+		view.setUint32(5, 1, true)
+		view.setUint32(9, data.length, true)
+		property.set(data, 13)
+
+		return property
+	})
+	const propertyBytes = properties.reduce((sum, property) => sum + property.length, 0)
+	const nodeLength = 13 + name.length + propertyBytes
+	const bytes = new Uint8Array(27 + nodeLength + 13)
+	const view = new DataView(bytes.buffer)
+
+	bytes.set(encode("Kaydara FBX Binary  \0\x1a\0"))
+	view.setUint32(23, 7400, true)
+	view.setUint32(27, 27 + nodeLength, true)
+	view.setUint32(31, arrays.length, true)
+	view.setUint32(35, propertyBytes, true)
+	bytes[39] = name.length
+	bytes.set(name, 40)
+
+	let at = 40 + name.length
+
+	for (const property of properties) {
+		bytes.set(property, at)
+		at += property.length
+	}
+
+	return bytes
+}
 
 function binaryStl(triangles: number, declared = triangles): Uint8Array {
 	const bytes = new Uint8Array(84 + triangles * 50)
@@ -109,17 +160,22 @@ describe("orbit", () => {
 describe("preflight", () => {
 	it("reads a binary STL's triangle count from its header and refuses one above the limit", () => {
 		expect(binaryStlTriangles(binaryStl(3))).toBe(3)
-		// The size must match the count, else it is ASCII.
-		expect(binaryStlTriangles(binaryStl(3, 4))).toBeNull()
 		expect(binaryStlTriangles(encode("solid cube\nendsolid cube\n"))).toBeNull()
 		expect(preflightStl(binaryStl(1))).toEqual({ ok: true })
+		// Trailing bytes after a real binary STL: still binary (no "solid"), still capped.
+		expect(binaryStlTriangles(new Uint8Array([...binaryStl(3), 0, 0]))).toBe(3)
 
-		const huge = new Uint8Array(84)
+		const huge = new Uint8Array(84 + 50)
 
 		new DataView(huge.buffer).setUint32(80, MODEL_MAX_TRIANGLES + 1, true)
-		// A header declaring more than the bytes hold is ASCII by size; a matching one above the limit is refused.
-		expect(preflightStl(huge)).toEqual({ ok: true })
-		expect(binaryStlTriangles(huge)).toBeNull()
+		// As STLLoader reads it: no "solid", so binary, and its arrays would be sized by the header. Refused first.
+		expect(preflightStl(huge)).toEqual({ ok: false, reason: "malformed" })
+		expect(preflightStl(binaryStl(3, 4))).toEqual({ ok: false, reason: "malformed" })
+
+		const declared = new Uint8Array(84 + (MODEL_MAX_TRIANGLES + 1) * 50)
+
+		new DataView(declared.buffer).setUint32(80, MODEL_MAX_TRIANGLES + 1, true)
+		expect(preflightStl(declared)).toEqual({ ok: false, reason: "tooLarge" })
 	})
 
 	it("reads a PLY header's element counts", () => {
@@ -147,12 +203,71 @@ describe("preflight", () => {
 		expect(preflightGltf(new Uint8Array(24), true)).toEqual({ ok: false, reason: "malformed" })
 	})
 
-	it("refuses a zip that unpacks too far, in all or in one entry", () => {
+	it("counts what meshopt buffers would allocate, from their declared counts and strides", () => {
+		const meshopt = (count: number) => ({
+			bufferViews: [
+				{ extensions: { EXT_meshopt_compression: { count, byteStride: 16 } } },
+				{ extensions: { KHR_meshopt_compression: { count: 1, byteStride: 4 } } }
+			]
+		})
+
+		expect(gltfMeshoptBytes(meshopt(10))).toBe(164)
+		expect(preflightGltf(glb(meshopt(10)), true)).toEqual({ ok: true })
+		expect(preflightGltf(glb(meshopt(100_000_000)), true)).toEqual({ ok: false, reason: "tooLarge" })
+	})
+
+	it("counts an OBJ's vertices and the triangles its faces fan into, before parsing", () => {
+		expect(objCounts(encode("v 0 0 0\nv 1 0 0\n  v 0 1 0\nvt 0 0\nvn 0 0 1\nf 1 2 3\nf 1/1 2/1 3/1 1/1\n# f 1 2 3\n"))).toEqual({
+			vertices: 3,
+			triangles: 3
+		})
+		// One face line with a million corners: a million triangles, refused before OBJLoader copies them.
+		const fan = encode(`v 0.5 0.5 0.5\nf ${"1 ".repeat(OBJ_MAX_TRIANGLES + 3)}\n`)
+
+		expect(preflightObj(fan)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightObj(encode("v 0 0 0\nf 1 1 1\n"))).toEqual({ ok: true })
+	})
+
+	it("walks a binary FBX's arrays, refusing one that inflates past what it declares or past the cap", () => {
+		const honest = fbx([{ count: 1000, data: deflate(new Uint8Array(8000)) }])
+		const lying = fbx([{ count: 10, data: deflate(new Uint8Array(8_000_000)) }])
+		const huge = fbx([{ count: FBX_MAX_ARRAY_BYTES / 8 + 1, data: deflate(new Uint8Array(8)) }])
+
+		expect(fbxArrays(honest)?.total).toBe(8000)
+		expect(preflightFbx(honest)).toEqual({ ok: true })
+		expect(preflightFbx(lying)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightFbx(huge)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(preflightFbx(fbx([{ count: 4, data: Uint8Array.from([1, 2, 3]) }]))).toEqual({ ok: false, reason: "malformed" })
+		expect(preflightFbx(honest.subarray(0, honest.length - 40))).toEqual({ ok: false, reason: "malformed" })
+		expect(preflightFbx(encode("; FBX 7.4.0 project file\n"))).toEqual({ ok: true })
+	})
+
+	it("stops inflating once a stream outgrows its limit", () => {
+		expect(inflatesWithin(deflate(new Uint8Array(100)), 100)).toBe("ok")
+		expect(inflatesWithin(deflate(new Uint8Array(100_000_000)), 1000)).toBe("over")
+		expect(inflatesWithin(Uint8Array.from([1, 2, 3]), 1000)).toBe("corrupt")
+	})
+
+	it("reads a KTX2's base-level pixels from its header", () => {
+		const header = new Uint8Array(80)
+		const view = new DataView(header.buffer)
+
+		header.set([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a])
+		view.setUint32(20, 1024, true)
+		view.setUint32(24, 512, true)
+		view.setUint32(36, 6, true)
+
+		expect(ktx2Pixels(header)).toBe(1024 * 512 * 6)
+		expect(ktx2Pixels(new Uint8Array(80))).toBeNull()
+	})
+
+	it("refuses a zip that unpacks past the model cap in all, or too far in one entry", () => {
 		const MIB = 1024 * 1024
 
+		expect(MODEL_MAX_UNPACKED_BYTES).toBe(MODEL_MAX_BYTES)
 		expect(preflightZip([{ compressed: MIB, uncompressed: 10 * MIB }])).toEqual({ ok: true })
 		expect(preflightZip([{ compressed: MIB, uncompressed: 300 * MIB }])).toEqual({ ok: false, reason: "tooLarge" })
-		expect(preflightZip(Array.from({ length: 6 }, () => ({ compressed: 90 * MIB, uncompressed: 100 * MIB })))).toEqual({
+		expect(preflightZip(Array.from({ length: 2 }, () => ({ compressed: 60 * MIB, uncompressed: 65 * MIB })))).toEqual({
 			ok: false,
 			reason: "tooLarge"
 		})
@@ -160,12 +275,10 @@ describe("preflight", () => {
 		expect(preflightZip([{ compressed: 10, uncompressed: 100_000 }])).toEqual({ ok: true })
 	})
 
-	it("sizes a texture within the side cap and the pixels left, and skips one that cannot fit", () => {
-		expect(textureSize(1024, 512, 4096, 1e9)).toEqual({ width: 1024, height: 512 })
-		expect(textureSize(8192, 4096, 4096, 1e9)).toEqual({ width: 4096, height: 2048 })
-		expect(textureSize(2000, 2000, 4096, 1_000_000)).toEqual({ width: 1000, height: 1000 })
-		expect(textureSize(2000, 2000, 4096, 0)).toBeNull()
-		expect(textureSize(0, 10, 4096, 1e9)).toBeNull()
+	it("sizes a texture within the side cap", () => {
+		expect(textureSize(1024, 512, 4096)).toEqual({ width: 1024, height: 512 })
+		expect(textureSize(8192, 4096, 4096)).toEqual({ width: 4096, height: 2048 })
+		expect(textureSize(0, 10, 4096)).toBeNull()
 	})
 
 	it("estimates GPU memory from attributes, mipmapped textures and the framebuffer", () => {

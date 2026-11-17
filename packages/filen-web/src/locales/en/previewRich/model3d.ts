@@ -59,7 +59,7 @@ export const previewRichModel3d = {
 	/** 3D viewer — the file did not parse */
 	previewModelUnreadable: "This model can't be read.",
 	/** 3D viewer — the model declares more geometry or unpacked data than the viewer loads */
-	previewModelTooLarge: "This model is too large to display.",
+	previewModelTooLarge: "This model is too large to preview.",
 	/** 3D viewer — the parsed model needs more graphics memory than the viewer allows */
 	previewModelTooComplex: "This model is too complex to display."
 } as const

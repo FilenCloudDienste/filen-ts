@@ -187,6 +187,11 @@ async function expectModel(
 	}
 
 	await expect(dialog.getByLabel("3D model", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("button", { name: "Info", exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// The model is drawn into the worker's canvas.
+	await expect
+		.poll(() => drawnPixels(dialog.getByLabel("3D model", { exact: true })), { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		.toBeGreaterThan(200)
 	await dialog.getByRole("button", { name: "Info", exact: true }).click()
 
 	const panel = dialog.getByRole("complementary")

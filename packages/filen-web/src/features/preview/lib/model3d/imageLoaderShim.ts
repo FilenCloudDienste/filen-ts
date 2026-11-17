@@ -1,11 +1,18 @@
 import { imageDimensions } from "@filen/office/core/opc"
-import { textureSize } from "@/features/preview/lib/model3d/preflight.logic"
+import { ktx2Pixels, textureSize } from "@/features/preview/lib/model3d/preflight.logic"
 
-// three's ImageLoader draws through an <img>, which a worker has none of. Every DOM-bound texture path goes through it
-// (TextureLoader for MTL, FBX and 3MF; USDComposer for USDZ), so its `load` is replaced, once per worker: the bytes come
-// through the sandboxed fetch, the header's dimensions are checked against the pixel budget before decoding, and the
-// image is decoded to an ImageBitmap at its drawn size. Those loaders build textures with the default flipY, which
-// WebGL ignores for an ImageBitmap, so the bitmap is decoded flipped.
+// Every texture a loader reads goes through one pixel budget, in the 3D worker. three's image paths are replaced, once
+// per worker: ImageLoader (an <img>, which a worker has none of: MTL, FBX, 3MF and USDZ textures), ImageBitmapLoader
+// (glTF's) and KTX2Loader's transcode.
+//   An image is read whole and its dimensions taken from its header (a JPEG's frame header may sit past large APPn
+//   segments). One whose dimensions cannot be read is skipped, never decoded.
+//   Its full size is reserved against the budget at once, with the check, before anything awaits: textures requested
+//   in the same tick cannot all pass. One that does not fit is skipped.
+//   Decodes run one at a time, each to an ImageBitmap at its drawn size; the full-size raster the decode makes first
+//   is what was reserved, and only the drawn size stays charged once it is done.
+//   A KTX2's base-level pixels (every layer and face) are reserved from its header before it transcodes.
+// ImageLoader's callers build textures with the default flipY, which WebGL ignores for an ImageBitmap, so those
+// bitmaps are decoded flipped; ImageBitmapLoader keeps the options its caller set.
 
 export interface ImageLoaderLike {
 	prototype: {
@@ -20,90 +27,165 @@ export interface ImageLoaderLike {
 	}
 }
 
+export interface ImageBitmapLoaderLike {
+	prototype: ImageLoaderLike["prototype"] & { options?: ImageBitmapOptions }
+}
+
+export interface Ktx2LoaderLike {
+	prototype: { _createTexture: (buffer: ArrayBuffer, config?: unknown) => Promise<unknown> }
+}
+
+export interface TextureBudget {
+	// Pixels left, at TEXTURE_BPP bytes each.
+	pixels: number
+}
+
 export interface ImageLoaderShimOptions {
 	readonly fetch: (url: string) => Promise<Response>
 	readonly decode: (blob: Blob, options: ImageBitmapOptions) => Promise<ImageBitmap>
 	// The longest side a texture is drawn at.
 	readonly maxSide: number
-	// Pixels the textures may still take; the shim spends from it.
-	readonly budget: { pixels: number }
-	// A texture that did not fit the budget, or did not decode.
+	readonly budget: TextureBudget
+	// A texture that did not fit the budget, had no readable dimensions, or did not decode.
 	readonly onSkipped: (url: string) => void
 }
 
-// The ImageBitmap options for a texture drawn at `size`: flipped (see above), straight alpha, no colour conversion.
+export class TextureSkippedError extends Error {
+	constructor(url: string) {
+		super(`texture ${url} skipped`)
+
+		this.name = "TextureSkipped"
+	}
+}
+
+// The ImageBitmap options for an ImageLoader texture drawn at `size`: flipped (see above), straight alpha, no colour
+// conversion.
 export function bitmapOptions(size: { width: number; height: number } | null): ImageBitmapOptions {
 	return {
 		imageOrientation: "flipY",
 		premultiplyAlpha: "none",
 		colorSpaceConversion: "none",
-		...(size === null ? {} : { resizeWidth: size.width, resizeHeight: size.height, resizeQuality: "high" })
+		...resizeOptions(size)
 	}
 }
 
-async function loadImage(url: string, options: ImageLoaderShimOptions): Promise<ImageBitmap | null> {
-	const response = await options.fetch(url)
-
-	if (!response.ok) return null
-
-	const blob = await response.blob()
-	const dimensions = imageDimensions(new Uint8Array(await blob.slice(0, 64 * 1024).arrayBuffer()))
-	const size = dimensions === undefined ? null : textureSize(dimensions.width, dimensions.height, options.maxSide, options.budget.pixels)
-
-	// Known dimensions that do not fit: skipped before anything is decoded.
-	if (dimensions !== undefined && size === null) return null
-
-	const bitmap = await options.decode(blob, bitmapOptions(size))
-
-	options.budget.pixels -= bitmap.width * bitmap.height
-
-	if (options.budget.pixels < 0) {
-		bitmap.close()
-
-		return null
-	}
-
-	return bitmap
+function resizeOptions(size: { width: number; height: number } | null): ImageBitmapOptions {
+	return size === null ? {} : { resizeWidth: size.width, resizeHeight: size.height, resizeQuality: "high" }
 }
 
-export interface ImageLoaderShim {
+// Takes `pixels` from the budget if they fit, in the same call as the check.
+export function reserve(budget: TextureBudget, pixels: number): boolean {
+	if (!Number.isFinite(pixels) || pixels <= 0 || pixels > budget.pixels) return false
+
+	budget.pixels -= pixels
+
+	return true
+}
+
+export interface TextureShim {
 	// Resolves once every texture asked for so far has loaded or been skipped, those its loads asked for included: the
 	// loaders that go through ImageLoader return their scene before its textures arrive.
 	settled(): Promise<void>
 }
 
-export function installImageLoaderShim(ImageLoader: ImageLoaderLike, options: ImageLoaderShimOptions): ImageLoaderShim {
+type Loader = ImageLoaderLike["prototype"]
+
+export function installTextureShim(
+	loaders: { ImageLoader: ImageLoaderLike; ImageBitmapLoader: ImageBitmapLoaderLike; KTX2Loader: Ktx2LoaderLike },
+	options: ImageLoaderShimOptions
+): TextureShim {
 	const pending = new Set<Promise<unknown>>()
+	// One decode at a time: the peak is one full-size raster.
+	let decoding: Promise<unknown> = Promise.resolve()
 
-	ImageLoader.prototype.load = function load(this: ImageLoaderLike["prototype"], url, onLoad, _onProgress, onError) {
+	async function decodeImage(
+		url: string,
+		base: (size: { width: number; height: number } | null) => ImageBitmapOptions
+	): Promise<ImageBitmap | null> {
+		const response = await options.fetch(url)
+
+		if (!response.ok) return null
+
+		const bytes = new Uint8Array(await response.arrayBuffer())
+		const dimensions = imageDimensions(bytes)
+
+		if (dimensions === undefined) return null
+
+		const full = dimensions.width * dimensions.height
+
+		if (!reserve(options.budget, full)) return null
+
+		const size = textureSize(dimensions.width, dimensions.height, options.maxSide)
+		const decoded = decoding.then(() => options.decode(new Blob([bytes]), base(size)))
+
+		decoding = decoded.catch(() => undefined)
+
+		const bitmap = await decoded.catch(() => null)
+
+		// Only what is drawn stays charged; a decode that failed gives everything back.
+		options.budget.pixels += bitmap === null ? full : full - bitmap.width * bitmap.height
+
+		return bitmap
+	}
+
+	function load(
+		this: Loader,
+		url: string,
+		base: (size: { width: number; height: number } | null) => ImageBitmapOptions,
+		onLoad?: (image: never) => void,
+		onError?: (error: unknown) => void
+	): undefined {
 		const resolved = this.manager?.resolveURL((this.path ?? "") + url) ?? url
+		const manager = this.manager
 
-		this.manager?.itemStart(resolved)
+		manager?.itemStart(resolved)
 
-		const loading = loadImage(resolved, options).then(
+		const loading = decodeImage(resolved, base).then(
 			bitmap => {
 				if (bitmap === null) {
 					options.onSkipped(url)
-					onError?.(new Error(`texture ${url} skipped`))
-					this.manager?.itemError(resolved)
+					onError?.(new TextureSkippedError(url))
+					manager?.itemError(resolved)
 				} else {
 					onLoad?.(bitmap as never)
 				}
 
-				this.manager?.itemEnd(resolved)
+				manager?.itemEnd(resolved)
 			},
 			(error: unknown) => {
 				options.onSkipped(url)
 				onError?.(error)
-				this.manager?.itemError(resolved)
-				this.manager?.itemEnd(resolved)
+				manager?.itemError(resolved)
+				manager?.itemEnd(resolved)
 			}
 		)
 
 		pending.add(loading)
 		void loading.finally(() => pending.delete(loading))
+	}
 
-		return undefined
+	loaders.ImageLoader.prototype.load = function (this: Loader, url, onLoad, _onProgress, onError) {
+		load.call(this, url, bitmapOptions, onLoad, onError)
+	}
+
+	loaders.ImageBitmapLoader.prototype.load = function (this: ImageBitmapLoaderLike["prototype"], url, onLoad, _onProgress, onError) {
+		const own = this.options ?? {}
+
+		load.call(this, url, size => ({ ...own, colorSpaceConversion: "none", ...resizeOptions(size) }), onLoad, onError)
+	}
+
+	const transcode = loaders.KTX2Loader.prototype._createTexture
+
+	loaders.KTX2Loader.prototype._createTexture = function (this: unknown, buffer, config) {
+		const pixels = ktx2Pixels(new Uint8Array(buffer))
+
+		if (pixels === null || !reserve(options.budget, pixels)) {
+			options.onSkipped("ktx2")
+
+			return Promise.reject(new TextureSkippedError("ktx2"))
+		}
+
+		return transcode.call(this, buffer, config)
 	}
 
 	return {

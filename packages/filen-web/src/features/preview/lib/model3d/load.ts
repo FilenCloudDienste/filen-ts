@@ -27,8 +27,14 @@ import { USDLoader } from "three/examples/jsm/loaders/USDLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js"
 import { ZipArchive, bytesSource } from "@filen/office/core/opc"
 import { THREE_ASSETS } from "virtual:three-assets"
+import { AllocationRefusedError, withAllocationBudget } from "@/features/preview/lib/model3d/allocationBudget"
 import {
+	MODEL_MAX_UNPACKED_BYTES,
+	PARSE_MAX_ALLOCATION,
+	PARSE_MAX_TOTAL,
+	preflightFbx,
 	preflightGltf,
+	preflightObj,
 	preflightPly,
 	preflightStl,
 	preflightZip,
@@ -99,17 +105,29 @@ async function zipPreflight(bytes: Uint8Array): Promise<void> {
 	refuse(preflightZip(archive.entries.map(entry => ({ compressed: entry.compressedSize, uncompressed: entry.uncompressedSize }))))
 }
 
-// The MTL files an OBJ names (`mtllib a.mtl b.mtl`), relative to it.
+// The MTL files an OBJ names, relative to it, in order and once each. A line may list several (`mtllib a.mtl b.mtl`)
+// or name one with spaces in it (`mtllib my model.mtl`): it lists several only when every word names an .mtl.
 export function mtlLibraries(obj: string): string[] {
 	const names: string[] = []
 
-	for (const match of obj.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)) {
-		const name = match[1]
+	for (const match of obj.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) {
+		const line = match[1] ?? ""
+		const words = line.split(/[ \t]+/)
+		const listed = words.length > 1 && words.every(word => word.toLowerCase().endsWith(".mtl")) ? words : [line]
 
-		if (name !== undefined) names.push(name)
+		for (const name of listed) if (!names.includes(name)) names.push(name)
 	}
 
 	return names
+}
+
+// Several MTLs' materials as one creator: a name is looked up in each, in the order the OBJ names them.
+function mergedMaterials(first: MTLLoader.MaterialCreator, creators: readonly MTLLoader.MaterialCreator[]): MTLLoader.MaterialCreator {
+	if (creators.length === 1) return first
+
+	return Object.assign(Object.create(first) as MTLLoader.MaterialCreator, {
+		create: (name: string) => creators.find(creator => name in creator.materialsInfo)?.create(name)
+	})
 }
 
 function directoryOf(path: string): string {
@@ -118,24 +136,30 @@ function directoryOf(path: string): string {
 	return slash === -1 ? "" : path.slice(0, slash + 1)
 }
 
-async function loadObj(source: string, fetchText: (url: string) => Promise<string | null>): Promise<LoadedModel> {
+async function loadObj(bytes: Uint8Array, fetchText: (url: string) => Promise<string | null>): Promise<LoadedModel> {
+	refuse(preflightObj(bytes))
+
+	const source = text(bytes)
 	const loader = new OBJLoader()
+	// Read together; the materials only as the faces use them, so an unused material's textures are never fetched.
+	const libraries = await Promise.all(
+		mtlLibraries(source).map(async library => {
+			const mtl = await fetchText(REFERENCE_BASE + library)
 
-	for (const library of mtlLibraries(source)) {
-		const mtl = await fetchText(REFERENCE_BASE + library)
+			if (mtl === null) return null
 
-		if (mtl === null) continue
+			const mtlLoader = new MTLLoader()
 
-		const mtlLoader = new MTLLoader()
+			// Both faces: exported meshes often have open or inconsistently wound surfaces.
+			mtlLoader.setMaterialOptions({ side: DoubleSide })
 
-		// Both faces: exported meshes often have open or inconsistently wound surfaces.
-		mtlLoader.setMaterialOptions({ side: DoubleSide })
+			return mtlLoader.parse(mtl, REFERENCE_BASE + directoryOf(library))
+		})
+	)
+	const creators = libraries.filter(creator => creator !== null)
+	const [first] = creators
 
-		const materials = mtlLoader.parse(mtl, REFERENCE_BASE + directoryOf(library))
-
-		materials.preload()
-		loader.setMaterials(materials)
-	}
+	if (first !== undefined) loader.setMaterials(mergedMaterials(first, creators))
 
 	return { root: loader.parse(source), animations: [] }
 }
@@ -168,9 +192,37 @@ function loadGltf(bytes: Uint8Array, binary: boolean, renderer: WebGLRenderer | 
 		})
 }
 
-// Parses `bytes` as `format`. Rejects with ModelRefusedError when a preflight refuses it, with the loader's error when
+// Parses `bytes` as `format`. Rejects with ModelRefusedError when a preflight refuses it or the parse asks for more
+// memory than it may (allocationBudget.ts: a USDZ's buffers each within the unpacked cap), with the loader's error when
 // it does not parse.
 export async function loadModel(
+	bytes: Uint8Array,
+	format: ModelFormat,
+	renderer: WebGLRenderer | null,
+	fetchText: (url: string) => Promise<string | null>
+): Promise<LoadedModel> {
+	const limits = { each: format === "usdz" ? MODEL_MAX_UNPACKED_BYTES : PARSE_MAX_ALLOCATION, total: PARSE_MAX_TOTAL }
+
+	try {
+		return await withAllocationBudget(limits, () => parseModel(bytes, format, renderer, fetchText))
+	} catch (error) {
+		if (error instanceof AllocationRefusedError) throw new ModelRefusedError("tooLarge")
+
+		throw error
+	}
+}
+
+// Frees the file's bytes once the scene is built: every loader copies what it keeps (GLTFLoader slices its body and
+// buffer views), so nothing of the scene points into them. A transfer detaches the buffer at once, whatever still
+// holds the array (the call that delivered it).
+export function releaseSource(bytes: Uint8Array): void {
+	const source = bytes.buffer
+
+	// ArrayBuffer.prototype.transfer: Chromium 114, Firefox 122, Safari 17.4; elsewhere the bytes go when the call ends.
+	if (source instanceof ArrayBuffer && "transfer" in source && !source.detached) source.transfer(0)
+}
+
+async function parseModel(
 	bytes: Uint8Array,
 	format: ModelFormat,
 	renderer: WebGLRenderer | null,
@@ -186,7 +238,7 @@ export async function loadModel(
 
 			return { root: geometryObject(new PLYLoader().parse(buffer(bytes))), animations: [] }
 		case "obj":
-			return await loadObj(text(bytes), fetchText)
+			return await loadObj(bytes, fetchText)
 		case "gltf":
 			return await loadGltf(bytes, false, renderer)
 		case "glb":
@@ -196,6 +248,8 @@ export async function loadModel(
 
 			return { root: new ThreeMFLoader().parse(buffer(bytes)), animations: [] }
 		case "fbx": {
+			refuse(preflightFbx(bytes))
+
 			const root = new FBXLoader().parse(buffer(bytes), REFERENCE_BASE)
 
 			return { root, animations: root.animations }
@@ -239,6 +293,8 @@ export function modelInfo(root: Object3D): ModelInfo {
 	let vertices = 0
 	let meshes = 0
 	let attributeBytes = 0
+	// Each buffer once: interleaved attributes share one, and so do meshes sharing a geometry.
+	const buffers = new Set<ArrayBufferLike>()
 
 	root.traverse(object => {
 		const geometry = (object as { geometry?: BufferGeometry }).geometry
@@ -252,9 +308,12 @@ export function modelInfo(root: Object3D): ModelInfo {
 		vertices += position.count
 		triangles += object instanceof Mesh ? Math.floor((geometry.index?.count ?? position.count) / 3) : 0
 
-		for (const attribute of Object.values(geometry.attributes)) attributeBytes += attribute.array.byteLength
+		for (const array of [...Object.values(geometry.attributes).map(attribute => attribute.array), geometry.index?.array]) {
+			if (array === undefined || buffers.has(array.buffer)) continue
 
-		attributeBytes += geometry.index?.array.byteLength ?? 0
+			buffers.add(array.buffer)
+			attributeBytes += array.buffer.byteLength
+		}
 
 		for (const material of materialsOf(object)) {
 			materials.add(material)

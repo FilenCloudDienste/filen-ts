@@ -22,7 +22,7 @@ import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 import { HEIC_EXTENSIONS, IMAGE_FORMATS, pendingProbe, streamsNatively, type ImageDecode } from "@/features/preview/lib/imageFormat"
 import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
-import { MODEL_MAX_BYTES } from "@/features/preview/lib/model3d/preflight.logic"
+import { MODEL_FORMATS, MODEL_MAX_BYTES } from "@/features/preview/lib/model3d/preflight.logic"
 import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
@@ -489,7 +489,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// topojson stays "other".
 	[GEO_FORMATS, "geo"],
 	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
-	[["stl", "obj", "gltf", "glb", "3mf", "fbx", "ply", "usdz"], "model3d"],
+	[MODEL_FORMATS, "model3d"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],

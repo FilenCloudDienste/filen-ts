@@ -120,7 +120,7 @@ describe("Model3dViewer", () => {
 		["noWebgl", "This browser can't display 3D models here."],
 		["malformed", "This model can't be read."],
 		["failed", "This model can't be read."],
-		["tooLarge", "This model is too large to display."],
+		["tooLarge", "This model is too large to preview."],
 		["tooComplex", "This model is too complex to display."]
 	] as const)("shows the %s card, with View source for a text format", async (status, message) => {
 		scene.next = () => Promise.resolve(outcome(status))
