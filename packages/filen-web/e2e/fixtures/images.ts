@@ -100,13 +100,13 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"img-pdfcompat.ai": { buffer: PDF_BYTES, mimeType: "application/illustrator" },
 		"img-postscript.ai": { buffer: Buffer.from(POSTSCRIPT_AI, "latin1"), mimeType: "application/illustrator" },
 		"img-dos.eps": { buffer: Buffer.from(dosEps(tiffSample())), mimeType: "application/postscript" },
-		// A 16 × 8 checkerboard of 1-bit samples.
+		// A 16 × 8 black frame on white, as the specification's example draws one (1 is black, 0 white).
 		"img-epsi.eps": {
 			buffer: Buffer.from(
 				epsiEps(
 					EPSI_WIDTH,
 					1,
-					Array.from({ length: 8 }, (_, row) => (row % 2 === 0 ? "AAAA" : "5555"))
+					Array.from({ length: 8 }, (_, row) => (row === 0 || row === 7 ? "FFFF" : "8001"))
 				)
 			),
 			mimeType: "application/postscript"

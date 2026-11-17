@@ -60,16 +60,16 @@ describe("decodeEpsi", () => {
 		return Array.from(data.filter((_, index) => index % 4 === 0))
 	}
 
-	it("reads 1-bit rows padded to a byte, 0 black and 1 white, top row first", () => {
+	it("reads 1-bit rows padded to a byte, 0 white and 1 black (EPSF 3.0 §6.1), top row first", () => {
 		const decoded = decodeEpsi(section(4, 1, ["A0", "50"]), 100)
 
 		expect(decoded).toMatchObject({ width: 4, height: 2, hasAlpha: false })
-		expect(greys(decoded.data)).toEqual([255, 0, 255, 0, 0, 255, 0, 255])
+		expect(greys(decoded.data)).toEqual([0, 255, 0, 255, 255, 0, 255, 0])
 	})
 
-	it("scales deeper samples to grey", () => {
-		expect(greys(decodeEpsi(section(2, 8, ["0080"]), 100).data)).toEqual([0, 128])
-		expect(greys(decodeEpsi(section(2, 4, ["F0"]), 100).data)).toEqual([255, 0])
+	it("scales deeper samples to grey, the depth's maximum black", () => {
+		expect(greys(decodeEpsi(section(2, 8, ["00FF"]), 100).data)).toEqual([255, 0])
+		expect(greys(decodeEpsi(section(2, 4, ["F0"]), 100).data)).toEqual([0, 255])
 	})
 
 	it("refuses a size over the budget before decoding, and hex that ends before the image", () => {

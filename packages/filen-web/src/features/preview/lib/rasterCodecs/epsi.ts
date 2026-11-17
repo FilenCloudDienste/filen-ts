@@ -1,8 +1,10 @@
 import { RasterBudgetError, type DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
 
 // An EPSI preview (Adobe EPSF 3.0, Technical Note 5002, Appendix E): "%%BeginPreview: width height depth lines", then
-// `lines` comment lines ("%" and hex), the image's rows of `depth` bits a sample, each row padded to a byte, 0 black and
-// the depth's maximum white, top row first. The bytes handed here start at the %%BeginPreview line.
+// `lines` comment lines ("%" and hex), the image's rows of `depth` bits a sample, each row padded to a byte. 0 is white
+// and the depth's maximum black (§6.1: the opposite of setgray). The specification puts the first sample at the lower
+// left, but the writers in use (ps2epsi, ImageMagick) write the top row first, so the rows are read top first. The
+// bytes handed here start at the %%BeginPreview line.
 
 const BEGIN_PREVIEW = "%%BeginPreview:"
 
@@ -101,7 +103,7 @@ export function decodeEpsi(bytes: Uint8Array, maxPixels: number): DecodedRaster 
 		for (let x = 0; x < width; x++) {
 			const bit = x * depth
 			const sample = ((packed[y * rowBytes + (bit >> 3)] ?? 0) >> (8 - depth - (bit & 7))) & max
-			const grey = Math.round((sample * 255) / max)
+			const grey = 255 - Math.round((sample * 255) / max)
 			const out = (y * width + x) * 4
 
 			data[out] = grey
