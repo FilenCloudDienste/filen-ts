@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readEmail } from "@/features/preview/lib/emailReading"
+import { rasterImageType, readEmail } from "@/features/preview/lib/emailReading"
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
@@ -85,6 +85,42 @@ describe("readEmail", () => {
 		])
 		expect(reading.attachments[1]?.blob).toBeInstanceOf(Blob)
 		expect(new TextDecoder().decode(await reading.attachments[1]?.blob.arrayBuffer())).toBe("%PDF-1.7\n")
+	})
+
+	it("types a part by its bytes, never its declared type: SVG and unknown bytes are no image", async () => {
+		const part = (type: string, id: string, base64: string): string[] => [
+			"--m",
+			`Content-Type: ${type}`,
+			`Content-ID: <${id}>`,
+			"Content-Transfer-Encoding: base64",
+			"",
+			base64
+		]
+		const reading = await readEmail(
+			encode(
+				CRLF([
+					"Subject: Types",
+					'Content-Type: multipart/related; boundary="m"',
+					"",
+					"--m",
+					"Content-Type: text/html",
+					"",
+					"<p>x</p>",
+					...part("image/svg+xml", "svg@x", btoa('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>')),
+					...part("image/png", "gif@x", btoa("GIF89a\x01\x00\x01\x00")),
+					...part("image/png", "text@x", btoa("not an image")),
+					"--m--"
+				])
+			)
+		)
+
+		expect(reading.status === "ok" && reading.attachments.map(attachment => [attachment.contentId, attachment.imageType])).toEqual([
+			["svg@x", null],
+			["gif@x", "image/gif"],
+			["text@x", null]
+		])
+		expect(rasterImageType(Uint8Array.from([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]))).toBe("image/avif")
+		expect(rasterImageType(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg")
 	})
 
 	it("reads at most 200 recipients and counts the rest", async () => {

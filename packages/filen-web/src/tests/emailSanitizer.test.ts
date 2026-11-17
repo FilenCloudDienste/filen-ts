@@ -19,6 +19,17 @@ function sanitized(html: string): { doc: Document; remoteBlocked: number; html: 
 }
 
 describe("sanitizeEmailHtml", () => {
+	it("makes an SVG link a listed link on real DOMPurify, never a resolved part the frame could navigate to", () => {
+		const result = sanitizeEmailHtml(
+			'<svg><a xlink:href="cid:img"><rect width="9" height="9"></rect></a><a xlink:href="https://example.com/s"><text>S</text></a></svg>',
+			() => "blob:https://app.example/part"
+		)
+
+		expect(result.html).not.toContain("blob:")
+		expect(result.html).not.toContain("xlink:href")
+		expect(result.links).toEqual([{ href: "https://example.com/s", text: "S" }])
+	})
+
 	it("keeps the document and its style element", () => {
 		const result = sanitizeEmailHtml("<html><head><style>p{color:red}</style></head><body><p>Hi</p></body></html>", NO_CID)
 

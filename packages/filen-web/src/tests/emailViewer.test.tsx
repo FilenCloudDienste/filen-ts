@@ -61,8 +61,14 @@ const { EmailViewer } = await import("@/features/preview/components/emailViewer"
 
 registerAllActions()
 
+const mintedTypes: string[] = []
+
 beforeAll(() => {
-	URL.createObjectURL = () => "blob:https://app.example/chart"
+	URL.createObjectURL = (blob: Blob | MediaSource) => {
+		mintedTypes.push(blob instanceof Blob ? blob.type : "")
+
+		return "blob:https://app.example/chart"
+	}
 	URL.revokeObjectURL = () => undefined
 })
 
@@ -135,6 +141,8 @@ describe("EmailViewer", () => {
 		const html = body.getAttribute("data-html") ?? ""
 
 		expect(html).toContain("blob:https://app.example/chart")
+		// Typed by its bytes (the part declares image/png too, but only the sniffed type reaches the URL).
+		expect(mintedTypes).toContain("image/png")
 		expect(html).not.toContain("tracker.e2e.example")
 		expect(body.getAttribute("data-links")).toBe("1")
 		expect(screen.getByRole("button", { name: "HTML" }).getAttribute("aria-pressed")).toBe("true")

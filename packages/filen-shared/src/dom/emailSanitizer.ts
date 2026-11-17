@@ -118,6 +118,15 @@ function cleanCss(css: string, mode: "sheet" | "declarations", run: Run): string
 	return kept.css
 }
 
+// A cid: URL's id is percent-encoded (RFC 2392); the Content-ID it names is not.
+function cidId(raw: string): string {
+	try {
+		return decodeURIComponent(raw)
+	} catch {
+		return raw
+	}
+}
+
 function linkHref(value: string): string | null {
 	try {
 		const url = new URL(value)
@@ -130,6 +139,16 @@ function linkHref(value: string): string | null {
 }
 
 function cleanAttributes(node: Element, run: Run): void {
+	const tag = node.tagName.toLowerCase()
+	const anchor = tag === "a" || tag === "area"
+	// An SVG link's target (xlink:href, or href) is a link like HTML's: never a resolved part, so a click can never
+	// navigate the frame to one.
+	const href = node.getAttribute("href") ?? (anchor ? node.getAttribute("xlink:href") : null)
+
+	if (anchor) {
+		node.removeAttribute("xlink:href")
+	}
+
 	for (const name of LOADING_ATTRIBUTES) {
 		const value = node.getAttribute(name)
 
@@ -146,9 +165,6 @@ function cleanAttributes(node: Element, run: Run): void {
 			node.setAttribute(name, local)
 		}
 	}
-
-	const tag = node.tagName.toLowerCase()
-	const href = node.getAttribute("href")
 
 	node.removeAttribute("href")
 	node.removeAttribute("target")
@@ -259,7 +275,7 @@ export function createEmailHtmlSanitizer(
 			return { html: "", remoteBlocked: 0, links: [], tooLarge: true }
 		}
 
-		const run: Run = { resolveCid, remoteBlocked: 0 }
+		const run: Run = { resolveCid: id => resolveCid(cidId(id)), remoteBlocked: 0 }
 
 		current = run
 

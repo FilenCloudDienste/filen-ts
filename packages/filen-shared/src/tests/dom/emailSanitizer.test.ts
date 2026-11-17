@@ -64,4 +64,29 @@ describe("createEmailHtmlSanitizer", () => {
 
 		expect(purifier.removed).toEqual([])
 	})
+
+	it("treats an SVG link's xlink:href as a link, never a resolved part", () => {
+		const sanitize = createEmailHtmlSanitizer(fakePurifier)
+		const result = sanitize(
+			"<svg><a xlink:href=\"cid:img\"><rect></rect></a><a xlink:href=\"https://example.com/s\">S</a></svg>",
+			id => `blob:local/${id}`
+		)
+
+		expect(result.html).not.toContain("blob:local")
+		expect(result.html).not.toContain("xlink:href")
+		expect(result.links).toEqual([{ href: "https://example.com/s", text: "S" }])
+	})
+
+	it("percent-decodes a cid: URL before resolving it", () => {
+		const asked: string[] = []
+		const sanitize = createEmailHtmlSanitizer(fakePurifier)
+		const result = sanitize("<img src=\"cid:a%40b\"><p style=\"background:url(cid:c%2Fd)\">x</p><img src=\"cid:bad%zz\">", id => {
+			asked.push(id)
+
+			return `blob:local/${String(asked.length)}`
+		})
+
+		expect(asked).toEqual(["a@b", "c/d", "bad%zz"])
+		expect(result.remoteBlocked).toBe(0)
+	})
 })

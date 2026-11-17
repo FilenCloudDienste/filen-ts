@@ -38,13 +38,14 @@ type ReadingState =
 	{ status: "pending" } | { status: "done"; reading: EmailReading; cidUrls: ReadonlyMap<string, string> } | { status: "failed" }
 type View = "html" | "text" | "source"
 
-// The message's inline pictures (cid:) as object URLs for its HTML.
+// The message's inline pictures (cid:) as object URLs for its HTML: raster images only, each a blob of the type its
+// bytes say (the declared one never reaches a URL).
 function mintCidUrls(attachments: readonly EmailAttachment[]): Map<string, string> {
 	const made = new Map<string, string>()
 
 	for (const attachment of attachments) {
-		if (attachment.contentId !== null && attachment.mimeType.startsWith("image/") && !made.has(attachment.contentId)) {
-			made.set(attachment.contentId, URL.createObjectURL(attachment.blob))
+		if (attachment.contentId !== null && attachment.imageType !== null && !made.has(attachment.contentId)) {
+			made.set(attachment.contentId, URL.createObjectURL(new Blob([attachment.blob], { type: attachment.imageType })))
 		}
 	}
 

@@ -26,6 +26,9 @@ export interface EmailAttachment {
 	readonly blob: Blob
 	// Content-ID without its angle brackets: what a cid: URL in the HTML names; null for none.
 	readonly contentId: string | null
+	// The raster type its first bytes say it is (never its declared type), or null: only such a part is shown in place
+	// by the HTML, as a blob of this type. SVG never is: a blob URL of it could be opened as a document.
+	readonly imageType: string | null
 	// An image the HTML shows in place (Content-Disposition inline, or related and named by the HTML).
 	readonly inline: boolean
 }
@@ -47,6 +50,27 @@ export interface EmailMessage {
 }
 
 export type EmailReading = ({ readonly status: "ok" } & EmailMessage) | { readonly status: "tooLarge" }
+
+function startsWith(bytes: Uint8Array, signature: readonly number[], at = 0): boolean {
+	return signature.every((byte, k) => bytes[at + k] === byte)
+}
+
+function ascii(bytes: Uint8Array, start: number, end: number): string {
+	return String.fromCharCode(...bytes.subarray(start, end))
+}
+
+// The raster formats every browser decodes in an <img>, by their signatures.
+export function rasterImageType(bytes: Uint8Array): string | null {
+	if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png"
+	if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg"
+	if (ascii(bytes, 0, 6) === "GIF87a" || ascii(bytes, 0, 6) === "GIF89a") return "image/gif"
+	if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP") return "image/webp"
+	if (ascii(bytes, 4, 8) === "ftyp" && ["avif", "avis"].includes(ascii(bytes, 8, 12))) return "image/avif"
+	if (ascii(bytes, 0, 2) === "BM") return "image/bmp"
+	if (startsWith(bytes, [0, 0, 1, 0])) return "image/x-icon"
+
+	return null
+}
 
 const LIMIT_CODES: ReadonlySet<string> = new Set(["EMAXNESTINGDEPTH", "EMAXHEADERSIZE", "EMAXPARTCOUNT", "EMAXFORWARDEDADDRESSES"])
 
@@ -106,7 +130,8 @@ function readMessage(email: Email): EmailMessage {
 		attachments: email.attachments.map((attachment, index) => {
 			const content = attachment.content
 			// arraybuffer encoding: an ArrayBuffer; a string only for an encoding this never asks for.
-			const blob = new Blob([typeof content === "string" ? content : new Uint8Array(content)], { type: attachment.mimeType })
+			const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
+			const blob = new Blob([bytes], { type: attachment.mimeType })
 			const id = contentId(attachment.contentId)
 
 			return {
@@ -117,6 +142,7 @@ function readMessage(email: Email): EmailMessage {
 				size: blob.size,
 				blob,
 				contentId: id,
+				imageType: id === null ? null : rasterImageType(bytes),
 				inline: id !== null && (attachment.disposition === "inline" || attachment.related === true)
 			}
 		}),
@@ -152,6 +178,7 @@ function readMsgMessage(message: MsgMessage): EmailMessage {
 				size: blob.size,
 				blob,
 				contentId: id,
+				imageType: id === null ? null : rasterImageType(attachment.bytes),
 				inline: id !== null && attachment.inline
 			}
 		}),
