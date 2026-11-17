@@ -20,7 +20,7 @@ async function close(page: Page): Promise<void> {
 
 test("iWork documents show the rendering they carry, and a key file is not taken for one", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -63,4 +63,5 @@ test("iWork documents show the rendering they carry, and a key file is not taken
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })

@@ -49,7 +49,7 @@ async function expectDatabase(page: Page, dialog: Locator): Promise<void> {
 
 test("a font opens as a specimen, its glyphs and its names", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -94,11 +94,12 @@ test("a font opens as a specimen, its glyphs and its names", async ({ page, cont
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a SQLite database is browsed read-only, from the drive and from an archive", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -131,6 +132,7 @@ test("a SQLite database is browsed read-only, from the drive and from an archive
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a track is plotted from the file alone, with its figures, profile and references never fetched", async ({ page, context }) => {

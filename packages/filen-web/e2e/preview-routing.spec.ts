@@ -48,7 +48,7 @@ async function closeText(page: Page): Promise<void> {
 
 test("code and text open in the editor, writable only as strict UTF-8, and binary is never shown as text", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -89,11 +89,12 @@ test("code and text open in the editor, writable only as strict UTF-8, and binar
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("JPEG under an alias name, and JPEG stored with a generic type, stream over the service worker", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 	const jpegResponses: string[] = []
 
 	page.on("response", response => {
@@ -124,10 +125,11 @@ test("JPEG under an alias name, and JPEG stored with a generic type, stream over
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a zip-based package lists at once at any size, and extracts into a directory", async ({ page, context }) => {
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
@@ -176,11 +178,12 @@ test("a zip-based package lists at once at any size, and extracts into a directo
 	)
 
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("an icon and an animated PNG get thumbnails from the SDK", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -193,11 +196,12 @@ test("an icon and an animated PNG get thumbnails from the SDK", async ({ page, c
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a Chrome extension lists as the zip behind its signed header", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
 	await bootTo(page)
 
@@ -209,4 +213,5 @@ test("a Chrome extension lists as the zip behind its signed header", async ({ pa
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })

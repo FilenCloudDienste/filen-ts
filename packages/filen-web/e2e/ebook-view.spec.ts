@@ -120,7 +120,7 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	// The fallback faces the engine fetched (synchronously, from its worker): MuPDF needs them to lay the book out, so
 	// they are fetched while it opens, not when a page is drawn. Watched from before the open.
@@ -204,4 +204,5 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })

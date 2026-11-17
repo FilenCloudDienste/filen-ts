@@ -29,7 +29,7 @@ async function close(page: Page): Promise<void> {
 
 test("a legacy text file reads with the detected codepage and reopens with another", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -64,11 +64,12 @@ test("a legacy text file reads with the detected codepage and reopens with anoth
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("markdown math renders as MathML and its remote images are never fetched", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 	const imageRequests: string[] = []
 
 	context.on("request", request => {
@@ -104,12 +105,13 @@ test("markdown math renders as MathML and its remote images are never fetched", 
 
 	expect(imageRequests).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 	expect(cspViolations).toEqual([])
 })
 
 test("a torrent shows its infohash, trackers and files, and its tracker is never contacted", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -127,5 +129,6 @@ test("a torrent shows its infohash, trackers and files, and its tracker is never
 	await close(page)
 
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 	expect(cspViolations).toEqual([])
 })

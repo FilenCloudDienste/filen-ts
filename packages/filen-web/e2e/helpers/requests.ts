@@ -27,14 +27,23 @@ function networkUrl(request: Request): URL | null {
 // then fails it with this reason; Firefox and WebKit report none.
 const CSP_BLOCKED = /^csp$|ERR_BLOCKED_BY_CSP|content security policy/i
 
-// Collects every request that leaves the app's own origin and Filen's hosts, as "<resource type> <url>"; the array
-// fills in place, so assert it once the flow is done: `expect(foreign).toEqual([])`. strictPreview also collects any
-// image, stylesheet, font or media request to another origin, Filen's CDN and egest included: a preview draws its
-// pictures from bytes it already holds. The SDK's own downloads are fetches from its worker and stay out of it. A
-// request a Content Security Policy blocked never left the browser and is taken out again once it fails so.
-export function trackForeignRequests(context: BrowserContext, { strictPreview }: { strictPreview: boolean }): string[] {
+export interface ForeignRequests {
+	// Requests that left the app's own origin and Filen's hosts, as "<resource type> <url>".
+	readonly foreign: string[]
+	// Requests a Content Security Policy refused before they were sent: none left the browser, but each one is
+	// something the page tried to load (a sanitizer that let a remote URL through), so preview specs assert none either.
+	readonly cspBlocked: string[]
+}
+
+// Collects every request that leaves the app's own origin and Filen's hosts; the arrays fill in place, so assert them
+// once the flow is done: `expect(foreign).toEqual([])`. strictPreview also collects any image, stylesheet, font or
+// media request to another origin, Filen's CDN and egest included: a preview draws its pictures from bytes it already
+// holds. The SDK's own downloads are fetches from its worker and stay out of it. A request that fails as refused by a
+// policy, was never started and is no redirect's next leg moves to `cspBlocked`; any other stays foreign.
+export function trackForeignRequests(context: BrowserContext, { strictPreview }: { strictPreview: boolean }): ForeignRequests {
 	const appOrigin = new URL(e2eBaseUrl()).origin
 	const foreign: string[] = []
+	const cspBlocked: string[] = []
 	const tracked: Request[] = []
 
 	context.on("request", request => {
@@ -51,14 +60,15 @@ export function trackForeignRequests(context: BrowserContext, { strictPreview }:
 	})
 	context.on("requestfailed", request => {
 		const index = tracked.indexOf(request)
+		const neverSent = request.timing().requestStart < 0 && request.redirectedFrom() === null
 
-		if (index !== -1 && CSP_BLOCKED.test(request.failure()?.errorText ?? "")) {
-			foreign.splice(index, 1)
+		if (index !== -1 && neverSent && CSP_BLOCKED.test(request.failure()?.errorText ?? "")) {
+			cspBlocked.push(...foreign.splice(index, 1))
 			tracked.splice(index, 1)
 		}
 	})
 
-	return foreign
+	return { foreign, cspBlocked }
 }
 
 export interface EgestObserver {
