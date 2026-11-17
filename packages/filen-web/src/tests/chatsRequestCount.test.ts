@@ -601,15 +601,19 @@ describe("chat list and thread requests on returning to the tab", () => {
 		vi.useFakeTimers({ toFake: ["Date"] })
 
 		const view = await mountOpenThread()
+		const readAt = Date.now()
 
+		// Only Date is faked: the deferred read runs on a real timer. The first return is far enough inside the window
+		// that its timer cannot fire while the return settles, however slow the machine.
 		hide()
 		changeElsewhere()
-		vi.setSystemTime(Date.now() + CHATS_LIST_REREAD_MS - 50)
+		vi.setSystemTime(readAt + CHATS_LIST_REREAD_MS - 5_000)
 		await show()
 
 		expect(listChats).not.toHaveBeenCalled()
 
 		hide()
+		vi.setSystemTime(readAt + CHATS_LIST_REREAD_MS - 50)
 		await show()
 		await elapse(150)
 
@@ -626,10 +630,15 @@ describe("chat list and thread requests on returning to the tab", () => {
 		const view = await mountOpenThread()
 		const readAt = Date.now()
 
+		// Hidden again before the return settles, in the same tick: the 50 ms timer it set is dropped before it could
+		// run, however slow the machine.
 		hide()
 		vi.setSystemTime(readAt + CHATS_LIST_REREAD_MS - 50)
-		await show()
+		act(() => {
+			focusManager.setFocused(true)
+		})
 		hide()
+		await drain()
 		await elapse(150)
 
 		expect(listChats).not.toHaveBeenCalled()
