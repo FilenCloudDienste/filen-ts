@@ -11,7 +11,8 @@ import "@/lib/i18n"
 // An image only our own code decodes (QOI): its whole bytes, decoded in the raster decode pool into a bitmap drawn at
 // the display long side with a chip that draws it whole, or a card when its header names more than the device decodes.
 
-const { downloadFileBytes, displayRaster, gunzipSvg } = vi.hoisted(() => ({
+const { downloadFileBytes, displayRaster, gunzipSvg, toastError } = vi.hoisted(() => ({
+	toastError: vi.fn(),
 	gunzipSvg: vi.fn<(bytes: Uint8Array, maxBytes: number) => Promise<Blob | null>>(),
 	downloadFileBytes: vi.fn<(file: AnyFile, token: string) => Promise<Uint8Array>>(),
 	displayRaster:
@@ -33,6 +34,7 @@ vi.mock("@/lib/sdk/client", async () => {
 	}
 })
 vi.mock("@/features/preview/lib/svgz", () => ({ gunzipSvg }))
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/features/preview/lib/rasterDecode", () => ({
 	displayRaster,
 	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 20 },
@@ -96,8 +98,42 @@ describe("ImageViewer on a QOI", () => {
 		await waitFor(() => {
 			expect(screen.getByRole("img", { name: "render" }).getAttribute("width")).toBe("5000")
 		})
-		expect(displayRaster.mock.calls.at(-1)?.[2].maxLongSide).toBeNull()
+		expect(displayRaster.mock.calls.at(-1)?.[2].maxLongSide).toBe(5000)
 		expect(screen.queryByText("Reduced · 5000×2")).toBeNull()
+	})
+
+	it("draws it whole no larger than a canvas of the device holds", async () => {
+		// 20 MP: within the worker's budget, past the desktop canvas area (64 MiB, 16 777 216 px).
+		downloadFileBytes.mockResolvedValue(qoiHeader(20_000, 1000))
+		displayRaster.mockImplementation((_format, _bytes, options) =>
+			Promise.resolve({ bitmap: bitmap(options.maxLongSide ?? 20_000, 2), width: 20_000, height: 1000 })
+		)
+		render(createElement(ImageViewer, { item: qoi("eeeeeeee-0000-0000-0000-000000000018", 22), alt: "render" }))
+
+		fireEvent.click(await screen.findByRole("button", { name: "Full res ▸" }))
+
+		await waitFor(() => {
+			expect(displayRaster.mock.calls.at(-1)?.[2].maxLongSide).toBe(Math.floor(20_000 * Math.sqrt(16_777_216 / 20_000_000)))
+		})
+	})
+
+	it("keeps the reduced picture when drawing it whole fails", async () => {
+		downloadFileBytes.mockResolvedValue(qoiHeader(5000, 2))
+		displayRaster.mockImplementation((_format, _bytes, options) =>
+			options.maxLongSide === 4096
+				? Promise.resolve({ bitmap: bitmap(4096, 2), width: 5000, height: 2 })
+				: Promise.reject(new Error("the canvas is too large"))
+		)
+		render(createElement(ImageViewer, { item: qoi("eeeeeeee-0000-0000-0000-000000000019", 22), alt: "render" }))
+
+		fireEvent.click(await screen.findByRole("button", { name: "Full res ▸" }))
+
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith("The image couldn't be shown at full resolution.")
+		})
+		expect(screen.getByRole("img", { name: "render" }).getAttribute("width")).toBe("4096")
+		expect(screen.queryByRole("button", { name: "Full res ▸" })).toBeNull()
+		expect(screen.queryByText("This image couldn't be read.")).toBeNull()
 	})
 
 	it("shows the too-large card for a header naming more pixels than the device decodes, decoding nothing", async () => {

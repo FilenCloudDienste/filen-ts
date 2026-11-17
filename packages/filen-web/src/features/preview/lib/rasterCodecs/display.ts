@@ -31,6 +31,28 @@ export function fitLongSide(width: number, height: number, maxLongSide: number |
 		: { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
 }
 
+// The size `width`×`height` takes with at most `maxPixels` pixels: never larger than its own.
+export function fitArea(width: number, height: number, maxPixels: number): { width: number; height: number } {
+	const scale = Math.min(1, Math.sqrt(maxPixels / (width * height)))
+
+	return scale >= 1
+		? { width, height }
+		: { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) }
+}
+
+// What "full resolution" draws a `width`×`height` image at: its own size, or the largest a canvas of this device holds
+// (`canvasPixels`); null when that is no larger than the view at `reducedLongSide` already shows.
+export function fullResolution(
+	width: number,
+	height: number,
+	reducedLongSide: number,
+	canvasPixels: number
+): { width: number; height: number } | null {
+	const full = fitArea(width, height, canvasPixels)
+
+	return Math.max(full.width, full.height) > reducedLongSide ? full : null
+}
+
 // A scale where createImageBitmap ignores the resize options (an engine without them): drawn smaller on a canvas.
 function drawnSmaller(full: ImageBitmap, width: number, height: number): ImageBitmap {
 	const canvas = new OffscreenCanvas(width, height)

@@ -14,6 +14,7 @@ import "@/lib/i18n"
 // starts), then the MuPDF read role, its one page drawn as a bitmap at the display long side with the chip that draws
 // it whole, and handed to the editor as the page shown.
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 const { openMupdfReader, head } = vi.hoisted(() => {
 	// The head the reader gives.
 	const head: { bytes: Uint8Array } = { bytes: new Uint8Array(0) }
@@ -21,6 +22,7 @@ const { openMupdfReader, head } = vi.hoisted(() => {
 	return { openMupdfReader: vi.fn(), head }
 })
 
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/lib/mupdf/reader", () => ({ openMupdfReader, mupdfImagePixels: () => 30_000_000 }))
 vi.mock("@/features/preview/lib/origin/byteReader", () => ({
 	openByteReader: () => Promise.resolve({ size: head.bytes.length, read: () => Promise.resolve(head.bytes), close: vi.fn() })
@@ -85,6 +87,32 @@ describe("ImageViewer on a TIFF", () => {
 		await waitFor(() => {
 			expect(screen.queryByText("Reduced · 5000×2")).toBeNull()
 		})
+	})
+
+	it("draws it whole no larger than a canvas of the device holds, and keeps the reduced page when that fails", async () => {
+		const natural = { width: 20_000, height: 1000 }
+		const reader = onePage(natural)
+
+		head.bytes = encodeTiff([{ width: 8, height: 8, rgb: [0, 0, 0] }])
+		reader.renderPage.mockImplementation((_page: number, options: { maxPixels: number; output: string }) =>
+			options.maxPixels > 4096 * 205 ? Promise.reject(new Error("too large")) : Promise.resolve(bitmap(4096, 204))
+		)
+		openMupdfReader.mockResolvedValue(reader)
+		render(createElement(ImageViewer, { item: tiff("eeeeeeee-0000-0000-0000-000000000025"), alt: "scan" }))
+
+		fireEvent.click(await screen.findByRole("button", { name: "Full res ▸" }))
+
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith("The image couldn't be shown at full resolution.")
+		})
+
+		// The desktop canvas area (16 777 216 px), not the page's own 20 MP.
+		const asked = reader.renderPage.mock.calls.at(-1)?.[1].maxPixels ?? 0
+
+		expect(asked).toBeLessThanOrEqual(16_777_216)
+		expect(asked).toBeGreaterThan(16_000_000)
+		expect(screen.getByRole("img", { name: "scan" }).getAttribute("width")).toBe("4096")
+		expect(screen.queryByRole("button", { name: "Full res ▸" })).toBeNull()
 	})
 
 	it("refuses a BigTIFF from its header, starting no engine", async () => {

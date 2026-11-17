@@ -5,6 +5,8 @@ export const previewImageView = {
 	previewImageReduced: "Reduced · {{width}}×{{height}}",
 	/** Image preview — button in that chip that shows the image at its own resolution */
 	previewImageShowFull: "Full res ▸",
+	/** Image preview — toast when drawing the image at full resolution failed; the reduced view stays */
+	previewImageFullFailed: "The image couldn't be shown at full resolution.",
 	/** Image preview — an image with more pixels than this device can decode */
 	previewImageTooLarge: "This image is too large to display on this device.",
 	/** Image preview — an image whose data could not be decoded (damaged or not what its name says) */

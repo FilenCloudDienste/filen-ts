@@ -1,16 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { heldImageCap } from "@/features/drive/lib/preview.logic"
 import type { PreviewKey } from "@/lib/i18n"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
-import { displayLongSide, workerDecodePixels } from "@/lib/pixelBudget"
+import { canvasPixels, displayLongSide, workerDecodePixels } from "@/lib/pixelBudget"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { displayRaster, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { rasterHeader } from "@/features/preview/lib/imageSniff/raster"
 import type { DisplayRasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
+import { fullResolution } from "@/features/preview/lib/rasterCodecs/display"
 import { PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { BitmapImage, BlobImage } from "@/features/preview/components/zoomableImage"
 import { gunzipSvg } from "@/features/preview/lib/svgz"
@@ -81,11 +83,14 @@ function DecodedImageBytes({ item, bytes, alt, format }: { item: DriveItem; byte
 	const maxPixels = workerDecodePixels(profile, bytes.byteLength, RASTER_BYTES_PER_PIXEL[format])
 	const fits = header !== null && naturalWidth * naturalHeight <= maxPixels
 	const longSide = displayLongSide(profile)
-	const reducible = Math.max(naturalWidth, naturalHeight) > longSide
+	// Never larger than a canvas of this device holds.
+	const full = header === null ? null : fullResolution(naturalWidth, naturalHeight, longSide, canvasPixels())
+	const fullLongSide = full === null ? longSide : Math.max(full.width, full.height)
 	// The decode asked for (the bytes it decodes, and whether at full resolution) with what it gave: a result for other
-	// bytes is not this one's.
-	const [full, setFull] = useState<{ bytes: Uint8Array; full: boolean }>({ bytes, full: false })
-	const atFull = full.bytes === bytes && full.full
+	// bytes is not this one's. A full-resolution draw that failed keeps the reduced one, and is not offered again.
+	const [wanted, setWanted] = useState<{ bytes: Uint8Array; full: boolean; failed: boolean }>({ bytes, full: false, failed: false })
+	const atFull = wanted.bytes === bytes && wanted.full
+	const fullFailed = wanted.bytes === bytes && wanted.failed
 	const [shown, setShown] = useState<{ bytes: Uint8Array; shown: Shown }>({ bytes, shown: { status: "pending" } })
 
 	useEffect(() => {
@@ -95,7 +100,7 @@ function DecodedImageBytes({ item, bytes, alt, format }: { item: DriveItem; byte
 
 		const controller = new AbortController()
 
-		displayRaster(format, bytes, { maxPixels, maxLongSide: atFull ? null : longSide, signal: controller.signal }).then(
+		displayRaster(format, bytes, { maxPixels, maxLongSide: atFull ? fullLongSide : longSide, signal: controller.signal }).then(
 			result => {
 				if (controller.signal.aborted) {
 					result.bitmap.close()
@@ -109,16 +114,26 @@ function DecodedImageBytes({ item, bytes, alt, format }: { item: DriveItem; byte
 				})
 			},
 			() => {
-				if (!controller.signal.aborted) {
-					setShown({ bytes, shown: { status: "failed" } })
+				if (controller.signal.aborted) {
+					return
 				}
+
+				// The reduced view stays: the full one is not asked again.
+				if (atFull) {
+					setWanted({ bytes, full: true, failed: true })
+					toast.error(t("previewImageFullFailed"))
+
+					return
+				}
+
+				setShown({ bytes, shown: { status: "failed" } })
 			}
 		)
 
 		return () => {
 			controller.abort()
 		}
-	}, [bytes, format, fits, maxPixels, longSide, atFull])
+	}, [bytes, format, fits, maxPixels, longSide, fullLongSide, atFull, t])
 
 	if (header === null) {
 		return (
@@ -161,12 +176,12 @@ function DecodedImageBytes({ item, bytes, alt, format }: { item: DriveItem; byte
 				height={current.height}
 				alt={alt}
 			/>
-			{reducible && !atFull ? (
+			{full !== null && !atFull && !fullFailed ? (
 				<ReducedChip
 					width={naturalWidth}
 					height={naturalHeight}
 					onShowFull={() => {
-						setFull({ bytes, full: true })
+						setWanted({ bytes, full: true, failed: false })
 					}}
 				/>
 			) : null}

@@ -1,17 +1,18 @@
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import { PdfEngineError } from "@filen/office/dom/pdfedit"
 import { PdfPages, usePdfViewer } from "@filen/office/react/pdf"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { PreviewKey } from "@/lib/i18n"
 import type { DeviceProfile } from "@/lib/deviceProfile"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
-import { displayLongSide } from "@/lib/pixelBudget"
+import { canvasPixels, displayLongSide } from "@/lib/pixelBudget"
 import { originKey, originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { mupdfImagePixels, openMupdfReader, type MupdfReader } from "@/lib/mupdf/reader"
 import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
-import { fitLongSide } from "@/features/preview/lib/rasterCodecs/display"
+import { fitLongSide, fullResolution } from "@/features/preview/lib/rasterCodecs/display"
 import { readerPageSource, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { usePreviewAccessMode, usePreviewCacheScope, usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
@@ -236,8 +237,10 @@ function TiffPage({
 }) {
 	const { t } = useTranslation("preview")
 	const longSide = displayLongSide(useDeviceProfile())
-	const [full, setFull] = useState(false)
-	const [drawn, setDrawn] = useState<{ full: boolean; drawn: Drawn }>({ full: false, drawn: { status: "pending" } })
+	// A full-resolution draw that failed keeps the reduced one, and is not offered again.
+	const [wanted, setWanted] = useState<{ full: boolean; failed: boolean }>({ full: false, failed: false })
+	const { full } = wanted
+	const [drawn, setDrawn] = useState<Drawn>({ status: "pending" })
 
 	useEffect(() => {
 		if (pageSourceRef === undefined) {
@@ -257,10 +260,13 @@ function TiffPage({
 		reader
 			.imageExtent(0)
 			.then(async natural => {
+				// At full resolution, never larger than a canvas of this device holds.
 				const size =
 					natural === null
 						? { width: longSide, height: longSide }
-						: fitLongSide(natural.width, natural.height, full ? null : longSide)
+						: full
+							? (fullResolution(natural.width, natural.height, longSide, canvasPixels()) ?? natural)
+							: fitLongSide(natural.width, natural.height, longSide)
 				const bitmap = await reader.renderPage(0, {
 					maxPixels: size.width * size.height,
 					output: "bitmap",
@@ -271,7 +277,7 @@ function TiffPage({
 					throw new Error("the engine drew RGBA where a bitmap was asked")
 				}
 
-				setDrawn({ full, drawn: { status: "shown", bitmap, width: bitmap.width, height: bitmap.height, natural } })
+				setDrawn({ status: "shown", bitmap, width: bitmap.width, height: bitmap.height, natural })
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) {
@@ -279,45 +285,53 @@ function TiffPage({
 				}
 
 				log.warn("preview", "drawing a TIFF page failed", error)
-				setDrawn({ full, drawn: { status: "refused", message: refusalOf(error) ?? "previewImageDecodeFailed" } })
+
+				// The reduced view stays.
+				if (full) {
+					setWanted({ full: true, failed: true })
+					toast.error(t("previewImageFullFailed"))
+
+					return
+				}
+
+				setDrawn({ status: "refused", message: refusalOf(error) ?? "previewImageDecodeFailed" })
 			})
 
 		return () => {
 			controller.abort()
 		}
-	}, [reader, full, longSide])
+	}, [reader, full, longSide, t])
 
-	const current: Drawn = drawn.full === full || drawn.drawn.status === "shown" ? drawn.drawn : { status: "pending" }
-
-	if (current.status === "pending") {
+	if (drawn.status === "pending") {
 		return <PreviewLoading />
 	}
 
-	if (current.status === "refused") {
+	if (drawn.status === "refused") {
 		return (
 			<PreviewUnsupportedState
 				item={item}
-				message={t(current.message)}
+				message={t(drawn.message)}
 			/>
 		)
 	}
 
-	const { natural } = current
+	const { natural } = drawn
+	const offered = natural === null ? null : fullResolution(natural.width, natural.height, longSide, canvasPixels())
 
 	return (
 		<div className="relative size-full">
 			<BitmapImage
-				bitmap={current.bitmap}
-				width={current.width}
-				height={current.height}
+				bitmap={drawn.bitmap}
+				width={drawn.width}
+				height={drawn.height}
 				alt={alt}
 			/>
-			{natural !== null && !full && Math.max(natural.width, natural.height) > longSide ? (
+			{natural !== null && offered !== null && !full && !wanted.failed ? (
 				<ReducedChip
 					width={natural.width}
 					height={natural.height}
 					onShowFull={() => {
-						setFull(true)
+						setWanted({ full: true, failed: false })
 					}}
 				/>
 			) : null}

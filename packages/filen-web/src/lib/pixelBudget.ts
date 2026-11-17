@@ -1,6 +1,7 @@
 import { MUPDF_BYTES_PER_PIXEL, PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBILE_MEMORY } from "@filen/office/core/pdfedit"
 import { THUMB_SDK_MEM_BUDGET } from "@/features/drive/lib/thumbnails.logic"
 import type { DeviceProfile } from "@/lib/deviceProfile"
+import { pdfViewerLimits } from "@/features/preview/lib/pdfLimits"
 
 // The pixel budgets every decode of untrusted image bytes checks, each with its basis. A decode compares the dimensions
 // its header names (read from bytes already in hand) against its budget before it allocates anything. Workers never
@@ -28,6 +29,12 @@ const DISPLAY_LONG_SIDE_MOBILE = 2048
 
 export function displayLongSide(profile: DeviceProfile): number {
 	return profile.mobile ? DISPLAY_LONG_SIDE_MOBILE : DISPLAY_LONG_SIDE_DESKTOP
+}
+
+// The most pixels a canvas of this device holds (the viewers' own canvas area limit, 4 bytes a pixel): what an image is
+// drawn at, at most, however many our decoders could decode.
+export function canvasPixels(): number {
+	return Math.floor(pdfViewerLimits().canvasMaxAreaInBytes / 4)
 }
 
 export function workerDecodeBytes(profile: DeviceProfile): number {
