@@ -22,13 +22,12 @@ describe("sqlite read source", () => {
 	it("reads tiles and cells through the worker at the window's base, and answers no other query", async () => {
 		const reads = {
 			tiles: vi.fn(() => Promise.resolve([])),
-			cell: vi.fn(() => Promise.resolve({ type: "text", bytes: 5, value: "hello" })),
-			nextId: () => 7
+			cell: vi.fn(() => Promise.resolve({ type: "text", bytes: 5, value: "hello" }))
 		}
 		const source = sqliteReadSource(reads, [{ name: "email", type: "TEXT", pk: 0 }], 2_000_000, () => sqliteLayout(1, 10, 0, 0))
 
 		await source.tiles(0, Uint32Array.of(0, 0))
-		expect(reads.tiles).toHaveBeenCalledWith(2_000_000, Uint32Array.of(0, 0), 7)
+		expect(reads.tiles).toHaveBeenCalledWith(2_000_000, Uint32Array.of(0, 0))
 		expect(await source.query("cell", { sheet: 0, row: 3, col: 0 })).toMatchObject({ input: "hello" })
 		expect(await source.query("cell", { sheet: 0, row: 0, col: 0 })).toMatchObject({ input: "email" })
 		await expect(source.query("navigate", { sheet: 0, row: 1, col: 0, direction: "down", to: "dataEdge" })).rejects.toThrow()

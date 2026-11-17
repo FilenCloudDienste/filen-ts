@@ -4,7 +4,11 @@ import { CellFlag, tilePosition, type SheetTile } from "@filen/office/core/sheet
 import { RANGE_VFS_NAME, rangeVfs, type RangeFileState, type SyncByteReader } from "@/features/preview/lib/sqliteRangeVfs"
 import {
 	AnchorIndex,
+	INTERRUPT_CHECK,
+	INTERRUPT_COUNT,
+	INTERRUPT_TILES,
 	SQLITE_COUNT_CHUNK,
+	SQLITE_FIRST_COUNT_CHUNK,
 	SQLITE_TILE_COLS,
 	SQLITE_TILE_ROWS,
 	cellSql,
@@ -79,6 +83,17 @@ const PROGRESS_OPS = 1000
 const PAGE_CACHE_KIB = 8192
 const MAX_SQL_LENGTH = 100_000
 const MAX_VALUE_LENGTH = 64 * 1024 * 1024
+// sqlite.org/security.html §1.1's limits, set well below the defaults but above what real schemas and this browser's own
+// SELECTs need: a wide table keeps its columns (the column limit stays), a schema's CHECK and DEFAULT expressions their
+// depth. Triggers never run.
+export const SCHEMA_LIMITS = [
+	["SQLITE_LIMIT_EXPR_DEPTH", 200],
+	["SQLITE_LIMIT_COMPOUND_SELECT", 50],
+	["SQLITE_LIMIT_FUNCTION_ARG", 32],
+	["SQLITE_LIMIT_LIKE_PATTERN_LENGTH", 10_000],
+	["SQLITE_LIMIT_VARIABLE_NUMBER", 100],
+	["SQLITE_LIMIT_TRIGGER_DEPTH", 1]
+] as const
 
 interface TableState {
 	readonly info: SqliteTableInfo
@@ -91,9 +106,15 @@ interface TableState {
 }
 
 // How the database reaches sqlite: ranged through the VFS, or whole in sqlite's own memory.
+// A whole source hands its bytes over in blocks, in order.
 export type SqliteSource =
 	| { readonly kind: "ranged"; readonly reader: SyncByteReader }
-	| { readonly kind: "whole"; readonly size: number; readonly fill: (heap: () => Uint8Array, pointer: number) => Promise<void> }
+	| {
+			readonly kind: "whole"
+			readonly size: number
+			readonly blockBytes: number
+			readonly read: (start: number, end: number) => Promise<Uint8Array>
+	  }
 
 function quiet(): void {
 	// Library diagnostics stay out of the console.
@@ -109,6 +130,35 @@ export function sqliteApiConfig(): Record<string, unknown> {
 	}
 }
 
+// A request stopped by the interrupt flag: the page asked for it to stop (stale tiles, a count a grid read went ahead
+// of, a cancelled check). Matched by name, which crosses the worker boundary.
+export class SqliteInterrupted extends Error {
+	constructor() {
+		super("interrupted")
+
+		this.name = "SqliteInterrupted"
+	}
+}
+
+// A read of the file failed after the database opened (an aborted or timed-out bridge read).
+export class SqliteUnreadable extends Error {
+	constructor(message: string) {
+		super(message)
+
+		this.name = "SqliteUnreadable"
+	}
+}
+
+export function isSqliteInterrupted(error: unknown): boolean {
+	return error instanceof Error && error.name === "SqliteInterrupted"
+}
+
+export function isSqliteUnreadable(error: unknown): boolean {
+	return error instanceof Error && error.name === "SqliteUnreadable"
+}
+
+type RequestKind = "tiles" | "count" | "cell"
+
 function sqlError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
 }
@@ -120,9 +170,11 @@ export class SqliteBrowser {
 	private readonly file: RangeFileState | null
 	private readonly tables: TableState[]
 	private readonly labels: SqliteLabels
-	// The request a set flag interrupts: what `interrupt[0]` must equal for the progress handler to stop it.
+	// The shared interrupt flag (INTERRUPT_* slots).
 	private readonly interrupt: Int32Array
-	private current = 0
+	private current: { kind: RequestKind; id: number } | null = null
+	// The progress handler stopped the running request.
+	private stopped = false
 
 	private constructor(
 		sqlite3: Sqlite3Static,
@@ -169,6 +221,11 @@ export class SqliteBrowser {
 
 		if (source.size < 16) throw new SqliteOpenError("notSqlite", "the file is too short for a database")
 
+		// The header is checked on the first block, before anything else is read or allocated.
+		const first = await source.read(0, Math.min(source.size, source.blockBytes))
+
+		if (!isSqliteHeader(first)) throw new SqliteOpenError("notSqlite", "the file does not start with the SQLite header")
+
 		// FREEONCLOSE: sqlite frees the copy, so it must be sqlite's own memory.
 		const pointer = capi.sqlite3_malloc64(BigInt(source.size))
 
@@ -178,16 +235,15 @@ export class SqliteBrowser {
 		let owned = false
 
 		try {
-			await source.fill(() => wasm.heap8u(), pointer)
+			// The heap view is taken again per block: wasm memory may grow in between.
+			wasm.heap8u().set(first, pointer)
 
-			const heap = wasm.heap8u()
-
-			if (!isSqliteHeader(heap.subarray(pointer, pointer + 16))) {
-				throw new SqliteOpenError("notSqlite", "the file does not start with the SQLite header")
+			for (let at = first.length; at < source.size; at += source.blockBytes) {
+				wasm.heap8u().set(await source.read(at, Math.min(source.size, at + source.blockBytes)), pointer + at)
 			}
 
 			// An in-memory database has no WAL: read as rollback mode.
-			const wal = patchWalHeader(heap, pointer, source.size, 0)
+			const wal = patchWalHeader(wasm.heap8u(), pointer, source.size, 0)
 			const rc = capi.sqlite3_deserialize(
 				db.pointer ?? 0,
 				"main",
@@ -236,6 +292,9 @@ export class SqliteBrowser {
 		const { capi } = this.sqlite3
 		const pointer = this.db.pointer ?? 0
 
+		// No virtual table module is left to connect: listing the schema prepares every virtual table, which would run
+		// fts5's or rtree's code over the file's own shadow data. They stay listed by their SQL.
+		capi.sqlite3_drop_modules(pointer, 0)
 		capi.sqlite3_db_config(pointer, capi.SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0, 0)
 		capi.sqlite3_db_config(pointer, capi.SQLITE_DBCONFIG_ENABLE_TRIGGER, 0, 0)
 		capi.sqlite3_db_config(pointer, capi.SQLITE_DBCONFIG_ENABLE_VIEW, 0, 0)
@@ -243,18 +302,43 @@ export class SqliteBrowser {
 		capi.sqlite3_limit(pointer, capi.SQLITE_LIMIT_ATTACHED, 0)
 		capi.sqlite3_limit(pointer, capi.SQLITE_LIMIT_SQL_LENGTH, MAX_SQL_LENGTH)
 		capi.sqlite3_limit(pointer, capi.SQLITE_LIMIT_LENGTH, MAX_VALUE_LENGTH)
+
+		// security.html §1.1: what a hostile schema may make the parser hold. (No hard heap limit: this build binds
+		// none; the worker's memory is bounded by its owner ending it.)
+		for (const [limit, value] of SCHEMA_LIMITS) capi.sqlite3_limit(pointer, capi[limit], value)
 		this.db.exec(`PRAGMA cell_size_check=ON; PRAGMA mmap_size=0; PRAGMA query_only=ON; PRAGMA cache_size=-${String(PAGE_CACHE_KIB)}`)
 		this.installInterrupt()
 	}
 
-	// The interrupt flag, checked every PROGRESS_OPS ops: a request whose id it holds stops.
+	// The interrupt flag, checked every PROGRESS_OPS ops.
 	private installInterrupt(): void {
 		this.sqlite3.capi.sqlite3_progress_handler(
 			this.db.pointer ?? 0,
 			PROGRESS_OPS,
-			() => (this.current !== 0 && Atomics.load(this.interrupt, 0) === this.current ? 1 : 0),
+			() => {
+				if (this.current === null || !this.isStale(this.current.kind, this.current.id)) return 0
+
+				this.stopped = true
+
+				return 1
+			},
 			0
 		)
+	}
+
+	private wasStopped(): boolean {
+		return this.stopped
+	}
+
+	private isStale(kind: RequestKind, id: number): boolean {
+		switch (kind) {
+			case "tiles":
+				return id <= Atomics.load(this.interrupt, INTERRUPT_TILES)
+			case "count":
+				return Atomics.load(this.interrupt, INTERRUPT_COUNT) === id
+			case "cell":
+				return false
+		}
 	}
 
 	private readTables(): TableState[] {
@@ -316,14 +400,26 @@ export class SqliteBrowser {
 		return table
 	}
 
-	// Runs `run` as request `id`: interruptible by setting the flag to `id`. An interrupted run rejects.
-	private request<T>(id: number, run: () => T): T {
-		this.current = id
+	// Runs `run` as request `id` of `kind`. A request the flag marks stale (before or while it runs) rejects with
+	// SqliteInterrupted; one a failed read of the file stopped, with SqliteUnreadable.
+	private request<T>(kind: RequestKind, id: number, run: () => T): T {
+		if (this.isStale(kind, id)) throw new SqliteInterrupted()
+
+		this.current = { kind, id }
+		this.stopped = false
+
+		if (this.file !== null) this.file.failed = false
 
 		try {
 			return run()
+		} catch (error) {
+			// The progress handler set it meanwhile.
+			if (this.wasStopped()) throw new SqliteInterrupted()
+			if (this.file?.failed === true) throw new SqliteUnreadable(sqlError(error))
+
+			throw error
 		} finally {
-			this.current = 0
+			this.current = null
 		}
 	}
 
@@ -346,7 +442,7 @@ export class SqliteBrowser {
 
 		if (table.done) return { rows: table.counted, exact: true }
 
-		return this.request(id, () => {
+		return this.request("count", id, () => {
 			const { paging, info } = table
 
 			if (paging.kind === "offset") {
@@ -358,12 +454,13 @@ export class SqliteBrowser {
 
 			const anchored = table.next !== null
 			const bind = table.next ?? []
-			const end = this.statement(chunkEndSql(info.name, paging.key, anchored), bind, statement =>
+			const chunk = anchored ? SQLITE_COUNT_CHUNK : SQLITE_FIRST_COUNT_CHUNK
+			const end = this.statement(chunkEndSql(info.name, paging.key, anchored, chunk), bind, statement =>
 				statement.step() ? paging.key.map((_, k) => keyValue(statement.get(k))) : null
 			)
 
 			if (end !== null) {
-				table.counted += SQLITE_COUNT_CHUNK
+				table.counted += chunk
 				table.next = end
 				table.anchors.add({ index: table.counted, key: end })
 
@@ -371,7 +468,9 @@ export class SqliteBrowser {
 			}
 
 			table.counted += Number(
-				this.statement(chunkRestSql(info.name, paging.key, anchored), bind, statement => (statement.step() ? statement.get(0) : 0))
+				this.statement(chunkRestSql(info.name, paging.key, anchored, chunk), bind, statement =>
+					statement.step() ? statement.get(0) : 0
+				)
 			)
 			table.done = true
 
@@ -383,7 +482,7 @@ export class SqliteBrowser {
 	tiles(index: number, base: number, coordinates: Uint32Array, id: number): SheetTile[] {
 		const table = this.table(index)
 
-		return this.request(id, () => {
+		return this.request("tiles", id, () => {
 			const tiles: SheetTile[] = []
 
 			for (let at = 0; at + 1 < coordinates.length; at += 2) {
@@ -480,7 +579,7 @@ export class SqliteBrowser {
 
 		if (gridRow === 0 || column === undefined) return { type: "text", bytes: 0, value: column?.name ?? "" }
 
-		return this.request(id, () => {
+		return this.request("cell", id, () => {
 			const dataRow = base + gridRow - 1
 			const anchor = table.paging.kind === "keyset" ? table.anchors.before(dataRow) : null
 			const skip = dataRow - (anchor?.index ?? 0)
@@ -504,11 +603,13 @@ export class SqliteBrowser {
 		const pointer = this.db.pointer ?? 0
 		let last = 0
 
+		if (this.file !== null) this.file.failed = false
+
 		capi.sqlite3_progress_handler(
 			pointer,
 			PROGRESS_OPS,
 			() => {
-				if (Atomics.load(this.interrupt, 0) === id) return 1
+				if (Atomics.load(this.interrupt, INTERRUPT_CHECK) === id) return 1
 
 				const now = performance.now()
 
@@ -527,8 +628,8 @@ export class SqliteBrowser {
 
 			return rows.length === 1 && rows[0]?.[0] === "ok" ? "ok" : "damaged"
 		} catch (error) {
-			if (Atomics.load(this.interrupt, 0) === id) return "cancelled"
-			if (this.file?.failed === true) throw new SqliteOpenError("unreadable", sqlError(error))
+			if (Atomics.load(this.interrupt, INTERRUPT_CHECK) === id) return "cancelled"
+			if (this.file?.failed === true) throw new SqliteUnreadable(sqlError(error))
 
 			return "damaged"
 		} finally {

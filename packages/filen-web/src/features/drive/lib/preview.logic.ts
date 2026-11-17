@@ -341,8 +341,8 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindFont",
 		assistantKind: null
 	},
-	// Read in ranges through the database viewer's own VFS on the drive and a public link, at any size; held whole in
-	// sqlite's memory up to the cap where only a whole read reaches it (an archive's entry, held bytes).
+	// Read in ranges through the database viewer's own VFS on the drive and a public link, at any size past the
+	// automatic check's 256 MiB; held whole in sqlite's memory up to the cap otherwise (sqliteDatabase.ts).
 	sqlite: {
 		streamed: false,
 		ranged: true,

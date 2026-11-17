@@ -19,10 +19,11 @@ async function closePreview(page: Page): Promise<void> {
 	await expect(previewOverlay(page)).toHaveCount(0)
 }
 
-// The database viewer's first table, its integrity checked by itself (the file is under 256 MiB), and the first data
-// row's first cell in the selection bar after one step down the grid.
+// The database viewer's users table, its integrity checked by itself (the file is under 256 MiB, read whole once), and
+// the first data row's first cell in the selection bar after one step down the grid.
 async function expectDatabase(page: Page, dialog: Locator): Promise<void> {
-	await expect(dialog.getByRole("button", { name: "users", exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// The list is by name: `audit` is selected first.
+	await dialog.getByRole("button", { name: "users", exact: true }).click({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText("Checked", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText(/70,000 rows|≥ 50,000 rows/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await dialog.getByLabel("Table rows").click()
@@ -84,7 +85,7 @@ test("a font opens as a specimen, its glyphs and its names", async ({ page, cont
 	expect(foreign).toEqual([])
 })
 
-test("a SQLite database is browsed read-only, from the drive in ranges and from an archive whole", async ({ page, context }) => {
+test("a SQLite database is browsed read-only, from the drive and from an archive", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
 	const foreign = trackForeignRequests(context, { strictPreview: true })
 

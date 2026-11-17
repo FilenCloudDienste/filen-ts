@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react"
+import { useEffect, useEffectEvent, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { SheetGrid, useSheetGrid, type SheetGridHandle } from "@filen/office/react/sheet"
 import { resolveTheme, useTheme } from "@/providers/themeProvider"
@@ -45,9 +45,14 @@ export function SqliteTableGrid({
 		table.grow(rows)
 	}, [table, rows])
 
+	// Told when the active cell moves, not when the callback changes.
+	const reportActive = useEffectEvent((activeRow: number, activeCol: number) => {
+		onActive(activeRow, activeCol)
+	})
+
 	useEffect(() => {
-		onActive(row, col)
-	}, [onActive, row, col])
+		reportActive(row, col)
+	}, [row, col])
 
 	return (
 		<SheetGrid

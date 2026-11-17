@@ -8,12 +8,14 @@ import { RANGE_READ_TIMEOUT_MS, rangePortReader } from "@/lib/media/rangePort"
 import {
 	SqliteBrowser,
 	SqliteOpenError,
+	isSqliteInterrupted,
 	sqliteApiConfig,
 	type SqliteCellValue,
 	type SqliteCheck,
 	type SqliteCount,
 	type SqliteLabels,
-	type SqliteSchema
+	type SqliteSchema,
+	type SqliteSource
 } from "@/features/preview/lib/sqliteBrowser"
 
 // One SQLite database, browsed read-only (lib/sqliteBrowser.ts): owned by its viewer, terminated with it. A drive or
@@ -48,20 +50,14 @@ function opened(): SqliteBrowser {
 	return browser
 }
 
-// Streams the port's bytes into sqlite's heap at `pointer`, one block at a time; the heap view is taken again per
-// block, since wasm memory may grow in between.
-function wholeFill(port: MessagePort, size: number): (heap: () => Uint8Array, pointer: number) => Promise<void> {
-	return async (heap, pointer) => {
-		const reader = rangePortReader(port)
-		const signal = new AbortController().signal
+// The port's bytes block by block, for a whole read into sqlite's heap.
+function wholeSource(port: MessagePort, size: number): { source: SqliteSource; close: () => void } {
+	const reader = rangePortReader(port)
+	const signal = new AbortController().signal
 
-		try {
-			for (let at = 0; at < size; at += BLOCK_BYTES) {
-				const block = await reader.readRange(at, Math.min(size, at + BLOCK_BYTES), signal)
-
-				heap().set(block, pointer + at)
-			}
-		} finally {
+	return {
+		source: { kind: "whole", size, blockBytes: BLOCK_BYTES, read: (start, end) => reader.readRange(start, end, signal) },
+		close: () => {
 			reader.close()
 		}
 	}
@@ -70,35 +66,48 @@ function wholeFill(port: MessagePort, size: number): (heap: () => Uint8Array, po
 const api = {
 	open: async (source: SqliteOpenSource, labels: SqliteLabels, interrupt: Int32Array): Promise<SqliteOpenResult> => {
 		const sqlite3 = await sqlite()
-
-		try {
-			browser = await SqliteBrowser.open(
-				sqlite3,
-				source.kind === "ranged"
-					? {
+		const from =
+			source.kind === "whole"
+				? wholeSource(source.port, source.size)
+				: {
+						source: {
 							kind: "ranged",
 							reader: new SyncRangeReader(source.channel.buffer, source.channel.port, source.channel.length, {
 								deadlineMs: RANGE_READ_TIMEOUT_MS,
 								now: () => performance.now()
 							})
-						}
-					: { kind: "whole", size: source.size, fill: wholeFill(source.port, source.size) },
-				labels,
-				interrupt
-			)
+						} satisfies SqliteSource,
+						close: () => undefined
+					}
+
+		// A second open (Retry) replaces the first.
+		browser?.close()
+		browser = null
+
+		try {
+			browser = await SqliteBrowser.open(sqlite3, from.source, labels, interrupt)
 
 			return { schema: browser.schema, failure: null }
 		} catch (error) {
 			if (error instanceof SqliteOpenError) return { schema: null, failure: { reason: error.reason, message: error.message } }
 
 			throw error
+		} finally {
+			from.close()
 		}
 	},
-	count: async (table: number, id: number): Promise<SqliteCount> => {
+	// Null when a grid read went ahead of it (the interrupt flag): the page counts on later.
+	count: async (table: number, id: number): Promise<SqliteCount | null> => {
 		// A task boundary first, so tile requests posted meanwhile run before this chunk.
 		await new Promise(resolve => setTimeout(resolve, 0))
 
-		return opened().countStep(table, id)
+		try {
+			return opened().countStep(table, id)
+		} catch (error) {
+			if (isSqliteInterrupted(error)) return null
+
+			throw error
+		}
 	},
 	tiles: (table: number, base: number, coordinates: Uint32Array, id: number): SheetTile[] => {
 		const tiles = opened().tiles(table, base, coordinates, id)

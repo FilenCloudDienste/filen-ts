@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest"
 import {
 	AnchorIndex,
 	SQLITE_HEADER,
+	SQLITE_HEX_DUMP_BYTES,
 	cellView,
+	fullValueText,
+	goToRow,
 	chunkEndSql,
 	hexDump,
 	isSqliteHeader,
@@ -113,5 +116,19 @@ describe("sqlite browse logic", () => {
 
 	it("dumps bytes as hex with their printable characters", () => {
 		expect(hexDump(new TextEncoder().encode("AB\n"))).toBe(`00000000  41 42 0a${" ".repeat(39)}  AB.`)
+	})
+
+	it("dumps only a BLOB's first 64 KiB in the full view, as its label says", () => {
+		expect(fullValueText(new Uint8Array(1024 * 1024)).split("\n")).toHaveLength(SQLITE_HEX_DUMP_BYTES / 16)
+		expect(fullValueText("text")).toBe("text")
+		expect(fullValueText(null)).toBe("")
+	})
+
+	it("goes to a row in the window, rebases past it, and stops at the last row of an exact count", () => {
+		expect(goToRow(10, 0, 100, { rows: 50, exact: true })).toEqual({ kind: "reveal", gridRow: 10 })
+		expect(goToRow(500, 0, 100, { rows: 50, exact: true })).toEqual({ kind: "reveal", gridRow: 50 })
+		expect(goToRow(500, 0, 100, { rows: 50, exact: false })).toEqual({ kind: "rebase", base: 499 })
+		expect(goToRow(5_000_000, 0, 1_048_575, { rows: 2_000_010, exact: true })).toEqual({ kind: "rebase", base: 2_000_009 })
+		expect(goToRow(5, 100, 100, null)).toEqual({ kind: "rebase", base: 4 })
 	})
 })

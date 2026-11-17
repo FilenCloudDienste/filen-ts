@@ -6,12 +6,27 @@ import SqliteBrowseWorker from "@/features/preview/workers/sqliteBrowse.worker.t
 import type { SqliteBrowseWorkerApi, SqliteOpenResult } from "@/features/preview/workers/sqliteBrowse.worker"
 import { openOriginSyncSource } from "@/features/preview/lib/origin/syncSource"
 import { openOriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
-import type { SqliteCheck, SqliteCount, SqliteLabels, SqliteOpenError, SqliteSchema } from "@/features/preview/lib/sqliteBrowser"
+import {
+	isSqliteUnreadable,
+	type SqliteCellValue,
+	type SqliteCheck,
+	type SqliteCount,
+	type SqliteLabels,
+	type SqliteOpenError,
+	type SqliteSchema
+} from "@/features/preview/lib/sqliteBrowser"
 import type { SqliteTableReads } from "@/features/preview/lib/sqliteSource"
-import { SQLITE_AUTO_CHECK_MAX_BYTES } from "@/features/preview/lib/sqliteBrowse.logic"
+import {
+	INTERRUPT_CHECK,
+	INTERRUPT_COUNT,
+	INTERRUPT_TILES,
+	SQLITE_AUTO_CHECK_MAX_BYTES,
+	SQLITE_INTERRUPT_SLOTS
+} from "@/features/preview/lib/sqliteBrowse.logic"
 
-// The page's side of an open database: its owned worker, how its bytes reach it (the sync range bridge for a drive or
-// link file, a whole read streamed into sqlite's memory otherwise), its reads, and the integrity check.
+// The page's side of an open database: its owned worker, how its bytes reach it (readsInRanges: the sync range bridge
+// for a large drive or link file, a whole read streamed into sqlite's memory otherwise), its reads, and the integrity
+// check.
 
 export type SqliteWorker = OwnedWorker<SqliteBrowseWorkerApi>
 
@@ -27,16 +42,28 @@ export function createSqliteWorker(): Worker {
 export interface SqliteDatabase {
 	readonly schema: SqliteSchema
 	readonly size: number
-	// Read through the range VFS (a drive or link file); else held whole in sqlite's memory.
+	// Read through the range VFS (a drive or link file past the check's size); else held whole in sqlite's memory.
 	readonly ranged: boolean
 	// The integrity check runs by itself (SQLITE_AUTO_CHECK_MAX_BYTES).
 	readonly autoCheck: boolean
 	// When the grid last read: counting waits for it to be idle.
 	lastRead(): number
+	// One per table, the same object each time.
 	reads(table: number): SqliteTableReads
-	count(table: number): Promise<SqliteCount>
+	// Null when a grid read went ahead of the step: count on later.
+	count(table: number): Promise<SqliteCount | null>
+	// Called when a read fails after the database opened (the bridge's read aborted or timed out); returns the
+	// unsubscribe.
+	onUnreadable(listener: () => void): () => void
 	// Ends the bridge (the worker is its owner's to end).
 	close(): void
+}
+
+// A database the check reads whole anyway (SQLITE_AUTO_CHECK_MAX_BYTES or less) is read whole into sqlite's memory
+// once, so the check, the counting and the tiles never download a byte twice; a larger one in ranges. An origin read
+// whole only (an archive entry, held bytes) is always read whole.
+export function readsInRanges(origin: ByteOrigin): boolean {
+	return originRanged(origin) && originSize(origin) > SQLITE_AUTO_CHECK_MAX_BYTES
 }
 
 export type SqliteOpenOutcome =
@@ -54,7 +81,7 @@ export interface SqliteOpenOptions {
 export async function openSqliteDatabase(owned: SqliteWorker, origin: ByteOrigin, options: SqliteOpenOptions): Promise<SqliteOpenOutcome> {
 	const { access, token, labels, interrupt } = options
 	const size = originSize(origin)
-	const ranged = originRanged(origin)
+	const ranged = readsInRanges(origin)
 	let close = (): void => undefined
 	let result: SqliteOpenResult
 
@@ -76,6 +103,8 @@ export async function openSqliteDatabase(owned: SqliteWorker, origin: ByteOrigin
 	} else {
 		const source = await openOriginRangeSource(origin, token, { access })
 
+		// The whole path's peak is the database twice for an archive entry until the SDK reads entries in ranges: the
+		// SDK worker holds the decoded entry while it is copied into sqlite's memory.
 		try {
 			const port = await source.port()
 
@@ -96,33 +125,111 @@ export async function openSqliteDatabase(owned: SqliteWorker, origin: ByteOrigin
 		return { ok: false, reason: failure?.reason ?? "damaged" }
 	}
 
-	let ids = 0
-	let lastRead = 0
-	const nextId = (): number => ++ids
 	const database: SqliteDatabase = {
 		schema,
 		size,
 		ranged,
 		autoCheck: size <= SQLITE_AUTO_CHECK_MAX_BYTES,
-		lastRead: () => lastRead,
-		reads: table => ({
-			tiles: (base, coordinates, id) => {
-				lastRead = performance.now()
-
-				return owned.run(remote => remote.tiles(table, base, coordinates, id))
-			},
-			cell: (base, row, col, id) => {
-				lastRead = performance.now()
-
-				return owned.run(remote => remote.cell(table, base, row, col, id))
-			},
-			nextId
-		}),
-		count: table => owned.run(remote => remote.count(table, nextId())),
+		...sqliteReads(owned, interrupt),
 		close
 	}
 
 	return { ok: true, database }
+}
+
+export type SqliteReads = Pick<SqliteDatabase, "lastRead" | "reads" | "count" | "onUnreadable">
+
+// The grid's reads of an open database, each named for the interrupt flag: a tile request makes every earlier one
+// stale (the grid asks again for what it still shows once the newer lands), and any grid read stops the count step in
+// flight, so tiles never wait on a chunk. A cell is read once for both of its readers (the grid's own query for a
+// clipped value, the selection bar). A read that failed reaches every onUnreadable listener.
+export function sqliteReads(owned: Pick<SqliteWorker, "run">, interrupt: Int32Array): SqliteReads {
+	let ids = 0
+	let lastRead = 0
+	// The count step in flight: a grid read that arrives meanwhile stops it, so tiles never wait on a chunk.
+	let counting = 0
+	const nextId = (): number => ++ids
+	const unreadable = new Set<() => void>()
+	const tables = new Map<number, SqliteTableReads>()
+	const watch = <T>(read: Promise<T>): Promise<T> =>
+		read.catch((error: unknown) => {
+			if (isSqliteUnreadable(error)) {
+				for (const listener of unreadable) listener()
+			}
+
+			throw error
+		})
+	const gridRead = (): number => {
+		lastRead = performance.now()
+
+		if (counting !== 0) Atomics.store(interrupt, INTERRUPT_COUNT, counting)
+
+		return nextId()
+	}
+	const tableReads = (table: number): SqliteTableReads => {
+		// The last cell read, shared by the grid's own query and the selection bar's.
+		let lastCell: { key: string; value: Promise<SqliteCellValue> } | null = null
+
+		return {
+			tiles: (base, coordinates) => {
+				const id = gridRead()
+
+				// Every earlier tile request is stale: the grid asks again for what it still shows once this one lands.
+				Atomics.store(interrupt, INTERRUPT_TILES, id - 1)
+
+				return watch(owned.run(remote => remote.tiles(table, base, coordinates, id)))
+			},
+			cell: (base, row, col) => {
+				const key = `${String(base)}:${String(row)}:${String(col)}`
+
+				if (lastCell?.key !== key) {
+					const id = gridRead()
+
+					const entry = { key, value: watch(owned.run(remote => remote.cell(table, base, row, col, id))) }
+
+					lastCell = entry
+					// A failed read is not kept: the next one asks again.
+					entry.value.catch(() => {
+						if (lastCell === entry) lastCell = null
+					})
+
+					return entry.value
+				}
+
+				return lastCell.value
+			}
+		}
+	}
+
+	return {
+		lastRead: () => lastRead,
+		reads: table => {
+			let reads = tables.get(table)
+
+			if (reads === undefined) {
+				reads = tableReads(table)
+				tables.set(table, reads)
+			}
+
+			return reads
+		},
+		count: table => {
+			const id = nextId()
+
+			counting = id
+
+			return watch(owned.run(remote => remote.count(table, id))).finally(() => {
+				if (counting === id) counting = 0
+			})
+		},
+		onUnreadable: listener => {
+			unreadable.add(listener)
+
+			return () => {
+				unreadable.delete(listener)
+			}
+		}
+	}
 }
 
 export interface SqliteCheckRun {
@@ -141,21 +248,19 @@ export function runSqliteCheck(
 	onProgress: (bytesRead: number) => void
 ): SqliteCheckRun {
 	if (!database.ranged) {
-		const id = 0x7fffffff
-
-		Atomics.store(options.interrupt, 0, 0)
+		const id = Atomics.add(options.interrupt, INTERRUPT_CHECK, 0) + 1
 
 		return {
 			result: owned.run(remote => remote.check(id, Comlink.proxy(onProgress))),
 			cancel: () => {
-				Atomics.store(options.interrupt, 0, id)
+				Atomics.store(options.interrupt, INTERRUPT_CHECK, id)
 			}
 		}
 	}
 
 	const checker = createOwnedWorker<SqliteBrowseWorkerApi>(createSqliteWorker, "sqlite-check")
 	const token = crypto.randomUUID()
-	const interrupt = new Int32Array(new SharedArrayBuffer(4))
+	const interrupt = new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS))
 	const run = { cancelled: false }
 	// Read through a call: the flag changes while the check awaits.
 	const cancelled = (): boolean => run.cancelled

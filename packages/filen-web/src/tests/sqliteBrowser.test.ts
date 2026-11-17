@@ -6,9 +6,28 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm"
 import { formatBytes } from "@filen/shared"
 import { tileKeyRow, type SheetTile } from "@filen/office/core/sheet"
-import { SqliteBrowser, SqliteOpenError, sqliteApiConfig, type SqliteLabels, type SqliteSource } from "@/features/preview/lib/sqliteBrowser"
+import {
+	SCHEMA_LIMITS,
+	SqliteBrowser,
+	SqliteOpenError,
+	isSqliteInterrupted,
+	isSqliteUnreadable,
+	sqliteApiConfig,
+	type SqliteLabels,
+	type SqliteSource
+} from "@/features/preview/lib/sqliteBrowser"
 import type { SyncByteReader } from "@/features/preview/lib/sqliteRangeVfs"
-import { SQLITE_COUNT_CHUNK, SQLITE_HEADER_READ_VERSION, SQLITE_HEADER_WRITE_VERSION } from "@/features/preview/lib/sqliteBrowse.logic"
+import {
+	INTERRUPT_CHECK,
+	INTERRUPT_COUNT,
+	INTERRUPT_TILES,
+	SQLITE_COUNT_CHUNK,
+	SQLITE_FIRST_COUNT_CHUNK,
+	SQLITE_HEADER_READ_VERSION,
+	SQLITE_HEADER_WRITE_VERSION,
+	SQLITE_HEX_DUMP_BYTES,
+	SQLITE_INTERRUPT_SLOTS
+} from "@/features/preview/lib/sqliteBrowse.logic"
 
 // The SQLite browser against the real engine (the package's node build), on databases node:sqlite writes: both ways
 // in (the range VFS, and whole into sqlite's memory) answer the same, the hardening holds, virtual tables and views
@@ -55,24 +74,23 @@ function memoryReader(bytes: Uint8Array, fail = false): SyncByteReader & { reads
 	}
 }
 
-function whole(bytes: Uint8Array): SqliteSource {
+// The bytes in blocks of `blockBytes` (small by default, so blocks are stitched at many boundaries), counting reads.
+function whole(bytes: Uint8Array, blockBytes = 4096): SqliteSource & { reads: number } {
 	return {
 		kind: "whole",
 		size: bytes.length,
-		fill: (heap, pointer) => {
-			// Two halves, as blocks arrive: stitched at the boundary.
-			const half = Math.floor(bytes.length / 2)
+		blockBytes,
+		reads: 0,
+		read(start, end) {
+			this.reads++
 
-			heap().set(bytes.subarray(0, half), pointer)
-			heap().set(bytes.subarray(half), pointer + half)
-
-			return Promise.resolve()
+			return Promise.resolve(bytes.slice(start, end))
 		}
 	}
 }
 
 async function open(source: SqliteSource): Promise<SqliteBrowser> {
-	return await SqliteBrowser.open(sqlite3, source, LABELS, new Int32Array(new SharedArrayBuffer(4)))
+	return await SqliteBrowser.open(sqlite3, source, LABELS, new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS)))
 }
 
 function only<T>(value: T | undefined): T {
@@ -173,6 +191,52 @@ describe("SqliteBrowser", () => {
 		held.close()
 	})
 
+	it("runs no virtual table module's code over the file's data while opening and listing", async () => {
+		const seen: string[] = []
+		const { capi, wasm, oo1 } = sqlite3
+		// Every statement each connection runs, nested ones (a module's own reads of its shadow tables) included.
+		class TracedDb extends oo1.DB {
+			constructor(...args: ConstructorParameters<typeof oo1.DB>) {
+				super(...args)
+				const record = (_reason: number, _ctx: number, _statement: number, sql: number): number => {
+					seen.push(wasm.cstrToJs(sql) ?? "")
+
+					return 0
+				}
+
+				// The binding takes the callback's argument too, which its typings leave out.
+				Reflect.apply(capi.sqlite3_trace_v2, capi, [this.pointer ?? 0, capi.SQLITE_TRACE_STMT, record, 0])
+			}
+		}
+		const traced = { ...sqlite3, oo1: { ...oo1, DB: TracedDb } } as Sqlite3Static
+		const browser = await SqliteBrowser.open(
+			traced,
+			whole(
+				database(db => {
+					db.exec(
+						"CREATE VIRTUAL TABLE f USING fts5(body); INSERT INTO f VALUES ('x'); CREATE VIRTUAL TABLE r USING rtree(id, a, b)"
+					)
+				})
+			),
+			LABELS,
+			new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS))
+		)
+
+		expect(seen.filter(sql => sql.includes("'main'."))).toEqual([])
+		expect(browser.schema.tables.filter(table => table.kind === "virtual").map(table => table.name)).toEqual(["f", "r"])
+		expect(browser.schema.tables.find(table => table.name === "f_config")?.kind).toBe("table")
+		browser.close()
+	})
+
+	it("sets the schema limits", async () => {
+		const browser = await open(whole(database(APP)))
+		const pointer = (browser as unknown as { db: { pointer: number } }).db.pointer
+
+		for (const [limit, value] of SCHEMA_LIMITS) expect(sqlite3.capi.sqlite3_limit(pointer, sqlite3.capi[limit], -1), limit).toBe(value)
+
+		browser.close()
+	})
+
 	it("refuses views, triggers, ATTACH and writes", async () => {
 		const browser = await open(whole(database(APP)))
 		const db = (browser as unknown as { db: { exec: (sql: string) => unknown } }).db
@@ -222,13 +286,14 @@ describe("SqliteBrowser", () => {
 			if (step.exact) break
 		}
 
+		// A small first chunk, so the grid draws before a large one has walked the table.
 		expect(steps).toEqual([
-			{ rows: SQLITE_COUNT_CHUNK, exact: false },
-			{ rows: SQLITE_COUNT_CHUNK * 2, exact: false },
+			{ rows: SQLITE_FIRST_COUNT_CHUNK, exact: false },
+			{ rows: SQLITE_FIRST_COUNT_CHUNK + SQLITE_COUNT_CHUNK, exact: false },
 			{ rows, exact: true }
 		])
 
-		// Data row 100,010 sits 10 rows past the second chunk's anchor: grid row 11 of a window based there.
+		// Data row 100,010: grid row 11 of a window based at 100,000, walked from the last chunk's anchor.
 		expect(texts(only(browser.tiles(0, 100_000, Uint32Array.of(0, 0), 2)[0])).get("11:1")).toBe("100010")
 		expect(browser.cell(0, 100_000, 11, 1, 3)).toEqual({ type: "integer", bytes: 6, value: "100010" })
 		browser.close()
@@ -249,7 +314,7 @@ describe("SqliteBrowser", () => {
 
 	it("passes the integrity check, finds damage, and cancels on the flag", async () => {
 		const bytes = database(APP)
-		const interrupt = new Int32Array(new SharedArrayBuffer(4))
+		const interrupt = new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS))
 		const browser = await SqliteBrowser.open(sqlite3, { kind: "ranged", reader: memoryReader(bytes) }, LABELS, interrupt)
 
 		expect(browser.check(1, () => undefined)).toBe("ok")
@@ -265,7 +330,7 @@ describe("SqliteBrowser", () => {
 		})
 		const cancelled = await SqliteBrowser.open(sqlite3, { kind: "ranged", reader: memoryReader(many) }, LABELS, interrupt)
 
-		Atomics.store(interrupt, 0, 2)
+		Atomics.store(interrupt, INTERRUPT_CHECK, 2)
 		expect(cancelled.check(2, () => undefined)).toBe("cancelled")
 		cancelled.close()
 
@@ -304,6 +369,76 @@ describe("SqliteBrowser", () => {
 		} else {
 			expect(cut).toMatchObject({ reason: "damaged" })
 		}
+	})
+
+	it("stops stale tile requests and the count a grid read went ahead of, never a cell read", async () => {
+		const interrupt = new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS))
+		const browser = await SqliteBrowser.open(sqlite3, whole(database(APP)), LABELS, interrupt)
+		const users = browser.schema.tables.findIndex(table => table.name === "users")
+		const stopped = (run: () => unknown): boolean => {
+			try {
+				run()
+			} catch (error) {
+				return isSqliteInterrupted(error)
+			}
+
+			return false
+		}
+
+		Atomics.store(interrupt, INTERRUPT_TILES, 5)
+		expect(stopped(() => browser.tiles(users, 0, Uint32Array.of(0, 0), 5))).toBe(true)
+		expect(stopped(() => browser.tiles(users, 0, Uint32Array.of(0, 0), 6))).toBe(false)
+		Atomics.store(interrupt, INTERRUPT_COUNT, 7)
+		expect(stopped(() => browser.countStep(users, 7))).toBe(true)
+		expect(stopped(() => browser.countStep(users, 8))).toBe(false)
+		expect(stopped(() => browser.cell(users, 0, 1, 1, 1))).toBe(false)
+		browser.close()
+	})
+
+	it("says a read that fails after opening is unreadable", async () => {
+		const bytes = database(APP)
+		const reader = memoryReader(bytes)
+		const browser = await open({ kind: "ranged", reader })
+		const users = browser.schema.tables.findIndex(table => table.name === "users")
+
+		reader.read = () => -1
+
+		const failure = (() => {
+			try {
+				browser.tiles(users, 0, Uint32Array.of(1, 0), 1)
+			} catch (error) {
+				return error
+			}
+
+			return null
+		})()
+
+		expect(isSqliteUnreadable(failure)).toBe(true)
+		browser.close()
+	})
+
+	it("reads a BLOB's first 64 KiB only, however small it is", async () => {
+		const blob = new Uint8Array(1024 * 1024).fill(7)
+		const browser = await open(
+			whole(
+				database(db => {
+					db.exec("CREATE TABLE t (b BLOB)")
+					db.prepare("INSERT INTO t VALUES (?)").run(blob)
+				})
+			)
+		)
+		const value = browser.cell(0, 0, 1, 0, 1)
+
+		expect(value.bytes).toBe(blob.length)
+		expect(value.value).toHaveLength(SQLITE_HEX_DUMP_BYTES)
+		browser.close()
+	})
+
+	it("reads only the first block of a whole file that is no database", async () => {
+		const source = whole(new Uint8Array(64 * 1024).fill(1), 4096)
+
+		await expect(open(source)).rejects.toMatchObject({ reason: "notSqlite" })
+		expect(source.reads).toBe(1)
 	})
 
 	it("refuses a file that is no database, and one whose reads fail", async () => {

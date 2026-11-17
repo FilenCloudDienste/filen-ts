@@ -18,11 +18,10 @@ import type { TableColumn } from "@/features/preview/lib/sqliteBrowse.logic"
 // column names, frozen, and whose rows from the second on are the table's from `base` on. The grid's own queries are
 // answered for the cell only; the others (navigation by data edges, copy, find) are not offered.
 
-// What the source asks its worker; `id` names the request for the interrupt flag.
+// What the source asks its worker (sqliteDatabase.ts names each request for the interrupt flag).
 export interface SqliteTableReads {
-	tiles(base: number, coordinates: Uint32Array, id: number): Promise<SheetTile[]>
-	cell(base: number, row: number, col: number, id: number): Promise<SqliteCellValue>
-	nextId(): number
+	tiles(base: number, coordinates: Uint32Array): Promise<SheetTile[]>
+	cell(base: number, row: number, col: number): Promise<SqliteCellValue>
 }
 
 const COLUMN_WIDTH = 160
@@ -92,7 +91,7 @@ export function sqliteReadSource(
 		if (name !== "cell") throw new Error(`a database table answers no ${name} query`)
 
 		const cell = request as SheetQueryRequest<"cell">
-		const value = await reads.cell(base, cell.row, cell.col, reads.nextId())
+		const value = await reads.cell(base, cell.row, cell.col)
 		const detail: SheetQueryResult<"cell"> = {
 			input: cell.row === 0 ? (columns[cell.col]?.name ?? "") : cellInput(value),
 			numFmt: "",
@@ -104,7 +103,7 @@ export function sqliteReadSource(
 	}
 
 	return {
-		tiles: async (_sheet, coordinates) => ({ tiles: await reads.tiles(base, coordinates, reads.nextId()) }),
+		tiles: async (_sheet, coordinates) => ({ tiles: await reads.tiles(base, coordinates) }),
 		release: () => {
 			// Tiles are built per request: the worker holds none to let go of.
 		},

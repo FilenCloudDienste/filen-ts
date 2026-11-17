@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@/lib/i18n"
 import type { SqliteCheck, SqliteSchema } from "@/features/preview/lib/sqliteBrowser"
 import type { SqliteDatabase, SqliteOpenOutcome } from "@/features/preview/lib/sqliteDatabase"
@@ -11,7 +11,8 @@ import { linkedFileItem } from "@/tests/fixtures/sdk"
 // never browsed), the WAL notice, and the integrity check: by itself up to 256 MiB, on demand above, damage replacing
 // the grid with the card.
 
-const { outcome, checks, worker } = vi.hoisted(() => ({
+const { outcome, checks, worker, grid } = vi.hoisted(() => ({
+	grid: { reportsActive: false, renders: 0 },
 	worker: { status: "ready", owned: {}, generation: 1 },
 	outcome: { next: null as SqliteOpenOutcome | null },
 	checks: { results: [] as Promise<SqliteCheck>[], runs: 0, cancels: 0 }
@@ -37,13 +38,26 @@ vi.mock("@/features/preview/lib/sqliteDatabase", () => ({
 		}
 	}
 }))
-vi.mock("@/features/preview/components/sqliteTableGrid", () => ({
-	SqliteTableGrid: ({ name, rows }: { name: string; rows: number }) => (
-		<p>
-			grid of {name}: {rows}
-		</p>
-	)
-}))
+vi.mock("@/features/preview/components/sqliteTableGrid", async () => {
+	const { useEffect } = await import("react")
+
+	// A grid that reports its active cell whenever its callback changes, as an uncompiled parent hands it a new one each
+	// render.
+	function SqliteTableGrid({ name, rows, onActive }: { name: string; rows: number; onActive: (row: number, col: number) => void }) {
+		grid.renders++
+		useEffect(() => {
+			if (grid.reportsActive) onActive(1, 0)
+		}, [onActive])
+
+		return (
+			<p>
+				grid of {name}: {rows}
+			</p>
+		)
+	}
+
+	return { SqliteTableGrid }
+})
 
 const SCHEMA: SqliteSchema = {
 	wal: false,
@@ -77,16 +91,18 @@ function database(overrides: Partial<SqliteDatabase> = {}): SqliteDatabase {
 		lastRead: () => 0,
 		reads: () => ({
 			tiles: () => Promise.resolve([]),
-			cell: () => Promise.resolve({ type: "null", bytes: 0, value: null }),
-			nextId: () => 1
+			cell: () => Promise.resolve({ type: "null", bytes: 0, value: null })
 		}),
 		count: () => Promise.resolve({ rows: 2, exact: true }),
+		onUnreadable: () => () => undefined,
 		close: () => undefined,
 		...overrides
 	}
 }
 
 beforeEach(() => {
+	grid.reportsActive = false
+	grid.renders = 0
 	checks.results = []
 	checks.runs = 0
 	checks.cancels = 0
@@ -175,5 +191,40 @@ describe("SqliteViewer", () => {
 			expect(screen.getByText("Not checked")).toBeTruthy()
 		})
 		expect(checks.cancels).toBe(1)
+	})
+
+	it("shows the unreadable card with Retry when a read fails after opening", async () => {
+		const listeners: (() => void)[] = []
+
+		outcome.next = {
+			ok: true,
+			database: database({
+				onUnreadable: listener => {
+					listeners.push(listener)
+
+					return () => undefined
+				}
+			})
+		}
+		await renderViewer()
+		await screen.findByText("grid of users: 2")
+
+		act(() => {
+			for (const listener of listeners) listener()
+		})
+
+		expect(screen.getByText("Couldn't read the database.")).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+	})
+
+	it("settles when the grid reports the same active cell again", async () => {
+		grid.reportsActive = true
+		outcome.next = { ok: true, database: database() }
+		await renderViewer()
+
+		expect(await screen.findByText("users.id, row 1")).toBeTruthy()
+		await new Promise(resolve => setTimeout(resolve, 50))
+		// Rendered a few times, never in a loop.
+		expect(grid.renders).toBeLessThan(10)
 	})
 })

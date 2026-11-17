@@ -5,8 +5,16 @@
 // Grid tiles (TILE_ROWS × TILE_COLS of @filen/office's sheet protocol).
 export const SQLITE_TILE_ROWS = 64
 export const SQLITE_TILE_COLS = 32
-// Rows each counting step covers: one step is O(chunk) however sparse the keys are.
+// Rows each counting step covers: one step is O(chunk) however sparse the keys are. The first step covers fewer, so the
+// grid draws its first rows before a large chunk has walked the table.
 export const SQLITE_COUNT_CHUNK = 50_000
+export const SQLITE_FIRST_COUNT_CHUNK = 1_000
+// The shared interrupt flag's slots (an Int32Array the page and the worker both hold): tile requests with an id at or
+// below slot 0 are stale; the count with slot 1's id stops; the check with slot 2's id stops.
+export const INTERRUPT_TILES = 0
+export const INTERRUPT_COUNT = 1
+export const INTERRUPT_CHECK = 2
+export const SQLITE_INTERRUPT_SLOTS = 3
 // A text cell's tile text is read only up to this many bytes; a longer one shows its size instead.
 export const SQLITE_INLINE_TEXT_BYTES = 65_536
 // What a tile shows of a text cell.
@@ -147,24 +155,27 @@ export function tileSql(
 }
 
 // The key of the row `skip` rows past an anchor (or the start): where the next counting chunk continues from.
-export function chunkEndSql(table: string, key: readonly string[], anchored: boolean): string {
+export function chunkEndSql(table: string, key: readonly string[], anchored: boolean, chunk: number = SQLITE_COUNT_CHUNK): string {
 	const where = anchored ? ` WHERE ${after(key)}` : ""
 
-	return `SELECT ${keyList(key)} FROM ${quoteIdent(table)}${where} ORDER BY ${keyList(key)} LIMIT 1 OFFSET ${String(SQLITE_COUNT_CHUNK - 1)}`
+	return `SELECT ${keyList(key)} FROM ${quoteIdent(table)}${where} ORDER BY ${keyList(key)} LIMIT 1 OFFSET ${String(chunk - 1)}`
 }
 
 // How many rows remain after an anchor (or in all), the last chunk: fewer than SQLITE_COUNT_CHUNK.
-export function chunkRestSql(table: string, key: readonly string[], anchored: boolean): string {
+export function chunkRestSql(table: string, key: readonly string[], anchored: boolean, chunk: number = SQLITE_COUNT_CHUNK): string {
 	const where = anchored ? ` WHERE ${after(key)}` : ""
 
-	return `SELECT count(*) FROM (SELECT 1 FROM ${quoteIdent(table)}${where} LIMIT ${String(SQLITE_COUNT_CHUNK)})`
+	return `SELECT count(*) FROM (SELECT 1 FROM ${quoteIdent(table)}${where} LIMIT ${String(chunk)})`
 }
 
 // One cell's whole value (up to SQLITE_CELL_MAX_BYTES; a longer one's first SQLITE_HEX_DUMP_BYTES), `skip` rows past an
 // anchor (or the start), as tileSql walks.
 export function cellSql(table: string, paging: TablePaging, column: string, anchored: boolean): string {
 	const c = quoteIdent(column)
-	const value = `typeof(${c}), octet_length(${c}), CASE WHEN octet_length(${c}) <= ${String(SQLITE_CELL_MAX_BYTES)} THEN ${c} ELSE substr(${c}, 1, ${String(SQLITE_HEX_DUMP_BYTES)}) END`
+	// A BLOB is shown as a hex dump of its start only, whatever its size.
+	const value =
+		`typeof(${c}), octet_length(${c}), CASE WHEN typeof(${c}) <> 'blob' AND octet_length(${c}) <= ${String(SQLITE_CELL_MAX_BYTES)} THEN ${c} ` +
+		`ELSE substr(${c}, 1, ${String(SQLITE_HEX_DUMP_BYTES)}) END`
 
 	if (paging.kind === "offset") return `SELECT ${value} FROM ${quoteIdent(table)} LIMIT 1 OFFSET ?`
 
@@ -273,4 +284,29 @@ export function hexDump(bytes: Uint8Array): string {
 	}
 
 	return lines.join("\n")
+}
+
+// The text a selected cell's full view shows: the value's text, or a hex dump of a BLOB's first SQLITE_HEX_DUMP_BYTES.
+export function fullValueText(value: string | Uint8Array | null): string {
+	if (value === null) return ""
+	if (typeof value === "string") return value
+
+	return hexDump(value.subarray(0, SQLITE_HEX_DUMP_BYTES))
+}
+
+// Where "Go to row" (1-based) goes: a row of the grid's window, or a new window whose first row is it. Past the end of a
+// table whose count is exact, its last row.
+export type RowTarget = { readonly kind: "reveal"; readonly gridRow: number } | { readonly kind: "rebase"; readonly base: number }
+
+export function goToRow(
+	row: number,
+	base: number,
+	windowRows: number,
+	count: { readonly rows: number; readonly exact: boolean } | null
+): RowTarget {
+	const target = count?.exact === true ? Math.max(1, Math.min(row, count.rows)) : row
+
+	if (target > base && target - base <= windowRows) return { kind: "reveal", gridRow: target - base }
+
+	return { kind: "rebase", base: target - 1 }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, CircleAlertIcon, DatabaseIcon, EyeIcon, TableIcon } from "lucide-react"
 import { cn, driveItemName, formatBytes } from "@filen/shared"
@@ -16,7 +16,7 @@ import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/comp
 import { SqliteTableGrid } from "@/features/preview/components/sqliteTableGrid"
 import type { SqliteBrowseWorkerApi } from "@/features/preview/workers/sqliteBrowse.worker"
 import type { SqliteCellValue, SqliteLabels, SqliteTableInfo } from "@/features/preview/lib/sqliteBrowser"
-import { SQLITE_HEX_DUMP_BYTES, hexDump } from "@/features/preview/lib/sqliteBrowse.logic"
+import { SQLITE_HEX_DUMP_BYTES, SQLITE_INTERRUPT_SLOTS, fullValueText, goToRow, hexDump } from "@/features/preview/lib/sqliteBrowse.logic"
 import { SQLITE_WINDOW_ROWS } from "@/features/preview/lib/sqliteSource"
 import {
 	SQLITE_COUNT_IDLE_MS,
@@ -47,12 +47,16 @@ interface Counted {
 
 // Opens the database in the viewer's worker once it is up; the bridge and its downloads end with the viewer. `retry`
 // opens it again after a failed read.
-function useSqliteOpen(item: DriveItem, worker: SqliteWorker | null, labels: SqliteLabels): { state: OpenState; retry: () => void } {
+function useSqliteOpen(
+	item: DriveItem,
+	worker: SqliteWorker | null,
+	labels: SqliteLabels
+): { state: OpenState; retry: () => void; unreadable: () => void } {
 	const origin = usePreviewOrigin(item)
 	const access = usePreviewAccessMode()
 	const [state, setState] = useState<OpenState>({ status: "opening" })
 	const [attempt, setAttempt] = useState(0)
-	const [interrupt] = useState(() => new Int32Array(new SharedArrayBuffer(4)))
+	const [interrupt] = useState(() => new Int32Array(new SharedArrayBuffer(4 * SQLITE_INTERRUPT_SLOTS)))
 	const readOrigin = useRef(origin)
 
 	useEffect(() => {
@@ -99,11 +103,15 @@ function useSqliteOpen(item: DriveItem, worker: SqliteWorker | null, labels: Sql
 		retry: () => {
 			setState({ status: "opening" })
 			setAttempt(previous => previous + 1)
+		},
+		unreadable: () => {
+			setState({ status: "failed", reason: "unreadable" })
 		}
 	}
 }
 
-// The rows of `table`, counted in chunks while the grid is idle; the first chunk at once.
+// The rows of `table`, counted in chunks while the grid is idle; the first (small) chunk at once. A step a grid read
+// went ahead of is taken again once the grid is idle.
 function useRowCount(database: SqliteDatabase, table: number | null): Counted | null {
 	const [counts, setCounts] = useState<ReadonlyMap<number, Counted>>(new Map())
 	const known = table === null ? undefined : counts.get(table)
@@ -131,10 +139,17 @@ function useRowCount(database: SqliteDatabase, table: number | null): Counted | 
 				counted => {
 					if (!live) return
 
+					if (counted === null) {
+						timer = setTimeout(step, SQLITE_COUNT_IDLE_MS)
+
+						return
+					}
+
 					setCounts(previous => new Map(previous).set(table, counted))
 
 					if (!counted.exact) timer = setTimeout(step, 0)
 				},
+				// A failed read reaches the viewer through onUnreadable.
 				() => undefined
 			)
 		}
@@ -374,13 +389,7 @@ function SelectedCell({ table, column, row, value }: { table: string; column: st
 						</p>
 					) : null}
 					<pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap select-text">
-						{value === null
-							? ""
-							: typeof value.value === "string"
-								? value.value
-								: value.value === null
-									? ""
-									: hexDump(value.value)}
+						{value === null ? "" : fullValueText(value.value)}
 					</pre>
 				</DialogContent>
 			</Dialog>
@@ -418,14 +427,16 @@ function TableView({
 		}
 
 		let live = true
-		const cellReads = database.reads(index)
 
-		cellReads.cell(base, active.row, active.col, cellReads.nextId()).then(
-			cell => {
-				if (live) setValue(cell)
-			},
-			() => undefined
-		)
+		database
+			.reads(index)
+			.cell(base, active.row, active.col)
+			.then(
+				cell => {
+					if (live) setValue(cell)
+				},
+				() => undefined
+			)
 
 		return () => {
 			live = false
@@ -433,14 +444,10 @@ function TableView({
 	}, [browsable, database, index, base, active.row, active.col])
 
 	const goTo = (row: number): void => {
-		// Data row `row` (1-based) is grid row row - base while it is in the window.
-		if (row > base && row - base <= SQLITE_WINDOW_ROWS && (counted === null || row <= counted.rows || !counted.exact)) {
-			gridRef.current?.goTo({ row: row - base, col: 0 })
+		const target = goToRow(row, base, SQLITE_WINDOW_ROWS, counted)
 
-			return
-		}
-
-		setBase(row - 1)
+		if (target.kind === "reveal") gridRef.current?.goTo({ row: target.gridRow, col: 0 })
+		else setBase(target.base)
 	}
 
 	return (
@@ -503,7 +510,7 @@ function TableView({
 							base={base}
 							gridRef={gridRef}
 							onActive={(row, col) => {
-								setActive({ row, col })
+								setActive(previous => (previous.row === row && previous.col === col ? previous : { row, col }))
 							}}
 						/>
 						{active.row > 0 && column !== undefined ? (
@@ -540,12 +547,15 @@ function DatabaseView({
 	item,
 	worker,
 	database,
-	options
+	options,
+	onUnreadable
 }: {
 	item: DriveItem
 	worker: SqliteWorker
 	database: SqliteDatabase
 	options: SqliteOpenOptions
+	// A read failed after the database opened: the viewer shows the unreadable card with Retry.
+	onUnreadable: () => void
 }) {
 	const { t } = useTranslation("preview")
 	const origin = usePreviewOrigin(item)
@@ -561,6 +571,11 @@ function DatabaseView({
 	const readOrigin = useRef(origin)
 	const name = driveItemName(item).toLowerCase()
 	const walSibling = (siblings ?? cachedSiblings(item.data.uuid)).some(sibling => driveItemName(sibling).toLowerCase() === `${name}-wal`)
+	const unreadable = useEffectEvent(() => {
+		onUnreadable()
+	})
+
+	useEffect(() => database.onUnreadable(unreadable), [database])
 
 	useEffect(() => {
 		if (checkRun === 0) {
@@ -634,8 +649,9 @@ function DatabaseView({
 }
 
 // A SQLite database, browsed read-only in its own worker: the tables, views and virtual tables on the left, a table's
-// rows in the sheet grid (or its SQL) on the right. A drive or link file is read in ranges, any size; an archive entry
-// or held bytes whole, up to the cap. The integrity check runs by itself up to 256 MiB, and when asked above that.
+// rows in the sheet grid (or its SQL) on the right. Up to 256 MiB it is read whole once (the integrity check, which runs
+// by itself there, reads every byte anyway); a larger drive or link file is read in ranges, any size, and checked when
+// asked. An archive entry or held bytes are always read whole, up to the cap.
 export function SqliteViewer({ item }: { item: DriveItem }) {
 	const { t } = useTranslation(["preview", "common"])
 	const worker = useOwnedWorker<SqliteBrowseWorkerApi>(createSqliteWorker, item.data.uuid, "sqlite-browse")
@@ -645,7 +661,7 @@ export function SqliteViewer({ item }: { item: DriveItem }) {
 		blob: t("previewSqliteBlob")
 	}))
 	const owned = worker.status === "ready" ? worker.owned : null
-	const { state, retry } = useSqliteOpen(item, owned, labels)
+	const { state, retry, unreadable } = useSqliteOpen(item, owned, labels)
 
 	if (worker.status === "failed" || state.status === "failed") {
 		const reason = state.status === "failed" ? state.reason : "unreadable"
@@ -687,6 +703,7 @@ export function SqliteViewer({ item }: { item: DriveItem }) {
 			worker={owned}
 			database={state.database}
 			options={state.options}
+			onUnreadable={unreadable}
 		/>
 	)
 }

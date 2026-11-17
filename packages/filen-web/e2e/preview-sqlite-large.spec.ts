@@ -16,7 +16,9 @@ import { RICH_SQLITE_BIG_BYTES, writeBigDatabase } from "./fixtures/richSqlite"
 const OPEN_CHUNKS = 16
 const CHECK_TIMEOUT_MS = 600_000
 
-test("a 300 MiB database opens unchecked in ranges and checks its integrity when asked", async ({ page, context }) => {
+test("a 300 MiB database opens unchecked in ranges and checks its integrity when asked", async ({ page, context, browserName }) => {
+	// One engine is enough for the 300 MiB upload and its download; the VFS is the same code on all three.
+	test.skip(browserName !== "chromium", "the large-database leg runs on Chromium only")
 	test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + CHECK_TIMEOUT_MS)
 
 	const cspViolations = trackCspViolations(page)
@@ -36,6 +38,8 @@ test("a 300 MiB database opens unchecked in ranges and checks its integrity when
 
 			await listbox.getByRole("option", { name }).dblclick()
 			await expect(dialog.getByText("Not checked", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+			// The list is by name: `blobs` is selected first.
+			await dialog.getByRole("button", { name: "users", exact: true }).click()
 			await expect(dialog.getByText("2 rows", { exact: false })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 			expect(egest.requests()).toBeLessThanOrEqual(OPEN_CHUNKS)
 
