@@ -1,6 +1,7 @@
 import { AudioSample, CustomAudioDecoder, type AudioCodec, type EncodedPacket } from "mediabunny"
 import WORKER_SOURCE from "@/vendor/ffmpeg-decoders/decoders.worker.js?raw"
 import { browserEngine, type BrowserEngine } from "@/lib/media/mseController.logic"
+import { NestedWorker, type NestedResponse } from "@/workers/nestedWorker"
 
 // AC-3, E-AC-3, DTS, TrueHD, WMA, MP1/MP2, AMR and ADPCM, which no browser decodes, ALAC, which only Safari does,
 // and FLAC where the browser's own decoder fails, through FFmpeg's decoders built to WebAssembly
@@ -77,11 +78,7 @@ export type DecoderRequest =
 	| { type: "flush"; handle: number }
 	| { type: "close"; handle: number }
 
-interface DecoderResponse {
-	id: number
-	error?: string
-	// The module trapped: the worker has closed itself.
-	fatal?: string
+interface DecoderResponse extends NestedResponse {
 	handle?: number
 	frames?: DecodedFrame[]
 }
@@ -93,28 +90,21 @@ export interface DecoderLease {
 }
 
 // One worker for every open decoder, started with the first and terminated with the last: a seek opens
-// the new decoder before closing the old one, so it is not restarted per seek. One that fails (a crash, a
-// trap in the module, or a script the browser refused) is dropped with everything waiting on it and every
-// decoder open in it, and the next decoder opened starts another.
+// the new decoder before closing the old one, so it is not restarted per seek. One that fails is dropped with every
+// decoder open in it (NestedWorker), and the next decoder opened starts another.
 export class DecoderWorker {
-	private worker: Worker | null = null
-	private users = 0
-	private nextId = 0
-	private readonly pending = new Map<number, { resolve: (response: DecoderResponse) => void; reject: (error: Error) => void }>()
-	private readonly spawn: () => Worker
+	private readonly nested: NestedWorker<DecoderRequest, DecoderResponse>
 
 	public constructor(spawn: () => Worker) {
-		this.spawn = spawn
+		this.nested = new NestedWorker(spawn, { name: "audio decoder" })
 	}
 
 	// Every open, failed or not, is balanced by exactly one release.
 	public async open(codec: FfmpegCodec, extradata?: Uint8Array, stream?: FfmpegStream): Promise<DecoderLease> {
-		this.users++
-
-		const worker = this.worker ?? this.start()
+		const worker = this.nested.acquire()
 		// An empty configuration is none.
 		const config = extradata === undefined || extradata.length === 0 ? undefined : extradata.slice().buffer
-		const { handle } = await this.post(
+		const { handle } = await this.nested.request(
 			worker,
 			{ type: "open", codec, ...(config === undefined ? {} : { extradata: config }), ...(stream === undefined ? {} : { stream }) },
 			config === undefined ? [] : [config]
@@ -128,82 +118,16 @@ export class DecoderWorker {
 	}
 
 	public request(lease: DecoderLease, request: DecoderRequest, transfer: Transferable[] = []): Promise<DecoderResponse> {
-		if (lease.worker !== this.worker) {
-			return Promise.reject(new Error("the audio decoder worker was lost"))
-		}
-
-		return this.post(lease.worker, request, transfer)
+		return this.nested.request(lease.worker, request, transfer)
 	}
 
 	// Never throws: a decoder whose worker is gone is gone with it.
 	public release(lease: DecoderLease | null): void {
-		this.users--
-
-		if (this.users <= 0) {
-			this.users = 0
-			this.stop(new Error("the audio decoder worker was stopped"))
-		} else if (lease !== null && lease.worker === this.worker) {
-			this.post(lease.worker, { type: "close", handle: lease.handle }).catch(() => undefined)
+		if (lease !== null && this.nested.current(lease.worker)) {
+			this.nested.request(lease.worker, { type: "close", handle: lease.handle }).catch(() => undefined)
 		}
-	}
 
-	private post(worker: Worker, request: DecoderRequest, transfer: Transferable[] = []): Promise<DecoderResponse> {
-		const id = this.nextId++
-
-		return new Promise((resolve, reject) => {
-			this.pending.set(id, { resolve, reject })
-			worker.postMessage({ id, ...request }, transfer)
-		})
-	}
-
-	private start(): Worker {
-		const worker = this.spawn()
-
-		worker.addEventListener("message", (event: MessageEvent<DecoderResponse>) => {
-			const response = event.data
-
-			if (response.fatal !== undefined) {
-				if (this.worker === worker) {
-					this.stop(new Error(response.fatal))
-				}
-
-				return
-			}
-
-			const waiting = this.pending.get(response.id)
-
-			this.pending.delete(response.id)
-
-			if (response.error === undefined) {
-				waiting?.resolve(response)
-			} else {
-				waiting?.reject(new Error(response.error))
-			}
-		})
-		worker.addEventListener("error", event => {
-			event.preventDefault()
-
-			if (this.worker === worker) {
-				this.stop(new Error(event.message || "the audio decoder worker failed"))
-			}
-		})
-
-		this.worker = worker
-
-		return worker
-	}
-
-	private stop(error: Error): void {
-		this.worker?.terminate()
-		this.worker = null
-
-		const waiting = [...this.pending.values()]
-
-		this.pending.clear()
-
-		for (const entry of waiting) {
-			entry.reject(error)
-		}
+		this.nested.release()
 	}
 }
 
