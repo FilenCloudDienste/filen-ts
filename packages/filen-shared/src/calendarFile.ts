@@ -25,6 +25,9 @@ export interface CalendarRecurrence {
 	readonly byDay: readonly string[]
 	readonly byMonthDay: readonly number[]
 	readonly byMonth: readonly number[]
+	// The rule has parts the fields above do not carry (BYSETPOS, BYWEEKNO, BYYEARDAY, BYHOUR, BYMINUTE, BYSECOND) or
+	// values they could not read: described only as a custom rule.
+	readonly custom: boolean
 }
 
 export interface CalendarEntry {
@@ -153,6 +156,7 @@ const FREQUENCIES: ReadonlyMap<string, CalendarFrequency> = new Map([
 	["YEARLY", "yearly"]
 ])
 const WEEKDAY = /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/
+const UNLISTED_PARTS: ReadonlySet<string> = new Set(["BYSETPOS", "BYWEEKNO", "BYYEARDAY", "BYHOUR", "BYMINUTE", "BYSECOND"])
 
 function integers(value: string, min: number, max: number): number[] {
 	return value
@@ -179,6 +183,16 @@ export function parseCalendarRecurrence(value: string): CalendarRecurrence | nul
 	}
 
 	const interval = Number(parts.get("INTERVAL") ?? "1")
+	const byDay = (parts.get("BYDAY") ?? "")
+		.split(",")
+		.slice(0, MAX_RULE_PARTS)
+		.map(day => day.trim().toUpperCase())
+		.filter(day => day !== "")
+	const byMonthDay = (parts.get("BYMONTHDAY") ?? "").split(",").filter(day => day.trim() !== "")
+	const byMonth = (parts.get("BYMONTH") ?? "").split(",").filter(month => month.trim() !== "")
+	const readDays = byDay.filter(day => WEEKDAY.test(day))
+	const readMonthDays = integers(parts.get("BYMONTHDAY") ?? "", -31, 31)
+	const readMonths = integers(parts.get("BYMONTH") ?? "", 1, 12)
 	const count = parts.has("COUNT") ? Number(parts.get("COUNT")) : null
 	const until = parts.get("UNTIL")
 
@@ -187,13 +201,14 @@ export function parseCalendarRecurrence(value: string): CalendarRecurrence | nul
 		interval: Number.isInteger(interval) && interval > 0 ? interval : 1,
 		count: count !== null && Number.isInteger(count) && count > 0 ? count : null,
 		until: until === undefined ? null : parseCalendarTime(until, null),
-		byDay: (parts.get("BYDAY") ?? "")
-			.split(",")
-			.slice(0, MAX_RULE_PARTS)
-			.map(day => day.trim().toUpperCase())
-			.filter(day => WEEKDAY.test(day)),
-		byMonthDay: integers(parts.get("BYMONTHDAY") ?? "", -31, 31),
-		byMonth: integers(parts.get("BYMONTH") ?? "", 1, 12)
+		byDay: readDays,
+		byMonthDay: readMonthDays,
+		byMonth: readMonths,
+		custom:
+			[...parts.keys()].some(part => UNLISTED_PARTS.has(part)) ||
+			readDays.length !== Math.min(byDay.length, MAX_RULE_PARTS) ||
+			readMonthDays.length !== Math.min(byMonthDay.length, MAX_RULE_PARTS) ||
+			readMonths.length !== Math.min(byMonth.length, MAX_RULE_PARTS)
 	}
 }
 

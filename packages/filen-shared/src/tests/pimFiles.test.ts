@@ -111,6 +111,11 @@ describe("readCalendar", () => {
 		expect(parseCalendarDuration("-PT5M")).toBeNull()
 		expect(parseCalendarDuration("PT")).toBeNull()
 		expect(parseCalendarRecurrence("INTERVAL=2")).toBeNull()
+		// Parts the summary does not carry, or values it could not read: a custom rule.
+		expect(parseCalendarRecurrence("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1")).toMatchObject({ custom: true })
+		expect(parseCalendarRecurrence("FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO")).toMatchObject({ custom: true })
+		expect(parseCalendarRecurrence("FREQ=WEEKLY;BYDAY=XX")).toMatchObject({ custom: true, byDay: [] })
+		expect(parseCalendarRecurrence("FREQ=WEEKLY;BYDAY=MO,WE;WKST=SU")).toMatchObject({ custom: false })
 		expect(parseCalendarRecurrence("FREQ=MONTHLY;BYDAY=-1FR,XX;BYMONTHDAY=0,15,40;UNTIL=20241231")).toMatchObject({
 			frequency: "monthly",
 			interval: 1,

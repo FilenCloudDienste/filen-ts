@@ -102,7 +102,8 @@ function recurrenceWords(t: TFunction<"preview">, rule: CalendarRecurrence): str
 		)
 	}
 
-	const repeat = parts.join(" ")
+	// A rule with parts this does not describe is not described half-way: its frequency, then "custom rule".
+	const repeat = rule.custom ? `${every(t, rule)}, ${t("previewCalendarCustomRule")}` : parts.join(" ")
 
 	if (rule.count !== null) return `${repeat}, ${t("previewCalendarTimes", { count: rule.count })}`
 

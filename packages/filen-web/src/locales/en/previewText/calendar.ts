@@ -96,6 +96,8 @@ export const previewTextCalendar = {
 	previewCalendarEveryYear_one: "Every year",
 	/** Calendar preview — a recurrence: every N years */
 	previewCalendarEveryYear_other: "Every {{count}} years",
+	/** Calendar preview — after a recurrence's frequency, for a rule with parts the preview does not describe (BYSETPOS, BYWEEKNO and the like) */
+	previewCalendarCustomRule: "custom rule",
 	/** Calendar preview — a recurrence's days; {{days}} is a list of weekdays */
 	previewCalendarOnDays: "on {{days}}",
 	/** Calendar preview — a recurrence's days of the month; {{days}} is a list of numbers */

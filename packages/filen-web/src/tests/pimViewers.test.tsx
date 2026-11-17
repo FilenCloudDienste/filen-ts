@@ -138,6 +138,28 @@ describe("CalendarViewer", () => {
 		expect(await screen.findByText(/1 entry · at least 3 more not shown/u)).toBeTruthy()
 	})
 
+	it("calls a rule with parts it does not describe a custom rule", async () => {
+		text.current = [
+			"BEGIN:VCALENDAR",
+			"BEGIN:VEVENT",
+			"SUMMARY:Close the books",
+			"DTSTART:20240131",
+			"RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;COUNT=12",
+			"END:VEVENT",
+			"END:VCALENDAR"
+		].join("\r\n")
+
+		render(
+			<CalendarViewer
+				item={itemNamed("books.ics")}
+				alt="books.ics"
+			/>,
+			{ wrapper }
+		)
+
+		expect(await screen.findByText("Every month, custom rule, 12 times")).toBeTruthy()
+	})
+
 	it("says when the calendar has no events", async () => {
 		text.current = "BEGIN:VCALENDAR\r\nEND:VCALENDAR"
 
