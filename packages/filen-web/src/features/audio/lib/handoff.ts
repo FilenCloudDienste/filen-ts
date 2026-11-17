@@ -1,6 +1,6 @@
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { previewType } from "@/features/drive/lib/preview.logic"
+import { previewType, withinFormatCap } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
 
@@ -14,9 +14,9 @@ import type { QueueTrack } from "@/features/audio/store/audioQueue"
 
 // True when a drive item resolves to the audio preview category (extension-first, mime-fallback — the
 // SAME classifier the listing icon and the preview gate use, so an item's audio-ness never disagrees
-// across surfaces).
+// across surfaces), within its format's own cap: a MIDI song or a module past it is never queued.
 export function isAudioItem(item: DriveItem): boolean {
-	return previewType(item) === "audio"
+	return previewType(item) === "audio" && withinFormatCap(item)
 }
 
 // Builds the playable queue track for a file item. `base.data` on the file arm is a structural superset

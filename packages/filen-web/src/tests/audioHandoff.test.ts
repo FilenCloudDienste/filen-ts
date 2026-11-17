@@ -11,14 +11,14 @@ import { testUuid } from "@/tests/support/uuid"
 // `{type:"encrypted"}` meta, which narrowItem turns into decryptedMeta=null (no name/mime), so it can
 // never classify as audio (that is exactly why such a track is never enqueued).
 
-function fileNamed(name: string, options: { mime?: string; undecryptable?: boolean } = {}): DriveItem {
-	const { mime = "application/octet-stream", undecryptable = false } = options
+function fileNamed(name: string, options: { mime?: string; undecryptable?: boolean; size?: bigint } = {}): DriveItem {
+	const { mime = "application/octet-stream", undecryptable = false, size = 2_048n } = options
 
 	const raw: File = {
 		uuid: testUuid(name),
 		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
-		size: 2_048n,
+		size,
 		favorited: false,
 		region: "de-1",
 		bucket: "filen-1",
@@ -27,7 +27,7 @@ function fileNamed(name: string, options: { mime?: string; undecryptable?: boole
 		canMakeThumbnail: false,
 		meta: undecryptable
 			? { type: "encrypted", data: "ciphertext" }
-			: { type: "decoded", data: { name, mime, modified: 1_700_000_000_000n, size: 2_048n, key: "key", version: 2 } }
+			: { type: "decoded", data: { name, mime, modified: 1_700_000_000_000n, size, key: "key", version: 2 } }
 	}
 
 	return narrowItem(raw)
@@ -38,6 +38,13 @@ function uuidsOf(tracks: { uuid: string }[]): string[] {
 }
 
 describe("isAudioItem", () => {
+	it("leaves out a MIDI song or a module past its format's cap, which nothing would play", () => {
+		expect(isAudioItem(fileNamed("song.mid", { size: 4n * 1024n * 1024n }))).toBe(true)
+		expect(isAudioItem(fileNamed("song.mid", { size: 4n * 1024n * 1024n + 1n }))).toBe(false)
+		expect(isAudioItem(fileNamed("tune.xm", { size: 33n * 1024n * 1024n }))).toBe(false)
+		expect(isAudioItem(fileNamed("long.mp3", { size: 2n * 1024n * 1024n * 1024n }))).toBe(true)
+	})
+
 	it("is true for audio extensions, false for other files and directories", () => {
 		expect(isAudioItem(fileNamed("song.mp3", { mime: "audio/mpeg" }))).toBe(true)
 		expect(isAudioItem(fileNamed("clip.mp4", { mime: "video/mp4" }))).toBe(false)

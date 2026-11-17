@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { BasicMIDI, SoundBankLoader, SpessaSynthProcessor, SpessaSynthSequencer, type BasicSoundBank } from "spessasynth_core"
-import { MIDI_MAX_EVENTS, midiEventCount } from "@filen/shared"
+import { MIDI_MAX_EVENTS, midiEventCount, synthCap } from "@filen/shared"
 import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
 
 // MIDI songs rendered by spessasynth with the bundled SoundFont, started by the remux worker for MIDI playback and
@@ -15,6 +15,7 @@ const VOICE_CAP = 128
 // After the last event, the notes' release rings on this long.
 const RELEASE_SECONDS = 2
 const QUANTUM = 128
+const MIDI_CAP = synthCap("midi")
 
 interface Song {
 	midi: BasicMIDI
@@ -67,6 +68,10 @@ function loadBank(url: string): Promise<BasicSoundBank> {
 
 // Parses the song once for every renderer of its key, and answers its length (with the release tail) without one.
 function load(key: string, data: ArrayBuffer): { duration: number } {
+	if (data.byteLength > MIDI_CAP) {
+		throw new Unsupported("larger than the MIDI player reads")
+	}
+
 	const bytes = new Uint8Array(data)
 	// Counted before anything is parsed: a song past the cap is refused at the cost of one walk.
 	const events = midiEventCount(bytes, MIDI_MAX_EVENTS)

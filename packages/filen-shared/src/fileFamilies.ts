@@ -11,8 +11,12 @@ export interface AudioFormat {
 }
 
 const MIB = 1024n * 1024n
-const MIDI: AudioFormat = { synth: "midi", cap: 4n * MIB }
-const TRACKER: AudioFormat = { synth: "module", cap: 32n * MIB }
+
+// The largest file each synthesizer reads: it holds the file whole.
+export const SYNTH_CAPS: Readonly<Record<NonNullable<AudioFormat["synth"]>, bigint>> = { midi: 4n * MIB, module: 32n * MIB }
+
+const MIDI: AudioFormat = { synth: "midi", cap: SYNTH_CAPS.midi }
+const TRACKER: AudioFormat = { synth: "module", cap: SYNTH_CAPS.module }
 
 // Extensions libopenmpt reads that name other, commoner formats, which they keep: a Netpbm image, a 3D model, music
 // notation or Doom's MUS, id's IMF, a self-extracting archive, a FAR archive, Mobile XMF. `mod` is no collision: a

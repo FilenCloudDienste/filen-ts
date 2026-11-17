@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { synthCap } from "@filen/shared"
 import createLibopenmpt, { type LibopenmptModule } from "@/vendor/libopenmpt/libopenmpt.js"
 import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
 
@@ -17,6 +18,8 @@ interface Renderer {
 	buffer: number
 	capacity: number
 }
+
+const MODULE_CAP = synthCap("module")
 
 const files = new Map<string, Uint8Array>()
 const renderers = new Map<number, Renderer>()
@@ -100,6 +103,10 @@ function create(lib: LibopenmptModule, bytes: Uint8Array, skipSamples: boolean):
 }
 
 async function load(key: string, data: ArrayBuffer): Promise<Omit<SynthResponse, "id">> {
+	if (data.byteLength > MODULE_CAP) {
+		throw new Unsupported("larger than the module player reads")
+	}
+
 	const bytes = new Uint8Array(data)
 	const openmpt = await lib()
 	const module = create(openmpt, bytes, true)

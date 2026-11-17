@@ -109,21 +109,28 @@ beforeAll(async () => {
 	await import("@/workers/synth/module.worker")
 })
 
-function serve(bytes: Uint8Array): { port: MessagePort; size: number; reads: () => number } {
+// `bytes` served by range, claiming `size` bytes (their own length unless a test says the file is larger).
+function serve(bytes: Uint8Array, size = bytes.length): { port: MessagePort; size: number; reads: () => number; bytesRead: () => number } {
 	const { port1, port2 } = new MessageChannel()
 	let reads = 0
+	let bytesRead = 0
 
 	exposeRangePort(
 		port1,
 		(start, end) => {
 			reads++
+			bytesRead += end - start
 
-			return Promise.resolve(bytes.slice(start, end))
+			const range = new Uint8Array(end - start)
+
+			range.set(bytes.subarray(start, Math.min(end, bytes.length)))
+
+			return Promise.resolve(range)
 		},
 		new AbortController()
 	)
 
-	return { port: port2, size: bytes.length, reads: () => reads }
+	return { port: port2, size, reads: () => reads, bytesRead: () => bytesRead }
 }
 
 describe("module synthesizer", () => {
@@ -312,6 +319,44 @@ describe("module synthesizer", () => {
 		expect(loads.filter(key => key === "grown").length - before).toBe(1)
 		await next.close()
 		await input.close()
+	})
+
+	it("reads a camcorder's MPEG program stream named .mod no further than its head, and a file past the cap not at all", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const { SYNTH_HEAD_BYTES } = await import("@/lib/media/remuxTypes")
+		const pack = new Uint8Array(64 * 1024)
+
+		pack.set([0x00, 0x00, 0x01, 0xba, 0x44, 0x00, 0x04, 0x00, 0x04, 0x01, 0x01, 0x89, 0xc3, 0xf8])
+
+		// Told it is 3 GB, past the module cap: nothing of it is read.
+		const camcorder = serve(pack, 3 * 1024 * 1024 * 1024)
+
+		await expect(synthAudioInput(camcorder.port, camcorder.size, "audio", { kind: "module", key: "camcorder" })).rejects.toSatisfy(
+			isAudioUnsupported
+		)
+		expect(camcorder.bytesRead()).toBe(0)
+
+		const small = serve(pack)
+		const loadsBefore = loads.length
+
+		await expect(synthAudioInput(small.port, small.size, "audio", { kind: "module", key: "small-ps" })).rejects.toSatisfy(
+			isAudioUnsupported
+		)
+		expect(small.bytesRead()).toBe(SYNTH_HEAD_BYTES)
+		expect(loads.length).toBe(loadsBefore)
+
+		const huge = serve(tinyMod(), 32 * 1024 * 1024 + 1)
+
+		await expect(synthAudioInput(huge.port, huge.size, "audio", { kind: "module", key: "huge" })).rejects.toSatisfy(isAudioUnsupported)
+		expect(huge.reads()).toBe(0)
+	})
+
+	it("probes a head as a module, or not", async () => {
+		const { synthFor } = await import("@/workers/remux/synthAudioInput")
+		const mod = tinyMod()
+
+		await expect(synthFor("module").reads(mod.subarray(0, 2048), mod.length)).resolves.toBe(true)
+		await expect(synthFor("module").reads(new Uint8Array(2048).fill(0x20), 1_000_000)).resolves.toBe(false)
 	})
 
 	it("refuses what libopenmpt does not read as unsupported audio, and a lost key as a read failure", async () => {

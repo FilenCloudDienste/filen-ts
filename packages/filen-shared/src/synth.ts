@@ -1,4 +1,4 @@
-import { AUDIO_FORMATS, type AudioFormat } from "./fileFamilies"
+import { AUDIO_FORMATS, SYNTH_CAPS, type AudioFormat } from "./fileFamilies"
 import { uint32le } from "./videos/probeAvi"
 
 // Audio a synthesizer renders: a MIDI song, or a tracker module.
@@ -8,6 +8,17 @@ export type AudioSynthKind = NonNullable<AudioFormat["synth"]>
 // for a format that is decoded.
 export function audioSynthKind(extension: string): AudioSynthKind | undefined {
 	return AUDIO_FORMATS.get(extension)?.synth
+}
+
+// The largest file `kind`'s synthesizer reads, in bytes, whoever asks it to: past it the file is never read.
+export function synthCap(kind: AudioSynthKind): number {
+	return Number(SYNTH_CAPS[kind])
+}
+
+// Whether a file's first bytes start a MIDI song: a Standard MIDI File's header, or an RMI's RIFF RMID. Checked before
+// a file is read whole for the MIDI synthesizer.
+export function isMidiHead(head: Uint8Array): boolean {
+	return ascii(head, 0) === "MThd" || (ascii(head, 0) === "RIFF" && ascii(head, 8) === "RMID")
 }
 
 // The most events a MIDI song may hold, and the most ports (16 channels each) it may address: its parse holds about

@@ -883,6 +883,13 @@ export function heldImageCap(item: DriveItem, profile: DeviceProfile): bigint | 
 	return formatCap(itemTypeExtension(item), profile) ?? bufferedSizeCap("image", profile)
 }
 
+// Whether the file fits its format's own cap (a MIDI song's, a module's, an image's): past it nothing opens or plays it.
+export function withinFormatCap(item: DriveItem, profile: DeviceProfile = deviceProfile()): boolean {
+	const cap = formatCap(itemTypeExtension(item), profile)
+
+	return cap === null || item.data.size <= cap
+}
+
 // The format's own cap, ahead of its category's: an image or audio row's.
 function formatCap(extension: string, profile: DeviceProfile): bigint | null {
 	const cap = IMAGE_FORMATS.get(extension)?.cap ?? AUDIO_FORMATS.get(extension)?.cap

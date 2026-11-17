@@ -1,9 +1,9 @@
 import { AudioSample } from "mediabunny"
-import type { AudioSynthKind } from "@filen/shared"
+import { isMidiHead, synthCap, type AudioSynthKind } from "@filen/shared"
 import { BlockCache } from "@/lib/media/blockCache"
 import { BLOCK_INPUT_PROFILES, type BlockInputProfile } from "@/lib/media/blockInput"
 import { rangePortReader } from "@/lib/media/rangePort"
-import { REMUX_WORKER_IDLE_MS, SourceReadError, type RemuxStats } from "@/lib/media/remuxTypes"
+import { REMUX_WORKER_IDLE_MS, SourceReadError, SYNTH_HEAD_BYTES, type RemuxStats } from "@/lib/media/remuxTypes"
 import soundFontUrl from "@/assets/soundfonts/GeneralUser-GS-2.0.3.sf3?url"
 import MidiWorker from "@/workers/synth/midi.worker.ts?worker"
 import ModuleWorker from "@/workers/synth/module.worker.ts?worker"
@@ -33,6 +33,8 @@ const RENDER_FRAMES = 4096
 const LOAD_TIMEOUT_MS = 20_000
 const OPEN_TIMEOUT_MS: Readonly<Record<AudioSynthKind, number>> = { module: 20_000, midi: 60_000 }
 const RENDER_TIMEOUT_MS = 5_000
+const PROBE_TIMEOUT_MS = 5_000
+
 // A wasm heap never shrinks: an instance whose heap grew past this is replaced once nothing renders on it, which a
 // playlist of modules otherwise never lets happen.
 const RECYCLE_HEAP_BYTES = 96 * 1024 * 1024
@@ -55,6 +57,13 @@ interface Held {
 
 // What a new instance is told before anything else.
 type Setup = () => Promise<SynthRequest>
+
+// A file as the synthesizer reads it: its first bytes, checked before the whole of it is read.
+interface SynthSource {
+	size: number
+	head(): Promise<Uint8Array>
+	read(): Promise<Uint8Array>
+}
 
 class Synth {
 	public readonly kind: AudioSynthKind
@@ -103,9 +112,10 @@ class Synth {
 		return this.told
 	}
 
-	// The worker holding `key`'s bytes, loaded through `read` when it does not yet (or no longer: a worker that failed
-	// took them with it), and the song's length. Balanced by one release.
-	public async acquire(key: string, read: () => Promise<Uint8Array>): Promise<{ worker: Worker; duration: number }> {
+	// The worker holding `key`'s bytes, loaded from `source` when it does not yet (or no longer: a worker that failed
+	// took them with it), and the song's length. A file is read whole only once its head reads as the synthesizer's
+	// (a camcorder's `.mod` never is). Balanced by one release.
+	public async acquire(key: string, source: SynthSource): Promise<{ worker: Worker; duration: number }> {
 		const worker = this.nested.acquire()
 		let counted = false
 
@@ -121,7 +131,9 @@ class Synth {
 				entry.users++
 			} else {
 				const load = async (): Promise<number> => {
-					const data = standalone(await read())
+					await this.sniff(worker, await source.head(), source.size)
+
+					const data = standalone(await source.read())
 					const { duration } = await this.nested.request(worker, { type: "load", key, data }, [data], LOAD_TIMEOUT_MS)
 
 					if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
@@ -144,6 +156,36 @@ class Synth {
 			}
 
 			throw error
+		}
+	}
+
+	// Whether a file of `size` bytes whose first bytes are `head` is one this synthesizer reads, from the head alone.
+	public async reads(head: Uint8Array, size: number): Promise<boolean> {
+		if (this.kind === "midi") {
+			return isMidiHead(head)
+		}
+
+		const worker = this.nested.acquire()
+
+		try {
+			await this.tell(worker)
+
+			return await this.probe(worker, head, size)
+		} finally {
+			this.nested.release(worker)
+		}
+	}
+
+	private async probe(worker: Worker, head: Uint8Array, size: number): Promise<boolean> {
+		const copy = head.slice().buffer
+		const { found } = await this.nested.request(worker, { type: "probe", head: copy, size }, [copy], PROBE_TIMEOUT_MS)
+
+		return found === true
+	}
+
+	private async sniff(worker: Worker, head: Uint8Array, size: number): Promise<void> {
+		if (!(this.kind === "midi" ? isMidiHead(head) : await this.probe(worker, head, size))) {
+			throw new AudioUnsupportedError(this.kind === "midi" ? "not a MIDI file" : "not a module libopenmpt reads")
 		}
 	}
 
@@ -177,7 +219,7 @@ class Synth {
 
 const synths: Partial<Record<AudioSynthKind, Synth>> = {}
 
-function synthFor(kind: AudioSynthKind): Synth {
+export function synthFor(kind: AudioSynthKind): Synth {
 	if (kind === "module") {
 		synths.module ??= new Synth(
 			"module",
@@ -291,13 +333,24 @@ export async function synthAudioInput(port: MessagePort, size: number, profile: 
 	const synth = synthFor(hint.kind)
 	let worker: Worker | null = null
 
+	// Refused before a byte is read, whoever asks: the player, a playlist, the crossfade analysis.
+	if (size === 0 || size > synthCap(hint.kind)) {
+		reader.close()
+
+		throw new AudioUnsupportedError(size === 0 ? "the file is empty" : `larger than the ${hint.kind} synthesizer reads`)
+	}
+
 	const close = (): void => {
 		cache.abort()
 		reader.close()
 	}
 
 	try {
-		const acquired = await synth.acquire(hint.key, () => cache.readThrough(0, size))
+		const acquired = await synth.acquire(hint.key, {
+			size,
+			head: () => cache.readThrough(0, Math.min(size, SYNTH_HEAD_BYTES)),
+			read: () => cache.readThrough(0, size)
+		})
 
 		worker = acquired.worker
 		// The file's bytes are in the synthesizer: the port is not read again.

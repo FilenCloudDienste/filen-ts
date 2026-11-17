@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { audioSynthKind, midiEventCount } from "@filen/shared"
+import { AUDIO_FORMATS, audioSynthKind, isMidiHead, MIDI_MAX_PORTS, midiEventCount, synthCap } from "@filen/shared"
 
 function vlq(value: number): number[] {
 	const out = [value & 0x7f]
@@ -65,5 +65,34 @@ describe("midiEventCount", () => {
 
 	it("names no synthesizer for decoded formats", () => {
 		expect(audioSynthKind("mp3")).toBeUndefined()
+	})
+
+	it("caps each synthesizer at its rows' own cap", () => {
+		expect(synthCap("midi")).toBe(4 * 1024 * 1024)
+		expect(synthCap("module")).toBe(32 * 1024 * 1024)
+		expect(Number(AUDIO_FORMATS.get("mid")?.cap)).toBe(synthCap("midi"))
+		expect(Number(AUDIO_FORMATS.get("xm")?.cap)).toBe(synthCap("module"))
+	})
+
+	it("tells a MIDI head, bare or in an RMI, from anything else", () => {
+		const rmi = Uint8Array.from([..."RIFF\0\0\0\0RMIDdata"].map(char => char.charCodeAt(0)))
+
+		expect(isMidiHead(smf(1))).toBe(true)
+		expect(isMidiHead(rmi)).toBe(true)
+		expect(isMidiHead(Uint8Array.from([..."RIFF\0\0\0\0WAVE"].map(char => char.charCodeAt(0))))).toBe(false)
+		expect(isMidiHead(Uint8Array.of(0x00, 0x00, 0x01, 0xba))).toBe(false)
+		expect(isMidiHead(new Uint8Array(0))).toBe(false)
+	})
+
+	it("refuses a song addressing more ports than the synthesizer allots channels for", () => {
+		const track = (port: number): number[] => chunk("MTrk", [0x00, 0xff, 0x21, 0x01, port, 0x00, 0x90, 60, 100, 0x00, 0xff, 0x2f, 0x00])
+		const song = (ports: number): Uint8Array =>
+			Uint8Array.from([
+				...chunk("MThd", [0, 1, 0, ports, 0x01, 0xe0]),
+				...Array.from({ length: ports }, (_, port) => track(port)).flat()
+			])
+
+		expect(midiEventCount(song(MIDI_MAX_PORTS))).toBe(MIDI_MAX_PORTS * 3)
+		expect(midiEventCount(song(MIDI_MAX_PORTS + 1))).toBeNull()
 	})
 })

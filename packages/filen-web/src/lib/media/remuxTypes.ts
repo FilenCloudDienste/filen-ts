@@ -235,6 +235,10 @@ export const REMUX_WORKER_IDLE_MS = 30_000
 // Comlink by name.
 export const SOURCE_READ_ERROR = "SourceReadError"
 
+// The head a synthesizer checks before it reads a file whole: libopenmpt's probe asks for this much
+// (openmpt_probe_file_header_get_recommended_size), and a MIDI head needs far less.
+export const SYNTH_HEAD_BYTES = 2048
+
 export class SourceReadError extends Error {
 	public constructor(cause: unknown) {
 		super(cause instanceof Error ? cause.message : String(cause), { cause })
