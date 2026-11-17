@@ -19,6 +19,7 @@ import {
 	type PdfViewport
 } from "../../dom/pdf/index"
 import { paintMatches } from "./highlight"
+import { buildStructTree, documentStructPrefix, pageStructTree, type StructTree } from "./structTree"
 import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
 
 // The page column, unstyled, for either engine: a document is anything with pdf.js's page contract (PdfDomDocument:
@@ -94,6 +95,8 @@ export interface PdfPagesProps extends PdfPagesBinding {
 	readonly onClick?: (event: MouseEvent<HTMLDivElement>) => void
 	readonly onAuxClick?: (event: MouseEvent<HTMLDivElement>) => void
 	readonly overlay?: PdfPageOverlay
+	// A tagged formula's MathML to MathML elements only (a dedicated sanitizer); without it a formula reads as its text.
+	readonly sanitizeMathML?: (markup: string) => Node | null
 }
 
 // A page's size before page 1 has been read.
@@ -383,7 +386,8 @@ export function PdfPageColumn({
 	tabIndex,
 	onClick,
 	onAuxClick,
-	overlay
+	overlay,
+	sanitizeMathML
 }: PdfPagesProps) {
 	const total = document.numPages
 	const [watcher] = useState(() => new PageWatcher())
@@ -467,6 +471,7 @@ export function PdfPageColumn({
 							registerPage={registerPage}
 							onNavigate={onNavigate}
 							overlay={overlay}
+							sanitizeMathML={sanitizeMathML}
 						/>
 					)
 				})}
@@ -516,6 +521,7 @@ interface PdfPageViewProps {
 	readonly registerPage: (page: number, element: HTMLElement | null) => void
 	readonly onNavigate: (to: PdfDestination) => void
 	readonly overlay: PdfPageOverlay | undefined
+	readonly sanitizeMathML: ((markup: string) => Node | null) | undefined
 }
 
 function PdfPageView({
@@ -540,7 +546,8 @@ function PdfPageView({
 	fallbackHeight,
 	registerPage,
 	onNavigate,
-	overlay
+	overlay,
+	sanitizeMathML
 }: PdfPageViewProps) {
 	const wrapperRef = useRef<HTMLDivElement | null>(null)
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -555,6 +562,9 @@ function PdfPageView({
 	// The page as last read. An engine may hand out the same page object for a new document (the editor's, after a change
 	// elsewhere): what it painted stays current then.
 	const proxy = loaded?.page ?? null
+	const owner = loaded?.document ?? null
+	// The page's structure tree is in its canvas: the canvas is then read, not hidden.
+	const [structured, setStructured] = useState(false)
 	// Read from the document shown (a page of the previous one only sizes and shows its bitmap until replaced).
 	const fresh = loaded !== null && loaded.document === document
 	// Set the first time the page nears the view, never cleared: the gate that keeps a long document from
@@ -728,38 +738,75 @@ function PdfPageView({
 	// tears it down.
 	useEffect(() => {
 		const container = textRef.current
+		const canvas = canvasRef.current
 
-		if (proxy === null || !nearView || !inView || container === null) return
+		if (proxy === null || owner === null || !nearView || !inView || container === null || canvas === null) return
 
-		const layout = layoutRef.current
-		const layer = new pdfjs.TextLayer({
-			textContentSource: proxy.streamTextContent(),
-			container,
-			viewport: proxy.getViewport({ scale: layout.scale, rotation: pdfPageRotation(proxy.rotate, layout.rotation) })
-		})
+		let layer: PdfTextLayer | null = null
+		let tree: StructTree | null = null
 		let unwatch: (() => void) | null = null
+		let settled: Promise<void> = Promise.resolve()
+		let cancelled = false
 
-		layerRef.current = layer
-		liveTextLayers.set(pdfjs.TextLayer, (liveTextLayers.get(pdfjs.TextLayer) ?? 0) + 1)
+		// A tagged document's page streams its marked content (the spans its tree owns), after its tree is read; the
+		// canvas renders meanwhile.
+		const built = pageStructTree(owner, proxy).then(found => {
+			if (cancelled) return
 
-		const settled = layer.render().then(
-			() => {
-				if (layerRef.current !== layer) return
+			const layout = layoutRef.current
+			const viewport = proxy.getViewport({ scale: layout.scale, rotation: pdfPageRotation(proxy.rotate, layout.rotation) })
+			const own = new pdfjs.TextLayer({
+				textContentSource: proxy.streamTextContent(found === null ? undefined : { includeMarkedContent: true }),
+				container,
+				viewport
+			})
 
-				// pdf.js's selection aid (TextLayerBuilder): see watchSelection.
-				const end = container.ownerDocument.createElement("div")
+			tree =
+				found === null
+					? null
+					: buildStructTree(container.ownerDocument, found, {
+							rawDims: viewport.rawDims as { readonly pageHeight: number; readonly pageX: number; readonly pageY: number },
+							idPrefix: `${documentStructPrefix(owner)}${String(pageNumber)}-`,
+							...(sanitizeMathML === undefined ? {} : { sanitizeMathML })
+						})
+			layer = own
+			layerRef.current = own
+			liveTextLayers.set(pdfjs.TextLayer, (liveTextLayers.get(pdfjs.TextLayer) ?? 0) + 1)
+			settled = own.render().then(
+				() => {
+					if (layerRef.current !== own) return
 
-				end.className = "endOfContent"
-				container.append(end)
-				unwatch = watchSelection(container, end)
-				setTextEpoch(epoch => epoch + 1)
-			},
-			() => {
-				// The page stays readable, only not selectable.
-			}
-		)
+					// pdf.js's selection aid (TextLayerBuilder): see watchSelection.
+					const end = container.ownerDocument.createElement("div")
+
+					end.className = "endOfContent"
+					container.append(end)
+					unwatch = watchSelection(container, end)
+
+					if (tree !== null) {
+						tree.applyToTextLayer(container)
+						canvas.append(tree.root)
+						setStructured(true)
+					}
+
+					setTextEpoch(epoch => epoch + 1)
+				},
+				() => {
+					// The page stays readable, only not selectable.
+				}
+			)
+		})
 
 		return () => {
+			cancelled = true
+
+			if (tree !== null) {
+				tree.root.remove()
+				setStructured(false)
+			}
+
+			if (layer === null) return
+
 			layer.cancel()
 			layerRef.current = null
 			unwatch?.()
@@ -776,11 +823,13 @@ function PdfPageView({
 
 			liveTextLayers.delete(pdfjs.TextLayer)
 			// A layer built meanwhile (the next page in the same commit, a reopened viewer) keeps the canvases.
-			void settled.then(() => {
-				if (!liveTextLayers.has(pdfjs.TextLayer)) pdfjs.TextLayer.cleanup()
-			})
+			void built
+				.then(() => settled)
+				.then(() => {
+					if (!liveTextLayers.has(pdfjs.TextLayer)) pdfjs.TextLayer.cleanup()
+				})
 		}
-	}, [pdfjs, proxy, nearView, inView])
+	}, [pdfjs, proxy, owner, pageNumber, nearView, inView, sanitizeMathML])
 
 	// A zoom or a turn re-lays out the spans in place, once the steps pause as the canvas does (it measures every
 	// span again); meanwhile --total-scale-factor resizes them. The selection and the find highlights stay.
@@ -869,7 +918,7 @@ function PdfPageView({
 			{/* The CSS box follows every zoom step at once, so a stale bitmap stretches to the new size. */}
 			<canvas
 				ref={canvasRef}
-				aria-hidden="true"
+				aria-hidden={structured ? undefined : "true"}
 				className={classNames?.canvas?.(painted)}
 				style={viewport === undefined ? undefined : { width: Math.floor(viewport.width), height: Math.floor(viewport.height) }}
 			/>

@@ -1,3 +1,4 @@
+import { sanitizePdfMathML } from "@/features/preview/lib/pdfMathSanitizer"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer } from "pdfjs-dist"
@@ -629,6 +630,7 @@ function PdfReader({
 							/>
 						}
 						allowLink={isSafeAbsoluteHref}
+						sanitizeMathML={sanitizePdfMathML}
 						maxCanvasBytes={pdfViewerSetup().limits.canvasMaxAreaInBytes}
 						{...(edit === null
 							? {}

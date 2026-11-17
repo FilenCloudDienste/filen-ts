@@ -58,8 +58,10 @@ export interface PdfPage<S = unknown> {
 	// `rotation` replaces the page's own /Rotate rather than adding to it.
 	getViewport(params: { scale: number; rotation?: number }): PdfViewport
 	render(params: PdfRenderParams): PdfRenderTask
-	// The text content as a stream, for the text layer.
-	streamTextContent(): S
+	// The text content as a stream, for the text layer; with marked content, the spans a structure tree owns.
+	streamTextContent(params?: { readonly includeMarkedContent?: boolean }): S
+	// The page's structure tree (a tagged PDF's), null without one. pdf.js's documents only.
+	getStructTree?(): Promise<unknown>
 	getTextContent(): Promise<PdfTextContent>
 	getAnnotations(params: { intent: "display" | "print" }): Promise<unknown[]>
 	cleanup(): unknown
