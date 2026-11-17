@@ -338,9 +338,10 @@ export class PacketDemuxer implements Demuxer {
 			}
 		}
 
-		run.fresh = run.packets.length - before
 		run.next = read.next
 		this.mergeFollowing(run)
+		// Counted once a run it reached has been taken over: what that run held is as new to this one as the read.
+		run.fresh = run.packets.length - before
 		this.evict(run)
 	}
 

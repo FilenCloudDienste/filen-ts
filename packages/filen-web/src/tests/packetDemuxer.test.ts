@@ -204,6 +204,53 @@ describe("PacketDemuxer eviction", () => {
 		}
 	})
 
+	it("reads every packet on into a run read ahead, however the budget cuts the run that takes it over", async () => {
+		const UNITS = 6000
+
+		// Where the run read ahead starts and how many of the second track's packets it holds: either fills it close to
+		// the budget, so taking it over cuts the merged run.
+		for (const [ahead, count] of [
+			[64, 1300],
+			[200, 1200]
+		] as const) {
+			const reads = new Map<number, number>()
+			const shared = sharedUnits(UNITS, [1, 2])
+			const input = inputOver(
+				{
+					...shared,
+					readPackets: pos => {
+						reads.set(pos, (reads.get(pos) ?? 0) + 1)
+
+						return shared.readPackets(pos)
+					}
+				},
+				UNITS * SMALL_UNIT
+			)
+			const [first, second] = await input.getAudioTracks()
+			const reader = new EncodedPacketSink(first ?? expect.unreachable())
+			const skipper = new EncodedPacketSink(second ?? expect.unreachable())
+			let packet = await reader.getFirstPacket()
+			// A run read ahead, nearly the budget's size, which the first track's reading reaches and takes over.
+			let far = await skipper.getPacket(ahead * 0.01)
+
+			for (let i = 0; i < count && far !== null; i++) {
+				far = await skipper.getNextPacket(far)
+			}
+
+			let read = packet === null ? 0 : 1
+
+			while (packet !== null) {
+				packet = await reader.getNextPacket(packet)
+				read += packet === null ? 0 : 1
+			}
+
+			expect([ahead, read]).toEqual([ahead, UNITS])
+			// Nothing the reading had just read was cut and read again.
+			// The cut never falls among the packets the latest read added, which would be read again at once: 108 reads.
+			expect([ahead, [...reads.values()].reduce((sum, times) => sum + times, 0)]).toEqual([ahead, 107])
+		}
+	})
+
 	it("stops looking for the first packet where no listed track's packets come", async () => {
 		const reads: number[] = []
 		const silent = sharedUnits(1_000_000, [7, 8])
