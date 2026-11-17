@@ -14,6 +14,14 @@ export const ROUTING_YAML_TEXT = "name: routing\nitems:\n  - one\n  - two\n"
 export const ROUTING_SUBTITLE_TEXT = "1\n00:00:01,000 --> 00:00:02,000\nHello from a subtitle\n"
 // Windows-1252 (a bijective codepage, so the editor saves it back as it was): the cue's line as it reads once decoded.
 export const ROUTING_LATIN1_LINE = "Café crème à la carte"
+// UTF-8 with one stray byte: read as UTF-8 before any codepage is guessed (its multi-byte sequences outnumber the
+// error), the byte a replacement character. A save cannot write that back, so the editor opens read-only.
+export const ROUTING_LOSSY_LINE = "Grüße aus Köln, naïve café"
+export const ROUTING_LOSSY_BYTES = Buffer.concat([
+	Buffer.from(`${ROUTING_LOSSY_LINE}\n`, "utf8"),
+	Buffer.from([0xff]),
+	Buffer.from("\n", "utf8")
+])
 export const ROUTING_MAIL_TEXT = "From: a@example.com\r\nTo: b@example.com\r\nSubject: Routing probe\r\n\r\nHello from a message\r\n"
 
 // The one entry of the Chrome extension fixture.
@@ -79,7 +87,7 @@ const MO_BYTES = Buffer.concat([Buffer.from([0xde, 0x12, 0x04, 0x95]), Buffer.al
 export const ROUTING_SCENARIOS = scenarioModule(
 	{
 		"routing-code": ["routing-config.yml", "routing-blob.mo"],
-		"routing-text": ["routing-subs.srt", "routing-latin1.srt", "routing-mail.eml"],
+		"routing-text": ["routing-subs.srt", "routing-latin1.srt", "routing-mail.eml", "routing-lossy.txt"],
 		"routing-images": ["routing-photo.jfif", "routing-generic.jpg"],
 		// Synthesized on disk (over 8 MiB), so it is a scenario of its own; the browser types it by its extension.
 		"routing-package": ["routing-app.apk"],
@@ -97,6 +105,7 @@ export const ROUTING_SCENARIOS = scenarioModule(
 			mimeType: "text/plain"
 		},
 		"routing-mail.eml": { buffer: Buffer.from(ROUTING_MAIL_TEXT, "utf8"), mimeType: "message/rfc822" },
+		"routing-lossy.txt": { buffer: ROUTING_LOSSY_BYTES, mimeType: "text/plain" },
 		"routing-photo.jfif": { buffer: JPEG_BYTES, mimeType: "image/jpeg" },
 		// A generic type: the inline route serves it by its extension.
 		"routing-generic.jpg": { buffer: JPEG_BYTES, mimeType: "application/octet-stream" },

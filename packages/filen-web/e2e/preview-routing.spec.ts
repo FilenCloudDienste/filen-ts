@@ -18,7 +18,7 @@ import { menuItemName } from "./helpers/menu"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
-import { ROUTING_EXTENSION_ENTRY, ROUTING_LATIN1_LINE, ROUTING_PACKAGE_ENTRY } from "./fixtures/routing"
+import { ROUTING_EXTENSION_ENTRY, ROUTING_LATIN1_LINE, ROUTING_LOSSY_LINE, ROUTING_PACKAGE_ENTRY } from "./fixtures/routing"
 
 // Which viewer a file opens in, by its name or by its stored type: extensions that open in an existing viewer
 // (highlighted code, text, a streamed image, a package's listing), one that must not open as text, and the editor's
@@ -26,7 +26,7 @@ import { ROUTING_EXTENSION_ENTRY, ROUTING_LATIN1_LINE, ROUTING_PACKAGE_ENTRY } f
 // extract writes into its own scratch directory.
 
 const [YAML, MO] = FIXTURE_FILES["routing-code"]
-const [SUBTITLES, LATIN1, MAIL] = FIXTURE_FILES["routing-text"]
+const [SUBTITLES, LATIN1, MAIL, LOSSY] = FIXTURE_FILES["routing-text"]
 const [JFIF, GENERIC_JPG] = FIXTURE_FILES["routing-images"]
 const [PACKAGE] = FIXTURE_FILES["routing-package"]
 const [EXTENSION] = FIXTURE_FILES["routing-extension"]
@@ -95,6 +95,11 @@ test("code and text open in the editor, writable when a save writes them back as
 
 	// A message is kept as it arrived.
 	await openText(page, listbox, MAIL, "Subject: Routing probe")
+	await expect(editorContent(page)).toHaveAttribute("contenteditable", "false")
+	await closeText(page)
+
+	// UTF-8 with a byte that is not: read with a replacement character a save cannot write back, so read-only.
+	await openText(page, listbox, LOSSY, ROUTING_LOSSY_LINE)
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "false")
 	await closeText(page)
 
