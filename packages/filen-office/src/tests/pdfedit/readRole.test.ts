@@ -10,6 +10,7 @@ import { startEngine, stopEngines } from "./harness"
 import { EPUB_CHAPTERS, makeEpub, makeFb2, makeMobi } from "./readFixtures"
 import { makePdf } from "./fixtures"
 import { budget } from "../timing"
+import { strToU8, zipSync } from "fflate"
 
 afterEach(() => {
 	stopLocalEngines()
@@ -284,6 +285,28 @@ describe("the read role", () => {
 		},
 		TIMEOUT
 	)
+
+	it("sets a book's text at the layout's size even where the publisher fixed it in px", async () => {
+		const chapter = `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>c</title><style>p{font-size:12px;color:#fff;background:#000}</style></head><body>${`<p>${"Lorem ipsum dolor sit amet. ".repeat(20)}</p>`.repeat(40)}</body></html>`
+		const book = zipSync({
+			mimetype: [strToU8("application/epub+zip"), { level: 0 }],
+			"META-INF/container.xml": strToU8(
+				'<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+			),
+			"c.opf": strToU8(
+				'<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">px</dc:identifier><dc:title>Px</dc:title></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>'
+			),
+			"c.xhtml": strToU8(chapter)
+		})
+		const client = localEngine()
+
+		await client.call("open", { bytes: book, role: "read", format: "epub", layout: { ...LAYOUT, em: 9 }, maxImagePixels: UNBOUNDED })
+
+		const small = (await client.call("pages", { from: 0, count: 10_000, generation: 0 })).length
+		const large = await client.call("layout", { ...LAYOUT, em: 18, generation: 1 })
+
+		expect(large.pageCount).toBeGreaterThan(small * 1.5)
+	})
 
 	it("keeps the format table's answers and MuPDF's void isReflowable", () => {
 		expect(MUPDF_FORMATS.epub.readsWhole).toBe(false)

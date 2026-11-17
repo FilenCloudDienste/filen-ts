@@ -32,6 +32,12 @@ const FONT_OBFUSCATION = new Set(["http://www.idpf.org/2008/embedding", "http://
 const ENCRYPTION_XML_MAX_BYTES = 4 * 1024 * 1024
 const ENCRYPTION_METHOD = /<(?:[\w-]+:)?EncryptionMethod\b[^>]*?\bAlgorithm\s*=\s*["']([^"']*)["']/g
 
+// The user style sheet a reflowed book is set with (the publisher's applies under it): text takes the layout's size
+// (A−/A+), whatever fixed px or pt size a publisher wrote, and dark publisher backgrounds or light text never reach
+// the paper-white page.
+export const READ_USER_CSS =
+	"body,p,div,span,li,td,th,dd,dt,blockquote,a,em,strong,i,b{font-size:1em!important;color:#000!important;background:transparent!important}"
+
 // Layout bounds: points, and the font size.
 const LAYOUT_MIN = 72
 const LAYOUT_MAX = 14_400
@@ -217,7 +223,12 @@ export async function openReadDocument(context: PdfEngineContext, args: PdfEngin
 			}
 		}
 
-		if (row.reflowable && layout !== undefined) document.layout(layout.width, layout.height, layout.em)
+		if (row.reflowable) {
+			// The reader's text size wins over the publisher's fixed sizes, and pages stay paper-white in either theme.
+			document.style(true, READ_USER_CSS)
+
+			if (layout !== undefined) document.layout(layout.width, layout.height, layout.em)
+		}
 
 		const pageCount = document.countPages()
 
