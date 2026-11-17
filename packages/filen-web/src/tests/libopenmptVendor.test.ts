@@ -8,16 +8,23 @@ const sha256 = (bytes: Buffer): string => createHash("sha256").update(bytes).dig
 
 describe("vendored libopenmpt module", () => {
 	it("is the exact build its manifest records, with the extension list read from it", () => {
-		const file = read("../vendor/libopenmpt/libopenmpt.js")
+		for (const name of ["libopenmpt.js", "libopenmpt.wasm"] as const) {
+			const file = read(`../vendor/libopenmpt/${name}`)
 
-		expect(file.byteLength).toBe(manifest.output["libopenmpt.js"].bytes)
-		expect(sha256(file)).toBe(manifest.output["libopenmpt.js"].sha256)
+			expect(file.byteLength, name).toBe(manifest.output[name].bytes)
+			expect(sha256(file), name).toBe(manifest.output[name].sha256)
+		}
+
 		expect(sha256(read("../vendor/libopenmpt/extensions.json"))).toBe(manifest.output["extensions.json"])
 	})
 
-	it("was built by the scripts in the repository", () => {
-		expect(sha256(read("../../scripts/codecs/build-libopenmpt.sh"))).toBe(manifest.sources["build-libopenmpt.sh"])
-		expect(sha256(read("../../scripts/codecs/emscripten.sh"))).toBe(manifest.sources["emscripten.sh"])
+	it("was built by the scripts in the repository, from a release its upstream tag pins", () => {
+		for (const name of ["build-libopenmpt.sh", "libopenmpt-bridge.c", "emscripten.sh"] as const) {
+			expect(sha256(read(`../../scripts/codecs/${name}`)), name).toBe(manifest.sources[name])
+		}
+
+		expect(manifest.libopenmpt.tag).toBe(`libopenmpt-${manifest.libopenmpt.version}`)
+		expect(manifest.libopenmpt.commit).toMatch(/^[0-9a-f]{40}$/)
 	})
 
 	it("ships the licences of what is linked in, as recorded at build time", () => {
@@ -26,11 +33,12 @@ describe("vendored libopenmpt module", () => {
 		}
 	})
 
-	it("catches C++ exceptions in WebAssembly, caps its heap, and needs nothing the CSP forbids", () => {
+	it("catches C++ exceptions in WebAssembly, caps its heap, takes its wasm compiled, and needs nothing the CSP forbids", () => {
 		const source = read("../vendor/libopenmpt/libopenmpt.js").toString("utf8")
 
 		expect(manifest.link).toContain("-fwasm-exceptions")
 		expect(manifest.link).toContain("-sMAXIMUM_MEMORY=256MB")
+		expect(manifest.link).toContain("-sINCOMING_MODULE_JS_API=[instantiateWasm]")
 		expect(source.match(/\beval\(|new Function\(|importScripts\(/g)).toBeNull()
 	})
 })

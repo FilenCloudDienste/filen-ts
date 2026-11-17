@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { isAudioUnsupported, isSourceReadError } from "@/lib/media/remuxTypes"
@@ -48,6 +49,36 @@ class InProcessWorker {
 }
 
 vi.mock("@/workers/synth/module.worker.ts?worker", () => ({ default: InProcessWorker }))
+
+// The heap's allocations as the module worker makes them, failing while `full` is set: what a capped heap that has no
+// room answers.
+const heap = { full: false }
+
+vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/vendor/libopenmpt/libopenmpt.js")>()
+
+	return {
+		default: async (options: Parameters<typeof actual.default>[0]) => {
+			const lib = await actual.default(options)
+			const malloc = lib._malloc.bind(lib)
+
+			lib._malloc = size => (heap.full ? 0 : malloc(size))
+
+			return lib
+		}
+	}
+})
+
+// The shipped wasm, read from disk where the remux worker fetches it; counted, as it is compiled once.
+const compiles = { count: 0 }
+
+vi.mock("@/workers/synth/libopenmptWasm", () => ({
+	compileLibopenmpt: () => {
+		compiles.count++
+
+		return WebAssembly.compile(readFileSync(new URL("../vendor/libopenmpt/libopenmpt.wasm", import.meta.url)))
+	}
+}))
 
 // A module playback never starts the MIDI synthesizer, so it never evaluates spessasynth.
 const midiWorkers = { started: 0 }
@@ -134,6 +165,67 @@ describe("module synthesizer", () => {
 
 		await first.close()
 		await second.close()
+	})
+
+	it("refuses a file the heap has no room for, and a render it cannot buffer, without losing the instance", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+
+		heap.full = true
+
+		try {
+			const refused = serve(tinyMod())
+
+			await expect(synthAudioInput(refused.port, refused.size, "audio", { kind: "module", key: "full" })).rejects.toSatisfy(
+				isAudioUnsupported
+			)
+		} finally {
+			heap.full = false
+		}
+
+		const source = serve(tinyMod())
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "room" })
+		const starved = input.reader({} as never, () => false)
+
+		heap.full = true
+
+		try {
+			await expect(starved.first(0)).rejects.toSatisfy(isAudioUnsupported)
+		} finally {
+			heap.full = false
+		}
+
+		await starved.close()
+
+		const reader = input.reader({} as never, () => false)
+		const first = await reader.first(0)
+
+		expect(first?.sample.numberOfFrames).toBe(4096)
+		expect(scope.closed).toBe(false)
+		await reader.close()
+		await input.close()
+	})
+
+	it("keeps libopenmpt's log off the console and compiles its wasm once", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const spies = (["log", "warn", "error", "info", "debug"] as const).map(level => vi.spyOn(console, level))
+
+		try {
+			const garbage = serve(new Uint8Array(4096).fill(0x33))
+
+			await expect(synthAudioInput(garbage.port, garbage.size, "audio", { kind: "module", key: "quiet" })).rejects.toSatisfy(
+				isAudioUnsupported
+			)
+
+			for (const spy of spies) {
+				expect(spy).not.toHaveBeenCalled()
+			}
+		} finally {
+			for (const spy of spies) {
+				spy.mockRestore()
+			}
+		}
+
+		expect(compiles.count).toBe(1)
 	})
 
 	it("refuses what libopenmpt does not read as unsupported audio, and a lost key as a read failure", async () => {

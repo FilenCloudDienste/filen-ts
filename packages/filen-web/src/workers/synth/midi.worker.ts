@@ -177,6 +177,10 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 			bankUrl = request.url
 
 			return {}
+		// libopenmpt's alone.
+		case "init":
+		case "probe":
+			throw new Unsupported(`${request.type} is the module synthesizer's`)
 		case "load":
 			load(request.key, request.data)
 
