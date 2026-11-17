@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseCalendarDuration, parseCalendarRecurrence, parseCalendarTime, readCalendar } from "@filen/shared/calendarFile"
+import { parseCalendarDuration, parseCalendarRecurrence, parseCalendarTime, parseUtcOffset, readCalendar } from "@filen/shared/calendarFile"
 import { readContacts, startsVcard } from "@filen/shared/contactFile"
 
 const CRLF = (lines: string[]): string => lines.join("\r\n")
@@ -14,6 +14,9 @@ describe("readCalendar", () => {
 				"TZID:Europe/Berlin",
 				"BEGIN:STANDARD",
 				"DTSTART:19701025T030000",
+				"TZOFFSETFROM:+0200",
+				"TZOFFSETTO:+0100",
+				"RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
 				"END:STANDARD",
 				"END:VTIMEZONE",
 				"BEGIN:VEVENT",
@@ -47,6 +50,21 @@ describe("readCalendar", () => {
 
 		expect(calendar.name).toBe("Team")
 		expect(calendar.entries).toHaveLength(3)
+		expect(calendar.truncated).toBe(false)
+		expect(calendar.zones).toEqual([
+			{
+				tzid: "Europe/Berlin",
+				observances: [
+					{
+						onset: { date: "1970-10-25", time: "03:00:00", utc: false, tzid: null },
+						offsetFrom: 7200,
+						offsetTo: 3600,
+						rule: expect.objectContaining({ frequency: "yearly", byMonth: [10], byDay: ["-1SU"] }),
+						dates: []
+					}
+				]
+			}
+		])
 		expect(calendar.entries[0]).toMatchObject({
 			kind: "event",
 			summary: "Planning, weekly",
@@ -61,6 +79,16 @@ describe("readCalendar", () => {
 		})
 		expect(calendar.entries[1]).toMatchObject({ kind: "todo", summary: "File taxes", end: { date: "2024-04-15", time: null } })
 		expect(calendar.entries[2]).toMatchObject({ start: { utc: true, tzid: null }, durationSeconds: 5400 })
+	})
+
+	it("reads UTC offsets with and without seconds", () => {
+		expect([
+			parseUtcOffset("+0100"),
+			parseUtcOffset("-0530"),
+			parseUtcOffset("+053045"),
+			parseUtcOffset("0100"),
+			parseUtcOffset("+1")
+		]).toEqual([3600, -19_800, 19_845, null, null])
 	})
 
 	it("parses times, durations and rules strictly", () => {
@@ -116,6 +144,8 @@ describe("readCalendar", () => {
 		expect(process.memoryUsage().heapUsed - before).toBeLessThan(96 * 1024 * 1024)
 		expect(calendar.entries).toHaveLength(10_000)
 		expect(calendar.entriesOmitted).toBeGreaterThan(0)
+		// Read only as far as the line cap: the count is a lower bound.
+		expect(calendar.truncated).toBe(true)
 	})
 
 	it("stops at nesting past its depth instead of growing a stack", () => {

@@ -12,6 +12,12 @@ export const previewTextContacts = {
 	previewContactsOmitted_one: "{{count}} more not shown",
 	/** Contacts preview — appended to the count when cards past the cap are not shown; {{count}} of them */
 	previewContactsOmitted_other: "{{count}} more not shown",
+	/** Contacts preview — appended to the count when the file was too long to read to its end; {{count}} cards past the cap were seen before reading stopped, so more may follow */
+	previewContactsOmittedAtLeast_one: "at least {{count}} more not shown",
+	/** Contacts preview — appended to the count when the file was too long to read to its end; {{count}} cards past the cap were seen before reading stopped, so more may follow */
+	previewContactsOmittedAtLeast_other: "at least {{count}} more not shown",
+	/** Contacts preview — appended to the count when the file was too long to read to its end and no card past the cap was seen */
+	previewContactsTruncated: "the rest of the file was not read",
 	/** Contacts preview — the file has no cards */
 	previewContactsEmpty: "This file has no contacts.",
 	/** Contacts preview — reading the contacts failed */

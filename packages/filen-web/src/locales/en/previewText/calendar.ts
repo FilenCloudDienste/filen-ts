@@ -12,6 +12,12 @@ export const previewTextCalendar = {
 	previewCalendarOmitted_one: "{{count}} more not shown",
 	/** Calendar preview — appended to the summary when entries past the cap are not shown; {{count}} of them */
 	previewCalendarOmitted_other: "{{count}} more not shown",
+	/** Calendar preview — appended to the summary when the file was too long to read to its end; {{count}} entries past the cap were seen before reading stopped, so more may follow */
+	previewCalendarOmittedAtLeast_one: "at least {{count}} more not shown",
+	/** Calendar preview — appended to the summary when the file was too long to read to its end; {{count}} entries past the cap were seen before reading stopped, so more may follow */
+	previewCalendarOmittedAtLeast_other: "at least {{count}} more not shown",
+	/** Calendar preview — appended to the summary when the file was too long to read to its end and no entry past the cap was seen */
+	previewCalendarTruncated: "the rest of the file was not read",
 	/** Calendar preview — the file has no events or to-dos */
 	previewCalendarEmpty: "This calendar has no events.",
 	/** Calendar preview — reading the calendar failed */

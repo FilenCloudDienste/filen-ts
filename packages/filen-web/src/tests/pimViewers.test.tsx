@@ -24,7 +24,13 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: new TextEncoder().encode(text.current), refetch: vi.fn() })
 }))
 vi.mock("@/features/preview/lib/textFamilyClient", () => ({
-	readCalendarFile: (value: string) => Promise.resolve(readCalendar(value)),
+	// A file read only as far as the line cap, as the worker reports one.
+	readCalendarFile: (value: string) =>
+		Promise.resolve(
+			value === "TRUNCATED"
+				? { ...readCalendar("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:One\r\nEND:VEVENT"), entriesOmitted: 3, truncated: true }
+				: readCalendar(value)
+		),
 	readContactFile: (value: string) => Promise.resolve(readContacts(value))
 }))
 
@@ -116,6 +122,20 @@ describe("CalendarViewer", () => {
 		expect(row.getAttribute("aria-expanded")).toBe("true")
 		expect(screen.getByText("https://example.com/meet")).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Copy Link" })).toBeTruthy()
+	})
+
+	it("gives a count past the cap as a lower bound when reading stopped before the file's end", async () => {
+		text.current = "TRUNCATED"
+
+		render(
+			<CalendarViewer
+				item={itemNamed("long.ics")}
+				alt="long.ics"
+			/>,
+			{ wrapper }
+		)
+
+		expect(await screen.findByText(/1 entry · at least 3 more not shown/u)).toBeTruthy()
 	})
 
 	it("says when the calendar has no events", async () => {

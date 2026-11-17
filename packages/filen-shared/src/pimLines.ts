@@ -141,8 +141,8 @@ const LINE_BREAK = /\r\n|\r|\n/g
 
 // Each content line of `text`, unfolded, handed to `visit` as it is read, up to the caps (nothing is collected). A vCard
 // 2.1 quoted-printable value continues past a line that ends in `=` (a soft break).
-// `visit` returns false to stop.
-export function eachContentLine(text: string, caps: ContentLineCaps, visit: (line: ContentLine) => boolean | void): void {
+// `visit` returns false to stop. Whether the whole text was read: false when the line cap or `visit` stopped it.
+export function eachContentLine(text: string, caps: ContentLineCaps, visit: (line: ContentLine) => boolean | void): boolean {
 	let current: string | null = null
 	let softBreak = false
 	let read = 0
@@ -188,6 +188,8 @@ export function eachContentLine(text: string, caps: ContentLineCaps, visit: (lin
 	}
 
 	flush()
+
+	return at > text.length && !stopped
 }
 
 export function param(line: ContentLine, name: string): string | null {

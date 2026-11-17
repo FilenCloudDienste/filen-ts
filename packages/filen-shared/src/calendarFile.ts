@@ -1,8 +1,8 @@
 import { decodedValue, displayText, param, eachContentLine, type ContentLine } from "./pimLines"
 
 // An iCalendar file (RFC 5545) read for display: its events and to-dos, their times as written (the app turns a time
-// zone into the viewer's own), their recurrence as a rule. Text only: nothing it names (ATTACH, URL, an organizer's
-// address) is ever fetched. Time zone definitions (VTIMEZONE) are skipped: a zone is known by its TZID.
+// zone into the viewer's own), their recurrence as a rule, and the time zones it defines (VTIMEZONE: each observance's
+// onset, offsets and yearly rule). Text only: nothing it names (ATTACH, URL, an organizer's address) is ever fetched.
 
 // "utc": a time ending in Z; "floating": no zone (the same wall time everywhere); otherwise the TZID it names.
 export interface CalendarTime {
@@ -47,12 +47,30 @@ export interface CalendarEntry {
 	readonly url: string | null
 }
 
+// One STANDARD or DAYLIGHT part of a VTIMEZONE: from its onset (a local time, in the offset before it), and again by
+// its rule or on its extra dates, local times are `offsetTo` seconds ahead of UTC.
+export interface CalendarObservance {
+	readonly onset: CalendarTime
+	readonly offsetFrom: number
+	readonly offsetTo: number
+	readonly rule: CalendarRecurrence | null
+	readonly dates: readonly CalendarTime[]
+}
+
+export interface CalendarZone {
+	readonly tzid: string
+	readonly observances: readonly CalendarObservance[]
+}
+
 export interface CalendarFile {
 	// X-WR-CALNAME.
 	readonly name: string | null
 	readonly entries: readonly CalendarEntry[]
 	// Entries past the cap, counted.
 	readonly entriesOmitted: number
+	// The file was not read to its end (past the line cap, or nested too deep): `entriesOmitted` is then a lower bound.
+	readonly truncated: boolean
+	readonly zones: readonly CalendarZone[]
 }
 
 const MAX_ENTRIES = 10_000
@@ -63,6 +81,9 @@ const MAX_SHORT = 512
 const MAX_DESCRIPTION = 8192
 const MAX_ATTENDEES = 100
 const MAX_RULE_PARTS = 64
+const MAX_ZONES = 64
+const MAX_OBSERVANCES = 64
+const MAX_ZONE_DATES = 64
 
 const TIME = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/
 
@@ -254,15 +275,73 @@ function apply(entry: Draft, line: ContentLine): void {
 	}
 }
 
+// A UTC offset, ±HHMM[SS], in seconds; null for none.
+export function parseUtcOffset(value: string): number | null {
+	const match = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(value.trim())
+
+	if (match === null) {
+		return null
+	}
+
+	const seconds = Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4] ?? 0)
+
+	return match[1] === "-" ? -seconds : seconds
+}
+
+interface ObservanceDraft {
+	onset: CalendarTime | null
+	offsetFrom: number | null
+	offsetTo: number | null
+	rule: CalendarRecurrence | null
+	dates: CalendarTime[]
+}
+
+function applyObservance(observance: ObservanceDraft, line: ContentLine): void {
+	switch (line.name) {
+		case "DTSTART":
+			observance.onset = parseCalendarTime(line.value, null)
+			break
+		case "TZOFFSETFROM":
+			observance.offsetFrom = parseUtcOffset(line.value)
+			break
+		case "TZOFFSETTO":
+			observance.offsetTo = parseUtcOffset(line.value)
+			break
+		case "RRULE":
+			observance.rule ??= parseCalendarRecurrence(line.value)
+			break
+		case "RDATE":
+			for (const value of line.value.split(",")) {
+				const date = parseCalendarTime(value, null)
+
+				if (date !== null && observance.dates.length < MAX_ZONE_DATES) observance.dates.push(date)
+			}
+
+			break
+		default:
+			break
+	}
+}
+
+interface ZoneDraft {
+	tzid: string | null
+	observances: CalendarObservance[]
+}
+
 // The events and to-dos of an iCalendar text, in the file's order.
 export function readCalendar(text: string): CalendarFile {
 	const entries: CalendarEntry[] = []
 	const stack: string[] = []
-	const open: { entry: Draft | null } = { entry: null }
+	const open: { entry: Draft | null; zone: ZoneDraft | null; observance: ObservanceDraft | null } = {
+		entry: null,
+		zone: null,
+		observance: null
+	}
+	const zones: CalendarZone[] = []
 	let name: string | null = null
 	let omitted = 0
 
-	eachContentLine(text, { lines: MAX_LINES, lineChars: MAX_LINE_CHARS }, line => {
+	const complete = eachContentLine(text, { lines: MAX_LINES, lineChars: MAX_LINE_CHARS }, line => {
 		if (line.name === "BEGIN") {
 			const component = line.value.trim().toUpperCase()
 
@@ -278,6 +357,10 @@ export function readCalendar(text: string): CalendarFile {
 				} else {
 					omitted++
 				}
+			} else if (stack.length === 2 && stack[0] === "VCALENDAR" && component === "VTIMEZONE" && zones.length < MAX_ZONES) {
+				open.zone = { tzid: null, observances: [] }
+			} else if (stack.length === 3 && open.zone !== null && (component === "STANDARD" || component === "DAYLIGHT")) {
+				open.observance = { onset: null, offsetFrom: null, offsetTo: null, rule: null, dates: [] }
 			}
 
 			return true
@@ -287,6 +370,20 @@ export function readCalendar(text: string): CalendarFile {
 			if (stack.length === 2 && open.entry !== null) {
 				entries.push(open.entry)
 				open.entry = null
+			} else if (stack.length === 2 && open.zone !== null) {
+				if (open.zone.tzid !== null && open.zone.observances.length > 0) {
+					zones.push({ tzid: open.zone.tzid, observances: open.zone.observances })
+				}
+
+				open.zone = null
+			} else if (stack.length === 3 && open.zone !== null && open.observance !== null) {
+				const { onset, offsetFrom, offsetTo, rule, dates } = open.observance
+
+				if (onset !== null && offsetTo !== null && open.zone.observances.length < MAX_OBSERVANCES) {
+					open.zone.observances.push({ onset, offsetFrom: offsetFrom ?? offsetTo, offsetTo, rule, dates })
+				}
+
+				open.observance = null
 			}
 
 			stack.pop()
@@ -298,6 +395,10 @@ export function readCalendar(text: string): CalendarFile {
 			name = displayText(decodedValue(line), MAX_SHORT)
 		} else if (stack.length === 2 && open.entry !== null) {
 			apply(open.entry, line)
+		} else if (stack.length === 2 && open.zone !== null && line.name === "TZID") {
+			open.zone.tzid = line.value.trim().slice(0, MAX_SHORT)
+		} else if (stack.length === 3 && open.observance !== null) {
+			applyObservance(open.observance, line)
 		}
 
 		return true
@@ -306,5 +407,5 @@ export function readCalendar(text: string): CalendarFile {
 	// An entry the file ends inside.
 	if (open.entry !== null) entries.push(open.entry)
 
-	return { name, entries, entriesOmitted: omitted }
+	return { name, entries, entriesOmitted: omitted, truncated: !complete, zones }
 }

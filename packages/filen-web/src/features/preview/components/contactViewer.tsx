@@ -56,6 +56,15 @@ function ContactCard({ contact }: { contact: Contact }) {
 	)
 }
 
+// Cards past the cap: an exact count, or a lower bound when reading stopped before the file's end.
+function omittedNote(t: TFunction<"preview">, count: number, truncated: boolean): string | null {
+	if (truncated) {
+		return ` · ${count > 0 ? t("previewContactsOmittedAtLeast", { count }) : t("previewContactsTruncated")}`
+	}
+
+	return count > 0 ? ` · ${t("previewContactsOmitted", { count })}` : null
+}
+
 const ROW_HEIGHT = 52
 
 function ContactList({ file, selected, onSelect }: { file: ContactFile; selected: number; onSelect: (index: number) => void }) {
@@ -74,7 +83,7 @@ function ContactList({ file, selected, onSelect }: { file: ContactFile; selected
 		<div className="flex min-h-0 flex-col border-border/50 max-md:max-h-64 max-md:border-b md:w-72 md:border-e">
 			<p className="px-4 py-2 text-xs text-muted-foreground">
 				{label}
-				{file.contactsOmitted > 0 ? ` · ${t("previewContactsOmitted", { count: file.contactsOmitted })}` : null}
+				{omittedNote(t, file.contactsOmitted, file.truncated)}
 			</p>
 			<div
 				ref={setScrollElement}

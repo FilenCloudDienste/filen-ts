@@ -14,6 +14,8 @@ import {
 	agendaDays,
 	agendaTime,
 	wallMs,
+	zoneTable,
+	type ZoneTable,
 	type AgendaDay,
 	type AgendaItem,
 	type AgendaTime
@@ -107,8 +109,8 @@ function recurrenceWords(t: TFunction<"preview">, rule: CalendarRecurrence): str
 	return repeat
 }
 
-function timeText(t: TFunction<"preview">, time: CalendarTime): string {
-	const shown = agendaTime(time)
+function timeText(t: TFunction<"preview">, time: CalendarTime, zones: ZoneTable): string {
+	const shown = agendaTime(time, zones)
 
 	if (shown.shownMs === null) {
 		return WALL_DATE.format(wallMs(time))
@@ -127,14 +129,14 @@ function duration(seconds: number): string {
 	return `${String(hours)}:${String(minutes).padStart(2, "0")}`
 }
 
-function detailFields(t: TFunction<"preview">, entry: CalendarEntry): MetadataField[] {
+function detailFields(t: TFunction<"preview">, entry: CalendarEntry, zones: ZoneTable): MetadataField[] {
 	const fields: MetadataField[] = []
 	const add = (label: string, value: string | null): void => {
 		if (value !== null && value !== "") fields.push({ label, value })
 	}
 
-	add(t("previewCalendarStarts"), entry.start === null ? null : timeText(t, entry.start))
-	add(t(entry.kind === "todo" ? "previewCalendarDue" : "previewCalendarEnds"), entry.end === null ? null : timeText(t, entry.end))
+	add(t("previewCalendarStarts"), entry.start === null ? null : timeText(t, entry.start, zones))
+	add(t(entry.kind === "todo" ? "previewCalendarDue" : "previewCalendarEnds"), entry.end === null ? null : timeText(t, entry.end, zones))
 	add(t("previewCalendarDuration"), entry.durationSeconds === null ? null : duration(entry.durationSeconds))
 
 	if (entry.recurrence !== null) {
@@ -182,7 +184,7 @@ function TimeColumn({ time }: { time: AgendaTime | null }) {
 	)
 }
 
-function AgendaRow({ item, open, onToggle }: { item: AgendaItem; open: boolean; onToggle: () => void }) {
+function AgendaRow({ item, zones, open, onToggle }: { item: AgendaItem; zones: ZoneTable; open: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("preview")
 	const { entry } = item
 	const title = entry.summary ?? t("previewCalendarUntitled")
@@ -218,7 +220,7 @@ function AgendaRow({ item, open, onToggle }: { item: AgendaItem; open: boolean; 
 				<div className="px-4 ps-12 pb-4">
 					<MetadataCard
 						title={title}
-						sections={[{ fields: detailFields(t, entry) }]}
+						sections={[{ fields: detailFields(t, entry, zones) }]}
 					/>
 				</div>
 			) : null}
@@ -228,8 +230,17 @@ function AgendaRow({ item, open, onToggle }: { item: AgendaItem; open: boolean; 
 
 type Row = { kind: "day"; day: AgendaDay } | { kind: "item"; item: AgendaItem }
 
+// Entries past the cap: an exact count, or a lower bound when reading stopped before the file's end.
+function omittedNote(t: TFunction<"preview">, count: number, truncated: boolean): string | null {
+	if (truncated) {
+		return ` · ${count > 0 ? t("previewCalendarOmittedAtLeast", { count }) : t("previewCalendarTruncated")}`
+	}
+
+	return count > 0 ? ` · ${t("previewCalendarOmitted", { count })}` : null
+}
+
 // Only the rows in view are mounted; rows measure themselves (an expanded one holds its details).
-function AgendaRows({ rows }: { rows: readonly Row[] }) {
+function AgendaRows({ rows, zones }: { rows: readonly Row[]; zones: ZoneTable }) {
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set())
@@ -270,6 +281,7 @@ function AgendaRows({ rows }: { rows: readonly Row[] }) {
 							) : (
 								<AgendaRow
 									item={row.item}
+									zones={zones}
 									open={open.has(row.item.index)}
 									onToggle={() => {
 										const next = new Set(open)
@@ -291,7 +303,8 @@ function AgendaRows({ rows }: { rows: readonly Row[] }) {
 // Grouped once per reading (the compiler keeps it while `calendar` stays), never per scroll.
 function Agenda({ calendar }: { calendar: CalendarFile }) {
 	const { t } = useTranslation("preview")
-	const rows: Row[] = agendaDays(calendar.entries).flatMap(day => [
+	const zones = zoneTable(calendar.zones)
+	const rows: Row[] = agendaDays(calendar.entries, zones).flatMap(day => [
 		{ kind: "day", day } as const,
 		...day.items.map(item => ({ kind: "item", item }) as const)
 	])
@@ -311,9 +324,12 @@ function Agenda({ calendar }: { calendar: CalendarFile }) {
 					</>
 				)}
 				{t("previewCalendarSummary", { count })}
-				{calendar.entriesOmitted > 0 ? ` · ${t("previewCalendarOmitted", { count: calendar.entriesOmitted })}` : null}
+				{omittedNote(t, calendar.entriesOmitted, calendar.truncated)}
 			</p>
-			<AgendaRows rows={rows} />
+			<AgendaRows
+				rows={rows}
+				zones={zones}
+			/>
 		</div>
 	)
 }

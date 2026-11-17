@@ -29,6 +29,8 @@ export interface ContactFile {
 	readonly contacts: readonly Contact[]
 	// Cards past the cap, counted.
 	readonly contactsOmitted: number
+	// The file was not read to its end (past the line cap): `contactsOmitted` is then a lower bound.
+	readonly truncated: boolean
 }
 
 const MAX_CONTACTS = 10_000
@@ -177,7 +179,7 @@ export function readContacts(text: string): ContactFile {
 	let depth = 0
 	let omitted = 0
 
-	eachContentLine(text, { lines: MAX_LINES, lineChars: MAX_LINE_CHARS }, line => {
+	const complete = eachContentLine(text, { lines: MAX_LINES, lineChars: MAX_LINE_CHARS }, line => {
 		if (line.name === "BEGIN" && line.value.trim().toUpperCase() === "VCARD") {
 			depth++
 
@@ -206,5 +208,5 @@ export function readContacts(text: string): ContactFile {
 	// A card the file ends inside.
 	if (open.card !== null) contacts.push(finish(open.card))
 
-	return { contacts, contactsOmitted: omitted }
+	return { contacts, contactsOmitted: omitted, truncated: !complete }
 }
