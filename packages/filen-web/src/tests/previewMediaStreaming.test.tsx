@@ -45,7 +45,9 @@ const sw = vi.hoisted(() => ({ controlled: false }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: mocks.sdkApi }))
 vi.mock("@/lib/media/mseController", () => ({ openRemuxSession: mocks.openRemuxSession, warmRemuxFile: vi.fn() }))
 vi.mock("@/lib/media/playback/openPlayback", () => ({ openPlayback: mocks.openPlayback }))
-vi.mock("@/features/videos/lib/probeService", () => ({ probeService: { request: mocks.probeRequest, onRecord: () => () => undefined } }))
+vi.mock("@/features/videos/lib/probeService", () => ({
+	probeService: { request: mocks.probeRequest, peek: () => undefined, onRecord: () => () => undefined }
+}))
 vi.mock("@/lib/media/mediaVolume", async importOriginal => ({
 	...(await importOriginal<typeof import("@/lib/media/mediaVolume")>()),
 	warmMediaVolume: () => Promise.resolve()

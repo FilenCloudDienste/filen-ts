@@ -18,6 +18,7 @@ import { undecodedKinds } from "@/features/preview/lib/playbackGap"
 import { CODECS, browserCanPlay } from "@/features/preview/lib/containerTracks"
 import { confirmedGap, silentAudioCodec, type PreviewVideoRoute } from "@/features/preview/lib/previewPlayback.logic"
 import { STREAM_STALL_MS, STREAM_STALL_POLL_MS, expectsProgress } from "@/lib/media/playback/directSession.logic"
+import { audioTracksOf, enableAudioTrack } from "@/lib/media/playback/audioTrackList"
 import {
 	holdPreviewStreamAlive,
 	previewStreamIdOf,
@@ -52,6 +53,15 @@ export interface PreviewVideoSnapshot {
 	silentCodec: MediaCodec | null
 	// Bumped whenever embedded subtitle cues arrived.
 	embeddedVersion: number
+	// The audio track playing, an index into the probe's audio (-1 until known).
+	audioIndex: number
+	// The element's own audio tracks on a direct stream (WebKit), named by the element: the audio menu needs no probe.
+	nativeAudio: readonly NativeAudioTrack[] | null
+}
+
+export interface NativeAudioTrack {
+	label: string
+	language: string
 }
 
 // What the outcome of a probe was: the record (null: no container the probe reads), or no answer at all.
@@ -73,6 +83,8 @@ export interface PreviewVideoDeps {
 	now?: () => number
 	hidden?: () => boolean
 	probe: (signal: AbortSignal) => Promise<PreviewProbeResult>
+	// The probe already held in memory, without I/O (the drive's probe service); null where none is.
+	peek?: () => VideoProbe | null
 	// The ladder's own deps for this file (byte sources, whether a direct rung exists).
 	playbackDeps: (allowDirect: boolean) => Partial<PlaybackDeps>
 	// The ladder; openPlayback when absent.
@@ -126,6 +138,8 @@ export class PreviewVideo {
 	// What the direct start's gap check read, kept for a later ladder open: a public link's probe is cached nowhere
 	// else. Outside the snapshot, so the direct start's UI stays as it was.
 	private directProbe: Extract<PreviewProbeResult, { status: "probed" }> | null = null
+	// The engagement probe in flight.
+	private probing: Promise<void> | null = null
 
 	public readonly subscribe = (listener: () => void): (() => void) => this.changes.subscribe(listener)
 
@@ -134,7 +148,16 @@ export class PreviewVideo {
 	public constructor(options: PreviewVideoOptions) {
 		this.options = options
 		this.lastTime = options.startTime
-		this.snapshot = { status: "active", route: options.route, probe: null, decision: null, silentCodec: null, embeddedVersion: 0 }
+		this.snapshot = {
+			status: "active",
+			route: options.route,
+			probe: options.deps.peek?.() ?? null,
+			decision: null,
+			silentCodec: null,
+			embeddedVersion: 0,
+			audioIndex: -1,
+			nativeAudio: null
+		}
 	}
 
 	// Where the element really was last, for a restart after the element was emptied (a failure).
@@ -181,6 +204,79 @@ export class PreviewVideo {
 
 		if (kind === "embedded-text" && direct && this.snapshot.status === "active") {
 			void this.escalate()
+		}
+	}
+
+	// Reads the probe, for the audio and chapter menus, once per open: called on the first engagement with the controls,
+	// so a video nobody reaches for costs no read. A hidden page waits until it is visible.
+	public ensureProbe(): void {
+		if (this.snapshot.probe !== null || this.probing !== null || this.disposed) {
+			return
+		}
+
+		this.probing = this.whenVisible().then(async () => {
+			const result =
+				this.directProbe ??
+				(await this.options.deps.probe(this.abort.signal).catch((): PreviewProbeResult => ({ status: "unavailable" })))
+
+			if (this.isDisposed() || result.status !== "probed") {
+				this.probing = null
+
+				return
+			}
+
+			this.directProbe = result
+
+			if (this.snapshot.probe === null && result.probe !== null) {
+				this.update({ probe: result.probe })
+			}
+		})
+	}
+
+	private whenVisible(): Promise<void> {
+		const hidden = this.options.deps.hidden ?? (() => typeof document !== "undefined" && document.hidden)
+
+		if (!hidden()) {
+			return Promise.resolve()
+		}
+
+		return new Promise(resolve => {
+			const listener = (): void => {
+				if (!hidden() || this.disposed) {
+					document.removeEventListener("visibilitychange", listener)
+					resolve()
+				}
+			}
+
+			document.addEventListener("visibilitychange", listener)
+		})
+	}
+
+	// Plays the probe's audio track `index`: in place where the element switches its own tracks (WebKit's direct
+	// stream), through the ladder's own switch once it plays, else by moving a direct start to the ladder.
+	public selectAudio(index: number): void {
+		if (index === this.snapshot.audioIndex || this.disposed || this.snapshot.status !== "active") {
+			return
+		}
+
+		const playback = this.playback
+
+		if (playback !== null) {
+			void playback.selectAudio(index).catch((error: unknown) => {
+				log.warn("preview.video", "switching the audio track failed", error)
+			})
+
+			return
+		}
+
+		if (this.snapshot.route === "direct" && !this.escalated) {
+			if (enableAudioTrack(this.video, index)) {
+				this.update({ audioIndex: index })
+
+				return
+			}
+
+			void this.escalate(index)
 		}
 	}
 
@@ -272,6 +368,8 @@ export class PreviewVideo {
 				video.currentTime = start
 			}
 
+			this.readNativeAudio(video)
+
 			void warmMediaVolume().then(() => {
 				if (!this.isDisposed() && this.snapshot.route === "direct") {
 					video.play().catch(() => undefined)
@@ -292,6 +390,30 @@ export class PreviewVideo {
 		this.watchForGap(video)
 		this.watchForStall(video, url)
 		video.src = url
+	}
+
+	// The element's own audio tracks (WebKit), free once its metadata is in: more than one fills the audio menu.
+	private readNativeAudio(video: HTMLVideoElement): void {
+		const tracks = audioTracksOf(video)
+
+		if (tracks === undefined) {
+			return
+		}
+
+		const native: NativeAudioTrack[] = []
+		let enabled = -1
+
+		for (let index = 0; index < tracks.length; index++) {
+			const track = tracks[index]
+
+			native.push({ label: track?.label ?? "", language: track?.language ?? "" })
+
+			if (track?.enabled === true && enabled < 0) {
+				enabled = index
+			}
+		}
+
+		this.update({ nativeAudio: native, audioIndex: enabled })
 	}
 
 	// WebKit retries a range request the service worker answers 404 for ever, without an error: a playhead
@@ -407,8 +529,9 @@ export class PreviewVideo {
 	}
 
 	// Leaves the plain-src start for the ladder at the same position and play state, the frame kept as the
-	// poster meanwhile. Once only: the ladder handles its own failures from there.
-	private async escalate(): Promise<void> {
+	// poster meanwhile, with the audio track `audioIndex` when one was asked for. Once only: the ladder handles its own
+	// failures from there.
+	private async escalate(audioIndex?: number): Promise<void> {
 		const video = this.video
 
 		if (video === null || this.escalated || this.isDisposed()) {
@@ -431,7 +554,7 @@ export class PreviewVideo {
 		video.removeAttribute("src")
 		video.load()
 		this.releaseDirect()
-		await this.openLadder({ time, play, allowDirect: false })
+		await this.openLadder({ time, play, allowDirect: false, ...(audioIndex === undefined ? {} : { audioIndex }) })
 	}
 
 	private async bridgePoster(video: HTMLVideoElement): Promise<void> {
@@ -469,7 +592,7 @@ export class PreviewVideo {
 		this.video?.removeAttribute("poster")
 	}
 
-	private async openLadder(params: { time: number; play: boolean; allowDirect: boolean }): Promise<void> {
+	private async openLadder(params: { time: number; play: boolean; allowDirect: boolean; audioIndex?: number }): Promise<void> {
 		const video = this.video
 
 		if (video === null) {
@@ -508,19 +631,23 @@ export class PreviewVideo {
 			return
 		}
 
-		const audioIndex = selectAudioTrack(
-			probe.audio.map(track => ({ lang: track.lang, default: track.def })),
-			{
-				userLanguages: userLanguages(),
-				playable: (_track, index) => {
-					const codec = probe.audio[index]?.codec ?? null
+		const chosen = params.audioIndex ?? (this.snapshot.audioIndex >= 0 ? this.snapshot.audioIndex : null)
+		const audioIndex =
+			chosen !== null && chosen < probe.audio.length
+				? chosen
+				: selectAudioTrack(
+						probe.audio.map(track => ({ lang: track.lang, default: track.def })),
+						{
+							userLanguages: userLanguages(),
+							playable: (_track, index) => {
+								const codec = probe.audio[index]?.codec ?? null
 
-					return codec !== null && NATIVE_AUDIO.has(codec)
-				}
-			}
-		)
+								return codec !== null && NATIVE_AUDIO.has(codec)
+							}
+						}
+					)
 
-		this.update({ probe })
+		this.update({ probe, audioIndex, nativeAudio: null })
 
 		if (params.play) {
 			await warmMediaVolume()
@@ -586,6 +713,7 @@ export class PreviewVideo {
 
 		this.update({
 			decision: state.decision,
+			audioIndex: state.selection.audioIndex,
 			status: state.status === "unsupported" ? "unsupported" : state.status === "failed" ? "failed" : "active",
 			silentCodec:
 				state.decision.path === "video-only" && probe.audio.length > 0 ? silentAudioCodec(probe, state.selection.audioIndex) : null

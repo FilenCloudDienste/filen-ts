@@ -5,7 +5,7 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
-import { PROBE_RANK } from "@/features/videos/lib/probeService.logic"
+import { PROBE_RANK, recordSatisfies } from "@/features/videos/lib/probeService.logic"
 import { probeService } from "@/features/videos/lib/probeService"
 import { directSource, linkedRemuxSource, remuxSource } from "@/lib/media/playback/sources"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -109,6 +109,12 @@ function previewVideoDeps(params: {
 			return url
 		},
 		probe: signal => probeFile(file, access, signal),
+		// A full probe the drive already holds names the audio tracks and chapters at once, with no read.
+		peek: () => {
+			const record = access === "authed" ? probeService.peek(file.uuid) : undefined
+
+			return record != null && recordSatisfies(record, "full", () => name) ? record.probe : null
+		},
 		onStreamGone: (url, listener) => onPreviewStreamGone(previewStreamIdOf(url), listener),
 		// The service worker serves a public link's file too, through an unauthenticated range port.
 		playbackDeps: allowDirect => ({

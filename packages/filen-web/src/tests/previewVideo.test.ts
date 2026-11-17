@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
 import { MAX_SUBTITLE_CUES, type LadderDecision, type MediaCodec, type VideoProbe } from "@filen/shared/videos"
 import type { Playback, PlaybackSnapshot, openPlayback } from "@/lib/media/playback/openPlayback"
@@ -100,12 +100,16 @@ interface Harness {
 	release: ReturnType<typeof vi.fn<(url: string) => void>>
 	holdAlive: ReturnType<typeof vi.fn<() => () => void>>
 	releaseAlive: ReturnType<typeof vi.fn<() => void>>
-	playback: { dispose: ReturnType<typeof vi.fn> }
+	playback: { dispose: ReturnType<typeof vi.fn>; selectAudio: ReturnType<typeof vi.fn> }
 	gone: () => void
 }
 
 function setUp(options: {
 	route: "direct" | "ladder"
+	// The element's own audio track list (WebKit), when it has one.
+	audioTracks?: { enabled: boolean; label: string; language: string }[]
+	peek?: VideoProbe | null
+	hidden?: () => boolean
 	probe?: VideoProbe | null | "unavailable"
 	path?: LadderDecision["path"]
 	registerFails?: boolean
@@ -116,6 +120,11 @@ function setUp(options: {
 	poster?: Promise<string | null>
 }): Harness {
 	const video = new DecodingVideo()
+
+	if (options.audioTracks !== undefined) {
+		Object.assign(video, { audioTracks: options.audioTracks })
+	}
+
 	const listeners = new Set<() => void>()
 	let snapshot: PlaybackSnapshot = {
 		status: "ready",
@@ -124,7 +133,7 @@ function setUp(options: {
 		failure: null,
 		demotions: 0
 	}
-	const playback = { dispose: vi.fn() }
+	const playback = { dispose: vi.fn(), selectAudio: vi.fn((_index: number) => Promise.resolve()) }
 	let onTextCues: ((cues: RemuxTextCue[]) => void) | undefined
 	const fake: Playback = {
 		getSnapshot: () => snapshot,
@@ -133,7 +142,7 @@ function setUp(options: {
 
 			return () => listeners.delete(listener)
 		},
-		selectAudio: () => Promise.resolve(),
+		selectAudio: playback.selectAudio,
 		dispose: playback.dispose
 	}
 	const release = vi.fn<(url: string) => void>()
@@ -177,7 +186,8 @@ function setUp(options: {
 				return () => undefined
 			},
 			now: () => Date.now(),
-			hidden: () => false
+			hidden: options.hidden ?? (() => false),
+			...(options.peek === undefined ? {} : { peek: () => options.peek ?? null })
 		}
 	})
 
@@ -634,5 +644,111 @@ describe("PreviewVideo — the worker reports its stream gone", () => {
 
 		expect(harness.open).toHaveBeenCalledOnce()
 		expect(harness.playbackDeps).toHaveBeenCalledWith(false)
+	})
+})
+
+describe("PreviewVideo — audio tracks", () => {
+	const twoTracks = (): { enabled: boolean; label: string; language: string }[] => [
+		{ enabled: true, label: "Main", language: "en" },
+		{ enabled: false, label: "Kommentar", language: "de" }
+	]
+
+	it("names the element's own audio tracks on a direct stream, and switches them in place", async () => {
+		const audioTracks = twoTracks()
+		const harness = setUp({ route: "direct", audioTracks })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+
+		expect(harness.controller.getSnapshot()).toMatchObject({
+			audioIndex: 0,
+			nativeAudio: [
+				{ label: "Main", language: "en" },
+				{ label: "Kommentar", language: "de" }
+			]
+		})
+
+		const loads = harness.video.loads
+
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(audioTracks.map(track => track.enabled)).toEqual([false, true])
+		expect(harness.controller.getSnapshot()).toMatchObject({ route: "direct", audioIndex: 1 })
+		expect(harness.open).not.toHaveBeenCalled()
+		expect(harness.video.loads).toBe(loads)
+	})
+
+	it("moves a direct start to the ladder with the track asked for, where the element switches none itself", async () => {
+		const harness = setUp({ route: "direct", probe: probeOf(["aac", "aac"]) })
+
+		await flush()
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(harness.open).toHaveBeenCalledOnce()
+		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 1, subtitle: "none" })
+	})
+
+	it("switches through the ladder's playback once it plays", async () => {
+		const harness = setUp({ route: "ladder", probe: probeOf(["aac", "ac3"]) })
+
+		await flush()
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(harness.playback.selectAudio).toHaveBeenCalledWith(1)
+
+		harness.setPlayback({ selection: { audioIndex: 1, subtitle: "none" } })
+
+		expect(harness.controller.getSnapshot().audioIndex).toBe(1)
+	})
+
+	it("reads the probe once per open, on engagement, and not at all for a held one", async () => {
+		const harness = setUp({ route: "direct" })
+
+		await flush()
+		expect(harness.probe).not.toHaveBeenCalled()
+
+		harness.controller.ensureProbe()
+		harness.controller.ensureProbe()
+		await flush()
+		harness.controller.ensureProbe()
+
+		expect(harness.probe).toHaveBeenCalledOnce()
+		expect(harness.controller.getSnapshot().probe).not.toBeNull()
+
+		const held = setUp({ route: "direct", peek: probeOf(["aac", "aac"]) })
+
+		held.controller.ensureProbe()
+		await flush()
+
+		expect(held.probe).not.toHaveBeenCalled()
+		expect(held.controller.getSnapshot().probe?.audio).toHaveLength(2)
+	})
+
+	it("waits for a hidden page to be shown before probing", async () => {
+		let hidden = true
+		const page = new EventTarget()
+
+		vi.stubGlobal("document", page)
+		onTestFinished(() => {
+			vi.unstubAllGlobals()
+		})
+
+		const harness = setUp({ route: "direct", hidden: () => hidden })
+
+		await flush()
+		harness.controller.ensureProbe()
+		await flush()
+
+		expect(harness.probe).not.toHaveBeenCalled()
+
+		hidden = false
+		page.dispatchEvent(new Event("visibilitychange"))
+		await flush()
+
+		expect(harness.probe).toHaveBeenCalledOnce()
 	})
 })

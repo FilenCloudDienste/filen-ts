@@ -9,6 +9,7 @@ import {
 	stallAction,
 	expectsProgress
 } from "@/lib/media/playback/directSession.logic"
+import { audioTracksOf, enableAudioTrack } from "@/lib/media/playback/audioTrackList"
 import type { PlaybackSession, SessionAudio, SessionCallbacks } from "@/lib/media/playback/types"
 import type { PreviewStreamStatus } from "@/lib/sw/protocol"
 
@@ -30,28 +31,6 @@ export interface DirectSource {
 	// Calls `listener` when the worker answers a request for `id` with 404 (it lost the registration);
 	// returns the unsubscribe. WebKit reports such a stream to the element by retrying it for ever.
 	onGone?: (id: string, listener: () => void) => () => void
-}
-
-interface AudioTrackLike {
-	enabled: boolean
-}
-
-interface AudioTrackListLike {
-	readonly length: number
-	[index: number]: AudioTrackLike | undefined
-}
-
-// HTMLVideoElement's typings lack audioTracks; currentTime only makes this assignable from it.
-interface ElementWithAudioTracks {
-	currentTime: number
-	audioTracks?: AudioTrackListLike
-}
-
-// Safari's own audio track switching on a direct stream; undefined elsewhere.
-function audioTracksOf(video: HTMLVideoElement | null): AudioTrackListLike | undefined {
-	const element: ElementWithAudioTracks | null = video
-
-	return element?.audioTracks
 }
 
 export function openDirectSession(params: {
@@ -361,19 +340,7 @@ class DirectSession implements PlaybackSession {
 	}
 
 	private applyAudioTrack(): void {
-		const tracks = audioTracksOf(this.video)
-
-		if (tracks === undefined || this.audioIndex < 0 || this.audioIndex >= tracks.length) {
-			return
-		}
-
-		for (let index = 0; index < tracks.length; index++) {
-			const track = tracks[index]
-
-			if (track !== undefined) {
-				track.enabled = index === this.audioIndex
-			}
-		}
+		enableAudioTrack(this.video, this.audioIndex)
 	}
 
 	private onError(): void {
