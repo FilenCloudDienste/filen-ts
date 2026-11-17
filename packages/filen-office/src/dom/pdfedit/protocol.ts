@@ -24,8 +24,8 @@ import type { TextEditHit } from "./textEdit/target"
 export type MupdfModule = typeof Mupdf
 
 // "edit": the document a user changes. "verify": opened read-only to check a file (signatures, a saved output);
-// it never saves and never changes the document. "read": a document other than PDF (formats.ts: an e-book) opened to
-// read; only the read requests (readRequests.ts) serve it, every PDF request is refused.
+// it never saves and never changes the document. "read": a document other than PDF (formats.ts: an e-book, an image
+// file) opened to read; only the read requests (readRequests.ts) serve it, every PDF request is refused.
 export type PdfEngineRole = "edit" | "verify" | "read"
 
 // The bytes the engine reads: a sync range buffer (syncRange.ts) and the port its server listens on.
@@ -248,6 +248,24 @@ export interface PdfEngineOps {
 		readonly args: { readonly text: string; readonly around: number; readonly radius: number; readonly generation: number }
 		readonly value: number | null
 	}
+	// A page drawn whole at the scale that fits `maxPixels` (an image file's page never above its image's own pixels),
+	// its tiles assembled here into one ImageBitmap ("bitmap") or one RGBA buffer ("rgba"), transferred. Refused
+	// ("overBudget") like render for a page whose largest image is over the open's pixel budget.
+	renderPage: {
+		readonly args: {
+			readonly page: number
+			readonly generation: number
+			readonly maxPixels: number
+			readonly output: "bitmap" | "rgba"
+		}
+		readonly value: PdfRenderPageValue
+	}
+	// The source pixels of the page's largest image, from its header (an image file's page: also from the page's bounds
+	// at the image's resolution, the larger winning); null when the page has no image. Nothing is decoded.
+	imageExtent: {
+		readonly args: { readonly page: number; readonly generation: number }
+		readonly value: { readonly width: number; readonly height: number } | null
+	}
 	// --- Annotations (any role; annotationRequests.ts) ---
 	// The annotations drawn on these 0-based pages (MuPDF page space: points, top-left origin, y down).
 	annotations: { readonly args: { readonly pages: readonly number[] }; readonly value: readonly PdfPageAnnotations[] }
@@ -414,6 +432,11 @@ export interface PdfReadOutlineNode {
 	readonly dest: readonly [number, { readonly name: "XYZ" }, number | null, number | null] | null
 	readonly items: readonly PdfReadOutlineNode[]
 }
+
+// A read document's page drawn whole (renderPage).
+export type PdfRenderPageValue =
+	| { readonly output: "bitmap"; readonly bitmap: PdfBitmapLike }
+	| { readonly output: "rgba"; readonly rgba: Uint8ClampedArray<ArrayBuffer>; readonly width: number; readonly height: number }
 
 // What a read document says about itself: MuPDF's format name ("EPUB", "MOBI", "FictionBook2") and its title, author
 // and subject when it has them.

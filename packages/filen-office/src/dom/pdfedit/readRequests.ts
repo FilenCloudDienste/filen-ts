@@ -7,8 +7,16 @@ import { isFatalEngineError, PdfEngineRefusal, type PdfEngineContext, type ReadD
 import { isMupdfFormat, MUPDF_FORMATS, type MupdfFormat } from "./formats"
 import { drawTile, pageInfos } from "./pageOps"
 import { installReadFontHook } from "./readFonts"
-import type { MupdfLayout, PdfDocumentSummary, PdfEngineArgs, PdfOpenResult, PdfReadMetadata, PdfReadOutlineNode } from "./protocol"
-import { TileRenderer } from "./render"
+import type {
+	MupdfLayout,
+	PdfDocumentSummary,
+	PdfEngineArgs,
+	PdfOpenResult,
+	PdfReadMetadata,
+	PdfReadOutlineNode,
+	PdfRenderPageValue
+} from "./protocol"
+import { PDF_TILE_DESKTOP, TileRenderer } from "./render"
 import type { PdfHandled, PdfRequestHandler } from "./requests"
 import { SyncRangeReader, syncRangeStreamHandle } from "./stream"
 import { pageBoundsOf, pageTextLinks, pointOf, structuredTextLines } from "./text"
@@ -215,12 +223,15 @@ export async function openReadDocument(context: PdfEngineContext, args: PdfEngin
 
 		if (pageCount === 0) throw new PdfEngineRefusal("notSupported", "the document has no pages")
 
+		// An image file names its type only when its first page loads (its header read, nothing decoded).
+		if (!row.reflowable) document.loadPage(0).destroy()
+
 		checkHeap(context, { memory })
 		context.setReading({
 			document,
 			format,
 			reader,
-			renderer: new TileRenderer(mupdf, document, host.maxDisplayLists, host.now, { maxImagePixels }),
+			renderer: new TileRenderer(mupdf, document, host.maxDisplayLists, host.now, { maxImagePixels, imagePages: !row.reflowable }),
 			generation: 0,
 			memory,
 			maxImagePixels,
@@ -350,7 +361,73 @@ function outward(around: number, radius: number, count: number): number[] {
 	return order
 }
 
-type ReadOp = "pages" | "render" | "text" | "destination" | "evict" | "close" | "layout" | "outline" | "metadata" | "locate"
+// A page drawn whole: scaled to fit `maxPixels`, an image file's page never above its image's own pixels; its tiles
+// copied into one buffer as they are drawn (one tile's pixmap in the heap at a time).
+async function renderWholePage(
+	context: PdfEngineContext,
+	read: ReadDocument,
+	{ page, maxPixels, output }: PdfEngineArgs<"renderPage">
+): Promise<{ readonly value: PdfRenderPageValue; readonly transfer: readonly unknown[] }> {
+	const { document, renderer, format } = read
+
+	checkPage(document, page)
+
+	if (!Number.isFinite(maxPixels) || maxPixels < 1 || (output !== "bitmap" && output !== "rgba")) throw new PdfEngineRefusal("badRequest")
+
+	const { bounds, largest } = renderer.pageFacts(page)
+	const pageWidth = bounds[2] - bounds[0]
+	const pageHeight = bounds[3] - bounds[1]
+
+	if (!(pageWidth > 0 && pageHeight > 0)) throw new PdfEngineRefusal("notSupported", "the page is empty")
+
+	const fit = Math.sqrt(maxPixels / (pageWidth * pageHeight))
+	const own =
+		MUPDF_FORMATS[format].reflowable || largest === null
+			? Number.POSITIVE_INFINITY
+			: Math.max(largest.width / pageWidth, largest.height / pageHeight)
+	const scale = Math.min(fit, own)
+	const width = Math.max(1, Math.floor(pageWidth * scale))
+	const height = Math.max(1, Math.floor(pageHeight * scale))
+	const rgba = new Uint8ClampedArray(width * height * 4)
+
+	for (let y = 0; y < height; y += PDF_TILE_DESKTOP) {
+		for (let x = 0; x < width; x += PDF_TILE_DESKTOP) {
+			const drawn = renderer.render(page, scale, 0, [
+				x,
+				y,
+				Math.min(width, x + PDF_TILE_DESKTOP),
+				Math.min(height, y + PDF_TILE_DESKTOP)
+			])
+			const [x0, y0] = drawn.tile
+			const row = drawn.width * 4
+
+			for (let line = 0; line < drawn.height; line++)
+				rgba.set(drawn.rgba.subarray(line * row, (line + 1) * row), ((y0 + line) * width + x0) * 4)
+		}
+	}
+
+	checkHeap(context, read)
+
+	if (output === "rgba") return { value: { output, rgba, width, height }, transfer: [rgba.buffer] }
+
+	const bitmap = await context.host.toBitmap(rgba, width, height)
+
+	return { value: { output, bitmap }, transfer: [bitmap] }
+}
+
+type ReadOp =
+	| "pages"
+	| "render"
+	| "text"
+	| "destination"
+	| "evict"
+	| "close"
+	| "layout"
+	| "outline"
+	| "metadata"
+	| "locate"
+	| "renderPage"
+	| "imageExtent"
 
 // The requests a read document serves (with heap); the server refuses every other while one is open.
 export const READ_REQUESTS: { readonly [K in ReadOp]: PdfRequestHandler<K> } = {
@@ -414,7 +491,10 @@ export const READ_REQUESTS: { readonly [K in ReadOp]: PdfRequestHandler<K> } = {
 
 		const next: ReadDocument = {
 			...read,
-			renderer: new TileRenderer(mupdf, read.document, host.maxDisplayLists, host.now, { maxImagePixels: read.maxImagePixels }),
+			renderer: new TileRenderer(mupdf, read.document, host.maxDisplayLists, host.now, {
+				maxImagePixels: read.maxImagePixels,
+				imagePages: false
+			}),
 			generation
 		}
 
@@ -448,13 +528,23 @@ export const READ_REQUESTS: { readonly [K in ReadOp]: PdfRequestHandler<K> } = {
 		}
 
 		return { value: null }
+	},
+	renderPage: (context, args) => renderWholePage(context, readAt(context, args.generation), args),
+	imageExtent: (context, { page, generation }) => {
+		const { document, renderer } = readAt(context, generation)
+
+		checkPage(document, page)
+
+		return { value: renderer.pageFacts(page).largest }
 	}
 }
 
 // The read requests the PDF table answers too: each refuses ("badRequest") while a PDF is open, "closed" when nothing is.
-export const READ_ONLY_REQUESTS: Pick<typeof READ_REQUESTS, "layout" | "outline" | "metadata" | "locate"> = {
+export const READ_ONLY_REQUESTS: Pick<typeof READ_REQUESTS, "layout" | "outline" | "metadata" | "locate" | "renderPage" | "imageExtent"> = {
 	layout: READ_REQUESTS.layout,
 	outline: READ_REQUESTS.outline,
 	metadata: READ_REQUESTS.metadata,
-	locate: READ_REQUESTS.locate
+	locate: READ_REQUESTS.locate,
+	renderPage: READ_REQUESTS.renderPage,
+	imageExtent: READ_REQUESTS.imageExtent
 }

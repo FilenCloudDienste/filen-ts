@@ -67,6 +67,7 @@ export {
 	type PdfReadMetadata,
 	type PdfReadOutlineNode,
 	type PdfRenderArgs,
+	type PdfRenderPageValue,
 	type PdfRenderPriority,
 	type PdfRenderValue,
 	type PdfRequiredFields,
@@ -85,7 +86,7 @@ export {
 	type PdfTile,
 	type ToPdfEngine
 } from "./protocol"
-export { PDF_TILE_DESKTOP, PDF_TILE_MOBILE, TileRenderer, type PdfRotation, type RenderedTile } from "./render"
+export { PDF_TILE_DESKTOP, PDF_TILE_MOBILE, TileRenderer, type ImageExtent, type PdfRotation, type RenderedTile } from "./render"
 export { PDF_ENGINE_REQUESTS, type PdfHandled, type PdfRequestHandler, type PdfRequestTable } from "./requests"
 export { isFatalEngineError, servePdfEngine, type PdfEngineScope, type PdfEngineServeOptions } from "./server"
 export { SyncRangeReader, syncRangeStreamHandle, type MupdfStreamHandle, type SyncRangeReaderOptions, type SyncReadFailure } from "./stream"

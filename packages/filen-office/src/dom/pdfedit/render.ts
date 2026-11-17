@@ -44,19 +44,48 @@ export interface RenderedTile {
 
 export type PdfRotation = 0 | 90 | 180 | 270
 
+// An image's source pixels, as its header names them (nothing decoded).
+export interface ImageExtent {
+	readonly width: number
+	readonly height: number
+}
+
 // A page's display list; for a guarded renderer also its structured text (whitespace and image blocks kept) and the
-// source pixels of its largest image, read from the image headers the text holds (nothing decoded).
+// extent of its largest image, read from the image headers the text holds (nothing decoded).
 interface PageList {
 	readonly list: Mupdf.DisplayList
 	readonly bounds: Mupdf.Rect
 	readonly text: Mupdf.StructuredText | null
-	readonly largestImage: number
+	readonly largest: ImageExtent | null
 }
 
 export interface TileRendererGuard {
 	// The most source pixels one image of a drawn page may have: a page holding a larger one is refused before it is
 	// drawn (MuPDF decodes an image whole, in the same heap).
 	readonly maxImagePixels: number
+	// The document is an image file (its page is its image): an image's extent is also taken from the page's bounds at
+	// the image's resolution, the larger of that and its header's size winning.
+	readonly imagePages?: boolean
+}
+
+function pixels(extent: ImageExtent | null): number {
+	return extent === null ? 0 : extent.width * extent.height
+}
+
+// An image's extent from its header; for an image file's page also from the page's bounds (points) at its resolution.
+function imageExtentOf(image: Mupdf.Image, bounds: Mupdf.Rect | null): ImageExtent {
+	let width = image.getWidth()
+	let height = image.getHeight()
+
+	if (bounds !== null) {
+		const xResolution = image.getXResolution()
+		const yResolution = image.getYResolution()
+
+		if (xResolution > 0) width = Math.max(width, Math.round(((bounds[2] - bounds[0]) * xResolution) / 72))
+		if (yResolution > 0) height = Math.max(height, Math.round(((bounds[3] - bounds[1]) * yResolution) / 72))
+	}
+
+	return { width, height }
 }
 
 function dropList(entry: PageList): void {
@@ -115,14 +144,18 @@ export class TileRenderer {
 		loaded.destroy()
 
 		let text: Mupdf.StructuredText | null = null
-		let largestImage = 0
+		let largest: ImageExtent | null = null
 
 		if (this.guard !== null) {
+			const pageBounds = this.guard.imagePages === true ? bounds : null
+
 			try {
 				text = list.toStructuredText("preserve-whitespace,preserve-images")
 				text.walk({
 					onImageBlock: (_bbox, _transform, image) => {
-						largestImage = Math.max(largestImage, image.getWidth() * image.getHeight())
+						const extent = imageExtentOf(image, pageBounds)
+
+						if (pixels(extent) > pixels(largest)) largest = extent
 					}
 				})
 			} catch (error) {
@@ -133,7 +166,7 @@ export class TileRenderer {
 			}
 		}
 
-		const entry: PageList = { list, bounds, text, largestImage }
+		const entry: PageList = { list, bounds, text, largest }
 
 		this.lists.set(page, entry)
 
@@ -157,9 +190,13 @@ export class TileRenderer {
 		return { text, bounds }
 	}
 
-	// The source pixels of the page's largest image (0 for a renderer without a guard).
-	largestImage(page: number): number {
-		return this.guard === null ? 0 : this.list(page).largestImage
+	// A guarded renderer's page: its bounds and its largest image's extent (null: it has none).
+	pageFacts(page: number): { readonly bounds: Mupdf.Rect; readonly largest: ImageExtent | null } {
+		if (this.guard === null) throw new Error("only a guarded renderer reads a page's images")
+
+		const { bounds, largest } = this.list(page)
+
+		return { bounds, largest }
 	}
 
 	// A page as printed: its content, its annotations and form fields when asked, and every pending redaction mark
@@ -228,8 +265,10 @@ export class TileRenderer {
 		if (this.guard !== null) {
 			const entry = this.list(page)
 
-			if (entry.largestImage > this.guard.maxImagePixels)
-				throw new PdfEngineRefusal("overBudget", `the page holds an image of ${entry.largestImage} pixels`)
+			const largest = pixels(entry.largest)
+
+			if (largest > this.guard.maxImagePixels)
+				throw new PdfEngineRefusal("overBudget", `the page holds an image of ${largest} pixels`)
 
 			return this.draw(entry.list, entry.bounds, scale, rotation, tile)
 		}
