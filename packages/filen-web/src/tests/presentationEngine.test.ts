@@ -188,8 +188,14 @@ describe("presentation engine connection", () => {
 		// One aligned block around the tail, never the whole file.
 		expect(source.requests).toEqual([[2_097_152, 3_000_000]])
 
+		// The port's close arrives as an I/O event: a timer of any length may run before it when the process was
+		// descheduled (libuv runs expired timers first), so the test waits for the abort itself.
+		const aborted = new Promise(resolve => {
+			source.lifetime.signal.addEventListener("abort", resolve, { once: true })
+		})
+
 		connection.dispose()
-		await new Promise(resolve => setTimeout(resolve, 20))
+		await aborted
 
 		expect(source.lifetime.signal.aborted).toBe(true)
 		pool.dispose()
