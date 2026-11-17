@@ -123,7 +123,8 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["image/jxl", "jxl"],
 	["image/x-qoi", "qoi"],
 	["application/illustrator", "ai"],
-	["image/vnd.adobe.photoshop", "psd"]
+	["image/vnd.adobe.photoshop", "psd"],
+	["video/ogg", "ogv"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
@@ -257,6 +258,14 @@ describe("TYPE_ROWS", () => {
 		for (const [mime, extension] of MIME_TYPES_SNAPSHOT) {
 			expect(extensionForMime(mime)).toBe(extension)
 		}
+	})
+
+	it("types the mp4, Matroska and Ogg video names by their families' types", () => {
+		expect(mimeForExtension("qt")).toBe("video/quicktime")
+		expect(mimeForExtension("mk3d")).toBe("video/x-matroska")
+		expect(mimeForExtension("ogv")).toBe("video/ogg")
+		expect(extensionForMime("video/quicktime")).toBe("mov")
+		expect(extensionForMime("video/x-matroska")).toBe("mkv")
 	})
 
 	it("serves each audio extension as web's inline route did", () => {

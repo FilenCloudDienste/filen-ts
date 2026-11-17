@@ -197,6 +197,28 @@ describe("resolveFileKind on a table without the audio and video siblings", () =
 	})
 })
 
+describe("resolveFileKind on a table with Ogg video", () => {
+	const withOgv = (extension: string): string | null => (extension === "ogv" ? "video" : kindOf(extension))
+
+	it.each([
+		// A MIME type settles an .ogg or .oga toward audio, never toward video: only a read of its content does.
+		["film.ogg", "video/ogg", null, "audio", "ogg", "default"],
+		["film.oga", "video/ogg", null, "audio", "oga", "default"],
+		["film.ogg", "video/ogg", "video", "video", "ogv", "sniff"],
+		["song.ogg", "audio/ogg", null, "audio", "oga", "mime"],
+		["film.ogv", "video/ogg", null, "video", "ogv", "mime"],
+		["film.ogv", "audio/ogg", null, "audio", "oga", "mime"],
+		// No extension: the type names it, Ogg video included.
+		["film", "video/ogg", null, "video", "ogv", "mime"]
+	] as const)("%s (%s, verdict %s) is %s by .%s", (name, mime, verdict, kind, extension, source) => {
+		expect(resolveFileKind({ name, mime, verdict }, withOgv)).toMatchObject({ kind, extension, source })
+	})
+
+	it("on a table without Ogg video, an .ogg typed video/ogg stays what it was", () => {
+		expect(resolveFileKind({ name: "film.ogg", mime: "video/ogg" }, mobileKindOf)).toMatchObject({ kind: "audio", extension: "ogg" })
+	})
+})
+
 describe("resolveFileKind when none of an extension's meanings is in the table", () => {
 	it.each([
 		// Web-shaped: no .ogv or .mka.

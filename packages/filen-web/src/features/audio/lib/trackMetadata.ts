@@ -17,6 +17,10 @@ import {
 } from "@/features/audio/store/useTrackTagsStore"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import type { AudioMetadataResult } from "@/workers/audioMetadata"
+import { OGG_VIDEO_SELECTION, oggVideoProbe, oggVideoVerdict, type OggVideoFacts } from "@filen/shared/videos"
+import { playbackCapabilities } from "@/lib/media/playback/capabilities"
+import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
+import { anyFileTypeFacts } from "@/features/drive/lib/item"
 
 // Reads a track's tags and cover thumbnail on demand, for whichever surface is showing that track right
 // now: a playlist row on screen, or the player's current/next track. Every answer is persisted (tags in
@@ -57,6 +61,9 @@ export interface TrackMetadataDeps extends ObjectUrlFns {
 	readThumbnail: (uuid: string) => Promise<Blob | null>
 	isOnline: () => boolean
 	now: () => number
+	// An Ogg track whose record holds a real picture stream: decides whether this browser plays it as a video.
+	onOggVideo?: (track: QueueTrack, facts: OggVideoFacts) => void
+	onReset?: () => void
 }
 
 interface Pending {
@@ -209,6 +216,17 @@ export class TrackMetadataService {
 	}
 
 	private async read(track: QueueTrack, options: TrackMetadataRequestOptions, epoch: number): Promise<TrackMetadataOutcome> {
+		const outcome = await this.readRecord(track, options, epoch)
+		const facts = outcome.type === "ready" ? outcome.record.oggVideo : undefined
+
+		if (facts !== undefined && facts !== null && epoch === this.epoch) {
+			this.deps.onOggVideo?.(track, facts)
+		}
+
+		return outcome
+	}
+
+	private async readRecord(track: QueueTrack, options: TrackMetadataRequestOptions, epoch: number): Promise<TrackMetadataOutcome> {
 		await hydrateTrackTags()
 
 		// A record without gain, or an Ogg record from before the picture-stream check, is re-read without the cover;
@@ -420,6 +438,7 @@ export class TrackMetadataService {
 
 		this.coverUrls.clear()
 		resetTrackTags()
+		this.deps.onReset?.()
 	}
 }
 
@@ -432,7 +451,49 @@ function firstInLine(): number {
 	return 0
 }
 
+// Ogg tracks whose picture stream this session already asked the browser about.
+const oggVideoAsked = new Set<string>()
+
+// Whether this browser plays the stream as a video, asked once per track per session and never stored: another
+// browser answers otherwise. Only "video" is recorded, in memory, so the file previews as a video from then on; else
+// it stays the audio it was.
+function considerOggVideo(track: QueueTrack, facts: OggVideoFacts): void {
+	const file = anyFileTypeFacts(track.file)
+
+	if (file === null || oggVideoAsked.has(track.uuid)) {
+		return
+	}
+
+	oggVideoAsked.add(track.uuid)
+
+	void playbackCapabilities
+		.capabilities(oggVideoProbe(facts), OGG_VIDEO_SELECTION, {
+			width: facts.width,
+			height: facts.height,
+			bitrate: OGG_VIDEO_BITRATE_HINT,
+			framerate: 30,
+			transfer: "sdr",
+			channels: 2,
+			sampleRate: 48_000
+		})
+		.then(caps => {
+			if (oggVideoVerdict(facts, caps) === "video" && oggVideoAsked.has(track.uuid)) {
+				recordContentVerdict({ uuid: track.uuid, ...file }, "video", { memoryOnly: true })
+			}
+		})
+		.catch((error: unknown) => {
+			log.warn("audio", "ogg video capability query failed", error)
+		})
+}
+
+// decodingInfo's bitrate hint for a stream whose own the head does not state.
+const OGG_VIDEO_BITRATE_HINT = 2_000_000
+
 export const trackMetadata = new TrackMetadataService({
+	onOggVideo: considerOggVideo,
+	onReset: () => {
+		oggVideoAsked.clear()
+	},
 	// Downloads share the media features' range-read cap.
 	readRemote: (track, token, options) =>
 		rangeReads.run<AudioMetadataResult>(firstInLine, () =>

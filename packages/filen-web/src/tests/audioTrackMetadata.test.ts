@@ -467,6 +467,23 @@ describe("TrackMetadataService", () => {
 			expect(deps.readRemote).toHaveBeenCalledTimes(2)
 		})
 
+		it("hands the facts on for this browser's verdict, from a new read or a stored record alike", async () => {
+			const onOggVideo = vi.fn<NonNullable<TrackMetadataDeps["onOggVideo"]>>()
+			const { service, deps } = makeService({ onOggVideo })
+
+			deps.readRemote.mockResolvedValueOnce({ ...parsed(), video: facts }).mockResolvedValueOnce(parsed())
+			putTrackTags("c", record({ oggVideo: facts }))
+
+			await service.request(ogg("a")).promise
+			await service.request(ogg("b")).promise
+			await service.request(ogg("c")).promise
+
+			expect(onOggVideo.mock.calls.map(([track, found]) => [track.uuid, found])).toEqual([
+				["a", facts],
+				["c", facts]
+			])
+		})
+
 		it("never re-reads a record of any other file for it", async () => {
 			const { service, deps } = makeService()
 

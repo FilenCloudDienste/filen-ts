@@ -1,4 +1,5 @@
 import * as Comlink from "comlink"
+import { VIDEO_CONTAINERS } from "@filen/shared/videos"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
 import { savePortAnnounced } from "@filen/shared/savePort"
@@ -162,7 +163,9 @@ function pdfOverEditLimit(item: DriveItem, maxBytes: number): boolean {
 
 // Containers the video editor reads (its export demuxes them): MP4 and QuickTime, Matroska and WebM, MPEG-TS, 3GPP.
 // Never AVI, WMV or FLV: nothing reads them, so nothing could be exported.
-const VIDEO_EDIT_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "m4v", "mov", "qt", "mkv", "webm", "ts", "m2ts", "mts", "3gp", "3g2"])
+const VIDEO_EDIT_EXTENSIONS: ReadonlySet<string> = new Set(
+	[...VIDEO_CONTAINERS].filter(([, row]) => row.editorReads).map(([extension]) => extension)
+)
 
 // Whether the preview offers the video editor: a video in the user's own drive in a container the export reads, saved
 // in place as MP4/MOV or as an MP4 copy beside it. Shared-in, public, trash and recents never edit (variant "drive"

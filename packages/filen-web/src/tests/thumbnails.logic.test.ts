@@ -178,6 +178,15 @@ describe("thumbnailCategory", () => {
 	// Order guard: video and pdf both carry canMakeThumbnail false (Rust decodes neither), so they
 	// have to be claimed by extension BEFORE the flag check or they would fall to "none" and lose the
 	// client-side generators that do handle them.
+	it.each(["3gp", "3g2", "qt", "mk3d"])("%s, an mp4 or Matroska family name, takes the video generator", ext => {
+		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false }))).toBe("video")
+	})
+
+	// Decided before any read: the generator finds no keyframes in these containers.
+	it.each(["ogv", "avi", "wmv", "flv", "mpg", "vob"])("%s -> none, without a probe", ext => {
+		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false }))).toBe("none")
+	})
+
 	it.each(["mp4", "mov", "webm", "m4v", "mkv"])("%s -> video despite canMakeThumbnail false, and size-gate exempt", ext => {
 		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false, size: BIG }))).toBe("video")
 	})

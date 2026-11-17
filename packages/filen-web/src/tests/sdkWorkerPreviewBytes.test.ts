@@ -152,13 +152,13 @@ describe("sdk worker video probe", () => {
 	})
 
 	it("resolves null for a container it does not read", async () => {
-		const avi = concat(text("RIFF"), u32(100), text("AVI "), zeros(100))
+		const wave = concat(text("RIFF"), u32(100), text("WAVE"), zeros(100))
 
 		fakeClient.downloadFileToWriter.mockImplementation(params =>
-			writeFrames(params, [Array.from(avi.subarray(Number(params.start), Number(params.end)))])
+			writeFrames(params, [Array.from(wave.subarray(Number(params.start), Number(params.end)))])
 		)
 
-		expect(await api.readVideoProbe(fileOf(avi.length), "uuid", "full", "v2")).toBeNull()
+		expect(await api.readVideoProbe(fileOf(wave.length), "uuid", "full", "v2")).toBeNull()
 	})
 
 	it("aborts its range reads through its preview token", async () => {

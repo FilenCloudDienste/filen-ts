@@ -997,7 +997,7 @@ describe("output shape", () => {
 		const input = fixtureInput([
 			{
 				name: "Movies",
-				paths: ["Alien (1979)/Alien (1979).mkv", "Alien (1979)/Alien (1979) - 720p.avi", "Loose (2000).mp4"]
+				paths: ["Alien (1979)/Alien (1979).mkv", "Alien (1979)/Alien (1979) - 720p.wmv", "Loose (2000).mp4"]
 			}
 		])
 
@@ -1023,7 +1023,7 @@ describe("output shape", () => {
 		expect(library.videos.map(video => [video.container, video.unsupported, video.height])).toEqual([
 			["mp4", false, 0],
 			["mkv", false, 0],
-			["avi", true, 720]
+			["wmv", true, 720]
 		])
 		expect(structuredClone(library)).toEqual(library)
 	})

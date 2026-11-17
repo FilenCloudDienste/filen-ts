@@ -26,6 +26,7 @@ import { MODEL_FORMATS, MODEL_MAX_BYTES } from "@/features/preview/lib/model3d/p
 import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
+import { VIDEO_CONTAINERS, type VideoContainer } from "@filen/shared/videos"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -548,6 +549,15 @@ export const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
 	...codeLanguageExtensions().filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension))
 ])
 
+const DRIVE_VIDEO_EXTENSIONS: readonly string[] = [...VIDEO_CONTAINERS]
+	.filter(([, row]) => row.drive && !row.transportStream)
+	.map(([extension]) => extension)
+
+// The video container row a file's type reads from (itemTypeExtension); undefined for anything else.
+export function videoContainerOf(item: DriveItem, verdict?: FileVerdict | null): VideoContainer | undefined {
+	return VIDEO_CONTAINERS.get(itemTypeExtension(item, verdict))
+}
+
 // The extension -> category tiers, in precedence order: the first tier listing an extension wins. icon.logic routes
 // through the same table, so a file's type icon and its preview category never disagree. Images come before rawImage
 // on purpose: if a RAW family ever gained a browser-decodable sibling extension, "image" renders the full picture,
@@ -555,9 +565,9 @@ export const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
 export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCategory])[] = [
 	[[...IMAGE_FORMATS.keys()], "image"],
 	[RAW_IMAGE_EXTENSIONS, "rawImage"],
-	// MKV and transport streams play through the remux worker. A `.ts`/`.mts` reads as one only once a read
-	// of its content said so (resolveFileKind hands such a file over as "m2ts").
-	[["mp4", "webm", "mkv", "mov", "m4v", "m2ts"], "video"],
+	// The container table's drive rows. MKV and transport streams play through the remux worker. A `.ts`/`.mts` reads
+	// as one only once a read of its content said so (resolveFileKind hands such a file over as "m2ts").
+	[DRIVE_VIDEO_EXTENSIONS, "video"],
 	[[...AUDIO_FORMATS.keys()], "audio"],
 	[["pdf"], "pdf"],
 	// Macro-enabled documents and templates open (and edit) as documents; macros are never run. Word 97–2003 documents

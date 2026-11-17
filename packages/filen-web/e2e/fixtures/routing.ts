@@ -1,6 +1,6 @@
 import { crc32 } from "node:zlib"
 import { buildZip, prng } from "../helpers/archiveFixtures"
-import { JPEG_BYTES, PNG_BYTES } from "../helpers/fixtureBytes"
+import { JPEG_BYTES, MP4_BYTES, PNG_BYTES } from "../helpers/fixtureBytes"
 import { scenarioModule } from "./scenarios"
 
 // The routing spec's files (preview-routing.spec.ts): extensions that open in an existing viewer by their name or by
@@ -89,6 +89,8 @@ export const ROUTING_SCENARIOS = scenarioModule(
 		"routing-code": ["routing-config.yml", "routing-blob.mo"],
 		"routing-text": ["routing-subs.srt", "routing-latin1.srt", "routing-mail.eml", "routing-lossy.txt"],
 		"routing-images": ["routing-photo.jfif", "routing-generic.jpg"],
+		// An MP4 under a 3GPP name: a video by its container row, played through the probe and the ladder.
+		"routing-video": ["routing-clip.3gp"],
 		// Synthesized on disk (over 8 MiB), so it is a scenario of its own; the browser types it by its extension.
 		"routing-package": ["routing-app.apk"],
 		// Thumbnailed by the SDK, which the client never decodes itself.
@@ -107,6 +109,7 @@ export const ROUTING_SCENARIOS = scenarioModule(
 		"routing-mail.eml": { buffer: Buffer.from(ROUTING_MAIL_TEXT, "utf8"), mimeType: "message/rfc822" },
 		"routing-lossy.txt": { buffer: ROUTING_LOSSY_BYTES, mimeType: "text/plain" },
 		"routing-photo.jfif": { buffer: JPEG_BYTES, mimeType: "image/jpeg" },
+		"routing-clip.3gp": { buffer: MP4_BYTES, mimeType: "video/3gpp" },
 		// A generic type: the inline route serves it by its extension.
 		"routing-generic.jpg": { buffer: JPEG_BYTES, mimeType: "application/octet-stream" },
 		"routing-icon.ico": { buffer: icoBytes(), mimeType: "image/x-icon" },

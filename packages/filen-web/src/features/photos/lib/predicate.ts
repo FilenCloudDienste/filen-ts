@@ -1,6 +1,12 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { CATEGORY_POLICY, itemFileKind, needsContentSniff, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import {
+	CATEGORY_POLICY,
+	itemFileKind,
+	needsContentSniff,
+	videoContainerOf,
+	type PreviewCategory
+} from "@/features/drive/lib/preview.logic"
 import { IMAGE_FORMATS, isPhotoFormat } from "@/features/preview/lib/imageFormat"
 
 // Mobile parity (features/photos/utils.ts's own isPhotoGridItem): keep only file-kind items with
@@ -9,8 +15,8 @@ import { IMAGE_FORMATS, isPhotoFormat } from "@/features/preview/lib/imageFormat
 // resolution the drive grid's video badge and the preview overlay itself use) rather than porting
 // mobile's EXPO_IMAGE_SUPPORTED_EXTENSIONS allowlist, which is an expo-image capability set with no
 // meaning on the web platform — previewType's own image tier (IMAGE_FORMATS) is already
-// web's equivalent gate for what counts as a displayable image here. Videos pass unconditionally,
-// exactly like mobile's own predicate.
+// web's equivalent gate for what counts as a displayable image here. Videos pass in a container whose row is a photo,
+// which keeps mobile's set (mp4 and QuickTime) and leaves out what no player plays yet.
 //
 // The decrypted-meta check is technically redundant with previewType's own behavior (an undecryptable
 // file has no name/mime to categorize, so it already resolves "other" and fails the category check
@@ -31,6 +37,11 @@ export function isPhotoItem(item: DriveItem, verdict?: FileVerdict | null): bool
 
 	if (!isPhotoCategory(category)) {
 		return false
+	}
+
+	// A video is a photo only in a container its row admits: never one played by nothing yet, nor Ogg.
+	if (category === "video") {
+		return videoContainerOf(item, verdict)?.photo === true
 	}
 
 	// An image format may opt out on its own row (a gzipped SVG is no photo).

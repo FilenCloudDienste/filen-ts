@@ -146,8 +146,9 @@ export interface Ambiguity {
 	notVcard?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
-	// Whether a MIME type may settle it.
-	mimeHint: boolean
+	// Whether a MIME type may settle it; "audioOnly": toward audio, never toward video (an `.ogg` some uploaders type
+	// video/ogg is music unless a read of its content says otherwise).
+	mimeHint: boolean | "audioOnly"
 	// The content read the app runs before choosing a viewer, while no verdict settles it.
 	sniff?: SniffId
 }
@@ -159,8 +160,8 @@ export type AmbiguityTable = ReadonlyMap<string, Ambiguity>
 const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	["ts", { fallback: "ts", transportStream: TRANSPORT_STREAM, mimeHint: false, sniff: "transportStream" }],
 	["mts", { fallback: "mts", transportStream: TRANSPORT_STREAM, mimeHint: false, sniff: "transportStream" }],
-	["ogg", { fallback: "ogg", audio: "oga", video: "ogv", mimeHint: true }],
-	["oga", { fallback: "oga", audio: "oga", video: "ogv", mimeHint: true }],
+	["ogg", { fallback: "ogg", audio: "oga", video: "ogv", mimeHint: "audioOnly" }],
+	["oga", { fallback: "oga", audio: "oga", video: "ogv", mimeHint: "audioOnly" }],
 	["ogv", { fallback: "ogv", audio: "oga", video: "ogv", mimeHint: true }],
 	["webm", { fallback: "webm", audio: "weba", video: "webm", mimeHint: true }],
 	["weba", { fallback: "weba", audio: "weba", video: "webm", mimeHint: true }],
@@ -308,11 +309,11 @@ function mimeExtension(ambiguity: Ambiguity, mime: string | null | undefined): s
 		return ambiguity.text
 	}
 
-	if (!ambiguity.mimeHint) {
+	if (ambiguity.mimeHint === false) {
 		return undefined
 	}
 
-	return AUDIO_TYPE.test(mime) ? ambiguity.audio : VIDEO_TYPE.test(mime) ? ambiguity.video : undefined
+	return AUDIO_TYPE.test(mime) ? ambiguity.audio : VIDEO_TYPE.test(mime) && ambiguity.mimeHint === true ? ambiguity.video : undefined
 }
 
 // Whether a content read could still turn the file into another kind.
@@ -403,7 +404,14 @@ export function resolveFileKind<K>(
 	}
 
 	// An audio or video type does not make a `.ts` or `.mts` a media file here either.
-	const byMime = extensionForMime(ambiguity !== undefined && !ambiguity.mimeHint && isMediaType(input.mime) ? null : input.mime)
+	const byMime = extensionForMime(
+		ambiguity !== undefined &&
+			(ambiguity.mimeHint === false
+				? isMediaType(input.mime)
+				: ambiguity.mimeHint === "audioOnly" && VIDEO_TYPE.test(input.mime ?? ""))
+			? null
+			: input.mime
+	)
 
 	if (byMime !== null) {
 		const kind = kindOf(byMime)

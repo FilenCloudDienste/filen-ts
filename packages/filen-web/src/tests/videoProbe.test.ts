@@ -335,8 +335,8 @@ describe("probeVideo — MP4", () => {
 		expect((await probe(file, "card")).record).toMatchObject({ container: "mov", audio: [{ codec: null, ch: 6, rate: 44100 }] })
 	})
 
-	it("returns null for anything that is no ISO BMFF or EBML file, after one block", async () => {
-		for (const file of [concat(text("RIFF"), u32(100), text("AVI "), zeros(100)), concat(text("ID3"), zeros(200)), zeros(4)]) {
+	it("returns null for anything that is no container it reads (a WAVE file, an MP3), after one block", async () => {
+		for (const file of [concat(text("RIFF"), u32(100), text("WAVE"), zeros(100)), concat(text("ID3"), zeros(200)), zeros(4)]) {
 			const { record, reads } = await probe(file, "full")
 
 			expect(record).toBeNull()

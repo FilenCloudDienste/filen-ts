@@ -4,8 +4,12 @@ import { walkIsobmff } from "./probeIsobmff"
 import { walkMatroska } from "./probeMatroska"
 import { walkMpegTs } from "./probeMpegts"
 import { walkOgg } from "./probeOgg"
+import { ASF_HEADER, walkAsf } from "./probeAsf"
+import { walkAvi } from "./probeAvi"
+import { walkFlv } from "./probeFlv"
+import { walkMpegPs } from "./probeMpegps"
 import { EBML_ID, LEADING_BOXES, TS_SNIFF_BYTES, sniffTransportStream, type TsLayout } from "./transportStreamHead"
-import type { ParsedContainer, ParsedTrack, ProbeTier, ProbeVideo, VideoProbe } from "./probeTypes"
+import type { ParsedContainer, ParsedTrack, ProbeContainer, ProbeTier, ProbeVideo, VideoProbe } from "./probeTypes"
 
 // The container probe: which tier reads how much, and the record each tier yields.
 
@@ -42,6 +46,37 @@ async function transportStream(source: BlockSource, head: Uint8Array): Promise<T
 	return sniffTransportStream(await readBytes(source, 0, Math.min(TS_SNIFF_BYTES, source.size)), source.size)
 }
 
+type SignatureContainer = Extract<ProbeContainer, "ogg" | "avi" | "flv" | "asf" | "ps">
+
+// The containers a fixed signature at the file's start names.
+function signatureContainer(head: Uint8Array): SignatureContainer | null {
+	if (ascii(head, 0, 4) === "OggS") {
+		return "ogg"
+	}
+
+	if (ascii(head, 0, 4) === "RIFF" && (ascii(head, 8, 12) === "AVI " || ascii(head, 8, 12) === "AVIX")) {
+		return "avi"
+	}
+
+	if (ascii(head, 0, 4) === "FLV\x01") {
+		return "flv"
+	}
+
+	if (ASF_HEADER.every((byte, i) => head[i] === byte)) {
+		return "asf"
+	}
+
+	return head[0] === 0 && head[1] === 0 && head[2] === 1 && head[3] === 0xba ? "ps" : null
+}
+
+const SIGNATURE_WALKERS: Readonly<Record<SignatureContainer, (source: BlockSource, result: ParsedContainer) => Promise<void>>> = {
+	ogg: walkOgg,
+	avi: walkAvi,
+	flv: walkFlv,
+	asf: walkAsf,
+	ps: walkMpegPs
+}
+
 // The container's raw walk, or null when the file is no container this reads. The first bytes decide
 // (a transport stream's first packets), so anything else costs one block. A walk that runs out of
 // budget or into a malformed structure returns what it found, flagged partial; failed downloads throw.
@@ -53,15 +88,15 @@ export async function walkContainer(source: BlockSource, tier: ProbeTier, option
 	const head = await readBytes(source, 0, Math.min(16, source.size))
 	const matroska = uint32(head, 0) === EBML_ID
 	const isobmff = !matroska && LEADING_BOXES.has(ascii(head, 4, 8))
-	const ogg = !matroska && !isobmff && ascii(head, 0, 4) === "OggS"
-	const transport = matroska || isobmff || ogg ? null : await transportStream(source, head)
+	const other = matroska || isobmff ? null : signatureContainer(head)
+	const transport = matroska || isobmff || other !== null ? null : await transportStream(source, head)
 
-	if (!matroska && !isobmff && !ogg && transport === null) {
+	if (!matroska && !isobmff && other === null && transport === null) {
 		return null
 	}
 
 	const result: ParsedContainer = {
-		container: matroska ? "mkv" : ogg ? "ogg" : transport === null ? "mp4" : "ts",
+		container: matroska ? "mkv" : (other ?? (transport === null ? "mp4" : "ts")),
 		durationSec: null,
 		index: null,
 		tracks: [],
@@ -75,8 +110,8 @@ export async function walkContainer(source: BlockSource, tier: ProbeTier, option
 	try {
 		const keyframes = options.keyframes === true
 
-		if (ogg) {
-			await walkOgg(source, result)
+		if (other !== null) {
+			await SIGNATURE_WALKERS[other](source, result)
 		} else if (transport !== null) {
 			await walkMpegTs(source, tier, result, transport)
 		} else {
@@ -141,7 +176,8 @@ function toRecord(parsed: ParsedContainer, tier: ProbeTier): VideoProbe {
 }
 
 // Reads one tier of a file's probe record through `source` (from probeSource). Null for a file that is
-// no MP4/MOV/Matroska/WebM/MPEG-TS/Ogg; throws BlockReadError when a download fails.
+// no container this reads (MP4/MOV, Matroska/WebM, MPEG-TS, Ogg, AVI, FLV, ASF, MPEG-PS); throws BlockReadError when a
+// download fails.
 export async function probeVideo(source: BlockSource, tier: ProbeTier): Promise<VideoProbe | null> {
 	const parsed = await walkContainer(source, tier)
 

@@ -6,27 +6,77 @@
 // count as separators: file names use them in place of spaces.
 
 import { MIN_TRANSPORT_STREAM_BYTES } from "./transportStream"
+import type { ProbeContainer } from "./probeTypes"
 
 export type VideoFileKind = "video" | "unsupportedVideo" | "subtitle" | "image" | "nfo" | "edl"
 
+export interface VideoContainer {
+	// The drive previews it as a video.
+	drive: boolean
+	// What the Videos library lists it as; absent: not listed.
+	library?: "video" | "unsupportedVideo"
+	// `.ts`/`.mts`: a video only once a read of its content found a transport stream.
+	transportStream: boolean
+	// The video editor's export reads it.
+	editorReads: boolean
+	// Photos shows it beside images.
+	photo: boolean
+	// The container probe walks it as this.
+	probe?: ProbeContainer
+	// probeKeyframes finds its keyframes, so a thumbnail can be cut from it without a full read.
+	keyframes: boolean
+}
+
+function container(probe: ProbeContainer, fields: Partial<VideoContainer> = {}): VideoContainer {
+	return { drive: true, library: "video", transportStream: false, editorReads: true, photo: true, probe, keyframes: true, ...fields }
+}
+
+// Read by the probe but played by nothing yet: not a drive video, not a photo, no thumbnails, and not in the editor.
+function unplayable(probe: ProbeContainer, library: VideoContainer["library"]): VideoContainer {
+	return {
+		drive: false,
+		...(library === undefined ? {} : { library }),
+		transportStream: false,
+		editorReads: false,
+		photo: false,
+		probe,
+		keyframes: false
+	}
+}
+
+// Every video container extension the apps know, one row each: the drive's video category, the Videos library, the
+// editor, Photos and thumbnails all derive from it.
+export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<string, VideoContainer>([
+	["mp4", container("mp4")],
+	["m4v", container("mp4")],
+	["3gp", container("mp4")],
+	["3g2", container("mp4")],
+	["mov", container("mov")],
+	["qt", container("mov")],
+	["mkv", container("mkv")],
+	["mk3d", container("mkv", { editorReads: false })],
+	["webm", container("webm")],
+	["ts", container("ts", { transportStream: true })],
+	["mts", container("ts", { transportStream: true })],
+	["m2ts", container("ts")],
+	// Plays only where the browser plays Ogg from a plain src; nothing remuxes it.
+	["ogv", container("ogg", { editorReads: false, photo: false, keyframes: false })],
+	["avi", unplayable("avi", "video")],
+	["divx", unplayable("avi", undefined)],
+	["flv", unplayable("flv", "video")],
+	["f4v", unplayable("flv", undefined)],
+	["asf", unplayable("asf", undefined)],
+	["wmv", unplayable("asf", "unsupportedVideo")],
+	["mpg", unplayable("ps", "unsupportedVideo")],
+	["mpeg", unplayable("ps", "unsupportedVideo")],
+	["vob", unplayable("ps", "unsupportedVideo")],
+	["m2v", unplayable("ps", undefined)]
+])
+
 const FILE_KINDS = new Map<string, VideoFileKind>([
-	["mp4", "video"],
-	["m4v", "video"],
-	["mov", "video"],
-	["mkv", "video"],
-	["mk3d", "video"],
-	["webm", "video"],
-	["ts", "video"],
-	["m2ts", "video"],
-	["mts", "video"],
-	["ogv", "video"],
-	["3gp", "video"],
-	["avi", "unsupportedVideo"],
-	["wmv", "unsupportedVideo"],
-	["flv", "unsupportedVideo"],
-	["mpg", "unsupportedVideo"],
-	["mpeg", "unsupportedVideo"],
-	["vob", "unsupportedVideo"],
+	...[...VIDEO_CONTAINERS].flatMap(([extension, row]): [string, VideoFileKind][] =>
+		row.library === undefined ? [] : [[extension, row.library]]
+	),
 	["srt", "subtitle"],
 	["vtt", "subtitle"],
 	["ass", "subtitle"],

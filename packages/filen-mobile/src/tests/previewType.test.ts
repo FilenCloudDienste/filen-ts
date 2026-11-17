@@ -387,6 +387,14 @@ describe("getPreviewType — stored mime", () => {
 		expect(getPreviewType("config.cfg", "text/plain")).toBe("text")
 	})
 
+	it("keeps video and Ogg types as before the shared video rows (3GPP is video; Ogg video has no kind here)", () => {
+		expect(getPreviewType("clip", "video/3gpp")).toBe("video")
+		expect(getPreviewType("clip.3gp", "video/3gpp")).toBe("video")
+		expect(getPreviewType("song.ogg", "video/ogg")).toBe("audio")
+		expect(getPreviewType("song.oga", "video/ogg")).toBe("audio")
+		expect(getPreviewType("film", "video/ogg")).toBe("unknown")
+	})
+
 	it("reads any other text/* mime as plain text", () => {
 		expect(getPreviewType("page", "text/x-unheard-of")).toBe("text")
 	})
@@ -422,7 +430,12 @@ describe("getPreviewType — stored mime", () => {
 
 	// Before = after: an archive or package type names an extension this platform's tables lack.
 	it("keeps an extensionless archive or package unknown, with no type extension", () => {
-		for (const mime of ["application/zip", "application/x-zip-compressed", "application/vnd.android.package-archive", "application/java-archive"]) {
+		for (const mime of [
+			"application/zip",
+			"application/x-zip-compressed",
+			"application/vnd.android.package-archive",
+			"application/java-archive"
+		]) {
 			expect(getPreviewType("download", mime), mime).toBe("unknown")
 			expect(fileTypeExtension("download", mime), mime).toBe("")
 		}

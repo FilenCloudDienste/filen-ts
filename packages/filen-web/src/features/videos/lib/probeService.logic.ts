@@ -1,6 +1,14 @@
 import { type } from "arktype"
 import { extensionStart } from "@filen/shared"
-import { MEDIA_CODECS, PROBE_CONTAINERS, PROBE_INDEXES, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
+import {
+	MEDIA_CODECS,
+	PROBE_CONTAINERS,
+	PROBE_INDEXES,
+	VIDEO_CONTAINERS,
+	type ProbeContainer,
+	type ProbeTier,
+	type VideoProbe
+} from "@filen/shared/videos"
 
 // The probe scheduler's rules and the persisted probe record. Plain and DOM-free.
 
@@ -96,27 +104,53 @@ export const probeRecordSchema = type({
 
 export type ProbeRecord = typeof probeRecordSchema.infer
 
-// The probe as it reads now: transport streams, and Matroska's landscape cover. A record from before keeps
-// answering unless it is one this probe would read differently (outdatedRecord).
-export const PROBE_REVISION = 2
+// The probe as it reads now. Revision 2: transport streams, and Matroska's landscape cover. Revision 3: Ogg, AVI, FLV,
+// ASF and MPEG program streams, and the 3GPP codecs (H.263, AMR). A record from before keeps answering unless it is one
+// this probe would read differently (outdatedRecord).
+export const PROBE_REVISION = 3
 
 const TRANSPORT_STREAM_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "m2ts", "m2t"])
 
-// A record from before PROBE_REVISION that a probe now would answer otherwise: no container for a
-// transport stream's name, or a Matroska cover read that never looked for the landscape one.
+// The probe's containers revision 3 first read.
+const REVISION_3_CONTAINERS: ReadonlySet<ProbeContainer> = new Set(["ogg", "avi", "flv", "asf", "ps"])
+
+function extensionOfName(name: string | null): string | null {
+	const dot = name === null ? -1 : extensionStart(name)
+
+	return name === null || dot === -1 ? null : name.slice(dot + 1).toLowerCase()
+}
+
+// A record a probe now would answer otherwise, by the revision that changed the answer: before 2, no container for a
+// transport stream's name, or a Matroska cover read that never looked for the landscape one; before 3, no container
+// for a name the new walkers read, or an MP4/QuickTime track whose codec the 3GPP sample entries now name.
 function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => string | null): boolean {
-	if (record.rev !== undefined) {
+	const revision = record.rev ?? 1
+	const probe = record.probe
+
+	if (revision >= PROBE_REVISION) {
 		return false
 	}
 
-	if (record.probe === null) {
-		const name = nameOf()
-		const dot = name === null ? -1 : extensionStart(name)
+	if (probe === null) {
+		const extension = extensionOfName(nameOf())
 
-		return name !== null && dot !== -1 && TRANSPORT_STREAM_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
+		if (extension === null) {
+			return false
+		}
+
+		const walker = VIDEO_CONTAINERS.get(extension)?.probe
+
+		return (revision < 2 && TRANSPORT_STREAM_EXTENSIONS.has(extension)) || (walker !== undefined && REVISION_3_CONTAINERS.has(walker))
 	}
 
-	return tier !== "card" && outdatedCover(record)
+	if (revision < 2 && tier !== "card" && outdatedCover(record)) {
+		return true
+	}
+
+	return (
+		(probe.container === "mp4" || probe.container === "mov") &&
+		(probe.video?.codec === null || probe.audio.some(audio => audio.codec === null))
+	)
 }
 
 function outdatedCover(record: ProbeRecord): boolean {

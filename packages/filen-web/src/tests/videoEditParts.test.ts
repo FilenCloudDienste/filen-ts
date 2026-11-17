@@ -98,9 +98,14 @@ describe("rebasedEditRecord", () => {
 
 describe("canEditVideo and the in-place video gate", () => {
 	it("edits a video in the user's own drive in a container the export reads", () => {
-		for (const name of ["a.mp4", "a.m4v", "a.mov", "a.mkv", "a.webm", "a.m2ts"]) {
+		for (const name of ["a.mp4", "a.m4v", "a.mov", "a.mkv", "a.webm", "a.m2ts", "a.3gp", "a.3g2", "a.qt"]) {
 			expect(canEditVideo(videoFile(name), "drive")).toBe(true)
 		}
+	})
+
+	it("never edits a stereoscopic Matroska or an Ogg video, though both preview", () => {
+		expect(canEditVideo(videoFile("a.mk3d"), "drive")).toBe(false)
+		expect(canEditVideo(videoFile("a.ogv"), "drive")).toBe(false)
 	})
 
 	it("never edits outside the drive, an undecryptable file, or a container nothing reads", () => {

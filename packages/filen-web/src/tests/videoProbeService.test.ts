@@ -146,9 +146,50 @@ describe("probe records", () => {
 		expect(recordSatisfies(oldMkv, "cover")).toBe(false)
 		expect(recordSatisfies(oldMp4, "cover")).toBe(true)
 		expect(recordSatisfies(oldNone, "card", () => "clip.MTS")).toBe(false)
-		expect(recordSatisfies(oldNone, "card", () => "film.avi")).toBe(true)
+		expect(recordSatisfies(oldNone, "card", () => "film.mp4")).toBe(true)
 		expect(recordSatisfies(oldNone, "card")).toBe(true)
 		expect(recordSatisfies(mergeProbe(null, "card", null, 2), "card", () => "clip.ts")).toBe(true)
+	})
+
+	it("probes again at revision 3 what the new walkers and 3GPP entries read, and nothing else", () => {
+		const none = (rev?: number) => ({
+			probe: null,
+			tiers: { card: true, full: true, cover: true },
+			at: 1,
+			...(rev === undefined ? {} : { rev })
+		})
+		const withRev = (record: VideoProbe, rev: number) => ({ probe: record, tiers: { card: true, full: true, cover: true }, at: 1, rev })
+
+		for (const name of ["film.avi", "film.divx", "film.flv", "film.f4v", "film.wmv", "film.asf", "film.mpg", "film.vob", "film.ogv"]) {
+			expect(recordSatisfies(none(2), "card", () => name)).toBe(false)
+			expect(recordSatisfies(none(3), "card", () => name)).toBe(true)
+		}
+
+		expect(recordSatisfies(none(2), "card", () => "film.mp4")).toBe(true)
+		expect(recordSatisfies(none(2), "card", () => "clip.ts")).toBe(true)
+
+		const amr = probe({
+			container: "mp4",
+			audio: [
+				{
+					id: 2,
+					codec: null,
+					codecString: null,
+					ch: 1,
+					rate: 8000,
+					lang: null,
+					name: null,
+					def: true,
+					forced: false,
+					commentary: false
+				}
+			]
+		})
+
+		expect(recordSatisfies(withRev(amr, 2), "card")).toBe(false)
+		expect(recordSatisfies(withRev(amr, 3), "card")).toBe(true)
+		expect(recordSatisfies(withRev(probe({ container: "mp4" }), 2), "card")).toBe(true)
+		expect(recordSatisfies(withRev({ ...amr, container: "mkv" }, 2), "card")).toBe(true)
 	})
 
 	it("folds a new read into an older record without keeping what it read differently", () => {
@@ -381,7 +422,7 @@ describe("ProbeService", () => {
 		rows.set("videos.v1.probe.b", old)
 
 		const request = service.request(named("a", "clip.ts"), "card")
-		const other = service.request(named("b", "film.avi"), "card")
+		const other = service.request(named("b", "film.mp4"), "card")
 
 		await flush()
 		expect(calls.map(call => call.uuid)).toEqual(["a"])

@@ -78,9 +78,18 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("shot.dng"))).toBe(true)
 	})
 
-	it("keeps a video file unconditionally (mobile parity: videos pass with no extension gate)", () => {
+	it("keeps an MP4 or QuickTime video (mobile parity)", () => {
 		expect(isPhotoItem(fileNamed("clip.mp4"))).toBe(true)
 		expect(isPhotoItem(fileNamed("clip.mov"))).toBe(true)
+	})
+
+	it("keeps the mp4 and Matroska family videos, never Ogg video", () => {
+		for (const name of ["a.3gp", "a.3g2", "a.qt", "a.mk3d"]) {
+			expect(isPhotoItem(fileNamed(name))).toBe(true)
+		}
+
+		expect(isPhotoItem(fileNamed("a.ogv"))).toBe(false)
+		expect(isPhotoItem(fileNamed("a.avi"))).toBe(false)
 	})
 
 	it("drops a non-media file (pdf, code, text, ...)", () => {

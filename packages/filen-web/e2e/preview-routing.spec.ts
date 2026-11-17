@@ -28,6 +28,7 @@ import { ROUTING_EXTENSION_ENTRY, ROUTING_LATIN1_LINE, ROUTING_LOSSY_LINE, ROUTI
 const [YAML, MO] = FIXTURE_FILES["routing-code"]
 const [SUBTITLES, LATIN1, MAIL, LOSSY] = FIXTURE_FILES["routing-text"]
 const [JFIF, GENERIC_JPG] = FIXTURE_FILES["routing-images"]
+const [CLIP_3GP] = FIXTURE_FILES["routing-video"]
 const [PACKAGE] = FIXTURE_FILES["routing-package"]
 const [EXTENSION] = FIXTURE_FILES["routing-extension"]
 
@@ -142,6 +143,48 @@ test("JPEG under an alias name, and JPEG stored with a generic type, stream over
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
 	expect(cspBlocked).toEqual([])
+})
+
+test("a 3GPP video previews as a video and plays", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "routing-video")
+
+	await waitForSwReady(page)
+	await itemRow(listbox, CLIP_3GP).dblclick()
+
+	const video = page.locator("video")
+
+	await expect(video).toBeVisible({ timeout: 30_000 })
+	// Muted, so no browser's autoplay policy holds it; re-asked per attempt, since the viewer may re-key its element
+	// once its source resolves.
+	await expect
+		.poll(
+			() =>
+				video
+					.evaluate(el => {
+						const element = el as HTMLVideoElement
+
+						element.muted = true
+
+						if (element.paused) {
+							void element.play().catch(() => undefined)
+						}
+
+						return element.currentTime
+					})
+					.catch(() => 0),
+			{ timeout: 30_000 }
+		)
+		.toBeGreaterThan(0)
+
+	await page.keyboard.press("Escape")
+	await expect(video).toHaveCount(0)
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
 })
 
 test("a zip-based package lists at once at any size, and extracts into a directory", async ({ page, context }) => {

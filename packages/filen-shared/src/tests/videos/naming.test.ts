@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+	VIDEO_CONTAINERS,
+	VIDEO_FILE_KINDS_SIGNATURE,
 	displayTitle,
 	dynamicRangeLabel,
 	episodeSeriesKey,
@@ -422,6 +424,31 @@ describe("ignore rules", () => {
 	})
 })
 
+describe("VIDEO_CONTAINERS", () => {
+	it("keeps fail-by-name containers out of the drive's video, Photos, thumbnails and the editor", () => {
+		for (const extension of ["avi", "divx", "flv", "f4v", "asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
+			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: false, photo: false, keyframes: false, editorReads: false })
+		}
+
+		expect(VIDEO_CONTAINERS.get("ogv")).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false, probe: "ogg" })
+	})
+
+	it("gives the mp4 and Matroska families what mp4 and mkv have", () => {
+		for (const extension of ["3gp", "3g2", "qt", "mk3d"]) {
+			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: true, library: "video", photo: true, keyframes: true })
+		}
+
+		expect(VIDEO_CONTAINERS.get("mk3d")?.editorReads).toBe(false)
+		expect(VIDEO_CONTAINERS.get("qt")?.editorReads).toBe(true)
+	})
+
+	it("changes the library's signature, so a stored index re-walks its names once", () => {
+		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("qt=video")
+		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("avi=video")
+		expect(VIDEO_FILE_KINDS_SIGNATURE).not.toContain("divx")
+	})
+})
+
 describe("videoFileKind", () => {
 	const big = 2 * 1024 * 1024 * 1024
 
@@ -436,11 +463,17 @@ describe("videoFileKind", () => {
 		["mts", big, "video"],
 		["ogv", big, "video"],
 		["3gp", big, "video"],
+		["3g2", big, "video"],
+		["qt", big, "video"],
 		["ts", big, "video"],
 		["ts", 4096, null],
-		["avi", big, "unsupportedVideo"],
+		["avi", big, "video"],
+		["flv", big, "video"],
+		["divx", big, null],
+		["f4v", big, null],
+		["asf", big, null],
+		["m2v", big, null],
 		["wmv", big, "unsupportedVideo"],
-		["flv", big, "unsupportedVideo"],
 		["mpg", big, "unsupportedVideo"],
 		["mpeg", big, "unsupportedVideo"],
 		["vob", big, "unsupportedVideo"],

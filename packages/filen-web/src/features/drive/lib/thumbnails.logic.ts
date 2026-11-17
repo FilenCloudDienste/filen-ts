@@ -1,6 +1,6 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { itemTypeExtension, needsContentSniff, previewType } from "@/features/drive/lib/preview.logic"
+import { itemTypeExtension, needsContentSniff, previewType, videoContainerOf } from "@/features/drive/lib/preview.logic"
 
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
@@ -128,7 +128,8 @@ const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
 //   1. directory / undecryptable -> none   (nothing to route on)
 //   2. svg/svgz, at/under gate   -> svg    (client-side: rasterised through an <img>, whose secure
 //                                           mode runs no script; never handed to the SDK's decoders)
-//   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
+//   3. video extension           -> video  (client-side: one frame off the SW's Range stream), or none for a
+//                                           container whose keyframes the generator cannot find
 //   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
 //   5. jxl                       -> raster (client-side: the browser's own decoder, where it has one)
 //      psd, psb                  -> psd    (the embedded thumbnail, decoded by the SDK)
@@ -156,9 +157,10 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 		return base.data.size <= THUMB_SVG_SIZE_GATE ? "svg" : "none"
 	}
 
-	// previewType, not the extension alone: a `.ts` is a video only when it is a transport stream.
+	// previewType, not the extension alone: a `.ts` is a video only when it is a transport stream. Only a container whose
+	// keyframes the generator finds gets one; any other is decided here, before a byte is read.
 	if (previewType(item, verdict) === "video") {
-		return "video"
+		return videoContainerOf(item, verdict)?.keyframes === true ? "video" : "none"
 	}
 
 	if (ext === "pdf") {
