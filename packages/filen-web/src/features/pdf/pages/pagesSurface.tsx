@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
 import { driveItemName } from "@filen/shared"
@@ -19,6 +19,8 @@ import { isPdfItem, usePagesView, usePdfPagesSurface, type PdfPagesSurfaceValue 
 import { bookmarkStarts } from "@/features/pdf/pages/pagesSurface.logic"
 import { PdfSplitDialog } from "@/features/pdf/pages/splitDialog"
 import { usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { setPdfRailTab, usePdfRailTab } from "@/features/preview/lib/pdfOutlineOpen"
 import { pdfjsDrawsThumbnails, thumbnailRenderer } from "@/features/pdf/pages/thumbnailRender"
 import { toolEnabled, type PdfToolPanelProps } from "@/features/pdf/tools/registry"
 
@@ -96,27 +98,66 @@ function useRailProps(surface: PdfPagesSurfaceValue): Omit<PdfPagesRailProps, "l
 	}
 }
 
-// The pages rail, left of the pages (wide views only), while the user has it open (the Pages tab's toggle).
-export function PdfPagesSide() {
+// The pages rail, left of the pages (wide views only), while the user has it open (the Pages tab's toggle). With the
+// document's outline (`outline`, null for a document without bookmarks) it has two tabs, Pages and Outline.
+export function PdfPagesSide({ outline }: { outline: ReactNode }) {
 	const open = usePdfPagesRailOpen()
 
-	return open ? <PdfPagesSideRail /> : null
+	return open ? <PdfPagesSideRail outline={outline} /> : null
 }
 
-function PdfPagesSideRail() {
+function PdfPagesSideRail({ outline }: { outline: ReactNode }) {
 	const { t } = useTranslation("preview")
 	const surface = usePdfPagesSurface()
 	const rail = useRailProps(surface)
+	const tab = usePdfRailTab()
+	const pages = (
+		<PdfPagesRail
+			{...rail}
+			layout="rail"
+		/>
+	)
+
+	if (outline === null) {
+		return (
+			<aside
+				aria-label={t("previewPdfPagesRailToggle")}
+				className="hidden w-32 shrink-0 border-r border-border bg-muted/30 md:block"
+			>
+				{pages}
+			</aside>
+		)
+	}
 
 	return (
 		<aside
 			aria-label={t("previewPdfPagesRailToggle")}
-			className="hidden w-32 shrink-0 border-r border-border bg-muted/30 md:block"
+			className={`hidden shrink-0 border-r border-border bg-muted/30 md:flex ${tab === "outline" ? "w-64" : "w-32"}`}
 		>
-			<PdfPagesRail
-				{...rail}
-				layout="rail"
-			/>
+			<Tabs
+				value={tab}
+				onValueChange={(value: unknown) => {
+					if (value === "pages" || value === "outline") setPdfRailTab(value)
+				}}
+				className="flex min-h-0 w-full flex-col gap-0"
+			>
+				<TabsList className="m-1 w-auto shrink-0">
+					<TabsTrigger value="pages">{t("previewPdfOutlineTabPages")}</TabsTrigger>
+					<TabsTrigger value="outline">{t("previewPdfOutlineTabOutline")}</TabsTrigger>
+				</TabsList>
+				<TabsContent
+					value="pages"
+					className="min-h-0 flex-1"
+				>
+					{pages}
+				</TabsContent>
+				<TabsContent
+					value="outline"
+					className="flex min-h-0 flex-1 flex-col"
+				>
+					{outline}
+				</TabsContent>
+			</Tabs>
 		</aside>
 	)
 }

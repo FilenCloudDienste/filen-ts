@@ -117,6 +117,8 @@ export interface PdfCommandBarProps {
 	onProperties: () => void
 	// The page field, for the Go to Page key.
 	pageInputRef: RefObject<HTMLInputElement | null>
+	// The outline pane beside the pages, where the host shows one: its toggle replaces the bookmarks menu from sm up.
+	outlinePane?: { readonly open: boolean; readonly toggle: () => void }
 }
 
 // The fit keys the zoom menu's fit entries show.
@@ -141,7 +143,8 @@ export function usePdfCommandParts({
 	onDownload,
 	onPrint,
 	onProperties,
-	pageInputRef
+	pageInputRef,
+	outlinePane
 }: PdfCommandBarProps): PdfCommandParts {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -234,7 +237,18 @@ export function usePdfCommandParts({
 			width: BAR_MENU,
 			priority: 3,
 			single: true,
-			content: outlineMenu(t("previewCommandBarOutline"), document, outline, dispatch)
+			content:
+				outlinePane === undefined || phone ? (
+					outlineMenu(t("previewCommandBarOutline"), document, outline, dispatch)
+				) : (
+					<RibbonButton
+						label={t("previewPdfOutlinePane")}
+						icon={<ListTreeIcon />}
+						pressed={outlinePane.open}
+						shortcut={<Kbd action="preview.pdfOutline" />}
+						onClick={outlinePane.toggle}
+					/>
+				)
 		})
 	}
 

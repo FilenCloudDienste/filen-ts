@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { mockViewportHeight } from "@/tests/support/viewport"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
@@ -333,15 +334,23 @@ describe("PdfViewer", () => {
 		expect(screen.queryByRole("button", { name: "Outline" })).toBeNull()
 	})
 
-	it("follows a bookmark from the Outline menu", async () => {
+	it("follows a bookmark from the outline pane the Outline button opens", async () => {
+		mockViewportHeight(element => element.getAttribute("role") === "tree", 280)
 		outline.items = [{ title: "Chapter three", dest: "third", items: [] }]
 		await mount()
 
-		fireEvent.click(await screen.findByRole("button", { name: "Outline" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Chapter three" }))
+		const toggle = await screen.findByRole("button", { name: "Outline" })
+
+		fireEvent.click(toggle)
+		expect(toggle.getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(await screen.findByRole("treeitem", { name: "Chapter three" }))
 		await waitFor(() => {
 			expect(scrolled.at(-1)).toBe(pageElement(3))
 		})
+
+		fireEvent.click(screen.getByRole("button", { name: "Close outline" }))
+		expect(screen.queryByRole("tree")).toBeNull()
+		expect(toggle.getAttribute("aria-pressed")).toBe("false")
 	})
 
 	it("shows the document's properties from the File menu", async () => {

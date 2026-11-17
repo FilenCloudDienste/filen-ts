@@ -21,6 +21,7 @@ export type PdfViewerAction =
 	| "preview.pdfFitPage"
 	| "preview.pdfFullScreen"
 	| "preview.pdfProperties"
+	| "preview.pdfOutline"
 
 type Def<Id extends string> = ActionDef & { readonly id: Id }
 
@@ -63,7 +64,8 @@ export const PDF_VIEWER_ACTIONS: readonly Def<PdfViewerAction>[] = [
 	pdfAction("preview.pdfFitWidth", "", "preview:previewKeyPdfFitWidth"),
 	pdfAction("preview.pdfFitPage", "", "preview:previewKeyPdfFitPage"),
 	pdfAction("preview.pdfFullScreen", "f", "preview:previewKeyPdfFullScreen"),
-	pdfAction("preview.pdfProperties", "", "preview:previewKeyPdfProperties")
+	pdfAction("preview.pdfProperties", "", "preview:previewKeyPdfProperties"),
+	pdfAction("preview.pdfOutline", "", "preview:previewKeyPdfOutline")
 ]
 
 // The preview overlay's own keys, for the file on screen (previewOverlay.tsx): paging between the files, closing, and

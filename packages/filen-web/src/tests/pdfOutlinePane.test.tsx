@@ -1,0 +1,114 @@
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import type { PdfOutlineItem } from "@filen/office/dom/pdf"
+import type { PdfDomDocument } from "@filen/office/react/pdf"
+import { PdfOutlinePane } from "@/features/preview/components/pdfOutlinePane"
+import { mockViewportHeight } from "@/tests/support/viewport"
+import "@/lib/i18n"
+
+// The outline pane over a stand-in document whose destinations are page indexes: keys, the current section, and only
+// the rows near the view resolved.
+
+const { resolveDestination } = vi.hoisted(() => ({
+	resolveDestination: vi.fn((_document: unknown, dest: readonly unknown[]) =>
+		Promise.resolve({ page: (dest[0] as number) + 1, left: null, top: null })
+	)
+}))
+
+vi.mock("@filen/office/dom/pdf", async importOriginal => ({ ...(await importOriginal<object>()), resolveDestination }))
+vi.mock("@filen/shared/dom/scheduleIdle", () => ({
+	scheduleIdle: (run: () => void) => {
+		queueMicrotask(run)
+
+		return () => undefined
+	}
+}))
+
+afterEach(() => {
+	cleanup()
+	resolveDestination.mockClear()
+})
+
+const DOCUMENT = { numPages: 1000 } as unknown as PdfDomDocument
+
+function outline(count: number): PdfOutlineItem[] {
+	return Array.from({ length: count }, (_, index) => ({ title: `Chapter ${String(index)}`, depth: index % 2, dest: [index] }))
+}
+
+async function settle(): Promise<void> {
+	for (let round = 0; round < 50; round++) await act(() => Promise.resolve())
+}
+
+describe("PdfOutlinePane", () => {
+	it("resolves only the rows near the view, marks the current section and goes with Enter", async () => {
+		mockViewportHeight(element => element.getAttribute("role") === "tree", 280)
+
+		const onGo = vi.fn()
+
+		render(
+			<PdfOutlinePane
+				document={DOCUMENT}
+				outline={outline(500)}
+				page={4}
+				onGo={onGo}
+			/>
+		)
+		await settle()
+
+		const asked = new Set(resolveDestination.mock.calls.map(([, dest]) => dest[0] as number))
+
+		expect(asked.size).toBeGreaterThan(0)
+		expect(Math.max(...asked)).toBeLessThan(60)
+		expect(screen.getByRole("treeitem", { current: "location" }).textContent).toContain("Chapter 3")
+
+		const tree = screen.getByRole("tree")
+
+		act(() => {
+			screen.getAllByRole("treeitem")[0]?.focus()
+		})
+		fireEvent.keyDown(tree, { key: "ArrowDown" })
+		await settle()
+		expect(document.activeElement?.textContent).toContain("Chapter 1")
+
+		fireEvent.keyDown(tree, { key: "Enter" })
+		await settle()
+		expect(onGo).toHaveBeenCalledWith({ page: 2, left: null, top: null })
+	})
+
+	it("collapses with the left key, and closes from its button", async () => {
+		mockViewportHeight(element => element.getAttribute("role") === "tree", 280)
+
+		const onClose = vi.fn()
+		const items: PdfOutlineItem[] = [
+			{ title: "Part", depth: 0, dest: [0] },
+			{ title: "Section", depth: 1, dest: [1] },
+			{ title: "Next", depth: 0, dest: [2] }
+		]
+
+		render(
+			<PdfOutlinePane
+				document={DOCUMENT}
+				outline={items}
+				page={1}
+				onGo={vi.fn()}
+				onClose={onClose}
+			/>
+		)
+		await settle()
+
+		const part = screen.getByRole("treeitem", { name: /Part/u })
+
+		expect(part.getAttribute("aria-expanded")).toBe("true")
+		act(() => {
+			part.focus()
+		})
+		fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowLeft" })
+		expect(screen.queryByText("Section")).toBeNull()
+		expect(screen.getByRole("treeitem", { name: /Part/u }).getAttribute("aria-expanded")).toBe("false")
+
+		fireEvent.click(screen.getByRole("button", { name: "Close outline" }))
+		expect(onClose).toHaveBeenCalledOnce()
+	})
+})

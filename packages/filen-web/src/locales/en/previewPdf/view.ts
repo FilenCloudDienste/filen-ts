@@ -12,5 +12,13 @@ export const previewPdfView = {
 	/** PDF viewer — confirmation button: go ahead and download the whole file */
 	previewPdfFullReadContinue: "Continue",
 	/** PDF viewer — confirmation button: do not download the whole file */
-	previewPdfFullReadCancel: "Cancel"
+	previewPdfFullReadCancel: "Cancel",
+	/** PDF viewer — title and accessible name of the side pane listing the document's bookmarks (outline), and of the bar button that shows or hides it */
+	previewPdfOutlinePane: "Outline",
+	/** PDF viewer — accessible name of the button closing the outline pane */
+	previewPdfOutlinePaneClose: "Close outline",
+	/** PDF editor — tab of the left rail showing the page thumbnails */
+	previewPdfOutlineTabPages: "Pages",
+	/** PDF editor — tab of the left rail showing the document's bookmarks (outline) */
+	previewPdfOutlineTabOutline: "Outline"
 } as const

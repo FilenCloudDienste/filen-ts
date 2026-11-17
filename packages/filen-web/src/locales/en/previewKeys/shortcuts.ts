@@ -109,6 +109,8 @@ export const previewKeysShortcuts = {
 	previewKeyPdfFullScreen: "Full screen (PDF)",
 	/** Shortcuts list — the PDF viewer's key showing the document's properties */
 	previewKeyPdfProperties: "Document properties (PDF)",
+	/** Shortcuts list — the PDF viewer's key showing or hiding the outline pane beside the pages */
+	previewKeyPdfOutline: "Show or hide the outline (PDF)",
 
 	// ── Code and text editors ────────────────────────────────────────────────
 	/** Shortcuts list — the code and text editors' undo key */

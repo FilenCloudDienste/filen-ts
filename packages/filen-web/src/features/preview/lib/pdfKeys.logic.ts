@@ -37,10 +37,15 @@ export function pdfViewerKey(
 }
 
 // The actions the viewer's host runs, not its document: the page field, full screen, the properties dialog.
-export type PdfHostAction = "preview.pdfGoToPage" | "preview.pdfFullScreen" | "preview.pdfProperties"
+export type PdfHostAction = "preview.pdfGoToPage" | "preview.pdfFullScreen" | "preview.pdfProperties" | "preview.pdfOutline"
 
 export function isPdfHostAction(action: PdfViewerAction): action is PdfHostAction {
-	return action === "preview.pdfGoToPage" || action === "preview.pdfFullScreen" || action === "preview.pdfProperties"
+	return (
+		action === "preview.pdfGoToPage" ||
+		action === "preview.pdfFullScreen" ||
+		action === "preview.pdfProperties" ||
+		action === "preview.pdfOutline"
+	)
 }
 
 // The command an action runs in `state`, or null when it cannot run (zoom at its limit, the last page): the key is

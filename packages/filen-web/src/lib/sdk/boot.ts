@@ -35,6 +35,7 @@ import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMa
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
+import { loadPdfOutlinePreferences } from "@/features/preview/lib/pdfOutlineOpen"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 
@@ -178,6 +179,7 @@ function preloadDevicePreferences(): Promise<void> {
 		loadSidebarHidden(),
 		loadOcrLanguages(),
 		loadPdfPagesRailOpen(),
+		loadPdfOutlinePreferences(),
 		loadCollapsedChatSections()
 	]).then(() => undefined)
 }

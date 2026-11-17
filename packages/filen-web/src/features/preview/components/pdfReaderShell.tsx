@@ -39,6 +39,9 @@ import { PdfPagesNotices, PdfPagesSide } from "@/features/pdf/pages/pagesSurface
 import { PdfPagesSurfaceContext, type PdfPagesSurfaceValue } from "@/features/pdf/pages/pagesSurfaceContext"
 import { usePdfPageKeys } from "@/features/pdf/pages/pagesKeys"
 import { pageShown } from "@/features/pdf/pages/pagesSurface.logic"
+import { togglePdfPagesRail, usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
+import { PdfOutlinePane } from "@/features/preview/components/pdfOutlinePane"
+import { closePdfOutlinePane, setPdfRailTab, togglePdfOutlinePane, usePdfOutlinePaneOpen } from "@/features/preview/lib/pdfOutlineOpen"
 
 // The PDF reader every MuPDF and pdf.js document is shown in: the command bar or the editor's ribbon, the pages with
 // their find, links, print and properties, and the editor's surfaces when it edits. The PDF viewer and the e-book
@@ -161,6 +164,8 @@ export function PdfReaderShell({
 		reopen()
 	}, [resident, state.find.open, fullRead.holds, state.page])
 	const [outline, setOutline] = useState<readonly PdfOutlineItem[]>([])
+	const paneOpen = usePdfOutlinePaneOpen()
+	const railOpen = usePdfPagesRailOpen()
 	const [properties, setProperties] = useState(false)
 	const linkGate = useTrustedLinkGate()
 	const download = usePreviewDownload()
@@ -303,6 +308,20 @@ export function PdfReaderShell({
 		viewer.pages.scrollerRef.current?.focus()
 	}
 
+	// The outline as a tree: the viewer's pane (with its close button) or the editor's rail tab.
+	const outlinePane = (onClose: (() => void) | undefined, className: string | undefined): ReactNode => (
+		<PdfOutlinePane
+			document={document}
+			outline={outline}
+			page={state.page}
+			onGo={to => {
+				dispatch({ type: "page.goto", page: to.page, left: to.left, top: to.top })
+			}}
+			{...(onClose === undefined ? {} : { onClose })}
+			{...(className === undefined ? {} : { className })}
+		/>
+	)
+
 	// The page surfaces (pages rail, Organise, page tools) share the document shown, the editor's engine and the page
 	// operations.
 	const pagesController = edit?.pages ?? null
@@ -368,6 +387,22 @@ export function PdfReaderShell({
 				break
 			case "preview.pdfProperties":
 				setProperties(true)
+				break
+			case "preview.pdfOutline":
+				if (outline.length === 0) {
+					break
+				}
+
+				if (edit === null) {
+					togglePdfOutlinePane()
+				} else {
+					if (!railOpen) {
+						togglePdfPagesRail()
+					}
+
+					setPdfRailTab("outline")
+				}
+
 				break
 		}
 	}
@@ -454,6 +489,7 @@ export function PdfReaderShell({
 						setProperties(true)
 					}}
 					pageInputRef={pageInputRef}
+					outlinePane={{ open: paneOpen, toggle: togglePdfOutlinePane }}
 				/>
 			) : (
 				<PdfRibbon
@@ -520,7 +556,13 @@ export function PdfReaderShell({
 					</>
 				)}
 				<div className="flex min-h-0 flex-1 max-sm:flex-col">
-					{surface === null ? null : <PdfPagesSide />}
+					{surface === null ? null : <PdfPagesSide outline={outline.length === 0 ? null : outlinePane(undefined, undefined)} />}
+					{edit === null && paneOpen && outline.length > 0
+						? outlinePane(() => {
+								closePdfOutlinePane()
+								focusPages()
+							}, "w-64 shrink-0 border-r border-border bg-background max-sm:hidden")
+						: null}
 					<PdfPages
 						pdfjs={PDFJS}
 						{...viewer.pages}
