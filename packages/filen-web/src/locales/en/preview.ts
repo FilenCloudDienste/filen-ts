@@ -41,6 +41,7 @@ import { previewRichSqlite } from "@/locales/en/previewRich/sqlite"
 import { previewTextMetadata } from "@/locales/en/previewText/metadata"
 import { previewEbookReader } from "@/locales/en/previewEbook/reader"
 import { previewTextEncoding } from "@/locales/en/previewText/encoding"
+import { previewTextMarkdown } from "@/locales/en/previewText/markdown"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -879,5 +880,6 @@ export const preview = {
 	...previewRichSqlite,
 	...previewTextMetadata,
 	...previewEbookReader,
-	...previewTextEncoding
+	...previewTextEncoding,
+	...previewTextMarkdown
 } as const

@@ -1,1 +1,7 @@
-export { MarkdownView, type MarkdownComponents, type MarkdownUrlTransform, type MarkdownViewProps } from "./MarkdownView"
+export {
+	MarkdownView,
+	type MarkdownComponents,
+	type MarkdownExtensions,
+	type MarkdownUrlTransform,
+	type MarkdownViewProps
+} from "./MarkdownView"

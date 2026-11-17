@@ -315,7 +315,7 @@ describe("the text and code command bar", () => {
 
 	it("formats markdown from the bar and locks the view switch while the source has unsaved edits", () => {
 		const onMode = vi.fn()
-		const view = mount("word", { tag: "markdown", markdown: { mode: "source", locked: true, onMode } })
+		const view = mount("word", { tag: "markdown", markdown: { mode: "source", formatting: true, locked: true, onMode } })
 
 		act(() => {
 			view.dispatch({ selection: { anchor: 0, head: 4 } })

@@ -2,7 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { DriveItem } from "@/features/drive/lib/item"
+import type { File, UuidStr } from "@filen/sdk-rs"
+import { narrowItem } from "@/features/drive/lib/item"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
@@ -17,6 +18,20 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 
 registerAllActions()
 
+const ITEM = narrowItem({
+	uuid: "mdfile-0000-0000-0000-000000000000",
+	stableUUID: undefined,
+	parent: "parent-0000-0000-0000-000000000000" as UuidStr,
+	size: 1n,
+	favorited: false,
+	region: "de-1",
+	bucket: "filen-1",
+	timestamp: 0n,
+	chunks: 1n,
+	canMakeThumbnail: false,
+	meta: { type: "decoded", data: { name: "notes.md", mime: "text/markdown", modified: 0n, size: 1n, key: "k", version: 2 } }
+} satisfies File)
+
 afterEach(() => {
 	cleanup()
 })
@@ -25,7 +40,7 @@ describe("the Markdown viewer", () => {
 	it("goes to the command bar with F6 pressed outside the viewer", async () => {
 		render(
 			<MarkdownViewer
-				item={{ uuid: "md", name: "notes.md" } as unknown as DriveItem}
+				item={ITEM}
 				alt="notes.md"
 			/>,
 			{ wrapper: queryClientWrapper(createTestQueryClient()) }
@@ -40,7 +55,7 @@ describe("the Markdown viewer", () => {
 	it("leaves the preview toggle's key to a dialog over the viewer", async () => {
 		render(
 			<MarkdownViewer
-				item={{ uuid: "md", name: "notes.md" } as unknown as DriveItem}
+				item={ITEM}
 				alt="notes.md"
 			/>,
 			{ wrapper: queryClientWrapper(createTestQueryClient()) }

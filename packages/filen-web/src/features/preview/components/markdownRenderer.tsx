@@ -1,6 +1,6 @@
 import { type MouseEvent, type ReactNode } from "react"
 import { cn } from "@filen/shared"
-import { MarkdownView, type MarkdownComponents, type MarkdownUrlTransform } from "@filen/office/react/markdown"
+import { MarkdownView, type MarkdownComponents, type MarkdownExtensions, type MarkdownUrlTransform } from "@filen/office/react/markdown"
 import { markdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 
@@ -24,7 +24,7 @@ function MarkdownLink({ href, children }: { href?: string | undefined; children?
 // Fenced code blocks (```lang ... ```) carry a `language-xxx` className from remark/rehype; inline
 // `code` spans don't. No fence-internal syntax highlighting here (unlike codeMirrorSource.tsx's
 // grammars) — a monospace block is the whole scope for a nested code span inside rendered markdown.
-function MarkdownCode({ className, children }: { className?: string | undefined; children?: ReactNode | undefined }) {
+export function MarkdownCode({ className, children }: { className?: string | undefined; children?: ReactNode | undefined }) {
 	if (typeof className === "string" && className.startsWith("language-")) {
 		return <code className={className}>{children}</code>
 	}
@@ -32,7 +32,7 @@ function MarkdownCode({ className, children }: { className?: string | undefined;
 	return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">{children}</code>
 }
 
-function MarkdownPre({ children }: { children?: ReactNode | undefined }) {
+export function MarkdownPre({ children }: { children?: ReactNode | undefined }) {
 	return <pre className="mb-3 overflow-x-auto rounded-lg bg-muted p-3 font-mono text-sm">{children}</pre>
 }
 
@@ -74,6 +74,8 @@ interface MarkdownRendererProps {
 	className?: string | undefined
 	overrides?: MarkdownComponents | undefined
 	urlTransform?: MarkdownUrlTransform | undefined
+	// Syntax beyond GFM (math): the file preview only; its code slot renders it.
+	extensions?: MarkdownExtensions | undefined
 	// -1: focusable from code (F6 from the preview's command bar).
 	tabIndex?: number | undefined
 }
@@ -84,6 +86,7 @@ function MarkdownBody({
 	className,
 	overrides,
 	urlTransform,
+	extensions,
 	tabIndex,
 	onClick,
 	onAuxClick
@@ -106,6 +109,7 @@ function MarkdownBody({
 				text={text}
 				components={components}
 				urlTransform={urlTransform ?? markdownUrlTransform}
+				extensions={extensions}
 			/>
 		</div>
 	)

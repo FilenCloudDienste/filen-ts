@@ -261,6 +261,8 @@ function MarkdownModeSwitch({
 
 export interface MarkdownBar {
 	readonly mode: MarkdownMode
+	// The source is markdown: its bar offers formatting.
+	readonly formatting: boolean
 	// Unsaved edits: the switch is locked.
 	readonly locked: boolean
 	readonly onMode: (mode: MarkdownMode) => void
@@ -478,7 +480,7 @@ export function CodeCommandBar({
 		})
 	}
 
-	if (markdown !== null && editable) {
+	if (markdown !== null && markdown.formatting && editable) {
 		groups.push({
 			id: "formatting",
 			label: t("previewCommandBarFormatting"),

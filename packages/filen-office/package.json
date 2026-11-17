@@ -207,6 +207,7 @@
 		"react-dom": "19.3.1",
 		"react-markdown": "10.1.0",
 		"remark-gfm": "4.0.1",
+		"remark-math": "6.0.0",
 		"tesseract.js-core": "7.0.0",
 		"tsx": "4.23.13",
 		"typescript": "~6.0.3",
@@ -267,7 +268,8 @@
 		"react": ">=19.2.3",
 		"react-dom": ">=19.2.3",
 		"react-markdown": "^10.1.0",
-		"remark-gfm": "^4.0.1"
+		"remark-gfm": "^4.0.1",
+		"remark-math": "^6.0.0"
 	},
 	"peerDependenciesMeta": {
 		"@codemirror/autocomplete": {
@@ -412,6 +414,9 @@
 			"optional": true
 		},
 		"remark-gfm": {
+			"optional": true
+		},
+		"remark-math": {
 			"optional": true
 		}
 	}

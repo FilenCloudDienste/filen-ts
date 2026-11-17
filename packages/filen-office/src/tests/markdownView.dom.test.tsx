@@ -2,16 +2,19 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { markdownUrlTransform } from "../core/markdown/index"
-import { MarkdownView, type MarkdownComponents } from "../react/markdown/index"
+import { MarkdownView, type MarkdownComponents, type MarkdownExtensions } from "../react/markdown/index"
 
-function html(text: string, components?: MarkdownComponents): string {
+function html(text: string, components?: MarkdownComponents, extensions?: MarkdownExtensions): string {
 	return renderToStaticMarkup(
 		<MarkdownView
 			text={text}
 			components={components}
+			extensions={extensions}
 		/>
 	)
 }
+
+const MATH: MarkdownExtensions = { math: true }
 
 describe("MarkdownView", () => {
 	it("renders CommonMark and GFM without any styling", () => {
@@ -66,5 +69,26 @@ describe("markdownUrlTransform", () => {
 		expect(markdownUrlTransform("sms:+1")).toBe("sms:+1")
 		expect(markdownUrlTransform("javascript:alert(1)")).toBeUndefined()
 		expect(markdownUrlTransform("#x")).toBeUndefined()
+	})
+})
+
+describe("MarkdownView math (opt-in)", () => {
+	it("is plain text without the extension", () => {
+		expect(html("$x^2$")).toBe("<p>$x^2$</p>")
+	})
+
+	it("marks inline and display math for the host's code slot", () => {
+		expect(html("Area $\\pi r^2$ here.", undefined, MATH)).toBe(
+			'<p>Area <code class="language-math math-inline">\\pi r^2</code> here.</p>'
+		)
+		expect(html("$$\nx = 1\n$$", undefined, MATH)).toBe('<pre><code class="language-math math-display">x = 1</code></pre>')
+	})
+
+	it("keeps prices and spaced dollar signs text, as GitHub does", () => {
+		expect(html("It costs $5 and $10 today.", undefined, MATH)).toBe("<p>It costs $5 and $10 today.</p>")
+		expect(html("a $ b $ c", undefined, MATH)).toBe("<p>a $ b $ c</p>")
+		expect(html("from $x$ to $y$", undefined, MATH)).toBe(
+			'<p>from <code class="language-math math-inline">x</code> to <code class="language-math math-inline">y</code></p>'
+		)
 	})
 })

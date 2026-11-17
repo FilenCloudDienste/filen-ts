@@ -1,177 +1,46 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import type { RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
-import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
-import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
-import { CodeSurface } from "@/features/preview/components/codeSurface"
-import { MarkdownRenderedBar, type MarkdownBar, type MarkdownMode } from "@/features/preview/components/codeCommandBar"
-import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
-import { usePreviewDownload } from "@/features/preview/lib/accessMode"
-import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
-import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
-import { keyForEditor } from "@/lib/keymap/dialogGuard"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
-import { PreviewErrorState, PreviewLoading, PreviewNotTextState } from "@/features/preview/components/previewErrorState"
+import { PreviewMarkdown } from "@/features/preview/components/previewMarkdown"
+import { RenderedSourceViewer, type RenderedSource } from "@/features/preview/components/renderedSourceViewer"
 
 export interface MarkdownViewerProps {
 	item: DriveItem
 	alt: string
-	// Same three optional props TextViewer accepts — forwarded to the source-mode editor only. The
-	// rendered arm is never an editing surface.
+	// See RenderedSourceViewer's own props: they reach the source-mode editor only.
 	editable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
 	contentRef?: RefObject<TextBuffer | null>
-	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
-	// See TextViewer's own prop.
 	onTextState?: (state: TextState) => void
 }
 
-// Top-level gate on the whole-buffer download and the binary check (usePreviewTextFile, shared with the text viewer)
-// — decodes ONCE here and feeds both views, so flipping modes never downloads again. The
-// editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
-// save rotates the uuid, remounting this whole viewer onto the new bytes.
+function renderMarkdown(source: RenderedSource, alt: string) {
+	return (
+		<PreviewMarkdown
+			text={source.file.text}
+			alt={alt}
+		/>
+	)
+}
+
+// A markdown file: rendered (math, images that are not loaded), with its source a toggle away.
 // No parameter defaults: the React Compiler skips a component that has them.
 export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState }: MarkdownViewerProps) {
-	const text = usePreviewTextFile(item, editable === true, onTextState)
-	const download = usePreviewDownload()
-
-	useLeaveViewerFullScreen()
-	const [mode, setMode] = useState<MarkdownMode>("rendered")
-	// Where focus goes after a keyboard toggle: into the source editor, or onto the command bar's switch when
-	// the toggle unmounted the editor that had it.
-	const [focusAfterToggle, setFocusAfterToggle] = useState<"editor" | "toggle" | null>(null)
-	const containerRef = useRef<HTMLDivElement>(null)
-	const toggleRef = useRef<HTMLButtonElement>(null)
-	// Toggling back to rendered UNMOUNTS the source-mode editor, and CodeMirrorSource only reports the
-	// dirty bit from a mount-time/dirty-edge effect — never on unmount — so an ungated toggle would both
-	// discard the buffer and strand the overlay's dirty flag. Read from the guard store, the single
-	// definition the overlay's own Save button reads too.
-	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
-
-	// Locked while dirty, like the command bar's switch (see above). The key is swallowed even then:
-	// left to the browser, Ctrl+Shift+V pastes the clipboard over the selection, which is not what
-	// pressing the toggle asks for. Works with the cursor in the editor too, but only in the viewer's own
-	// layer: a dialog over it, or a native field, keeps the key.
-	useAction(
-		"editor.togglePreview",
-		keyboardEvent => {
-			const root = containerRef.current
-
-			if (root === null || !keyForEditor(root, keyboardEvent.target)) {
-				return
-			}
-
-			keyboardEvent.preventDefault()
-
-			if (dirty) {
-				return
-			}
-
-			const focusInside = containerRef.current?.contains(document.activeElement) ?? false
-
-			setFocusAfterToggle(mode === "rendered" ? "editor" : focusInside ? "toggle" : null)
-			setMode(mode === "rendered" ? "source" : "rendered")
-		},
-		IN_EDITORS,
-		[dirty, mode]
-	)
-
-	useEffect(() => {
-		if (focusAfterToggle === "toggle" && mode === "rendered") {
-			toggleRef.current?.focus()
-		}
-	}, [focusAfterToggle, mode])
-
-	const focusDocument = (): void => {
-		containerRef.current?.querySelector<HTMLElement>('[role="document"]')?.focus()
-	}
-
-	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
-	// macOS Firefox do).
-	useEditorLayerKeys(containerRef, (event, root) => {
-		onCommandBarF6(event, root, focusDocument)
-	})
-
-	if (text.status === "pending") {
-		return <PreviewLoading />
-	}
-
-	if (text.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(text.dto)}
-				onRetry={text.refetch}
-			/>
-		)
-	}
-
-	if (text.status === "notText") {
-		return (
-			<PreviewNotTextState
-				item={item}
-				onShowAnyway={text.showAnyway}
-			/>
-		)
-	}
-
-	const { file, writable, encoding } = text
-	const bar: MarkdownBar = {
-		mode,
-		locked: dirty,
-		switchRef: toggleRef,
-		onMode: next => {
-			setFocusAfterToggle(null)
-			setMode(next)
-		}
-	}
-
 	return (
-		<div
-			ref={containerRef}
-			className="flex size-full flex-col"
-			// The source's F6 is the editor surface's own (it takes the key first).
-			onKeyDownCapture={event => {
-				onRibbonEscape(event, event.currentTarget, focusDocument, "capture")
-			}}
-			onKeyDown={event => {
-				if (!onRibbonEscape(event, event.currentTarget, focusDocument, "bubble"))
-					onCommandBarF6(event, event.currentTarget, focusDocument)
-			}}
-		>
-			{mode === "source" ? (
-				<CodeSurface
-					// Reopened with another encoding: a new text, so a new editor.
-					key={encoding.chosen ?? ""}
-					file={file}
-					encoding={encoding}
-					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
-					alt={alt}
-					editable={editable === true && writable}
-					locked={locked ?? false}
-					autoFocus={focusAfterToggle === "editor"}
-					markdown={bar}
-					onDirtyChange={onDirtyChange}
-					contentRef={contentRef}
-				/>
-			) : (
-				<>
-					<MarkdownRenderedBar
-						markdown={bar}
-						onDownload={download}
-					/>
-					<div className="min-h-0 flex-1">
-						<MarkdownRenderer
-							text={file.text}
-							alt={alt}
-							tabIndex={-1}
-						/>
-					</div>
-				</>
-			)}
-		</div>
+		<RenderedSourceViewer
+			item={item}
+			alt={alt}
+			renderer={source => renderMarkdown(source, alt)}
+			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
+			formatting
+			{...(editable === undefined ? {} : { editable })}
+			{...(onDirtyChange === undefined ? {} : { onDirtyChange })}
+			{...(contentRef === undefined ? {} : { contentRef })}
+			{...(locked === undefined ? {} : { locked })}
+			{...(onTextState === undefined ? {} : { onTextState })}
+		/>
 	)
 }

@@ -20,3 +20,11 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 export function markdownUrlTransform(url: string): string | undefined {
 	return isSafeAbsoluteHref(url) ? url : undefined
 }
+
+const DATA_IMAGE = /^data:image\//i
+
+// The file preview's: an image's data: URL survives too (it loads nothing; the CSP admits data: images). Any other
+// image is never fetched: the preview names it instead (previewMarkdown.tsx).
+export function previewMarkdownUrlTransform(url: string, key: string): string | undefined {
+	return key === "src" && DATA_IMAGE.test(url) ? url : markdownUrlTransform(url)
+}

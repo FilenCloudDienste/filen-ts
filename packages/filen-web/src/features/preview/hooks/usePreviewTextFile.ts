@@ -25,7 +25,7 @@ export type PreviewTextFile =
 	// The bytes do not look like text: nothing is decoded until the user asks to see them anyway, read-only.
 	| { status: "notText"; showAnyway: () => void }
 	// `writable`: a save writes back the bytes the file came from (or, converted, the same text as UTF-8).
-	| { status: "success"; file: TextFile; writable: boolean; encoding: TextEncodingControls }
+	| { status: "success"; bytes: Uint8Array; file: TextFile; writable: boolean; encoding: TextEncodingControls }
 
 // What an editable text viewer tells the overlay: whether a save writes the file back as it was (one it would change
 // keeps the slot read-only until converted), and the encoding a save writes (a newer version is compared in it).
@@ -106,6 +106,7 @@ export function usePreviewTextFile(
 
 	return {
 		status: "success",
+		bytes: result.bytes,
 		file,
 		writable,
 		encoding: {

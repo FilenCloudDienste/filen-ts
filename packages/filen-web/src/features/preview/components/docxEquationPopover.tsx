@@ -1,6 +1,5 @@
 import { useEffect, useId, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
-import type { TFunction } from "i18next"
 import {
 	equationLatex,
 	latexPreview,
@@ -16,6 +15,7 @@ import { Switch } from "@/components/ui/switch"
 import { useInputForm } from "@/features/preview/components/docxEditor.logic"
 import { isImeKeydown, isMacPlatform, matchesCombo } from "@filen/shared/keymap"
 import type { DocxObjectControlProps } from "@/features/preview/components/docxFormControls"
+import { latexErrorMessage } from "@/features/preview/lib/latexError"
 
 const IS_MAC = isMacPlatform()
 
@@ -98,26 +98,6 @@ function pressPoint(props: DocxObjectControlProps, press: DocxObjectPress): { x:
 			y: press.clientY
 		}
 	)
-}
-
-function errorMessage(t: TFunction<"preview">, error: LatexError): string {
-	const values = { token: error.token ?? "", position: error.offset + 1 }
-
-	switch (error.code) {
-		case "tooLong":
-			return t("previewDocxEquationErrorTooLong")
-		case "tooDeep":
-			return t("previewDocxEquationErrorTooDeep", values)
-		case "unknownCommand":
-			return t("previewDocxEquationErrorUnknownCommand", values)
-		case "missingArgument":
-			return t("previewDocxEquationErrorMissingArgument", values)
-		case "unbalanced":
-			return t("previewDocxEquationErrorUnbalanced", values)
-		case "unexpected":
-		case "empty":
-			return t("previewDocxEquationErrorUnexpected", values)
-	}
 }
 
 function sameError(a: LatexError | null, b: LatexError | null): boolean {
@@ -396,7 +376,7 @@ export function DocxEquationPopover(props: DocxObjectControlProps) {
 						role="alert"
 						className="text-destructive"
 					>
-						{errorMessage(t, error)}
+						{latexErrorMessage(t, error)}
 					</p>
 				)}
 				{opened.mode === "edit" && opened.lossy ? <p className="text-muted-foreground">{t("previewDocxEquationLossy")}</p> : null}
