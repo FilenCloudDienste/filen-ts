@@ -1,0 +1,29 @@
+{
+	"xhtmlMb": 2.02249,
+	"epubMb": 0.358282,
+	"samples": 3,
+	"desktop": {
+		"cpuThrottle": 1,
+		"pages": 680,
+		"relaidPages": 1178,
+		"openMs": 218,
+		"relayoutMs": 129,
+		"baseHeapMb": 22,
+		"openHeapMb": 31.75,
+		"relayoutHeapMb": 31.75,
+		"layoutBudgetMs": 1500,
+		"heapBudgetMb": 512
+	},
+	"midPhone": {
+		"cpuThrottle": 4,
+		"pages": 680,
+		"relaidPages": 1178,
+		"openMs": 899,
+		"relayoutMs": 532,
+		"baseHeapMb": 22,
+		"openHeapMb": 31.75,
+		"relayoutHeapMb": 31.75,
+		"layoutBudgetMs": 4000,
+		"heapBudgetMb": 256
+	}
+}
