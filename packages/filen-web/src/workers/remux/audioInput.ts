@@ -10,7 +10,7 @@ import {
 	type InputAudioTrack,
 	type InputFormat
 } from "mediabunny"
-import { BlockSource, mpegAudioHeader, waveFormatTag, walkContainer } from "@filen/shared/videos"
+import { BlockSource, mpegAudioHeader, waveFormatExtra, waveFormatTag, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
 import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
 import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
@@ -529,10 +529,7 @@ export function waveProbedCodec(
 ): ProbedCodec | null {
 	const view = format === null || format.length < 16 ? null : new DataView(format.buffer, format.byteOffset, format.byteLength)
 	const tag = format === null || view === null ? 0 : waveFormatTag(format, 0, format.length)
-	const extraLength = view === null || format === null || format.length < 18 ? 0 : Math.min(view.getUint16(16, true), format.length - 18)
-	// WAVE_FORMAT_EXTENSIBLE's own 22 bytes (valid bits, channel mask, sub-format) open the extra bytes; the codec's
-	// configuration follows them, as FFmpeg's WAV header reader takes it.
-	const extensible = view !== null && view.getUint16(0, true) === 0xfffe && extraLength >= 22 ? 22 : 0
+	const extra = format === null || view === null ? null : waveFormatExtra(format, 0, format.length)
 	const stream: FfmpegStream = {
 		blockAlign: view?.getUint16(12, true) ?? 0,
 		bitRate: (view?.getUint32(8, true) ?? 0) * 8,
@@ -562,7 +559,7 @@ export function waveProbedCodec(
 	return {
 		codec: ffmpeg,
 		stream,
-		...(format !== null && extraLength > extensible ? { extradata: format.slice(18 + extensible, 18 + extraLength) } : {})
+		...(extra !== null && extra.length > 0 ? { extradata: extra.slice() } : {})
 	}
 }
 

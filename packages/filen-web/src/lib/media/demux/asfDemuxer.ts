@@ -11,6 +11,7 @@ import {
 	uint16le,
 	uint32le,
 	uint64le,
+	waveFormatExtra,
 	waveFormatTag,
 	type AsfHeader,
 	type AsfStream,
@@ -509,7 +510,7 @@ function audioTrack(stream: Extract<AsfStream, { audio: unknown }>, isDefault: b
 		codec = pcmCodec(tag, uint16le(specific, 14))
 	}
 
-	const extra = specific.length >= 18 ? specific.subarray(18, 18 + uint16le(specific, 16)) : null
+	const extra = specific.length >= 18 ? waveFormatExtra(specific, 0, specific.length) : null
 
 	return {
 		type: "audio",

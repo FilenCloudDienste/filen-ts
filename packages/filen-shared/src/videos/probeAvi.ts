@@ -97,18 +97,28 @@ export function waveFormatTag(bytes: Uint8Array, at: number, length: number): nu
 	return tag === WAVE_FORMAT_EXTENSIBLE && extra >= 22 ? uint16le(bytes, at + 24) : tag
 }
 
+// The codec's own configuration in a WAVEFORMATEX(TENSIBLE) at `at`, `length` bytes: its extra bytes, clamped to what
+// is there, past WAVE_FORMAT_EXTENSIBLE's own 22 (valid bits, channel mask, sub-format), as FFmpeg's WAV header reader
+// takes it.
+export function waveFormatExtra(bytes: Uint8Array, at: number, length: number): Uint8Array {
+	const extra = length >= 18 ? Math.min(uint16le(bytes, at + 16), length - 18) : 0
+	const skip = uint16le(bytes, at) === WAVE_FORMAT_EXTENSIBLE && extra >= 22 ? 22 : 0
+
+	return bytes.subarray(at + 18 + skip, at + 18 + extra)
+}
+
 // A WAVEFORMATEX(TENSIBLE) at `at`, `length` bytes: codec, channels, rate and, for AAC, the AudioSpecificConfig its
 // extra bytes hold.
 export function waveFormatAudio(bytes: Uint8Array, at: number, length: number): Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate"> {
 	const tag = waveFormatTag(bytes, at, length)
 	const ch = uint16le(bytes, at + 2)
 	const rate = uint32le(bytes, at + 4)
-	const extra = length >= 18 ? Math.min(uint16le(bytes, at + 16), length - 18) : 0
+	const extra = waveFormatExtra(bytes, at, length)
 	const codec = FORMAT_TAGS[tag] ?? null
 	let codecString: string | null = null
 
 	if (codec === "aac") {
-		const config = extra >= 2 ? bytes.subarray(at + 18, at + 18 + extra) : null
+		const config = extra.length >= 2 ? extra : null
 
 		codecString = mp4aCodecString({
 			objectTypeIndication: 0x40,

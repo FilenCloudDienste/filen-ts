@@ -15,6 +15,7 @@ import {
 	type ReadAt,
 	uint16le,
 	uint32le,
+	waveFormatExtra,
 	waveFormatTag
 } from "@filen/shared/videos"
 import {
@@ -137,7 +138,7 @@ function audioTrack(stream: AviStream, index: number, isDefault: boolean): Demux
 	const probed = stream.audio
 	const tag = waveFormatTag(strf, 0, strf.length)
 	const bits = uint16le(strf, 14)
-	const extraLength = strf.length >= 18 ? Math.min(uint16le(strf, 16), strf.length - 18) : 0
+	const extra = waveFormatExtra(strf, 0, strf.length)
 
 	const channels = probed?.ch ?? 2
 	const sampleRate = probed?.rate ?? 48000
@@ -150,7 +151,7 @@ function audioTrack(stream: AviStream, index: number, isDefault: boolean): Demux
 	} else if (probed?.codec === "mp3" || probed?.codec === "ac3" || probed?.codec === "dts" || probed?.codec === "aac") {
 		codec = probed.codec
 		// AAC without an AudioSpecificConfig is ADTS framed (WAVE_FORMAT_MPEG_ADTS_AAC), which needs none.
-		const description = codec === "aac" && extraLength >= 2 ? strf.subarray(18, 18 + extraLength) : null
+		const description = codec === "aac" && extra.length >= 2 ? extra : null
 
 		config = {
 			codec: codec === "mp3" ? "mp3" : (probed.codecString ?? codec),

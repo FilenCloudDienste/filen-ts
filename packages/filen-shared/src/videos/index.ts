@@ -31,6 +31,8 @@ export {
 	parseAviHeader,
 	uint16le,
 	uint32le,
+	waveFormatAudio,
+	waveFormatExtra,
 	waveFormatTag,
 	type AviHeader,
 	type AviLists,
