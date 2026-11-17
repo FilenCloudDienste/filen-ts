@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { isAudioUnsupported, isSourceReadError } from "@/lib/media/remuxTypes"
 import { SYNTH_SOURCE_ERROR, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
-import { tinyMod } from "@/tests/support/trackerModules"
+import { largeXm, mmcmpPacked, tinyMod } from "@/tests/support/trackerModules"
 
 // The module worker itself (the shipped libopenmpt build) run in this process behind a stand-in for its worker
 // scope, and the remux worker's synthesizer input over it.
@@ -56,7 +56,12 @@ vi.mock("@/workers/synth/module.worker.ts?worker", () => ({ default: InProcessWo
 
 // The heap's allocations as the module worker makes them, failing while `full` is set: what a capped heap that has no
 // room answers.
-const heap: { full: boolean; reported: number | null } = { full: false, reported: null }
+const heap: {
+	full: boolean
+	reported: number | null
+	trap: boolean
+	lib: Awaited<ReturnType<typeof import("@/vendor/libopenmpt/libopenmpt.js").default>> | null
+} = { full: false, reported: null, trap: false, lib: null }
 
 vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/vendor/libopenmpt/libopenmpt.js")>()
@@ -64,12 +69,25 @@ vi.mock("@/vendor/libopenmpt/libopenmpt.js", async importOriginal => {
 	return {
 		default: async (options: Parameters<typeof actual.default>[0]) => {
 			const lib = await actual.default(options)
+
+			heap.lib = lib
 			const malloc = lib._malloc.bind(lib)
 
 			const heapBytes = lib._filen_heap_bytes.bind(lib)
 
 			lib._malloc = size => (heap.full ? 0 : malloc(size))
 			lib._filen_heap_bytes = () => heap.reported ?? heapBytes()
+
+			const render = lib._filen_render.bind(lib)
+
+			// A trap in the module, as WebAssembly raises one.
+			lib._filen_render = (...args) => {
+				if (heap.trap) {
+					throw new WebAssembly.RuntimeError("unreachable")
+				}
+
+				return render(...args)
+			}
 
 			return lib
 		}
@@ -358,6 +376,117 @@ describe("module synthesizer", () => {
 		await expect(synthFor("module").reads(mod.subarray(0, 2048), mod.length)).resolves.toBe(true)
 		await expect(synthFor("module").reads(new Uint8Array(2048).fill(0x20), 1_000_000)).resolves.toBe(false)
 	})
+
+	it("renders the same bytes through two interleaved cursors of one stream as through fresh streams", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const { PcmStream } = await import("@/workers/remux/pcmStream")
+		const { emptyRemuxStats } = await import("@/lib/media/remuxTypes")
+		const bytes = tinyMod(31, true)
+		const open = async (key: string) => {
+			const source = serve(bytes)
+
+			return PcmStream.open(await synthAudioInput(source.port, source.size, "audio", { kind: "module", key }), emptyRemuxStats())
+		}
+		const signal = new AbortController().signal
+		const stream = await open("cursors")
+		const { WAV_HEADER_BYTES } = await import("@/workers/remux/wav.logic")
+		const dataOffset = WAV_HEADER_BYTES
+		// Two places, each read in two steps: a cursor at 1 s, one at 5 s, taking turns.
+		const second = 48_000 * stream.layout.blockAlign
+		const at = (seconds: number, step: number): [number, number] => [
+			dataOffset + seconds * second + step * 16_384,
+			dataOffset + seconds * second + (step + 1) * 16_384
+		]
+		const interleaved = [
+			await stream.read(...at(1, 0), signal),
+			await stream.read(...at(5, 0), signal),
+			await stream.read(...at(1, 1), signal),
+			await stream.read(...at(5, 1), signal)
+		]
+		const early = await open("cursors-early")
+		const late = await open("cursors-late")
+		const fresh = [
+			await early.read(...at(1, 0), signal),
+			await late.read(...at(5, 0), signal),
+			await early.read(...at(1, 1), signal),
+			await late.read(...at(5, 1), signal)
+		]
+
+		expect(interleaved.map(part => [...part])).toEqual(fresh.map(part => [...part]))
+		expect(interleaved.every(part => part.some(byte => byte !== 0))).toBe(true)
+
+		for (const each of [stream, early, late]) {
+			await each.close()
+		}
+	})
+
+	it("drops an instance a module trapped in, failing its reader as a read, and plays the next open on a fresh one", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(tinyMod())
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "trap" })
+		const reader = input.reader({} as never, () => false)
+
+		heap.trap = true
+
+		try {
+			await expect(reader.first(0)).rejects.toSatisfy(isSourceReadError)
+		} finally {
+			heap.trap = false
+		}
+
+		expect(scope.closed).toBe(true)
+		await reader.close()
+		await input.close()
+		scope.closed = false
+
+		const again = serve(tinyMod())
+		const next = await synthAudioInput(again.port, again.size, "audio", { kind: "module", key: "trap" })
+		const played = next.reader({} as never, () => false)
+		const first = await played.first(0)
+
+		expect(first?.sample.numberOfFrames).toBe(4096)
+		first?.sample.close()
+		await played.close()
+		await next.close()
+	})
+
+	it("plays libopenmpt's own MPTM test module, and a module packed with MMCMP", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		// test/test.mptm of the libopenmpt release this build pins (BSD-3-Clause, as libopenmpt).
+		const mptm = serve(new Uint8Array(readFileSync(new URL("fixtures/synth/test.mptm", import.meta.url))))
+		const own = await synthAudioInput(mptm.port, mptm.size, "audio", { kind: "module", key: "mptm" })
+
+		expect(own.info.duration).toBeGreaterThan(0)
+
+		const reader = own.reader({} as never, () => false)
+		const first = await reader.first(0)
+
+		expect(first?.sample.numberOfFrames).toBe(4096)
+		first?.sample.close()
+		await reader.close()
+		await own.close()
+
+		const packed = serve(mmcmpPacked(tinyMod()))
+		const unpacked = await synthAudioInput(packed.port, packed.size, "audio", { kind: "module", key: "mmcmp" })
+
+		expect(unpacked.info.duration).toBeCloseTo(7.68, 3)
+		await unpacked.close()
+	})
+
+	it("keeps a module at the 32 MiB cap within libopenmpt's 256 MiB heap", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const bytes = largeXm(32 * 1024 * 1024 - 1024)
+		const source = serve(bytes)
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "at-cap" })
+		const reader = input.reader({} as never, () => false)
+		const first = await reader.first(0)
+
+		expect(first?.sample.numberOfFrames).toBe(4096)
+		first?.sample.close()
+		expect(heap.lib?._filen_heap_bytes()).toBeLessThanOrEqual(256 * 1024 * 1024)
+		await reader.close()
+		await input.close()
+	}, 60_000)
 
 	it("refuses what libopenmpt does not read as unsupported audio, and a lost key as a read failure", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
