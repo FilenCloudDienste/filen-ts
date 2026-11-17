@@ -876,6 +876,40 @@ describe("getThumbnailUrl — image and browser gates", () => {
 		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
 	})
 
+	it("queues a Photoshop file and an EPS behind image jobs: their previews are the SDK's to decode", async () => {
+		const images = Array.from({ length: SDK_THUMBNAIL_DECODES }, () => imageItem())
+		const embedded = [
+			{ name: "art.psd", mime: "image/vnd.adobe.photoshop" },
+			{ name: "figure.eps", mime: "application/postscript" }
+		].map(({ name, mime }) =>
+			imageItem({
+				meta: { type: "decoded", data: { name, mime, modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 } }
+			})
+		)
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
+
+		const attempts = [...images, ...embedded].map(item => getThumbnailUrl(item, deps))
+
+		await flushMicrotasks()
+
+		expect(deferred.keys).toEqual(images.map(item => item.data.uuid))
+
+		for (const item of images) {
+			deferred.resolve(item.data.uuid, bytes)
+		}
+
+		await flushMicrotasks()
+
+		expect(deferred.keys.slice(SDK_THUMBNAIL_DECODES)).toEqual(embedded.map(item => item.data.uuid))
+
+		for (const item of embedded) {
+			deferred.resolve(item.data.uuid, bytes)
+		}
+
+		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
+	})
+
 	// The write and its read-back need no decoder: the next image starts while the first still persists.
 	it("frees the slot before the persist completes", async () => {
 		const [first, ...rest] = Array.from({ length: SDK_THUMBNAIL_DECODES + 1 }, () => imageItem())

@@ -21,8 +21,8 @@ import { RankedGate } from "@/features/drive/lib/rankedGate"
 // never a limit the SDK itself needs (never reimplement SDK-side concurrency; this bounds how many
 // requests THIS app issues concurrently). The OPFS cache read stays outside it: see generate().
 //
-// Two gates, because the two kinds of producer saturate different things. Every image ("sdk") job ends
-// in the SDK's thumbnail decoders, sized by the same SDK_THUMBNAIL_DECODES boot hands the client: a slot
+// Two gates, because the two kinds of producer saturate different things. Every image ("sdk") job, and
+// every Photoshop or EPS job (an embedded preview), ends in the SDK's thumbnail decoders, sized by the same SDK_THUMBNAIL_DECODES boot hands the client: a slot
 // past that only parks a job inside the SDK, and in a shared gate it held a slot a browser decode needed.
 // Video, pdf and svg decode in the browser, each on its own element, worker or canvas.
 const BROWSER_GENERATIONS = 3
@@ -164,11 +164,14 @@ const pending = new Map<string, PendingEntry>()
 // generation has no entry here — nothing but a seat ever needs to know it was joined.
 const seats = new Map<string, { joined: boolean }>()
 
+// The categories whose decode is the SDK's: images, and the Photoshop and EPS files whose embedded preview it decodes
+// (an EPSI preview, decoded in the raster pool instead, is rare and small).
+const SDK_DECODED: ReadonlySet<ThumbGeneratorCategory> = new Set(["sdk", "psd", "eps"])
 const sdkGate = new RankedGate(SDK_THUMBNAIL_DECODES, OFFSCREEN_HOLD_MS)
 const browserGate = new RankedGate(BROWSER_GENERATIONS, OFFSCREEN_HOLD_MS)
 
 function gateFor(category: ThumbGeneratorCategory): RankedGate {
-	return category === "sdk" ? sdkGate : browserGate
+	return SDK_DECODED.has(category) ? sdkGate : browserGate
 }
 
 // Runs a seeded production in one of its category's generation slots: it costs what the generation it
