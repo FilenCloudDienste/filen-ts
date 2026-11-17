@@ -257,8 +257,14 @@ export function ffmpegSampleReader<P>(params: {
 				const pending = opening
 
 				opening = null
-				ffmpegDecoders.release(await pending.catch(() => null))
 				lease = null
+
+				// A failed open released its worker itself.
+				const held = await pending.catch(() => null)
+
+				if (held !== null) {
+					ffmpegDecoders.release(held)
+				}
 			}
 		}
 	}

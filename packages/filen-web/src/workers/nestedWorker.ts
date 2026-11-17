@@ -32,11 +32,12 @@ interface Pending {
 
 export class NestedWorker<Request extends object, Response extends NestedResponse> {
 	private worker: Worker | null = null
-	private users = 0
+	// The users of every instance still held, current, retired or ended: a release counts against the instance it was
+	// acquired from, never another.
+	private readonly users = new Map<Worker, number>()
 	private nextId = 0
 	private idleTimer: ReturnType<typeof setTimeout> | null = null
-	// Retired instances, with the users they have left; and every instance ended.
-	private readonly retired = new Map<Worker, number>()
+	private readonly retired = new Set<Worker>()
 	private readonly ended = new WeakSet<Worker>()
 	private readonly pending = new Map<number, Pending>()
 	private readonly spawn: () => Worker
@@ -50,29 +51,37 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 	// The worker for a new user, started if none runs. Every acquire is balanced by exactly one release, given the
 	// worker it returned.
 	public acquire(): Worker {
-		this.users++
+		const worker = this.worker ?? this.start()
+
+		this.users.set(worker, (this.users.get(worker) ?? 0) + 1)
 		this.cancelIdle()
 
-		return this.worker ?? this.start()
+		return worker
 	}
 
-	public release(worker: Worker | null = this.worker): void {
-		const left = worker === null ? undefined : this.retired.get(worker)
+	public release(worker: Worker): void {
+		const count = this.users.get(worker)
 
-		if (worker !== null && left !== undefined) {
-			if (left <= 1) {
-				this.retired.delete(worker)
-				this.end(worker, new Error(`the ${this.options.name} worker was stopped`))
-			} else {
-				this.retired.set(worker, left - 1)
-			}
+		if (count === undefined) {
+			return
+		}
+
+		if (count > 1) {
+			this.users.set(worker, count - 1)
 
 			return
 		}
 
-		this.users = Math.max(0, this.users - 1)
+		this.users.delete(worker)
 
-		if (this.users > 0 || this.worker === null) {
+		// A retired instance ends with its last user; an ended one only forgets it.
+		if (this.retired.delete(worker) || this.ended.has(worker)) {
+			this.end(worker, new Error(`the ${this.options.name} worker was stopped`))
+
+			return
+		}
+
+		if (worker !== this.worker) {
 			return
 		}
 
@@ -88,7 +97,7 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		this.idleTimer = setTimeout(() => {
 			this.idleTimer = null
 
-			if (this.users === 0) {
+			if (this.worker !== null && !this.users.has(this.worker)) {
 				this.stop(new Error(`the ${this.options.name} worker was stopped`))
 			}
 		}, idleMs)
@@ -109,13 +118,11 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		this.cancelIdle()
 		this.worker = null
 
-		if (this.users === 0) {
-			this.end(worker, new Error(`the ${this.options.name} worker was stopped`))
+		if (this.users.has(worker)) {
+			this.retired.add(worker)
 		} else {
-			this.retired.set(worker, this.users)
+			this.end(worker, new Error(`the ${this.options.name} worker was stopped`))
 		}
-
-		this.users = 0
 	}
 
 	// Answered by the worker, or rejected once it is lost; past `timeoutMs`, the worker is taken for stuck and dropped.
@@ -200,8 +207,8 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		}
 	}
 
-	// Terminates `worker`, current or retired, and fails what waits on it. A retired one keeps its count of users, whose
-	// releases still come.
+	// Terminates `worker`, current or retired, and fails what waits on it. Its users' releases still come, and count
+	// against it alone.
 	private end(worker: Worker, error: Error): void {
 		if (this.ended.has(worker)) {
 			return

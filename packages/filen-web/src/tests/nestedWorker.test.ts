@@ -58,9 +58,9 @@ describe("NestedWorker", () => {
 		const second = helper.acquire()
 
 		expect(first).toBe(second)
-		helper.release()
+		helper.release(first)
 		expect(spawned[0]?.terminated).toBe(false)
-		helper.release()
+		helper.release(second)
 		expect(spawned[0]?.terminated).toBe(true)
 		expect(helper.acquire()).not.toBe(first)
 		expect(spawned).toHaveLength(2)
@@ -72,10 +72,10 @@ describe("NestedWorker", () => {
 		const { helper, spawned } = nested(30_000)
 		const worker = helper.acquire()
 
-		helper.release()
+		helper.release(worker)
 		vi.advanceTimersByTime(29_000)
 		expect(helper.acquire()).toBe(worker)
-		helper.release()
+		helper.release(worker)
 		vi.advanceTimersByTime(30_000)
 		expect(spawned[0]?.terminated).toBe(true)
 	})
@@ -154,7 +154,8 @@ describe("NestedWorker", () => {
 
 		helper.release(worker)
 		vi.advanceTimersByTime(20_000)
-		helper.release(worker)
+		// A user that came and went within the grace starts it over, with the first timer cleared.
+		helper.release(helper.acquire())
 		vi.advanceTimersByTime(20_000)
 		expect(spawned[0]?.terminated).toBe(false)
 		vi.advanceTimersByTime(10_000)
@@ -186,6 +187,44 @@ describe("NestedWorker", () => {
 		expect(spawned[1]?.terminated).toBe(false)
 		helper.release(fresh)
 		expect(spawned[1]?.terminated).toBe(false)
+	})
+
+	it("ends a retired instance with its own last user, whatever users of an instance lost before it still hold", async () => {
+		vi.useFakeTimers()
+
+		const { helper, spawned } = nested(30_000)
+		const lost = helper.acquire()
+		const stuck = helper.request(lost, { type: "render" }, [], 2_000).catch(() => undefined)
+
+		vi.advanceTimersByTime(2_000)
+		await stuck
+		expect(spawned[0]?.terminated).toBe(true)
+
+		// A user of the next instance; the instance is retired on a grown heap.
+		const fresh = helper.acquire()
+
+		helper.retire(fresh)
+		// The lost instance's user releases late: that counts against the lost instance, never the retired one.
+		helper.release(lost)
+		expect(spawned[1]?.terminated).toBe(false)
+		helper.release(fresh)
+		expect(spawned[1]?.terminated).toBe(true)
+	})
+
+	it("ignores a second release of an instance's last user", () => {
+		const { helper, spawned } = nested()
+		const first = helper.acquire()
+
+		helper.release(first)
+
+		const second = helper.acquire()
+		const other = helper.acquire()
+
+		helper.release(first)
+		expect(spawned[1]?.terminated).toBe(false)
+		helper.release(second)
+		helper.release(other)
+		expect(spawned[1]?.terminated).toBe(true)
 	})
 
 	it("ends a retired worker at once when no one uses it", () => {

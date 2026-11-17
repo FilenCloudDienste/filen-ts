@@ -99,22 +99,35 @@ export class DecoderWorker {
 		this.nested = new NestedWorker(spawn, { name: "audio decoder" })
 	}
 
-	// Every open, failed or not, is balanced by exactly one release.
+	// Every open that resolves is balanced by exactly one release of its lease; one that fails releases its worker
+	// itself.
 	public async open(codec: FfmpegCodec, extradata?: Uint8Array, stream?: FfmpegStream): Promise<DecoderLease> {
 		const worker = this.nested.acquire()
-		// An empty configuration is none.
-		const config = extradata === undefined || extradata.length === 0 ? undefined : extradata.slice().buffer
-		const { handle } = await this.nested.request(
-			worker,
-			{ type: "open", codec, ...(config === undefined ? {} : { extradata: config }), ...(stream === undefined ? {} : { stream }) },
-			config === undefined ? [] : [config]
-		)
 
-		if (handle === undefined) {
-			throw new Error("the audio decoder worker returned no decoder")
+		try {
+			// An empty configuration is none.
+			const config = extradata === undefined || extradata.length === 0 ? undefined : extradata.slice().buffer
+			const { handle } = await this.nested.request(
+				worker,
+				{
+					type: "open",
+					codec,
+					...(config === undefined ? {} : { extradata: config }),
+					...(stream === undefined ? {} : { stream })
+				},
+				config === undefined ? [] : [config]
+			)
+
+			if (handle === undefined) {
+				throw new Error("the audio decoder worker returned no decoder")
+			}
+
+			return { handle, worker }
+		} catch (error) {
+			this.nested.release(worker)
+
+			throw error
 		}
-
-		return { handle, worker }
 	}
 
 	public request(lease: DecoderLease, request: DecoderRequest, transfer: Transferable[] = []): Promise<DecoderResponse> {
@@ -122,12 +135,12 @@ export class DecoderWorker {
 	}
 
 	// Never throws: a decoder whose worker is gone is gone with it.
-	public release(lease: DecoderLease | null): void {
-		if (lease !== null && this.nested.current(lease.worker)) {
+	public release(lease: DecoderLease): void {
+		if (this.nested.current(lease.worker)) {
 			this.nested.request(lease.worker, { type: "close", handle: lease.handle }).catch(() => undefined)
 		}
 
-		this.nested.release()
+		this.nested.release(lease.worker)
 	}
 }
 
@@ -243,8 +256,16 @@ export function ffmpegAudioDecoder(worker: DecoderWorker, codecs: readonly Audio
 		}
 
 		public close(): void {
-			if (this.opening !== null) {
-				worker.release(this.lease)
+			const opening = this.opening
+
+			if (opening !== null) {
+				// An open still under way is released once it lands; a failed one released its worker itself.
+				opening.then(
+					lease => {
+						worker.release(lease)
+					},
+					() => undefined
+				)
 				this.opening = null
 				this.lease = null
 			}

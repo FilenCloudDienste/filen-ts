@@ -517,6 +517,6 @@ describe("module synthesizer", () => {
 		const worker = helper.acquire()
 
 		await expect(helper.request(worker, { type: "open", key: "never loaded", sampleRate: 48_000 })).rejects.toSatisfy(isSourceReadError)
-		helper.release()
+		helper.release(worker)
 	})
 })
