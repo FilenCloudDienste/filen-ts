@@ -253,7 +253,8 @@ test("e-book layout cost", async ({ browser, browserName }, testInfo) => {
 
 	const recordPath = process.env["FILEN_WEB_E2E_EBOOK_BENCH_RECORD"]
 
-	if (recordPath !== undefined && recordPath !== "") writeFileSync(recordPath, report)
+	// A final newline, as the format check wants of the recorded baseline.
+	if (recordPath !== undefined && recordPath !== "") writeFileSync(recordPath, `${report}\n`)
 
 	expect(misses, report).toEqual([])
 })
