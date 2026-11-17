@@ -1,6 +1,15 @@
 import type { AnyFile } from "@filen/sdk-rs"
 import { PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY, shouldRespawn, type PdfMemoryProfile } from "@filen/office/core/pdfedit"
-import { PDF_ENGINE_WASM, PdfEngineClient, type PdfByteChannel, type PdfEngineRole, type PdfOpenResult } from "@filen/office/dom/pdfedit"
+import {
+	PDF_ENGINE_WASM,
+	PdfEngineClient,
+	type MupdfFormat,
+	type MupdfLayout,
+	type PdfByteChannel,
+	type PdfEngineRole,
+	type PdfOpenResult,
+	type PdfOpenSource
+} from "@filen/office/dom/pdfedit"
 import PdfEngineWorker from "@/features/pdf/workers/pdfEngine.worker.ts?worker"
 import { withPdfEngineModule } from "@/features/pdf/session/engineModule"
 import { openSyncRange, type SyncRangeHandle } from "@/lib/media/syncRange"
@@ -10,9 +19,14 @@ import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
 import { transferList } from "@/lib/transferList"
 import { createOwnedWorker } from "@/lib/workers/ownedWorker"
+import { originKey, originSize, originWhole, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
+import { openOriginSyncSource } from "@/features/preview/lib/origin/syncSource"
+import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
+import { takePreviewBytes } from "@/features/preview/lib/previewCache"
 
 // One PDF engine: a worker with MuPDF and one document, reading the file through its own sync range bridge from the
-// SDK worker. Closing it closes the document, stops the bridge and terminates the worker; a poisoned engine (a wasm
+// SDK worker (a document of the read role read whole, an archive entry or bytes the page holds, is transferred to it
+// instead). Closing it closes the document, stops the bridge and terminates the worker; a poisoned engine (a wasm
 // trap, out of memory, a stuck render) is terminated at once and reports it. Every engine is an owned preview worker,
 // so sign-out terminates it at once (its calls reject "closed"). Every engine holds the compiled MuPDF module
 // (engineModule.ts) while it lives.
@@ -62,20 +76,58 @@ function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; 
 	return { client, gone: owned.gone }
 }
 
-// Where an engine reads its file: a drive file through the SDK worker, or a channel another engine serves (a written
-// save, from the editing engine's heap).
-type EngineSource =
+// Where an engine reads its file: a drive file through the SDK worker, a channel another engine serves (a written
+// save, from the editing engine's heap), or (the read role) a preview origin.
+export type EngineSource =
 	| { readonly kind: "file"; readonly file: AnyFile; readonly access: PreviewAccessMode }
 	| { readonly kind: "channel"; readonly channel: PdfByteChannel }
+	// `scope`: the preview cache's (previewCacheScope), where a whole origin's bytes may already be.
+	| { readonly kind: "origin"; readonly origin: ByteOrigin; readonly access: OriginAccess; readonly scope: string | null }
 
-interface EngineStart {
+// The read role's open: the document's format, its first layout (reflowable formats), its language when known, and the
+// most source pixels one image of a drawn page may have.
+export interface EngineReadArgs {
+	readonly format: MupdfFormat
+	readonly layout?: MupdfLayout
+	readonly language?: string
+	readonly maxImagePixels: number
+}
+
+export interface EngineStart {
 	readonly source: EngineSource
 	readonly role: PdfEngineRole
 	readonly password?: string
+	readonly read?: EngineReadArgs
+	// Aborting before the open settles ends the engine (the open rejects).
+	readonly signal?: AbortSignal
 	readonly onPoisoned?: (message: string) => void
 }
 
-async function startEngine(options: EngineStart): Promise<PdfEngine> {
+// A whole origin's bytes, to transfer to the engine: taken out of the preview cache when it holds them (a transfer would
+// leave a detached view there), else loaded without keeping them.
+async function wholeOriginBytes(
+	source: Extract<EngineSource, { readonly kind: "origin" }>,
+	token: string,
+	signal: AbortSignal | undefined
+): Promise<Uint8Array> {
+	const { origin, access, scope } = source
+	const bytes =
+		takePreviewBytes(scope, originKey(origin)) ??
+		(await loadOriginBytes(origin, token, {
+			access,
+			cap: originSize(origin),
+			store: false,
+			scope,
+			...(signal === undefined ? {} : { signal })
+		}))
+
+	// Only a buffer of exactly these bytes is transferred whole.
+	return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
+		? bytes
+		: bytes.slice()
+}
+
+export async function startEngine(options: EngineStart): Promise<PdfEngine> {
 	const token = crypto.randomUUID()
 	const engineDone = Promise.withResolvers<undefined>()
 	const ready = Promise.withResolvers<PdfEngine>()
@@ -84,23 +136,29 @@ async function startEngine(options: EngineStart): Promise<PdfEngine> {
 	// The module is held until the engine closes; an open that fails releases it.
 	void withPdfEngineModule(async module => {
 		const { client, gone } = spawn(module)
-		let ended = false
+		// An object, as the open's awaits read it after end() may have run.
+		const life = { ended: false }
 		const end = (): void => {
-			if (ended) {
+			if (life.ended) {
 				return
 			}
 
-			ended = true
+			life.ended = true
 			client.terminate()
 			range?.close()
 
-			if (options.source.kind === "file") void sdkApi.cancelPreviewDownload(token).catch(() => undefined)
+			options.signal?.removeEventListener("abort", end)
+
+			if (options.source.kind !== "channel") void sdkApi.cancelPreviewDownload(token).catch(() => undefined)
 
 			engineDone.resolve(undefined)
 		}
 
 		// Sign-out (or a broken worker) ends the engine like a close.
 		gone.catch(end)
+
+		if (options.signal?.aborted === true) end()
+		else options.signal?.addEventListener("abort", end)
 
 		client.onPoisoned(message => {
 			log.warn("pdf", "engine poisoned", { message })
@@ -109,25 +167,45 @@ async function startEngine(options: EngineStart): Promise<PdfEngine> {
 		})
 
 		try {
-			let channel: PdfByteChannel
+			const { source } = options
+			let opening: PdfOpenSource
+			let transfer: unknown[]
 
-			if (options.source.kind === "file") {
-				range = await openSyncRange(options.source.file, options.source.access, token)
-				channel = range.channel
-			} else channel = options.source.channel
+			if (source.kind === "origin" && originWhole(source.origin)) {
+				const bytes = await wholeOriginBytes(source, token, options.signal)
+
+				opening = { bytes }
+				transfer = [bytes.buffer]
+			} else {
+				if (source.kind === "file") range = await openSyncRange(source.file, source.access, token)
+				else if (source.kind === "origin") range = await openOriginSyncSource(source.origin, token, { access: source.access })
+
+				// Ended while the bridge opened: nothing reads it.
+				if (life.ended) range?.close()
+
+				const channel = range?.channel ?? (source.kind === "channel" ? source.channel : null)
+
+				if (channel === null) throw new Error("the engine has no source")
+
+				opening = { channel }
+				transfer = [channel.port]
+			}
 
 			const opened = await client.call(
 				"open",
 				{
-					channel,
+					...opening,
 					role: options.role,
 					...(options.password === undefined ? {} : { password: options.password }),
-					// What the editor lets the document grow to in this browser.
-					...(options.role === "edit" ? { memory: pdfEngineMemory() } : {})
+					// What the editor lets the document grow to in this browser, and the read role's heap budget.
+					...(options.role === "edit" || options.role === "read" ? { memory: pdfEngineMemory() } : {}),
+					...options.read
 				},
-				[channel.port]
+				transfer
 			)
 			let closing: Promise<{ readonly heapBytes: number }> | null = null
+
+			options.signal?.removeEventListener("abort", end)
 
 			ready.resolve({
 				client,
