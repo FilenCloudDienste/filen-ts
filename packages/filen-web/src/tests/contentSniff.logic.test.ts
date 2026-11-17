@@ -334,3 +334,44 @@ describe("the .db read", () => {
 		expect(previewType(fileNamed("notes.db", 300n, "text/plain"), null)).toBe("text")
 	})
 })
+
+// An Illustrator file opens in the PDF viewer only when its head holds a PDF; PostScript alone has no viewer.
+describe("the .ai read", () => {
+	it("reads an .ai's first kilobyte before choosing a viewer, from any origin", () => {
+		const file = fileNamed("logo.ai", 3n * MIB)
+		const sniffer = SNIFFERS.pdfCompatible
+
+		expect(needsContentSniff(file, null)).toBe("pdfCompatible")
+		expect(previewType(file, "pdfCompatible")).toBe("pdf")
+		expect(previewType(file, "notPdfCompatible")).toBe("other")
+		expect(needsContentSniff(file, "pdfCompatible")).toBeNull()
+		expect(canPreview(file)).toBe(true)
+		expect(["file", "linkedFile", "entry", "bytes"].map(origin => gateRunsSniffer(sniffer, origin as "file"))).toEqual([
+			true,
+			true,
+			true,
+			true
+		])
+	})
+
+	it("finds a PDF header starting anywhere in the first kilobyte, not past it", () => {
+		const sniffer = SNIFFERS.pdfCompatible
+
+		if (sniffer.mode !== "head") throw new Error("a head read")
+
+		const at = (offset: number): Uint8Array => {
+			const head = new Uint8Array(offset + 8).fill(0x20)
+
+			head.set(new TextEncoder().encode("%PDF-1.6"), offset)
+
+			// What the read gives: its head bytes at most.
+			return head.subarray(0, sniffer.headBytes)
+		}
+
+		expect(sniffer.headBytes).toBe(1028)
+		expect(sniffer.decide(at(0), 4096)).toBe("pdfCompatible")
+		expect(sniffer.decide(at(1023), 4096)).toBe("pdfCompatible")
+		expect(sniffer.decide(at(1024), 4096)).toBe("notPdfCompatible")
+		expect(sniffer.decide(new TextEncoder().encode("%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator"), 4096)).toBe("notPdfCompatible")
+	})
+})

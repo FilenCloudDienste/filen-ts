@@ -103,7 +103,8 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["application/x-mobipocket-ebook", "mobi"],
 	["application/x-fictionbook+xml", "fb2"],
 	["image/jxl", "jxl"],
-	["image/x-qoi", "qoi"]
+	["image/x-qoi", "qoi"],
+	["application/illustrator", "ai"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.

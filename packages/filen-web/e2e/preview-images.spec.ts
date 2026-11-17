@@ -2,7 +2,8 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect, readFixtureManifest, settleLeases } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { FIXTURE_FILES, gotoFixture, openFixtureRows } from "./helpers/fixtures"
-import { itemRow, openArchive } from "./helpers/archive"
+import { itemRow, openArchive, openRowMenu } from "./helpers/archive"
+import { menuItemName } from "./helpers/menu"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
@@ -329,7 +330,7 @@ test("a QOI is edited from the pool's decode and saved as a PNG copy beside it",
 test.describe("public links", () => {
 	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account (E2E_PREMIUM)")
 
-	test("a link's QOI, JPEG XL and TIFF are read without a session and shown", async ({ page }) => {
+	test("a link's QOI, JPEG XL, TIFF and PDF-compatible Illustrator file are read without a session and shown", async ({ page }) => {
 		test.slow()
 
 		const cspViolations = trackCspViolations(page)
@@ -338,7 +339,9 @@ test.describe("public links", () => {
 			const files = [
 				{ name: `e2e-link-${runId}.qoi`, mimeType: "image/x-qoi", buffer: qoiSample(), ours: true },
 				{ name: `e2e-link-${runId}.jxl`, mimeType: "image/jxl", buffer: jxlSample(), ours: false },
-				{ name: `e2e-link-${runId}.tif`, mimeType: "image/tiff", buffer: tiffSample(), ours: true }
+				{ name: `e2e-link-${runId}.tif`, mimeType: "image/tiff", buffer: tiffSample(), ours: true },
+				// Read on the link's page too: a PDF inside, shown by the PDF viewer.
+				{ name: `e2e-link-${runId}.ai`, mimeType: "application/illustrator", buffer: PDF_BYTES, ours: false }
 			]
 
 			await uploadFiles(
@@ -360,6 +363,12 @@ test.describe("public links", () => {
 				for (const [index, { name, ours }] of files.entries()) {
 					await settleLeases(page)
 					await page.goto(links[index] ?? "")
+
+					if (name.endsWith(".ai")) {
+						await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+
+						continue
+					}
 
 					const shown = picture(page, name)
 
@@ -410,6 +419,42 @@ test("a Photoshop file shows its composite and its embedded thumbnail; without a
 
 	await itemRow(listbox, LARGE).dblclick()
 	await expect(page.getByText(preview.previewPsbUnsupported, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await page.keyboard.press("Escape")
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("an Illustrator file saved PDF-compatible opens in the PDF viewer, view only; PostScript alone has no viewer", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const [PDF_AI, POSTSCRIPT_AI] = FIXTURE_FILES["images-ai"]
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-ai")
+
+	// Its first kilobyte holds a PDF: the PDF viewer, without the editing tools (a save would drop Illustrator's data).
+	await itemRow(listbox, PDF_AI).dblclick()
+
+	const dialog = page.getByRole("dialog").first()
+
+	await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("button", { name: preview.previewPdfAnnotToolRectangle })).toHaveCount(0)
+	await page.keyboard.press("Escape")
+	await expect(page.getByRole("dialog")).toHaveCount(0)
+
+	// PostScript only: no Open once read, Open as text in its place.
+	await itemRow(listbox, POSTSCRIPT_AI).dblclick()
+	await expect(async () => {
+		await page.keyboard.press("Escape")
+		await openRowMenu(page, listbox, POSTSCRIPT_AI)
+		await expect(page.getByRole("menuitem", { name: menuItemName("Open") })).toHaveCount(0, { timeout: 2_000 })
+	}).toPass({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("menuitem", { name: menuItemName("Open as text") })).toBeVisible()
 	await page.keyboard.press("Escape")
 
 	expect(cspViolations).toEqual([])

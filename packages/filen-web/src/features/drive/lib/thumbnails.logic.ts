@@ -1,6 +1,6 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { itemTypeExtension, previewType } from "@/features/drive/lib/preview.logic"
+import { itemTypeExtension, needsContentSniff, previewType } from "@/features/drive/lib/preview.logic"
 
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
@@ -8,8 +8,9 @@ import { itemTypeExtension, previewType } from "@/features/drive/lib/preview.log
 // "none" covers every directory arm, an undecryptable file, an svg over its size gate, and
 // anything the SDK itself says it cannot thumbnail. "raster" is an image the SDK cannot decode but a browser can (JPEG
 // XL), drawn by the browser itself in a worker of its own. "psd" is a Photoshop file's embedded thumbnail (its 1036
-// resource, a JPEG), read by range and handed to the SDK.
-export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "psd" | "none"
+// resource, a JPEG), read by range and handed to the SDK. "illustrator" is an `.ai` no read has settled yet: its head
+// read tells whether a PDF is inside, whose first page is its thumbnail.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "psd" | "illustrator" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
 // roughly the same size. The video and pdf generators use it for both dimensions (a square fit), the
@@ -130,6 +131,7 @@ const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
 //   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
 //   5. jxl                       -> raster (client-side: the browser's own decoder, where it has one)
 //      psd, psb                  -> psd    (the embedded thumbnail, decoded by the SDK)
+//      ai, unread                -> illustrator (its head read, then the pdf generator)
 //   6. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
 //   7. everything else           -> none
 //
@@ -167,6 +169,10 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 
 	if (ext === "psd" || ext === "psb") {
 		return "psd"
+	}
+
+	if (needsContentSniff(item, verdict) === "pdfCompatible") {
+		return "illustrator"
 	}
 
 	return base.data.canMakeThumbnail ? "sdk" : "none"

@@ -137,10 +137,20 @@ export function pdfTooLargeToEdit(item: DriveItem, variant: DriveVariant, maxByt
 	return pdfEditable(item, variant) && pdfOverEditLimit(item, maxBytes)
 }
 
+// PDF-compatible Illustrator files open in the PDF viewer, but a save through the PDF tools would drop the Illustrator
+// data they carry beside the PDF: view only.
+const VIEW_ONLY_PDF_EXTENSIONS: ReadonlySet<string> = new Set(["ai"])
+
 function pdfEditable(item: DriveItem, variant: DriveVariant): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return variant === "drive" && base.type === "file" && !base.data.undecryptable && previewType(item) === "pdf"
+	return (
+		variant === "drive" &&
+		base.type === "file" &&
+		!base.data.undecryptable &&
+		previewType(item) === "pdf" &&
+		!VIEW_ONLY_PDF_EXTENSIONS.has(extensionOf(driveItemName(base)))
+	)
 }
 
 function pdfOverEditLimit(item: DriveItem, maxBytes: number): boolean {

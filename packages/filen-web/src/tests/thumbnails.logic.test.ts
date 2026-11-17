@@ -135,6 +135,12 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed("art.psb", { canMakeThumbnail: false }))).toBe("psd")
 	})
 
+	it("routes an unread Illustrator file to its head read, and a read one to the PDF generator or to none", () => {
+		expect(thumbnailCategory(fileNamed("logo.ai", { canMakeThumbnail: false }))).toBe("illustrator")
+		expect(thumbnailCategory(fileNamed("logo.ai", { canMakeThumbnail: false }), "pdfCompatible")).toBe("pdf")
+		expect(thumbnailCategory(fileNamed("logo.ai", { canMakeThumbnail: false }), "notPdfCompatible")).toBe("none")
+	})
+
 	it("routes a JPEG XL to the browser's own decoder, whatever the SDK says", () => {
 		expect(thumbnailCategory(fileNamed("photo.jxl", { canMakeThumbnail: false }))).toBe("raster")
 		expect(thumbnailCategory(fileNamed("photo.JXL", { canMakeThumbnail: true }))).toBe("raster")

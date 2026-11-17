@@ -12,6 +12,8 @@ import {
 	type PreviewSaveDeps
 } from "@/features/drive/lib/previewSave.logic"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { recordFileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
+import { previewType } from "@/features/drive/lib/preview.logic"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -268,6 +270,16 @@ describe("canEditPdf / pdfTooLargeToEdit", () => {
 		expect(canEditPdf(pdf(1_024n), "drive", LIMIT)).toBe(true)
 		expect(canEditPdf(pdf(4_096n), "drive", LIMIT)).toBe(true)
 		expect(pdfTooLargeToEdit(pdf(4_096n), "drive", LIMIT)).toBe(false)
+	})
+
+	it("only views a PDF-compatible Illustrator file", () => {
+		const ai = fileItem({ size: 1_024n, meta: byMime("logo.ai", "application/illustrator") })
+
+		recordFileKindVerdict(ai.data.uuid, "pdfCompatible", { memoryOnly: true })
+
+		expect(previewType(ai)).toBe("pdf")
+		expect(canEditPdf(ai, "drive", LIMIT)).toBe(false)
+		expect(pdfTooLargeToEdit(ai, "drive", LIMIT)).toBe(false)
 	})
 
 	it("is too large only when everything but the size passes", () => {

@@ -37,7 +37,8 @@ const KINDS: Readonly<Record<string, string>> = {
 	pot: "presentation",
 	vhd: "code",
 	key: "iwork",
-	sqlite: "sqlite"
+	sqlite: "sqlite",
+	pdf: "pdf"
 }
 
 function kindOf(extension: string): string | null {
@@ -132,7 +133,11 @@ const ROWS: Row[] = [
 	["cache.db", null, 3 * MIB, "notSqlite", null, "db", "sniff", true, false],
 	["notes.db", "text/plain", 300, null, "text", "txt", "mime", true, true],
 	["clip.db", "audio/mpeg", 300, null, "audio", "mp3", "mime", true, true],
-	["app.db", "application/vnd.sqlite3", 3 * MIB, null, "sqlite", "sqlite", "mime", true, true]
+	["app.db", "application/vnd.sqlite3", 3 * MIB, null, "sqlite", "sqlite", "mime", true, true],
+	// An .ai is a PDF only when its head holds one; unread, it reads like an unknown extension (stored as a PDF, it is one).
+	["logo.ai", "application/illustrator", 3 * MIB, null, null, "ai", "default", true, true],
+	["logo.ai", null, 3 * MIB, "pdfCompatible", "pdf", "pdf", "sniff", true, false],
+	["logo.ai", null, 3 * MIB, "notPdfCompatible", null, "ai", "sniff", true, false]
 ]
 
 describe("resolveFileKind", () => {
@@ -260,7 +265,7 @@ describe("verdictChangesKind", () => {
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
 		expect(
-			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))
+			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ai", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))
 		).toEqual([
 			"transportStream",
 			"transportStream",
@@ -269,6 +274,7 @@ describe("content sniffs", () => {
 			"virtualDisk",
 			"iworkPackage",
 			"sqlite",
+			"pdfCompatible",
 			null,
 			null,
 			null,
@@ -283,7 +289,8 @@ describe("content sniffs", () => {
 			presentationTemplate: ["presentationBinary", "notPresentationBinary"],
 			virtualDisk: ["virtualDisk", "notVirtualDisk"],
 			iworkPackage: ["iworkPackage", "notIworkPackage"],
-			sqlite: ["sqlite", "notSqlite"]
+			sqlite: ["sqlite", "notSqlite"],
+			pdfCompatible: ["pdfCompatible", "notPdfCompatible"]
 		})
 	})
 
@@ -294,6 +301,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("vhd")).toEqual(["vhd", null, "vhd"])
 		expect(sniffCandidates("key")).toEqual([null, "key", null])
 		expect(sniffCandidates("db")).toEqual([null, "sqlite", null])
+		expect(sniffCandidates("ai")).toEqual([null, "pdf", null])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 

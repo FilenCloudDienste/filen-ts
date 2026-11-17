@@ -43,6 +43,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notIworkPackage":
 		case "sqlite":
 		case "notSqlite":
+		case "pdfCompatible":
+		case "notPdfCompatible":
 			return false
 	}
 }

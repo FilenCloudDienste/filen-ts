@@ -215,6 +215,10 @@ const { supportsNativeImageMock, thumbnailRasterMock } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/nativeImageSupport", () => ({ supportsNativeImage: supportsNativeImageMock }))
+
+const { runContentSniffMock } = vi.hoisted(() => ({ runContentSniffMock: vi.fn<(id: string) => Promise<string>>() }))
+
+vi.mock("@/features/preview/lib/contentSniff", () => ({ runContentSniff: runContentSniffMock }))
 vi.mock("@/features/drive/lib/thumbRaster", () => ({ thumbnailRaster: thumbnailRasterMock }))
 
 import {
@@ -224,6 +228,7 @@ import {
 	generateSvgThumb,
 	generateRasterThumb,
 	generatePsdThumb,
+	generateIllustratorThumb,
 	rasterizeSvgThumb,
 	resetDriveKeyframes,
 	warmUploadThumbnail
@@ -308,14 +313,15 @@ beforeEach(() => {
 
 describe("registration", () => {
 	// The old image and heic arms are gone, both folded into the single sdk arm.
-	it("registers sdk/video/pdf/svg/raster/psd generators exactly once, at import", () => {
+	it("registers sdk/video/pdf/svg/raster/psd/illustrator generators exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
 			["sdk", generateSdkThumb],
 			["video", generateVideoThumb],
 			["pdf", generatePdfThumb],
 			["svg", generateSvgThumb],
 			["raster", generateRasterThumb],
-			["psd", generatePsdThumb]
+			["psd", generatePsdThumb],
+			["illustrator", generateIllustratorThumb]
 		])
 	})
 })
@@ -779,6 +785,31 @@ function jxlHead30Bit(heightMinusOne: number): number[] {
 
 	return [...out, 0, 0]
 }
+
+describe("generateIllustratorThumb", () => {
+	it("has none for PostScript alone, after its head read", async () => {
+		runContentSniffMock.mockResolvedValue("notPdfCompatible")
+
+		await expect(
+			generateIllustratorThumb(itemAsBaseFile(narrowItem(namedFile("logo.ai", "application/illustrator"))), live())
+		).resolves.toEqual({
+			type: "unavailable",
+			reason: "unsupported"
+		})
+		expect(runContentSniffMock.mock.calls[0]?.[0]).toBe("pdfCompatible")
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("fails, counting toward the blacklist, when the head could not be read", async () => {
+		runContentSniffMock.mockRejectedValue(new Error("network"))
+
+		await expect(
+			generateIllustratorThumb(itemAsBaseFile(narrowItem(namedFile("logo.ai", "application/illustrator"))), live())
+		).resolves.toEqual({
+			type: "failed"
+		})
+	})
+})
 
 describe("generatePsdThumb", () => {
 	const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9])

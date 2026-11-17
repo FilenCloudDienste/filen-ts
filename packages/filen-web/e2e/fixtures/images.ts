@@ -2,7 +2,7 @@ import { gzipSync } from "node:zlib"
 import { encodeQoi, qoiTestPixels } from "@/tests/support/qoiBytes"
 import { bigTiffHeader, encodeTiff } from "@/tests/support/tiffBytes"
 import { encodePsd } from "@/tests/support/psdBytes"
-import { JPEG_BYTES } from "../helpers/fixtureBytes"
+import { JPEG_BYTES, PDF_BYTES } from "../helpers/fixtureBytes"
 import { JXL_PROBE_BASE64 } from "@/lib/imageProbeFixtures"
 import { buildZip } from "../helpers/archiveFixtures"
 import { scenarioModule } from "./scenarios"
@@ -14,6 +14,8 @@ export const QOI_SIZE = { width: 96, height: 64 } as const
 export const TIFF_PAGE = { width: 120, height: 80 } as const
 
 export const PSD_SIZE = { width: 90, height: 60 } as const
+
+const POSTSCRIPT_AI = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
 // Taller than a view, so stepping pages scrolls the column.
 const TIFF_TALL_PAGE = { width: 200, height: 1600 } as const
 
@@ -42,7 +44,8 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"images-svgz": ["img-sample.svgz", "img-bomb.svgz"],
 		"images-tiff": ["img-single.tif", "img-multipage.tiff", "img-big.tif"],
 		"images-archive": ["img-entries.zip"],
-		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"]
+		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"],
+		"images-ai": ["img-pdfcompat.ai", "img-postscript.ai"]
 	},
 	() => ({
 		"img-sample.qoi": { buffer: qoiSample(), mimeType: "image/x-qoi" },
@@ -89,6 +92,9 @@ export const IMAGE_SCENARIOS = scenarioModule(
 			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { version: 2 })),
 			mimeType: "image/vnd.adobe.photoshop"
 		},
+		// Saved PDF-compatible: a PDF inside. Without it, PostScript only.
+		"img-pdfcompat.ai": { buffer: PDF_BYTES, mimeType: "application/illustrator" },
+		"img-postscript.ai": { buffer: Buffer.from(POSTSCRIPT_AI, "latin1"), mimeType: "application/illustrator" },
 		"img-entries.zip": {
 			buffer: buildZip([
 				{ name: IMAGE_ENTRIES.qoi, data: qoiSample() },

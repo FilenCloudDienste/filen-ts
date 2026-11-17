@@ -1,4 +1,4 @@
-import { runTimeout, driveItemName, Semaphore, type DeferFn, type Result } from "@filen/shared"
+import { runTimeout, driveItemName, Semaphore, type DeferFn, type FileVerdict, type Result } from "@filen/shared"
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
 import type { File as SdkFile } from "@filen/sdk-rs"
@@ -64,7 +64,8 @@ import { frameHints, probeRecords } from "@/features/videos/lib/records"
 import FrameWorker from "@/features/videos/workers/frame.worker.ts?worker"
 import type { FrameCaptureParams, FrameCaptureResult, FrameWorkerApi } from "@/features/videos/workers/frame.worker"
 import { rangeReads } from "@/lib/media/rangeReads"
-import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
+import { recordContentVerdict, recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
+import { runContentSniff } from "@/features/preview/lib/contentSniff"
 import { thumbnailRaster } from "@/features/drive/lib/thumbRaster"
 import { gunzipSvg } from "@/features/preview/lib/svgz"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
@@ -1023,6 +1024,35 @@ export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 	}
 }
 
+// An Illustrator file no read has settled: its first kilobyte tells whether a PDF is inside (the verdict is kept, so
+// the next ask goes to the pdf generator or to none), and only then is its first page drawn as a PDF's. PostScript
+// alone has none.
+export const generateIllustratorThumb: ThumbGenerator = async (item, signal) => {
+	let verdict: FileVerdict
+
+	try {
+		verdict = await runContentSniff("pdfCompatible", { kind: "file", file: narrowToAnyFile(item) }, crypto.randomUUID(), {
+			access: "authed",
+			scope: previewCacheScope("authed", undefined),
+			signal
+		})
+	} catch (e) {
+		if (!signal.aborted) {
+			log.warn("thumb-generators", "generateIllustratorThumb: head read failed", item.data.uuid, e)
+		}
+
+		return { type: "failed" }
+	}
+
+	const meta = item.data.decryptedMeta
+
+	if (meta !== null) {
+		recordContentVerdict({ uuid: item.data.uuid, name: meta.name, mime: meta.mime, size: item.data.size }, verdict)
+	}
+
+	return verdict === "pdfCompatible" ? await generatePdfThumb(item, signal) : { type: "unavailable", reason: "unsupported" }
+}
+
 // One pdf.js worker shared by every PDF thumbnail, instead of one spun up and torn down per file.
 // Handed to pdf.js as the host's own (openPdf's "shared" worker), so a task's destroy() ends only its own document
 // and never the worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
@@ -1269,3 +1299,4 @@ registerThumbGenerator("pdf", generatePdfThumb)
 registerThumbGenerator("svg", generateSvgThumb)
 registerThumbGenerator("raster", generateRasterThumb)
 registerThumbGenerator("psd", generatePsdThumb)
+registerThumbGenerator("illustrator", generateIllustratorThumb)

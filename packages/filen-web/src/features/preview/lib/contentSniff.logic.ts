@@ -30,6 +30,26 @@ export function isZipHead(head: Uint8Array): boolean {
 	return head.length >= ZIP_LOCAL_HEADER.length && ZIP_LOCAL_HEADER.every((byte, index) => head[index] === byte)
 }
 
+// Where Illustrator's PDF-compatible save begins its PDF: the PDF header within the file's first kilobyte (ISO 32000-1
+// §7.5.2 lets readers find it there, after bytes another program put first).
+const PDF_HEADER = Uint8Array.from("%PDF-", char => char.charCodeAt(0))
+const PDF_HEADER_WITHIN = 1024
+
+// The bytes a header starting at the kilobyte's last byte still needs.
+const PDF_HEADER_HEAD_BYTES = PDF_HEADER_WITHIN + PDF_HEADER.length - 1
+
+export function hasPdfHeader(head: Uint8Array): boolean {
+	const last = Math.min(PDF_HEADER_WITHIN - 1, head.length - PDF_HEADER.length)
+
+	for (let at = 0; at <= last; at++) {
+		if (PDF_HEADER.every((byte, index) => head[at + index] === byte)) {
+			return true
+		}
+	}
+
+	return false
+}
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
@@ -52,6 +72,12 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: SQLITE_HEADER.length,
 		decide: head => (isSqliteHeader(head) ? "sqlite" : "notSqlite")
+	},
+	// An Illustrator file's first kilobyte: a PDF inside opens in the PDF viewer, PostScript only has no viewer.
+	pdfCompatible: {
+		mode: "head",
+		headBytes: PDF_HEADER_HEAD_BYTES,
+		decide: head => (hasPdfHeader(head) ? "pdfCompatible" : "notPdfCompatible")
 	}
 }
 
