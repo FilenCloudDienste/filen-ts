@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { ALL_FORMATS, BufferSource, Input } from "mediabunny"
 import { BlockCache } from "@/lib/media/blockCache"
-import { probedCodecFor, probedCodecs, waveProbedCodec } from "@/workers/remux/audioInput"
+import { mpegLayerCodec, probedCodecFor, probedCodecs, waveProbedCodec } from "@/workers/remux/audioInput"
 import {
 	FTYP,
 	audioEntry,
@@ -122,14 +122,29 @@ describe("probedCodecs — container track IDs that are not mediabunny's track i
 		expect(probedCodecFor(probed, 1, null)).toBeNull()
 	})
 
-	it("takes the walk's MP1 or MP2 over the MP3 mediabunny calls any MPEG audio, and no other codec over MP3", () => {
-		const probed = new Map([
-			[1, { codec: "mp2" as const }],
-			[2, { codec: "wmav2" as const }]
-		])
+	it("never takes a walked codec over the MP3 mediabunny names: a track's place alone does not say it is the same", () => {
+		const probed = new Map([[1, { codec: "mp2" as const }]])
 
-		expect(probedCodecFor(probed, 1, "mp3")?.codec).toBe("mp2")
-		expect(probedCodecFor(probed, 2, "mp3")).toBeNull()
+		expect(probedCodecFor(probed, 1, "mp3")).toBeNull()
+	})
+
+	it("names a Matroska MP2 track, which mediabunny leaves unnamed, for FFmpeg's MP2 decoder", async () => {
+		const file = concat(
+			ebmlHeader(),
+			segment(
+				element(0x1549a966, uintElement(0x2ad7b1, 1_000_000), element(0x4489, f64(30_037))),
+				element(
+					0x1654ae6b,
+					trackEntry(3, 2, "A_AAC", element(0x63a2, AAC_LC_48K_STEREO), STEREO_48K),
+					trackEntry(4, 2, "A_MPEG/L2", STEREO_48K)
+				)
+			)
+		)
+
+		expect(await matched(file)).toEqual([
+			{ id: 1, number: 1, codec: "aac", walked: null },
+			{ id: 2, number: 2, codec: null, walked: "mp2" }
+		])
 	})
 })
 
@@ -157,6 +172,39 @@ function waveFormat(
 
 	return out
 }
+
+// Bare MPEG audio, `frames` frames of `header`'s (a whole frame each of `bytes`).
+function mpegAudio(header: number[], bytes: number, frames: number): Uint8Array {
+	const out = new Uint8Array(bytes * frames)
+
+	for (let i = 0; i < frames; i++) {
+		out.set(header, i * bytes)
+	}
+
+	return out
+}
+
+describe("mpegLayerCodec", () => {
+	it("picks MP2 or MP1 by the first frame of what mediabunny calls MP3, and leaves MP3 to its own decoder", async () => {
+		const layerOf = async (bytes: Uint8Array): Promise<string | null> => {
+			const input = new Input({ source: new BufferSource(bytes), formats: ALL_FORMATS })
+
+			try {
+				const track = (await input.getAudioTracks())[0]
+
+				expect(await track?.getCodec()).toBe("mp3")
+
+				return track === undefined ? null : ((await mpegLayerCodec(track))?.codec ?? null)
+			} finally {
+				input.dispose()
+			}
+		}
+
+		// MPEG-1 at 44.1 kHz, 128 kbit/s: layer II frames of 417 bytes, layer III frames of 417 bytes.
+		expect(await layerOf(mpegAudio([0xff, 0xfd, 0x80, 0x04], 417, 40))).toBe("mp2")
+		expect(await layerOf(mpegAudio([0xff, 0xfb, 0x90, 0x04], 417, 40))).toBeNull()
+	})
+})
 
 describe("waveProbedCodec", () => {
 	it("picks WMA's and ADPCM's decoder by the format tag, with the format's fields and extra bytes", () => {

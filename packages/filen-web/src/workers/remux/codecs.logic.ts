@@ -77,7 +77,7 @@ export function isFfmpegReaderAudio(codec: AudioCodec | null): boolean {
 }
 
 // Whether a track mediabunny names `codec` may be one the walk decodes through FFmpeg instead: one for FFmpeg's own
-// reader, and MPEG audio, which mediabunny calls MP3 whatever its layer (an MP1 or MP2 stream).
+// reader. MPEG audio, which mediabunny calls MP3 whatever its layer, is told apart by its own first frame instead.
 export function walkDecides(codec: AudioCodec | null): boolean {
-	return isFfmpegReaderAudio(codec) || codec === "mp3"
+	return isFfmpegReaderAudio(codec)
 }

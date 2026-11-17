@@ -23,14 +23,16 @@ describe("AUDIO_FORMATS", () => {
 			"eac3",
 			"ec3",
 			"dts",
-			"wma"
+			"wma",
+			"mp2",
+			"mpa"
 		])
 	})
 
 	it("marks only the formats no browser plays as they are as decoded", () => {
 		const decoded = [...AUDIO_FORMATS].filter(([, format]) => format.decoded === true).map(([extension]) => extension)
 
-		expect(decoded).toEqual(["mka", "ac3", "eac3", "ec3", "dts", "wma"])
+		expect(decoded).toEqual(["mka", "ac3", "eac3", "ec3", "dts", "wma", "mp2", "mpa"])
 	})
 
 	it("has no synthesized formats and no format caps yet", () => {

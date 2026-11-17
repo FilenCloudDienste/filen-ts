@@ -33,7 +33,10 @@ export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, A
 	["ec3", { decoded: true }],
 	["dts", { decoded: true }],
 	// Windows Media Audio, in ASF.
-	["wma", { decoded: true }]
+	["wma", { decoded: true }],
+	// Bare MPEG audio of any layer: MP1 and MP2 only FFmpeg decodes.
+	["mp2", { decoded: true }],
+	["mpa", { decoded: true }]
 ])
 
 // Subtitle files a text editor reads as they are (videos/sidecars.ts names their formats). Image-based tracks (VobSub,

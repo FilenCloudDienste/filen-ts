@@ -494,6 +494,8 @@ const MATROSKA_CODECS: readonly (readonly [string, MediaCodec])[] = [
 	["A_VORBIS", "vorbis"],
 	["A_FLAC", "flac"],
 	["A_MPEG/L3", "mp3"],
+	["A_MPEG/L2", "mp2"],
+	["A_MPEG/L1", "mp1"],
 	["A_ALAC", "alac"],
 	["V_MPEG4/ISO/AVC", "h264"],
 	["V_MPEGH/ISO/HEVC", "hevc"],

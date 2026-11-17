@@ -10,7 +10,7 @@ import {
 	type InputAudioTrack,
 	type InputFormat
 } from "mediabunny"
-import { BlockSource, walkContainer } from "@filen/shared/videos"
+import { BlockSource, mpegAudioHeader, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
 import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
 import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
@@ -622,8 +622,7 @@ export async function probedCodecs(cache: BlockCache): Promise<Map<number, Probe
 }
 
 // The walk's codec for one of mediabunny's audio tracks (`number` is InputAudioTrack.number). A codec mediabunny
-// names itself must agree, so a track only one side lists cannot shift a walked codec onto another stream; the one
-// exception is MPEG audio, which mediabunny calls MP3 whatever its layer, where the walk's MP1 or MP2 wins.
+// names itself must agree, so a track only one side lists cannot shift a walked codec onto another stream.
 export function probedCodecFor(probed: Map<number, ProbedCodec>, number: number, codec: string | null): ProbedCodec | null {
 	const known = probed.get(number)
 
@@ -631,7 +630,20 @@ export function probedCodecFor(probed: Map<number, ProbedCodec>, number: number,
 		return null
 	}
 
-	return codec === null || codec === known.codec || (codec === "mp3" && (known.codec === "mp1" || known.codec === "mp2")) ? known : null
+	return codec === null || codec === known.codec ? known : null
+}
+
+// MPEG audio, which mediabunny calls MP3 whatever its layer: the layer the track's own first frame states picks the
+// decoder, MP1 or MP2 through FFmpeg. Null for layer III, or where the first packet starts no frame.
+export async function mpegLayerCodec(track: InputAudioTrack): Promise<ProbedCodec | null> {
+	const packet = await new EncodedPacketSink(track).getFirstPacket().catch(() => null)
+	const header = packet === null ? null : mpegAudioHeader(packet.data, 0)
+
+	if (header === null || header.layer === 3) {
+		return null
+	}
+
+	return waveProbedCodec(header.layer === 1 ? "mp1" : "mp2", null, header.rate, header.channels)
 }
 
 // An MP3 or ADTS stream's duration, which no header gives: its size over the byte rate of its first frames,
@@ -701,8 +713,14 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 	for (const track of ordered) {
 		const codec = await track.getCodec()
 
-		// A codec mediabunny does not know, or MPEG audio it calls MP3 that the walk finds to be MP1/MP2: perhaps one
-		// only FFmpeg decodes.
+		const layer = codec === "mp3" ? await mpegLayerCodec(track) : null
+
+		if (layer !== null) {
+			chosen = { track, codec: layer.codec, ffmpeg: layer }
+			break
+		}
+
+		// A codec mediabunny does not know: perhaps one only FFmpeg decodes.
 		if (walkDecides(codec)) {
 			probed ??= await probedCodecs(cache)
 

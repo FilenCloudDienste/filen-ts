@@ -357,8 +357,9 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 		expect(
 			[...IMAGE_FORMATS.keys()].filter(extension => !JPEG_ALIASES.includes(extension) && !DECODED_SINCE.includes(extension))
 		).toEqual(LEGACY_IMAGE_TIER)
-		// Plus WMA, decoded by FFmpeg in the remux worker, added after the policy table.
-		expect([...AUDIO_FORMATS.keys()]).toEqual([...LEGACY_AUDIO_TIER, "wma"])
+		// Plus WMA and bare MP2/MPA, decoded by FFmpeg in the remux worker, added after the policy table.
+		expect([...AUDIO_FORMATS.keys()]).toEqual([...LEGACY_AUDIO_TIER, "wma", "mp2", "mpa"])
+		expect(audioRoute({ extension: "mp2", contentType: "audio/mpeg", demoted: false })).toBe("transcode")
 		expect(previewCategoryForExtension("wma")).toBe("audio")
 		expect(audioRoute({ extension: "wma", contentType: "audio/x-ms-wma", demoted: false })).toBe("transcode")
 		expect([...HEIC_EXTENSIONS]).toEqual([...LEGACY_HEIC])

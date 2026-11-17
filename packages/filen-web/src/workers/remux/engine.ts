@@ -48,6 +48,7 @@ import {
 	containerPackets,
 	estimatedStreamDuration,
 	ffmpegSampleReader,
+	mpegLayerCodec,
 	probedCodecFor,
 	probedCodecs,
 	rawPackets,
@@ -314,8 +315,14 @@ export class RemuxEngine {
 			track.getDisposition()
 		])
 
-		// A codec mediabunny does not know (or TrueHD) may be one FFmpeg decodes, which the container walk names.
-		const ffmpeg = walkDecides(codec) ? probedCodecFor(await this.probedCodecs(), track.number, codec) : null
+		// A codec mediabunny does not know (or TrueHD) may be one FFmpeg decodes, which the container walk names; MPEG
+		// audio's own first frame says whether it is MP1 or MP2.
+		const ffmpeg =
+			codec === "mp3"
+				? await mpegLayerCodec(track)
+				: walkDecides(codec)
+					? probedCodecFor(await this.probedCodecs(), track.number, codec)
+					: null
 
 		// Audio tracks go by their place among the file's audio tracks, which the probe's audio list (container order)
 		// gives too: InputTrack.id counts every track, and is not the container's own ID either.
