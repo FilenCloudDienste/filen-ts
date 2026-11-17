@@ -69,6 +69,9 @@ class Synth {
 	public readonly kind: AudioSynthKind
 	public readonly nested: NestedWorker<SynthRequest, SynthResponse>
 	private readonly held = new Map<string, Held>()
+	// A renderer a closed reader left, by key: the next reader of the key seeks it rather than opening another, which
+	// would parse the song again (and, for a module, decode every sample). One per key, so it costs one renderer.
+	private readonly parked = new Map<string, { worker: Worker; handle: number }>()
 	// What a new instance is told first (the compiled libopenmpt, the MIDI synthesizer's sound bank), the instance last
 	// told, and the telling.
 	private readonly setup: Setup
@@ -189,13 +192,68 @@ class Synth {
 		}
 	}
 
+	// A renderer for `key` in `worker`: the one a closed reader left, else a new one.
+	public async renderer(worker: Worker, key: string): Promise<number> {
+		const idle = this.parked.get(key)
+
+		if (idle?.worker === worker) {
+			this.parked.delete(key)
+
+			return idle.handle
+		}
+
+		const response = await this.nested.request(worker, { type: "open", key, sampleRate: SAMPLE_RATE }, [], OPEN_TIMEOUT_MS[this.kind])
+
+		if (response.handle === undefined) {
+			throw new Error("the synthesizer opened no renderer")
+		}
+
+		return response.handle
+	}
+
+	// Keeps a closed reader's renderer for the key's next reader, while the key is held there and none is kept yet;
+	// closes it otherwise.
+	public park(worker: Worker, key: string, handle: number): void {
+		if (!this.nested.current(worker)) {
+			return
+		}
+
+		if (this.held.get(key)?.worker === worker && !this.parked.has(key)) {
+			this.parked.set(key, { worker, handle })
+
+			return
+		}
+
+		this.close(worker, handle)
+	}
+
+	private close(worker: Worker, handle: number): void {
+		this.nested
+			.request(worker, { type: "close", handle })
+			.then(response => {
+				this.recycle(worker, response)
+			})
+			.catch(() => undefined)
+	}
+
 	public release(key: string, worker: Worker): void {
 		const held = this.held.get(key)
 
 		if (held?.worker === worker && --held.users <= 0) {
 			this.held.delete(key)
 
+			const idle = this.parked.get(key)
+
+			if (idle?.worker === worker) {
+				this.parked.delete(key)
+			}
+
 			if (this.nested.current(worker)) {
+				// Closed ahead of the unload, answered in order: the unload then finds nothing rendering.
+				if (idle?.worker === worker) {
+					this.nested.request(worker, { type: "close", handle: idle.handle }).catch(() => undefined)
+				}
+
 				this.nested
 					.request(worker, { type: "unload", key })
 					.then(response => {
@@ -251,15 +309,7 @@ function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () 
 	let closed = false
 
 	const opened = (): Promise<number> => {
-		opening ??= synth.nested
-			.request(worker, { type: "open", key, sampleRate: SAMPLE_RATE }, [], OPEN_TIMEOUT_MS[synth.kind])
-			.then(response => {
-				if (response.handle === undefined) {
-					throw new Error("the synthesizer opened no renderer")
-				}
-
-				return response.handle
-			})
+		opening ??= synth.renderer(worker, key)
 
 		return opening
 	}
@@ -299,17 +349,11 @@ function synthReader(synth: Synth, worker: Worker, key: string, isCancelled: () 
 		next: item => chunk(item.timestamp + item.duration),
 		close: () => {
 			closed = true
-			// An open still under way is closed once it lands: a renderer no reader holds would stay in the worker.
+			// Its renderer, once an open still under way lands, goes to the key's next reader or is closed: one no reader
+			// holds would stay in the worker.
 			opening
 				?.then(handle => {
-					if (synth.nested.current(worker)) {
-						synth.nested
-							.request(worker, { type: "close", handle })
-							.then(response => {
-								synth.recycle(worker, response)
-							})
-							.catch(() => undefined)
-					}
+					synth.park(worker, key, handle)
 				})
 				.catch(() => undefined)
 

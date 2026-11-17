@@ -289,18 +289,55 @@ describe("MIDI synthesizer", () => {
 				}
 			}
 
+			// The first's renderer is kept for the key's next reader; the second's, closed, shares its samples with it.
 			await first.close()
-			// Its close reaches the worker on a later turn.
+			await second.close()
+			// The closes reach the worker on a later turn.
 			await new Promise(resolve => setTimeout(resolve, 50))
 			expect(releases).not.toHaveBeenCalled()
-			await second.close()
+			// The key's last input goes, and with it the kept renderer and what it decoded.
+			await input.close()
 			await vi.waitFor(() => {
 				expect(releases).toHaveBeenCalled()
 			})
 		} finally {
 			releases.mockRestore()
 		}
+	})
 
+	it("plays a song again through the renderer a reader left at its end, seeking it back", async () => {
+		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
+		const source = serve(song(4))
+		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "midi", key: "replay" })
+		const done = input.reader({} as never, () => false)
+
+		for (let item = await done.first(0); item !== null;) {
+			const next = await done.next(item)
+
+			item.sample.close()
+			item = next
+		}
+
+		await done.close()
+
+		// The next reader takes the renderer over, its sequencer stopped at the end: the first note sounds again.
+		const replay = input.reader({} as never, () => false)
+		let loudest = 0
+
+		for (let item = await replay.first(0), count = 0; item !== null && count < 6; count++) {
+			const samples = new Float32Array(item.sample.numberOfFrames)
+
+			item.sample.copyTo(samples, { planeIndex: 0, format: "f32-planar" })
+			loudest = Math.max(loudest, peak(samples))
+
+			const next = await replay.next(item)
+
+			item.sample.close()
+			item = next
+		}
+
+		expect(loudest).toBeGreaterThan(0.001)
+		await replay.close()
 		await input.close()
 	})
 })

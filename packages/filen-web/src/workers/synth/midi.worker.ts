@@ -196,6 +196,11 @@ function seek(renderer: Renderer, seconds: number): number {
 	renderer.sequencer.currentTime = Math.min(position, renderer.song)
 	renderer.position = position
 
+	// A renderer a reader played to the end before (and left for this one) has its sequencer stopped there.
+	if (renderer.sequencer.paused) {
+		renderer.sequencer.play()
+	}
+
 	return position
 }
 

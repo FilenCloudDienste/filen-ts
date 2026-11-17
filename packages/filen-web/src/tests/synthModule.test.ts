@@ -206,26 +206,35 @@ describe("module synthesizer", () => {
 		await input.close()
 	})
 
-	it("closes a renderer whose reader closed while it was still opening", async () => {
+	it("keeps the renderer a reader left while still opening it for the key's next reader, and closes it with the key", async () => {
 		const { synthAudioInput } = await import("@/workers/remux/synthAudioInput")
 		const source = serve(tinyMod())
 		const input = await synthAudioInput(source.port, source.size, "audio", { kind: "module", key: "early" })
 		const reader = input.reader({} as never, () => false)
 		const from = posted.length
+		const types = (type: SynthRequest["type"]) => posted.slice(from).filter(request => request.type === type).length
 		const first = reader.first(0)
 
 		await reader.close()
+
 		const landed = await first.catch(() => null)
 
 		landed?.sample.close()
-		await vi.waitFor(() => {
-			const opened = posted.slice(from).filter(request => request.type === "open").length
-			const closed = posted.slice(from).filter(request => request.type === "close").length
 
-			expect(opened).toBe(1)
-			expect(closed).toBe(1)
-		})
+		// The next reader, a seek's, takes it over: no second parse of the module.
+		const seeking = input.reader({} as never, () => false)
+		const later = await seeking.first(3.3)
+
+		expect(later?.timestamp).toBeCloseTo(3.36, 3)
+		later?.sample.close()
+		await seeking.close()
+		expect(types("open")).toBe(1)
+		expect(types("close")).toBe(0)
+
 		await input.close()
+		await vi.waitFor(() => {
+			expect(types("close")).toBe(1)
+		})
 	})
 
 	it("refuses a file the heap has no room for, and a render it cannot buffer, without losing the instance", async () => {
@@ -303,17 +312,21 @@ describe("module synthesizer", () => {
 		const bytes = tinyMod()
 		const grown = serve(bytes)
 		const input = await synthAudioInput(grown.port, grown.size, "audio", { kind: "module", key: "grown" })
+		// Another file the same instance holds, with nothing rendering for it.
+		const otherSource = serve(tinyMod(31, true))
+		const other = await synthAudioInput(otherSource.port, otherSource.size, "audio", { kind: "module", key: "grown-other" })
 		const reader = input.reader({} as never, () => false)
-
 		const start = await reader.first(0)
 
 		start?.sample.close()
+		await reader.close()
 		heap.reported = 200 * 1024 * 1024
 
 		try {
-			await reader.close()
+			// Its last input goes: the renderer it left is closed, and that close answers the grown heap.
+			await input.close()
 			await vi.waitFor(() => {
-				expect(posted.at(-1)?.type).toBe("close")
+				expect(posted.at(-1)?.type).toBe("unload")
 			})
 			await new Promise(resolve => setTimeout(resolve, 10))
 		} finally {
@@ -321,8 +334,7 @@ describe("module synthesizer", () => {
 		}
 
 		// The old instance still serves the input it has.
-		const again = input.reader({} as never, () => false)
-
+		const again = other.reader({} as never, () => false)
 		const replay = await again.first(0)
 
 		expect(replay?.timestamp).toBe(0)
@@ -336,7 +348,7 @@ describe("module synthesizer", () => {
 		// A fresh instance: the key is loaded into it anew.
 		expect(loads.filter(key => key === "grown").length - before).toBe(1)
 		await next.close()
-		await input.close()
+		await other.close()
 	})
 
 	it("reads a camcorder's MPEG program stream named .mod no further than its head, and a file past the cap not at all", async () => {
