@@ -79,7 +79,7 @@ index 8966d2a6db735c2085b0ff75a56b084ed798a321..23395cf17d7b0929c4a14a873150e6ab
  export declare const trex: (trackData: IsobmffTrackData) => Box;
  /**
 diff --git a/dist/modules/src/isobmff/isobmff-boxes.js b/dist/modules/src/isobmff/isobmff-boxes.js
-index 4e52b92e55ce69492643233b3032ee6877d7791e..0d403c41dd68f7e41718376076570950b4f3a8a5 100644
+index 4e52b92e55ce69492643233b3032ee6877d7791e..4e82cc787316fdaebb61b96990bdc60e332ad14d 100644
 --- a/dist/modules/src/isobmff/isobmff-boxes.js
 +++ b/dist/modules/src/isobmff/isobmff-boxes.js
 @@ -286,7 +286,7 @@ export const moov = (muxer) => {
@@ -113,6 +113,112 @@ index 4e52b92e55ce69492643233b3032ee6877d7791e..0d403c41dd68f7e41718376076570950
  };
  /** Track Extends Box: Contains the default values used by the movie fragments. */
  export const trex = (trackData) => {
+@@ -1304,8 +1315,9 @@ export const tfhd = (trackData) => {
+  */
+ export const tfdt = (trackData) => {
+     assert(trackData.currentChunk);
++    // The first sample's decode time: a fragment's earliest presentation can come later.
+     return fullBox('tfdt', 1, 0, [
+-        u64(intoTimescale(trackData.currentChunk.startTimestamp, trackData.timescale)), // Base Media Decode Time
++        u64(intoTimescale(trackData.currentChunk.samples[0].decodeTimestamp, trackData.timescale)), // Base Media Decode Time
+     ]);
+ };
+ /** Track Run Box: Specifies a run of contiguous samples for a given track. */
+@@ -1335,7 +1347,9 @@ export const trun = (trackData) => {
+     flags |= 0x0200 * +sampleSizePresent; // Sample size present
+     flags |= 0x0400 * +sampleFlagsPresent; // Sample flags present
+     flags |= 0x0800 * +sampleCompositionTimeOffsetsPresent; // Sample composition time offsets present
+-    return fullBox('trun', 1, flags, [
++    // Version 0 (unsigned offsets) unless one is negative: not every reader takes version 1.
++    const signedOffsets = allSampleCompositionTimeOffsets.some(x => x < 0);
++    return fullBox('trun', signedOffsets ? 1 : 0, flags, [
+         u32(trackData.currentChunk.samples.length), // Sample count
+         i32(dataOffset), // Data offset
+         firstSampleFlagsPresent ? u32(allSampleFlags[0]) : [],
+@@ -1344,7 +1358,9 @@ export const trun = (trackData) => {
+             sampleSizePresent ? u32(allSampleSizes[i]) : [], // Sample size
+             sampleFlagsPresent ? u32(allSampleFlags[i]) : [], // Sample flags
+             // Sample composition time offsets
+-            sampleCompositionTimeOffsetsPresent ? i32(allSampleCompositionTimeOffsets[i]) : [],
++            sampleCompositionTimeOffsetsPresent
++                ? (signedOffsets ? i32 : u32)(allSampleCompositionTimeOffsets[i])
++                : [],
+         ]),
+     ]);
+ };
+diff --git a/dist/modules/src/isobmff/isobmff-muxer.d.ts b/dist/modules/src/isobmff/isobmff-muxer.d.ts
+index 74078d872b6994c7c5052fd899de90e65f923860..d05057a749d0a181cf9a8c2ac351c68649afdc95 100644
+--- a/dist/modules/src/isobmff/isobmff-muxer.d.ts
++++ b/dist/modules/src/isobmff/isobmff-muxer.d.ts
+@@ -47,6 +47,8 @@ export type IsobmffTrackData = {
+     lastTimescaleUnits: number | null;
+     lastSample: Sample | null;
+     startTimestampOffset: number | null;
++    /** Seconds decode times lag presentation by, in a fragmented file; null until the first window is seen. */
++    decodeDelay: number | null;
+     finalizedChunks: Chunk[];
+     currentChunk: Chunk | null;
+     compactlyCodedChunkTable: {
+diff --git a/dist/modules/src/isobmff/isobmff-muxer.js b/dist/modules/src/isobmff/isobmff-muxer.js
+index 8d888423e2c4dc0eeb70a3b8892034f406ec6016..b1c63b2eb150840538cc0582e16f4cfabe0a8d2b 100644
+--- a/dist/modules/src/isobmff/isobmff-muxer.js
++++ b/dist/modules/src/isobmff/isobmff-muxer.js
+@@ -302,6 +302,7 @@ export class IsobmffMuxer extends Muxer {
+             lastTimescaleUnits: null,
+             lastSample: null,
+             startTimestampOffset: null,
++            decodeDelay: null,
+             finalizedChunks: [],
+             currentChunk: null,
+             compactlyCodedChunkTable: [],
+@@ -403,6 +404,7 @@ export class IsobmffMuxer extends Muxer {
+             lastTimescaleUnits: null,
+             lastSample: null,
+             startTimestampOffset: null,
++            decodeDelay: null,
+             finalizedChunks: [],
+             currentChunk: null,
+             compactlyCodedChunkTable: [],
+@@ -440,6 +442,7 @@ export class IsobmffMuxer extends Muxer {
+             lastTimescaleUnits: null,
+             lastSample: null,
+             startTimestampOffset: null,
++            decodeDelay: null,
+             finalizedChunks: [],
+             currentChunk: null,
+             compactlyCodedChunkTable: [],
+@@ -726,6 +729,22 @@ export class IsobmffMuxer extends Muxer {
+         }
+         const sortedTimestamps = trackData.timestampProcessingQueue.map(x => x.timestamp).sort((a, b) => a - b);
+         if (this.isFragmented) {
++            // Decode times lag presentation by the reorder delay, so no sample is presented before it is decoded and
++            // composition offsets stay non-negative. The delay is the first window's; a later one needing more has its
++            // decode times held at or before every presentation still to come.
++            const queue = trackData.timestampProcessingQueue;
++            if (trackData.decodeDelay === null) {
++                let delay = 0;
++                for (let i = 0; i < queue.length; i++) {
++                    delay = Math.max(delay, sortedTimestamps[i] - queue[i].timestamp);
++                }
++                trackData.decodeDelay = delay;
++            }
++            let bound = Infinity;
++            for (let i = queue.length - 1; i >= 0; i--) {
++                bound = Math.min(bound, queue[i].timestamp);
++                sortedTimestamps[i] = Math.min(sortedTimestamps[i] - trackData.decodeDelay, bound);
++            }
+             trackData.startTimestampOffset ??= Math.min(sortedTimestamps[0], 0);
+         }
+         else {
+@@ -820,7 +839,7 @@ export class IsobmffMuxer extends Muxer {
+             // the last sample's duration in each fragment be "0" for fragmented files. The guess we make here is
+             // actually correct most of the time, since typically, no delta frame with a lower timestamp follows the key
+             // frame (although it can happen).
+-            const timescaleUnits = intoTimescale(nextSample.timestamp, trackData.timescale, false);
++            const timescaleUnits = intoTimescale(nextSample.timestamp - (trackData.decodeDelay ?? 0), trackData.timescale, false);
+             const delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+             trackData.lastSample.timescaleUnitsToNextSample = delta;
+         }
 diff --git a/dist/modules/src/matroska/matroska-demuxer.js b/dist/modules/src/matroska/matroska-demuxer.js
 index 149566a8f4aba2e7f6bfbdfcabce6c192468783f..1eca1c096f0c74612e20628d2329f74e37d8354b 100644
 --- a/dist/modules/src/matroska/matroska-demuxer.js
@@ -178,7 +284,7 @@ index a4caccedc192e8811f38d1f0d47cdb1b4a02af03..391244542ff45f130b392c74a08ce82b
              throw new TypeError('options.onFtyp, when provided, must be a function.');
          }
 diff --git a/src/isobmff/isobmff-boxes.ts b/src/isobmff/isobmff-boxes.ts
-index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..0a9815a52e576e48e33f8e16ea2672d1ac69b80a 100644
+index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..4d76bdb8a0de4bf5d8bbbe5935a24e5896c66721 100644
 --- a/src/isobmff/isobmff-boxes.ts
 +++ b/src/isobmff/isobmff-boxes.ts
 @@ -397,7 +397,7 @@ export const moov = (muxer: IsobmffMuxer) => {
@@ -214,6 +320,119 @@ index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..0a9815a52e576e48e33f8e16ea2672d1
  };
  
  /** Track Extends Box: Contains the default values used by the movie fragments. */
+@@ -1640,8 +1653,9 @@ export const tfhd = (trackData: IsobmffTrackData) => {
+ export const tfdt = (trackData: IsobmffTrackData) => {
+ 	assert(trackData.currentChunk);
+ 
++	// The first sample's decode time: a fragment's earliest presentation can come later.
+ 	return fullBox('tfdt', 1, 0, [
+-		u64(intoTimescale(trackData.currentChunk.startTimestamp, trackData.timescale)), // Base Media Decode Time
++		u64(intoTimescale(trackData.currentChunk.samples[0]!.decodeTimestamp, trackData.timescale)), // Base Media Decode Time
+ 	]);
+ };
+ 
+@@ -1679,7 +1693,10 @@ export const trun = (trackData: IsobmffTrackData) => {
+ 	flags |= 0x0400 * +sampleFlagsPresent; // Sample flags present
+ 	flags |= 0x0800 * +sampleCompositionTimeOffsetsPresent; // Sample composition time offsets present
+ 
+-	return fullBox('trun', 1, flags, [
++	// Version 0 (unsigned offsets) unless one is negative: not every reader takes version 1.
++	const signedOffsets = allSampleCompositionTimeOffsets.some(x => x < 0);
++
++	return fullBox('trun', signedOffsets ? 1 : 0, flags, [
+ 		u32(trackData.currentChunk.samples.length), // Sample count
+ 		i32(dataOffset), // Data offset
+ 		firstSampleFlagsPresent ? u32(allSampleFlags[0]!) : [],
+@@ -1688,7 +1705,9 @@ export const trun = (trackData: IsobmffTrackData) => {
+ 			sampleSizePresent ? u32(allSampleSizes[i]!) : [], // Sample size
+ 			sampleFlagsPresent ? u32(allSampleFlags[i]!) : [], // Sample flags
+ 			// Sample composition time offsets
+-			sampleCompositionTimeOffsetsPresent ? i32(allSampleCompositionTimeOffsets[i]!) : [],
++			sampleCompositionTimeOffsetsPresent
++				? (signedOffsets ? i32 : u32)(allSampleCompositionTimeOffsets[i]!)
++				: [],
+ 		]),
+ 	]);
+ };
+diff --git a/src/isobmff/isobmff-muxer.ts b/src/isobmff/isobmff-muxer.ts
+index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86b8aeb849 100644
+--- a/src/isobmff/isobmff-muxer.ts
++++ b/src/isobmff/isobmff-muxer.ts
+@@ -101,6 +101,8 @@ export type IsobmffTrackData = {
+ 	lastTimescaleUnits: number | null;
+ 	lastSample: Sample | null;
+ 	startTimestampOffset: number | null;
++	/** Seconds decode times lag presentation by, in a fragmented file; null until the first window is seen. */
++	decodeDelay: number | null;
+ 
+ 	finalizedChunks: Chunk[];
+ 	currentChunk: Chunk | null;
+@@ -544,6 +546,7 @@ export class IsobmffMuxer extends Muxer {
+ 			lastTimescaleUnits: null,
+ 			lastSample: null,
+ 			startTimestampOffset: null,
++			decodeDelay: null,
+ 			finalizedChunks: [],
+ 			currentChunk: null,
+ 			compactlyCodedChunkTable: [],
+@@ -666,6 +669,7 @@ export class IsobmffMuxer extends Muxer {
+ 			lastTimescaleUnits: null,
+ 			lastSample: null,
+ 			startTimestampOffset: null,
++			decodeDelay: null,
+ 			finalizedChunks: [],
+ 			currentChunk: null,
+ 			compactlyCodedChunkTable: [],
+@@ -710,6 +714,7 @@ export class IsobmffMuxer extends Muxer {
+ 			lastTimescaleUnits: null,
+ 			lastSample: null,
+ 			startTimestampOffset: null,
++			decodeDelay: null,
+ 			finalizedChunks: [],
+ 			currentChunk: null,
+ 			compactlyCodedChunkTable: [],
+@@ -1125,6 +1130,28 @@ export class IsobmffMuxer extends Muxer {
+ 		const sortedTimestamps = trackData.timestampProcessingQueue.map(x => x.timestamp).sort((a, b) => a - b);
+ 
+ 		if (this.isFragmented) {
++			// Decode times lag presentation by the reorder delay, so no sample is presented before it is decoded and
++			// composition offsets stay non-negative. The delay is the first window's; a later one needing more has its
++			// decode times held at or before every presentation still to come.
++			const queue = trackData.timestampProcessingQueue;
++
++			if (trackData.decodeDelay === null) {
++				let delay = 0;
++
++				for (let i = 0; i < queue.length; i++) {
++					delay = Math.max(delay, sortedTimestamps[i]! - queue[i]!.timestamp);
++				}
++
++				trackData.decodeDelay = delay;
++			}
++
++			let bound = Infinity;
++
++			for (let i = queue.length - 1; i >= 0; i--) {
++				bound = Math.min(bound, queue[i]!.timestamp);
++				sortedTimestamps[i] = Math.min(sortedTimestamps[i]! - trackData.decodeDelay, bound);
++			}
++
+ 			trackData.startTimestampOffset ??= Math.min(sortedTimestamps[0]!, 0);
+ 		} else {
+ 			trackData.startTimestampOffset ??= sortedTimestamps[0]!;
+@@ -1235,7 +1262,11 @@ export class IsobmffMuxer extends Muxer {
+ 			// the last sample's duration in each fragment be "0" for fragmented files. The guess we make here is
+ 			// actually correct most of the time, since typically, no delta frame with a lower timestamp follows the key
+ 			// frame (although it can happen).
+-			const timescaleUnits = intoTimescale(nextSample.timestamp, trackData.timescale, false);
++			const timescaleUnits = intoTimescale(
++				nextSample.timestamp - (trackData.decodeDelay ?? 0),
++				trackData.timescale,
++				false,
++			);
+ 			const delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+ 			trackData.lastSample.timescaleUnitsToNextSample = delta;
+ 		}
 diff --git a/src/matroska/matroska-demuxer.ts b/src/matroska/matroska-demuxer.ts
 index 770a1302fc270ac0b16b898c453a01dfe29370b1..3f751bf175a6f8909d5fc592e732b033f571646e 100644
 --- a/src/matroska/matroska-demuxer.ts

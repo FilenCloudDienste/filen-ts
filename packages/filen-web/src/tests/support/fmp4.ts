@@ -1,5 +1,6 @@
-// The samples of a fragmented MP4 as a SourceBuffer receives it: the init segment's timescale, then each fragment's
-// samples with their decode and presentation times (tfdt, trun durations and composition offsets), in seconds.
+// The samples of a fragmented MP4 as a SourceBuffer receives it: the init segment's timescale and edit list, then each
+// fragment's samples with their decode and presentation times (tfdt, trun durations and composition offsets), in
+// seconds, before the edit list applies.
 
 export interface Fmp4Sample {
 	dts: number
@@ -7,6 +8,15 @@ export interface Fmp4Sample {
 	duration: number
 	size: number
 	key: boolean
+	// The version of the trun box the sample is in: 1 allows negative composition offsets.
+	trunVersion: number
+}
+
+export interface Fmp4Track {
+	timescale: number | null
+	// The media time the edit list starts presentation at (seconds); null for no edit list.
+	editMediaTime: number | null
+	samples: Fmp4Sample[]
 }
 
 interface Box {
@@ -46,7 +56,7 @@ function child(bytes: Uint8Array, parent: Box, type: string, skip = 0): Box | un
 	return boxes(bytes, parent.start + skip, parent.end).find(box => box.type === type)
 }
 
-export function fmp4Samples(bytes: Uint8Array, limit: number): { timescale: number | null; samples: Fmp4Sample[] } {
+export function fmp4Samples(bytes: Uint8Array, limit: number): Fmp4Track {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 	const top = boxes(bytes, 0, bytes.length)
 	let timescale: number | null = null
@@ -60,6 +70,25 @@ export function fmp4Samples(bytes: Uint8Array, limit: number): { timescale: numb
 		const version = bytes[mdhd.start] ?? 0
 
 		timescale = view.getUint32(mdhd.start + (version === 1 ? 20 : 12))
+	}
+
+	const edts = trak === undefined ? undefined : child(bytes, trak, "edts")
+	const elst = edts === undefined ? undefined : child(bytes, edts, "elst")
+	let editMediaTime: number | null = null
+
+	if (elst !== undefined && timescale !== null) {
+		const version = bytes[elst.start] ?? 0
+		const count = view.getUint32(elst.start + 4)
+		const entry = version === 1 ? 20 : 12
+
+		// The first edit that is not empty (media time -1).
+		for (let index = 0, at = elst.start + 8; index < count && editMediaTime === null; index++, at += entry) {
+			const mediaTime = version === 1 ? Number(view.getBigInt64(at + 8)) : view.getInt32(at + 4)
+
+			if (mediaTime >= 0) {
+				editMediaTime = mediaTime / timescale
+			}
+		}
 	}
 
 	const scale = timescale ?? 1
@@ -134,11 +163,12 @@ export function fmp4Samples(bytes: Uint8Array, limit: number): { timescale: numb
 				duration: duration / scale,
 				size,
 				// sample_is_non_sync_sample clear.
-				key: (sampleFlags & 0x10000) === 0
+				key: (sampleFlags & 0x10000) === 0,
+				trunVersion: version
 			})
 			dts += duration
 		}
 	}
 
-	return { timescale, samples }
+	return { timescale, editMediaTime, samples }
 }

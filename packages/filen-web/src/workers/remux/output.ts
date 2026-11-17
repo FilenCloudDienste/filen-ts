@@ -26,8 +26,10 @@ export class FragmentTooLargeError extends Error {
 }
 
 // One track muxed to fragmented MP4. The first segment carries the init segment (ftyp + moov) ahead of
-// its first fragment. Every packet keeps its source timestamp; nothing is shifted, so no edit list is
-// written as long as the first one is not negative.
+// its first fragment. Every packet keeps its source timestamp as its presentation time. Decode times lag
+// them by the stream's reorder delay (the patched muxer), so no picture is presented before it is decoded;
+// where that puts the first decode time before 0 (a start at the file's first key picture), the muxer
+// starts decoding at 0 and writes an edit list that trims the lag back off.
 export class FragmentedTrackOutput {
 	private readonly output: Output
 	// Adds a packet; the decoder config goes with the first one only.

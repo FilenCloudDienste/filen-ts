@@ -2,17 +2,20 @@ import { test, expect } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { readMse, recordMse, resetMse } from "./helpers/mseRecorder"
-import { fmp4Samples } from "./helpers/fmp4"
+import { fmp4Samples } from "@/tests/support/fmp4"
 
-// Observability, not a playback check: the demuxer tests' H.264 streams with B-frames (AVI, whose reorder the demuxer
-// infers with no presentation times to go by, ASF and MPEG-PS) played in the preview, recording per file what the
-// browser reports and what the remux worker handed it. It fails only on an error event (the element's, or a
-// SourceBuffer's), never on a playhead that stalls: that is what the record is for.
+// The demuxer tests' H.264 streams with B-frames (AVI, whose reorder the demuxer infers with no presentation times to
+// go by, ASF and MPEG-PS) played in the preview: each must play past PLAYED_SECONDS with no error event (the element's
+// or a SourceBuffer's), and every sample the remux worker appends must be decoded no later than it is presented
+// (version-0 trun, no negative composition offset). What the browser reports and what it was handed is recorded per
+// file either way.
 
 const FILES = FIXTURE_FILES["preview-legacy-bframes"]
 // How long each file is watched, and how often.
 const WATCH_MS = 15_000
 const SAMPLE_MS = 500
+// Played this far, a file is through: the streams run two seconds.
+const PLAYED_SECONDS = 1.5
 // Samples read back per SourceBuffer.
 const SAMPLES = 40
 
@@ -27,7 +30,7 @@ interface Moment {
 	quality: { total: number; dropped: number; corrupted: number } | null
 }
 
-test("B-frame AVI, ASF and MPEG-PS: what each browser reports while it plays them", async ({ page, browserName }, testInfo) => {
+test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is presented", async ({ page, browserName }, testInfo) => {
 	test.slow()
 
 	const appLog: string[] = []
@@ -99,6 +102,10 @@ test("B-frame AVI, ASF and MPEG-PS: what each browser reports while it plays the
 
 			if (moment !== null) {
 				moments.push(moment)
+
+				if (moment.currentTime >= PLAYED_SECONDS || moment.error !== null) {
+					break
+				}
 			}
 
 			await page.waitForTimeout(SAMPLE_MS)
@@ -128,7 +135,6 @@ test("B-frame AVI, ASF and MPEG-PS: what each browser reports while it plays the
 		for (const buffer of buffers) {
 			console.log(
 				`[bframes] ${browserName} ${name} ${buffer.mime}: timescale ${String(buffer.timescale)}, ` +
-					// A sample presented before it is decoded: a negative composition offset, which some decoders mishandle.
 					`presented before decoded ${String(buffer.samples.filter(sample => sample.pts < sample.dts).length)} of ${String(buffer.samples.length)}, ` +
 					`dts/pts ${buffer.samples
 						.slice(0, 16)
@@ -145,6 +151,18 @@ test("B-frame AVI, ASF and MPEG-PS: what each browser reports while it plays the
 
 		if (errored !== undefined) {
 			failures.push(`${name}: the element reported error ${JSON.stringify(errored.error)} at ${String(errored.at)} ms`)
+		}
+
+		if (!moments.some(moment => moment.currentTime >= PLAYED_SECONDS)) {
+			failures.push(`${name}: played to ${String(last?.currentTime)} s, not ${String(PLAYED_SECONDS)}, in ${String(WATCH_MS)} ms`)
+		}
+
+		for (const buffer of buffers) {
+			const early = buffer.samples.filter(sample => sample.pts < sample.dts || sample.trunVersion !== 0)
+
+			if (early.length > 0) {
+				failures.push(`${name} ${buffer.mime}: ${String(early.length)} samples presented before decoded or in a version-1 trun`)
+			}
 		}
 
 		if (mse.events.some(event => event.type === "error")) {
