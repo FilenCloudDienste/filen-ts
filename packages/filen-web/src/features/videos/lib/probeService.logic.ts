@@ -125,7 +125,7 @@ function extensionOfName(name: string | null): string | null {
 // A record a probe now would answer otherwise, by the revision that changed the answer: before 2, no container for a
 // transport stream's name, or a Matroska cover read that never looked for the landscape one; before 3, no container
 // for a name the new walkers read, or a 3GPP file's track whose codec its sample entries now name; before 4, a
-// transport stream's audio track with no codec, which MP1 or MP2 now names.
+// transport stream's or Matroska file's audio track with no codec, which MP1 or MP2 now names.
 function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => string | null): boolean {
 	const revision = record.rev ?? 1
 	const probe = record.probe
@@ -153,7 +153,8 @@ function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => stri
 		return true
 	}
 
-	if (probe.container === "ts") {
+	// Revision 4 names MP1 and MP2, in transport streams and in Matroska (A_MPEG/L1, A_MPEG/L2).
+	if (probe.container === "ts" || probe.container === "mkv" || probe.container === "webm") {
 		return revision < 4 && probe.audio.some(audio => audio.codec === null)
 	}
 

@@ -193,10 +193,9 @@ describe("probe records", () => {
 		expect(recordSatisfies(withRev(amr, 2), "card", () => "film.mp4")).toBe(true)
 		expect(recordSatisfies(withRev({ ...amr, container: "mov" }, 2), "card", () => "film.mov")).toBe(true)
 		expect(recordSatisfies(withRev(probe({ container: "mp4" }), 2), "card", () => "call.3gp")).toBe(true)
-		expect(recordSatisfies(withRev({ ...amr, container: "mkv" }, 2), "card", () => "call.3gp")).toBe(true)
 	})
 
-	it("probes again at revision 4 a transport stream's unnamed audio, which MP1/MP2 now names, and nothing else", () => {
+	it("probes again at revision 4 a transport stream's or Matroska file's unnamed audio, which MP1/MP2 now names, and nothing else", () => {
 		const unnamed = {
 			id: 2,
 			codec: null,
@@ -221,6 +220,9 @@ describe("probe records", () => {
 		expect(recordSatisfies(at(ts, 4), "card")).toBe(true)
 		expect(recordSatisfies(at(probe({ container: "ts", index: "none" }), 3), "card")).toBe(true)
 		expect(recordSatisfies(at(probe({ container: "avi", index: "idx", audio: [unnamed] }), 3), "card")).toBe(true)
+		expect(recordSatisfies(at(probe({ container: "mkv", index: "cues", audio: [unnamed] }), 2), "card")).toBe(false)
+		expect(recordSatisfies(at(probe({ container: "webm", index: "cues", audio: [unnamed] }), 3), "card")).toBe(false)
+		expect(recordSatisfies(at(probe({ container: "mkv", index: "cues", audio: [unnamed] }), 4), "card")).toBe(true)
 		expect(recordSatisfies(at(null, 3), "card", () => "film.avi")).toBe(true)
 	})
 
