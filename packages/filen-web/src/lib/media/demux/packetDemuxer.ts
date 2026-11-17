@@ -20,7 +20,7 @@ import {
 // One packet as a reader found it. `unit` is where the container unit holding its start begins (a tag, a chunk, a
 // pack, a data packet): a reader can start reading there again. `part` tells packets starting in one unit apart
 // (below MAX_PARTS). Its bytes are the `size` bytes at `pos`, or `payload` when the reader assembled them itself (an
-// ASF object from fragments, a PES payload).
+// ASF object from fragments, a PES payload): a buffer of its own, never a view pinning a larger read.
 export interface DemuxPacket {
 	track: number
 	// Presentation time, seconds, on the file's own clock.
@@ -101,8 +101,19 @@ const READ_FORWARD_BYTES = 4 * 1024 * 1024
 const SEEK_BACKOFF_BYTES = 128 * 1024
 // Jumps one search makes before it reads forward from the best point it has.
 const MAX_JUMPS = 12
-// Packets kept across runs; past it the runs used least recently are dropped (read again if wanted).
-const MAX_KEPT_PACKETS = 250_000
+// What the kept runs may hold: their packet records (about this many bytes each) and the payloads readers assembled.
+// Past either, the runs used least recently are dropped, then the oldest packets of the one in use; a dropped packet
+// is read again from its unit if asked for.
+const PACKET_RECORD_BYTES = 96
+const MAX_KEPT_RECORD_BYTES = 256 * 1024
+const MAX_KEPT_PAYLOAD_BYTES = 8 * 1024 * 1024
+// Where the header gives no duration, it is estimated from the packets in this much of the data's start (or this
+// many seconds of them), at the file's average rate.
+const ESTIMATE_BYTES = 2 * 1024 * 1024
+const ESTIMATE_SECONDS = 4
+// How far the search for a track's first packet reads: a track listed but never carried ends there, not at the end
+// of the file.
+const FIRST_PACKET_BYTES = 16 * 1024 * 1024
 // How far before a target the key search first looks, doubled while no key is found.
 const KEY_BACKOFF_SECONDS = 2
 
@@ -112,6 +123,34 @@ interface Run {
 	done: boolean
 	packets: DemuxPacket[]
 	used: number
+	// Packets the latest read added: eviction never drops those.
+	fresh: number
+}
+
+function keptCost(runs: readonly Run[]): { records: number; payloads: number } {
+	let records = 0
+	let payloads = 0
+
+	for (const run of runs) {
+		records += run.packets.length * PACKET_RECORD_BYTES
+
+		for (const packet of run.packets) {
+			payloads += packet.payload?.byteLength ?? 0
+		}
+	}
+
+	return { records, payloads }
+}
+
+function overBudget(cost: { records: number; payloads: number }): boolean {
+	return cost.records > MAX_KEPT_RECORD_BYTES || cost.payloads > MAX_KEPT_PAYLOAD_BYTES
+}
+
+// The PacketDemuxer behind an input reading one of these formats, once mediabunny created it.
+const DEMUXERS = new WeakMap<Input, PacketDemuxer>()
+
+export function packetDemuxerOf(input: Input): PacketDemuxer | null {
+	return DEMUXERS.get(input) ?? null
 }
 
 const NO_DATA = new Uint8Array(0)
@@ -148,11 +187,14 @@ export class PacketDemuxer implements Demuxer {
 	private readonly mutex = new Mutex()
 	private clock = 0
 	private offset: number | null = null
+	// The header's duration, else the estimate; undefined until known.
+	private knownDuration: number | null | undefined = undefined
 
 	public constructor(input: Input, mimeType: string, open: (input: Input) => Promise<ContainerReader>) {
 		this.input = input
 		this.mimeType = mimeType
 		this.open = open(input)
+		DEMUXERS.set(input, this)
 	}
 
 	public dispose(): void {
@@ -173,8 +215,63 @@ export class PacketDemuxer implements Demuxer {
 		return reader.tracks.map(track => (track.type === "video" ? new VideoBacking(this, track) : new AudioBacking(this, track)))
 	}
 
+	// The header's duration, else one estimated from the data's start at the file's average rate (never a read of the
+	// whole file); null when neither is known, and a far seek can then only read forward to its target.
 	public async duration(): Promise<number | null> {
-		return (await this.open).duration
+		const reader = await this.open
+
+		return this.knownDuration !== undefined ? this.knownDuration : this.mutex.run(async () => this.durationOf(reader))
+	}
+
+	private async durationOf(reader: ContainerReader): Promise<number | null> {
+		if (this.knownDuration !== undefined) {
+			return this.knownDuration
+		}
+
+		if (reader.duration !== null) {
+			this.knownDuration = reader.duration
+
+			return this.knownDuration
+		}
+
+		const offset = await this.timeOffset(reader)
+		const run = this.runAt(reader.dataStart)
+		let span = PacketDemuxer.ptsSpan(run)
+
+		while (!run.done && run.next - run.start < ESTIMATE_BYTES && (span === null || span.end - span.first < ESTIMATE_SECONDS)) {
+			await this.advance(reader, run)
+			span = PacketDemuxer.ptsSpan(run)
+		}
+
+		const size = this.input._reader.fileSize
+
+		if (span === null) {
+			this.knownDuration = null
+		} else if (run.done && run.start <= reader.dataStart) {
+			this.knownDuration = span.end - offset
+		} else {
+			const seconds = span.end - span.first
+			const bytes = run.next - run.start
+
+			this.knownDuration = seconds > 0 && bytes > 0 && size !== null ? ((size - reader.dataStart) / bytes) * seconds : null
+		}
+
+		return this.knownDuration
+	}
+
+	// The earliest and latest presentation times in `run`, and where the last packet ends.
+	private static ptsSpan(run: Run): { first: number; last: number; end: number } | null {
+		let first = Infinity
+		let last = -Infinity
+		let end = -Infinity
+
+		for (const packet of run.packets) {
+			first = Math.min(first, packet.pts)
+			last = Math.max(last, packet.pts)
+			end = Math.max(end, packet.pts + packet.duration)
+		}
+
+		return Number.isFinite(first) ? { first, last, end } : null
 	}
 
 	// The file clock's time of the first packet, which the exposed timestamps count from.
@@ -205,7 +302,7 @@ export class PacketDemuxer implements Demuxer {
 			return existing
 		}
 
-		const run: Run = { start, next: start, done: false, packets: [], used: this.clock }
+		const run: Run = { start, next: start, done: false, packets: [], used: this.clock, fresh: 0 }
 
 		this.runs.push(run)
 		this.runs.sort((a, b) => a.start - b.start)
@@ -225,6 +322,7 @@ export class PacketDemuxer implements Demuxer {
 		}
 
 		const last = lastSequence(run)
+		const before = run.packets.length
 
 		for (const packet of read.packets) {
 			if (sequenceOf(packet) > last) {
@@ -232,6 +330,7 @@ export class PacketDemuxer implements Demuxer {
 			}
 		}
 
+		run.fresh = run.packets.length - before
 		run.next = read.next
 		this.mergeFollowing(run)
 		this.evict(run)
@@ -265,23 +364,25 @@ export class PacketDemuxer implements Demuxer {
 	}
 
 	private evict(keep: Run): void {
-		let total = this.runs.reduce((sum, run) => sum + run.packets.length, 0)
-
-		while (total > MAX_KEPT_PACKETS) {
+		while (overBudget(keptCost(this.runs))) {
 			const oldest = this.runs.filter(run => run !== keep).sort((a, b) => a.used - b.used)[0]
 
 			if (oldest === undefined) {
-				// One run alone past the cap: drop its oldest packets, which the reader reads again if asked.
-				const drop = Math.floor(keep.packets.length / 2)
-
-				keep.start = keep.packets[drop]?.unit ?? keep.start
-				keep.packets.splice(0, drop)
-
-				return
+				break
 			}
 
-			total -= oldest.packets.length
 			this.runs.splice(this.runs.indexOf(oldest), 1)
+		}
+
+		// One run alone past the budget: its oldest packets go, down to half of them or the latest read's, which the
+		// reader reads again if asked.
+		if (overBudget(keptCost(this.runs))) {
+			const drop = Math.min(Math.ceil(keep.packets.length / 2), keep.packets.length - keep.fresh)
+
+			if (drop > 0) {
+				keep.start = keep.packets[drop]?.unit ?? keep.next
+				keep.packets.splice(0, drop)
+			}
 		}
 	}
 
@@ -293,6 +394,59 @@ export class PacketDemuxer implements Demuxer {
 				return first !== undefined && sequenceOf(first) <= sequence && sequence <= lastSequence(run)
 			}) ?? null
 		)
+	}
+
+	// The first packet in `run` after `sequence` that `wanted` accepts, reading on while the run reaches no further than
+	// `limit`. Looked up by sequence after every read, since eviction may drop the run's oldest packets meanwhile.
+	private async following(
+		reader: ContainerReader,
+		run: Run,
+		sequence: number,
+		wanted: (packet: DemuxPacket) => boolean,
+		limit: number
+	): Promise<DemuxPacket | null> {
+		let cursor = sequence
+
+		for (;;) {
+			for (let index = PacketDemuxer.firstAfter(run, cursor); index < run.packets.length; index++) {
+				const packet = run.packets[index]
+
+				if (packet === undefined) {
+					break
+				}
+
+				if (wanted(packet)) {
+					return packet
+				}
+
+				cursor = sequenceOf(packet)
+			}
+
+			if (run.done || run.next > limit) {
+				return null
+			}
+
+			await this.advance(reader, run)
+		}
+	}
+
+	// Index of the first packet in `run` after `sequence`, by binary search.
+	private static firstAfter(run: Run, sequence: number): number {
+		let low = 0
+		let high = run.packets.length
+
+		while (low < high) {
+			const middle = (low + high) >> 1
+			const packet = run.packets[middle]
+
+			if (packet !== undefined && sequenceOf(packet) <= sequence) {
+				low = middle + 1
+			} else {
+				high = middle
+			}
+		}
+
+		return low
 	}
 
 	// Index of the packet `sequence` in `run`, by binary search.
@@ -408,7 +562,7 @@ export class PacketDemuxer implements Demuxer {
 	}
 
 	private byteRate(reader: ContainerReader): number | null {
-		const duration = reader.duration
+		const duration = this.knownDuration ?? null
 		const size = this.input._reader.fileSize
 
 		return duration === null || duration <= 0 || size === null ? null : (size - reader.dataStart) / duration
@@ -426,7 +580,7 @@ export class PacketDemuxer implements Demuxer {
 		const offset = await this.timeOffset(reader)
 		const size = this.input._reader.fileSize ?? reader.dataStart
 		let low = { pos: reader.dataStart, pts: offset }
-		let high = { pos: size, pts: offset + (reader.duration ?? 0) }
+		let high = { pos: size, pts: offset + (this.knownDuration ?? 0) }
 
 		for (const run of this.runs) {
 			const span = PacketDemuxer.span(run, track)
@@ -490,22 +644,7 @@ export class PacketDemuxer implements Demuxer {
 
 			const run = this.runAt(reader.dataStart)
 
-			for (let index = 0; ; index++) {
-				const packet = run.packets[index]
-
-				if (packet?.track === track) {
-					return packet
-				}
-
-				if (packet === undefined) {
-					if (run.done) {
-						return null
-					}
-
-					await this.advance(reader, run)
-					index--
-				}
-			}
+			return this.following(reader, run, -1, packet => packet.track === track, reader.dataStart + FIRST_PACKET_BYTES)
 		})
 
 		return found === null ? null : this.packet(reader, found, options)
@@ -524,31 +663,11 @@ export class PacketDemuxer implements Demuxer {
 				await this.advance(reader, run)
 			}
 
-			let index = PacketDemuxer.indexOf(run, sequence)
-
-			if (index === -1) {
+			if (PacketDemuxer.indexOf(run, sequence) === -1) {
 				return null
 			}
 
-			for (index++; ; index++) {
-				const packet = run.packets[index]
-
-				if (packet === undefined) {
-					if (run.done) {
-						return null
-					}
-
-					// Advancing may merge a later run in; positions keep the index valid.
-					await this.advance(reader, run)
-					index--
-
-					continue
-				}
-
-				if (packet.track === track && (!key || packet.key)) {
-					return packet
-				}
-			}
+			return this.following(reader, run, sequence, packet => packet.track === track && (!key || packet.key), Infinity)
 		})
 
 		return found === null ? null : this.packet(reader, found, options)
@@ -558,6 +677,8 @@ export class PacketDemuxer implements Demuxer {
 	public async at(track: number, timestamp: number, key: boolean, options: PacketRetrievalOptions): Promise<EncodedPacket | null> {
 		const reader = await this.open
 		const found = await this.mutex.run(async () => {
+			await this.durationOf(reader)
+
 			const target = timestamp + (await this.timeOffset(reader))
 			const run = await this.covering(reader, track, target)
 			const exact = PacketDemuxer.latest(run, track, target, key)

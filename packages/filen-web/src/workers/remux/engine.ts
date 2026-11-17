@@ -59,6 +59,7 @@ import { ac3Layout, dtsLayout, layoutFor, type Speaker } from "@/workers/remux/c
 import { copyCodecString, isCopyableAudio, isTranscodableAudio, walkDecides, outputVideoCodecString } from "@/workers/remux/codecs.logic"
 import { hevcKeyIsIdr, hevcLengthSize, IDR_REACH_KEYS, idrReachSeconds } from "@/workers/remux/hevc.logic"
 import { KeyIndex, seekReach } from "@/workers/remux/keyIndex"
+import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
 import { FragmentedTrackOutput, FragmentTooLargeError } from "@/workers/remux/output"
 import { PumpGate, runPump, type PumpReader, type PumpResult, type PumpWriter } from "@/workers/remux/pump"
 import { TextTap, isTapTextCodec, type TextTapTrack } from "@/workers/remux/textTap"
@@ -216,13 +217,19 @@ export class RemuxEngine {
 		const matroska = format === MATROSKA || format === WEBM
 		const scanning = SCANNING_FORMATS.has(format)
 		const index = params.index ?? (await this.probeIndex(params.size))
+		// Our own demuxers estimate a duration their header lacks; without one they cannot place a far time.
+		const packets = packetDemuxerOf(this.input)
 		// Computing the duration of a file without an index, absent the header's own, reads all of it: a raw
 		// audio stream's is estimated from its first frames instead, and 0 leaves the MediaSource duration open.
 		const duration =
 			(await this.input.getDurationFromMetadata()) ??
-			(scanning ? ((await estimatedStreamDuration(this.cache, format)) ?? 0) : await this.input.computeDuration())
+			(scanning
+				? ((await estimatedStreamDuration(this.cache, format)) ?? 0)
+				: packets !== null
+					? 0
+					: await this.input.computeDuration())
 
-		this.seekScansFile = matroska && index === "none"
+		this.seekScansFile = (matroska && index === "none") || (packets !== null && duration === 0)
 		this.duration = duration
 
 		if (matroska) {

@@ -77,8 +77,9 @@ function metaData(duration: number, keyframes: { times: number[]; positions: num
 }
 
 // An FLV of `frames` H.264 pictures (a key one every second, `pictureBytes` each) and an AAC frame per 1024 samples
-// at 48 kHz; with onMetaData's keyframe list when `indexed`.
-function flv(frames: number, pictureBytes: number, indexed: boolean): Uint8Array {
+// at 48 kHz; with onMetaData's keyframe list when `indexed`. Without `timed`, neither onMetaData nor the closing
+// PreviousTagSize says how long it lasts (a crashed recording's).
+function flv(frames: number, pictureBytes: number, indexed: boolean, timed = true): Uint8Array {
 	const header = [...text("FLV"), 1, 0x05, ...be(9, 4), 0, 0, 0, 0]
 	const body: number[][] = [tag(9, 0, [0x17, 0, 0, 0, 0, ...AVCC]), tag(8, 0, [0xaf, 0, 0x11, 0x90])]
 	const keys: { times: number[]; positions: number[] } = { times: [], positions: [] }
@@ -102,13 +103,13 @@ function flv(frames: number, pictureBytes: number, indexed: boolean): Uint8Array
 		}
 	}
 
-	const duration = frames / FPS
+	const duration = timed ? frames / FPS : 0
 	// The metadata tag's own length shifts the positions after it; it is the same length with and without real ones.
 	const draft = tag(18, 0, metaData(duration, indexed ? keys : null))
 	const base = header.length + draft.length
 	const meta = tag(18, 0, metaData(duration, indexed ? { times: keys.times, positions: keys.positions.map(at => base + at) } : null))
 
-	return Uint8Array.from([...header, ...meta, ...body.flat()])
+	return Uint8Array.from([...header, ...meta, ...body.flat(), ...(timed ? [] : [0, 0, 0, 0])])
 }
 
 function inputOf(bytes: Uint8Array, reads: [number, number][] = []): Input {
@@ -200,6 +201,18 @@ describe("FLV demuxer", () => {
 
 		expect(read).toBeLessThan(bytes.length / 2)
 		expect((await sink.getNextPacket(defined(key)))?.timestamp).toBeCloseTo(41.04, 6)
+	})
+
+	it("estimates the duration of a file that states none, then seeks it by interpolation", async () => {
+		const bytes = flv(1500, 8 * 1024, false, false)
+		const reads: [number, number][] = []
+		const input = inputOf(bytes, reads)
+		const sink = await sinkOf(input.getPrimaryVideoTrack())
+		const duration = defined(await input.getDurationFromMetadata())
+
+		expect(Math.abs(duration - 60)).toBeLessThan(3)
+		expect((await sink.getKeyPacket(41.3))?.timestamp).toBeCloseTo(41, 6)
+		expect(reads.reduce((sum, [start, end]) => sum + end - start, 0)).toBeLessThan(bytes.length / 2)
 	})
 
 	it("uses onMetaData's keyframe list to seek", async () => {

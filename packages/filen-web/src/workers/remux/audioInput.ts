@@ -13,6 +13,7 @@ import {
 import { BlockSource, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
 import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
+import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
 import { AUDIO_UNSUPPORTED_ERROR, type RemuxStats } from "@/lib/media/remuxTypes"
 import { sampleReader, type SampleItem, type SampleReader } from "@/workers/remux/audioTranscode"
 import { estimateFrameStreamDuration, ID3V2_HEADER_BYTES, id3v2Bytes } from "@/workers/remux/audioDuration.logic"
@@ -721,9 +722,12 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 	}
 
 	const { track, ffmpeg } = chosen
+	// Our own demuxers already estimate a duration their header lacks: computing one would read the whole file.
 	const duration =
 		(await input.getDurationFromMetadata()) ??
-		(format === MATROSKA || format === WEBM || format === FLAC ? null : await estimatedOrComputed(cache, input, format))
+		(format === MATROSKA || format === WEBM || format === FLAC || packetDemuxerOf(input) !== null
+			? null
+			: await estimatedOrComputed(cache, input, format))
 
 	if (duration === null || !(duration > 0)) {
 		throw new AudioUnsupportedError("unknown duration")

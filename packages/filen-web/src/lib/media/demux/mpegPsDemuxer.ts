@@ -485,7 +485,8 @@ class MpegPsReader implements ContainerReader {
 	}
 
 	private closed(entry: Track, frame: Open): DemuxPacket {
-		const data = frame.chunks.length === 1 ? (frame.chunks[0] ?? new Uint8Array()) : concat(frame.chunks, frame.length)
+		// A copy, so the packet does not pin the window it was read from.
+		const data = concat(frame.chunks, frame.length)
 
 		return {
 			track: entry.number,
