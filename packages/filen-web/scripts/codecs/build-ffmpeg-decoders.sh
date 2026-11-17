@@ -9,10 +9,10 @@
 # script.
 #
 # The FFmpeg part is LGPL-2.1-or-later: configure enables no GPL or nonfree component, only these
-# decoders and what they depend on. This script and bridge.c and decoder-worker.js beside it, whose hashes
-# the manifest records, are the complete corresponding source of the module.
+# decoders and what they depend on. This script and bridge.c, decoder-worker.js and emscripten.sh beside it, whose
+# hashes the manifest records, are the complete corresponding source of the module.
 #
-#   brew install emscripten          (the version pinned below)
+#   brew install emscripten          (the version emscripten.sh pins)
 #   scripts/codecs/build-ffmpeg-decoders.sh
 #
 # Same FFmpeg tarball, flags and emcc build give the same output bytes; the manifest records all of them
@@ -26,13 +26,6 @@ FFMPEG_TARBALL="ffmpeg-${FFMPEG_VERSION}.tar.xz"
 FFMPEG_URL="https://ffmpeg.org/releases/${FFMPEG_TARBALL}"
 # Of the tarball as signed by the FFmpeg release key FCF986EA15E6E293A5644F10B4322F04D67658D8.
 FFMPEG_SHA256="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
-# Exactly as `emcc --version` prints it: a release and a -git build of it are different compilers.
-EMCC_VERSION="7.0.0-git"
-# `emcc --version` alone does not tell one 7.0.0-git build from another: the manifest also records the LLVM it
-# drives and, for Homebrew's emscripten, the formula's version, revision and SHA-256 (the committed module: formula
-# 7.0.0, revision 0, from the 7.0.0 tag tarball). A different build of the same version gives different bytes.
-EMSCRIPTEN_FORMULA_VERSION="7.0.0"
-EMSCRIPTEN_FORMULA_REVISION="0"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE="$(cd "${HERE}/../.." && pwd)"
@@ -84,65 +77,8 @@ LINK_FLAGS=(
 FFMPEG_PREFIX_MAP="-ffile-prefix-map=<ffmpeg source>=ffmpeg"
 BRIDGE_PREFIX_MAP="-ffile-prefix-map=<scripts/codecs>=codecs"
 
-need() {
-	command -v "$1" > /dev/null || {
-		echo "missing $1" >&2
-		exit 1
-	}
-}
-
-need emcc
-need curl
-need shasum
-
-emcc_version="$(emcc --version | sed -n '1s/^.*) //p')"
-
-if [[ "${emcc_version}" != "${EMCC_VERSION}" && "${ALLOW_EMCC_MISMATCH:-}" != "1" ]]; then
-	echo "emcc ${emcc_version} found, ${EMCC_VERSION} expected (ALLOW_EMCC_MISMATCH=1 builds anyway, with different bytes)" >&2
-	exit 1
-fi
-
-emcc_clang="$(emcc -v 2>&1 | sed -n 's/^clang version //p' | head -n 1)"
-emcc_homebrew="null"
-
-if command -v brew > /dev/null 2>&1 && brew list --versions emscripten > /dev/null 2>&1; then
-	emcc_homebrew="$(brew info --json=v2 emscripten | node -e '
-		const formula = JSON.parse(require("fs").readFileSync(0, "utf8")).formulae[0]
-		const installed = formula.installed[0] ?? {}
-
-		process.stdout.write(JSON.stringify({
-			version: installed.version ?? null,
-			revision: formula.revision,
-			formulaSha256: formula.ruby_source_checksum?.sha256 ?? null,
-			tarballSha256: formula.urls?.stable?.checksum ?? null,
-			bottle: installed.poured_from_bottle === true
-		}))
-	')"
-
-	if [[ "${emcc_homebrew}" != *"\"version\":\"${EMSCRIPTEN_FORMULA_VERSION}\",\"revision\":${EMSCRIPTEN_FORMULA_REVISION},"* && "${ALLOW_EMCC_MISMATCH:-}" != "1" ]]; then
-		echo "Homebrew emscripten ${emcc_homebrew} found, ${EMSCRIPTEN_FORMULA_VERSION} revision ${EMSCRIPTEN_FORMULA_REVISION} expected" >&2
-		exit 1
-	fi
-fi
-
-# The Emscripten checkout: its runtime, emmalloc and musl are linked into the module.
-emscripten_root="$(em-config EMSCRIPTEN_ROOT)"
-emscripten_license=""
-
-for candidate in "${emscripten_root}/LICENSE" "${emscripten_root}/../LICENSE"; do
-	if [[ -f "${candidate}" ]]; then
-		emscripten_license="${candidate}"
-		break
-	fi
-done
-
-musl_license="${emscripten_root}/system/lib/libc/musl/COPYRIGHT"
-musl_version="$(cat "${emscripten_root}/system/lib/libc/musl/VERSION")"
-
-if [[ -z "${emscripten_license}" || ! -f "${musl_license}" ]]; then
-	echo "cannot find Emscripten's LICENSE or musl's COPYRIGHT under ${emscripten_root}" >&2
-	exit 1
-fi
+# shellcheck source=emscripten.sh
+source "${HERE}/emscripten.sh"
 
 if [[ -n "${FFMPEG_DECODERS_WORKDIR:-}" ]]; then
 	work="${FFMPEG_DECODERS_WORKDIR}"
@@ -197,28 +133,6 @@ cp "${build}/${OUT_NAME}" "${OUT_DIR}/${OUT_NAME}"
 cp "${emscripten_license}" "${OUT_DIR}/licenses/emscripten-LICENSE"
 cp "${musl_license}" "${OUT_DIR}/licenses/musl-COPYRIGHT"
 
-hash_of() {
-	shasum -a 256 "$1" | cut -d ' ' -f 1
-}
-
-json_string() {
-	local value="${1//\\/\\\\}"
-
-	printf '"%s"' "${value//\"/\\\"}"
-}
-
-json_array() {
-	local first=1
-
-	printf '['
-	for item in "$@"; do
-		[[ ${first} -eq 1 ]] || printf ', '
-		first=0
-		json_string "${item}"
-	done
-	printf ']'
-}
-
 cat > "${OUT_DIR}/manifest.json" << EOF
 {
 	"description": "FFmpeg AC-3, E-AC-3, DTS, TrueHD/MLP, ALAC, FLAC, WMA, MP1/MP2, AMR, ADPCM and DVD LPCM decoders built to WebAssembly by scripts/codecs/build-ffmpeg-decoders.sh; the module is LGPL-2.1-or-later.",
@@ -244,6 +158,7 @@ cat > "${OUT_DIR}/manifest.json" << EOF
 	"link": $(json_array "${OPT_FLAGS[@]}" "${FFMPEG_PREFIX_MAP}" "${BRIDGE_PREFIX_MAP}" "${LINK_FLAGS[@]}"),
 	"sources": {
 		"build-ffmpeg-decoders.sh": "$(hash_of "${HERE}/build-ffmpeg-decoders.sh")",
+		"emscripten.sh": "$(hash_of "${HERE}/emscripten.sh")",
 		"bridge.c": "$(hash_of "${HERE}/bridge.c")",
 		"decoder-worker.js": "$(hash_of "${HERE}/decoder-worker.js")"
 	},

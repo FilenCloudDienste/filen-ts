@@ -7,6 +7,7 @@ import {
 import { fileTypeExtension } from "@/features/drive/lib/preview.logic"
 import { ErrorWithDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { classifyMediaError, mediaFailureDTO, type MediaFailureKind } from "@/lib/media/mediaFailure"
+import { audioSynthKind } from "@filen/shared"
 import { BlockSource } from "@filen/shared/videos"
 import { urlReadRange } from "@/lib/media/urlReadRange"
 import { cancelHeldPause, pauseMedia } from "@filen/shared/heldPause"
@@ -35,9 +36,13 @@ function aborted(signal: AbortSignal): never {
 export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal): Promise<TrackSource> {
 	signal.throwIfAborted()
 
+	const extension = fileTypeExtension(track.name, track.mime, track.uuid)
+	// A synthesizer's audio is only ever the decoded stream: MediaSource has no route for it.
+	const synth = audioSynthKind(extension)
+
 	if (isMediaStreamAvailable()) {
 		const route = audioRoute({
-			extension: fileTypeExtension(track.name, track.mime, track.uuid),
+			extension,
 			contentType: track.contentType,
 			demoted: audioDemotions.has(track.uuid)
 		})
@@ -69,7 +74,7 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 		}
 
 		try {
-			const stream = await openDecodedAudioStream({ file: track.file, access: "authed" })
+			const stream = await openDecodedAudioStream({ file: track.file, access: "authed", synth })
 
 			if (signal.aborted) {
 				stream.release()
@@ -94,8 +99,17 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 			}
 
 			signal.throwIfAborted()
+
+			if (synth !== undefined) {
+				throw new ErrorWithDTO(mediaFailureDTO("other"))
+			}
+
 			// The service worker could not take the stream: MediaSource below.
 		}
+	}
+
+	if (synth !== undefined) {
+		throw new ErrorWithDTO(mediaFailureDTO("other"))
 	}
 
 	const media = audioMediaSource({ file: track.file, access: "authed" })

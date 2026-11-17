@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
-import { InFlight } from "@filen/shared"
+import { audioSynthKind, InFlight } from "@filen/shared"
+import { fileTypeExtension } from "@/features/drive/lib/preview.logic"
 import { kvGetJson } from "@/lib/storage/adapter"
 import { kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { log } from "@/lib/log"
@@ -290,7 +291,14 @@ async function analyzeInWorker(track: QueueTrack, signal: AbortSignal, permits: 
 
 	try {
 		const port = await Promise.race([source.openPort(), aborted.promise])
-		const answer = hold.remote.analyzeEdges(Comlink.transfer({ port, size: Number(track.file.size) }, [port]), Comlink.proxy(permits))
+		const synth = audioSynthKind(fileTypeExtension(track.name, track.mime, track.uuid))
+		const answer = hold.remote.analyzeEdges(
+			Comlink.transfer(
+				{ port, size: Number(track.file.size), ...(synth === undefined ? {} : { synth: { kind: synth, key: track.uuid } }) },
+				[port]
+			),
+			Comlink.proxy(permits)
+		)
 
 		answer.catch(() => undefined)
 

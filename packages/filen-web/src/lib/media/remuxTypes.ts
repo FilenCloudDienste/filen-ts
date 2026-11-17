@@ -228,6 +228,9 @@ export function isIdrUnreachable(error: unknown): boolean {
 	return error instanceof Error && error.name === IDR_UNREACHABLE_ERROR
 }
 
+// How long the remux worker, and a worker it starts, is kept after its last user.
+export const REMUX_WORKER_IDLE_MS = 30_000
+
 // A read of the file's bytes failed (not aborted): the source, not the media, is the problem. Crosses
 // Comlink by name.
 export const SOURCE_READ_ERROR = "SourceReadError"

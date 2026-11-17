@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import { isAbortError } from "@filen/shared"
+import { isAbortError, type AudioSynthKind } from "@filen/shared"
 import type { AnyFile } from "@filen/sdk-rs"
 import { registerPortStream, releasePreviewStream } from "@/features/preview/lib/previewStream"
 import { mseFailureKind, mseOpenFailureKind } from "@/features/preview/lib/previewPlayback.logic"
@@ -24,12 +24,14 @@ export interface DecodedAudioStream {
 
 // Rejects with AudioUnsupportedError (isAudioUnsupported) when nothing in the file can be decoded, and with
 // another error when the service worker cannot take the stream (the caller falls back to MediaSource).
+// `synth` names the synthesizer a file a synthesizer renders needs (audioSynthKind).
 export async function openDecodedAudioStream(params: {
 	file: AnyFile
 	access: "authed" | "anon"
+	synth?: AudioSynthKind | undefined
 	id?: string
 }): Promise<DecodedAudioStream> {
-	const { file, access, id = crypto.randomUUID() } = params
+	const { file, access, synth, id = crypto.randomUUID() } = params
 	const hold = await holdRemuxWorker()
 	const source = access === "anon" ? linkedRemuxSource(file) : remuxSource(file)
 	let released = false
@@ -53,7 +55,14 @@ export async function openDecodedAudioStream(params: {
 
 				const info = await Promise.race([
 					hold.remote.openPcm(
-						Comlink.transfer({ port: input, size: Number(file.size) }, [input]),
+						Comlink.transfer(
+							{
+								port: input,
+								size: Number(file.size),
+								...(synth === undefined ? {} : { synth: { kind: synth, key: file.uuid } })
+							},
+							[input]
+						),
 						Comlink.transfer(output, [output])
 					),
 					hold.dead

@@ -18,6 +18,8 @@ export interface NestedWorkerOptions {
 	idleMs?: number
 	// The error a request's `error` answer rejects with.
 	toError?: (message: string) => Error
+	// The error what waits on a worker that failed rejects with.
+	toLostError?: (message: string) => Error
 }
 
 export class NestedWorker<Request extends object, Response extends NestedResponse> {
@@ -92,7 +94,7 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 
 			if (response.fatal !== undefined) {
 				if (this.worker === worker) {
-					this.stop(new Error(response.fatal))
+					this.stop(this.lost(response.fatal))
 				}
 
 				return
@@ -112,13 +114,17 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 			event.preventDefault()
 
 			if (this.worker === worker) {
-				this.stop(new Error(event.message || `the ${this.options.name} worker failed`))
+				this.stop(this.lost(event.message || `the ${this.options.name} worker failed`))
 			}
 		})
 
 		this.worker = worker
 
 		return worker
+	}
+
+	private lost(message: string): Error {
+		return this.options.toLostError?.(message) ?? new Error(message)
 	}
 
 	private cancelIdle(): void {

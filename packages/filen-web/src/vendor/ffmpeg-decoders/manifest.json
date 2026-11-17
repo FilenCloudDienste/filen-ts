@@ -21,7 +21,8 @@
 	},
 	"link": ["-Oz", "-flto", "-msimd128", "-DNDEBUG", "-ffile-prefix-map=<ffmpeg source>=ffmpeg", "-ffile-prefix-map=<scripts/codecs>=codecs", "-sMODULARIZE=1", "-sEXPORT_NAME=createFfmpegDecoders", "-sENVIRONMENT=worker", "-sSINGLE_FILE=1", "-sSINGLE_FILE_BINARY_ENCODE=0", "-sDYNAMIC_EXECUTION=0", "-sALLOW_MEMORY_GROWTH=1", "-sFILESYSTEM=0", "-sMALLOC=emmalloc", "-sSUPPORT_LONGJMP=0", "-sINCOMING_MODULE_JS_API=[]", "-sEXPORTED_RUNTIME_METHODS=HEAPU8", "-sEXPORTED_FUNCTIONS=_decoder_log_level,_decoder_extradata,_decoder_open,_decoder_packet,_decoder_send,_decoder_drain,_decoder_receive,_decoder_reset,_decoder_format,_decoder_channels,_decoder_channel_mask,_decoder_sample_rate,_decoder_frames,_decoder_plane,_decoder_timestamp,_decoder_close"],
 	"sources": {
-		"build-ffmpeg-decoders.sh": "9636d1bb4ad7aa2c8b9acfaa4425e7f20e21339d688f7591c0a14875d6a57ddb",
+		"build-ffmpeg-decoders.sh": "cb8e8ab088b00d35d31a740d4ce0de5d606736d7b062bfd5bfceca4de1a9e25c",
+		"emscripten.sh": "3f149991165029949f707376dcfa814c1aa32c1ca91c3dc04ca432f88fa0cc06",
 		"bridge.c": "912f612596fec45e98853e381b6a2ce6a38664f73d49b3268fd9b17ef9519791",
 		"decoder-worker.js": "5ba67e008edb5eaacd3ddb519d7801cdb8b644d23109671aa52d4612d7ceb5e1"
 	},

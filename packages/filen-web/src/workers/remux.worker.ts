@@ -17,7 +17,7 @@ import {
 	type WindowPermits
 } from "@/lib/media/remuxTypes"
 import { RemuxEngine } from "@/workers/remux/engine"
-import { openAudioInput } from "@/workers/remux/audioInput"
+import { playbackAudioInput, type SynthHint } from "@/workers/remux/synthAudioInput"
 import { analyzeEdges } from "@/workers/remux/edges"
 import { PcmStream } from "@/workers/remux/pcmStream"
 import { WAV_CONTENT_TYPE } from "@/workers/remux/wav.logic"
@@ -96,11 +96,12 @@ const api = {
 	// Decodes the audio file `params.port` serves into a WAV stream served by range on `output` (the service
 	// worker reads it there), until the reader closes `output`. Rejects with AudioUnsupportedError when nothing
 	// in the file can be decoded.
-	async openPcm(params: { port: MessagePort; size: number }, output: MessagePort): Promise<PcmStreamInfo> {
+	// `synth` names the synthesizer a file a synthesizer renders needs.
+	async openPcm(params: { port: MessagePort; size: number; synth?: SynthHint }, output: MessagePort): Promise<PcmStreamInfo> {
 		let stream: PcmStream
 
 		try {
-			const input = await openAudioInput(params.port, params.size)
+			const input = await playbackAudioInput(params.port, params.size, "audio", params.synth)
 
 			try {
 				stream = await PcmStream.open(input, emptyRemuxStats())
@@ -144,11 +145,11 @@ const api = {
 	// Closes the port when done. Rejects with SourceReadError when the bytes did not arrive; a file nothing in
 	// which decodes is a `failed` answer. Each window reads in one of the page's background permits, `permits`.
 	async analyzeEdges(
-		params: { port: MessagePort; size: number },
+		params: { port: MessagePort; size: number; synth?: SynthHint },
 		permits: WindowPermits & Partial<Comlink.ProxyMethods>
 	): Promise<EdgeAnalysis> {
 		try {
-			return await analyzeEdges(params.port, params.size, permits)
+			return await analyzeEdges(params.port, params.size, permits, params.synth)
 		} finally {
 			permits[Comlink.releaseProxy]?.()
 		}

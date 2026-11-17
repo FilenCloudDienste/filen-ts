@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { cn, driveItemName, isAbortError } from "@filen/shared"
+import { audioSynthKind, cn, driveItemName, isAbortError, type AudioSynthKind } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
@@ -148,11 +148,13 @@ function DecodedAudio({
 	item,
 	alt,
 	resume,
+	synth,
 	onStreamFailed
 }: {
 	item: DriveItem
 	alt: string
 	resume: AudioResume
+	synth: AudioSynthKind | undefined
 	onStreamFailed: (resume: AudioResume) => void
 }) {
 	const access = usePreviewAccessMode()
@@ -170,7 +172,7 @@ function DecodedAudio({
 		let live = true
 		let release: (() => void) | null = null
 
-		void openDecodedAudioStream({ file, access }).then(
+		void openDecodedAudioStream({ file, access, synth }).then(
 			stream => {
 				if (live) {
 					release = () => {
@@ -199,7 +201,7 @@ function DecodedAudio({
 			live = false
 			release?.()
 		}
-	}, [file, access, resume, onStreamFailed])
+	}, [file, access, synth, resume, onStreamFailed])
 
 	if (state.status === "unsupported") {
 		return (
@@ -315,8 +317,14 @@ function hasMediaSource(): boolean {
 	return typeof MediaSource !== "undefined" || "ManagedMediaSource" in globalThis
 }
 
-// Which of the three an audio preview plays through, and from where.
-type AudioStage = { kind: "stream" } | { kind: "decoded"; resume: AudioResume } | { kind: "mediaSource"; resume: AudioResume }
+// Which of the three an audio preview plays through, and from where. A synthesizer's audio has the decoded stream
+// alone: where it breaks, Retry opens it again ("failed"); without a service worker it cannot stream.
+type AudioStage =
+	| { kind: "stream" }
+	| { kind: "decoded"; resume: AudioResume }
+	| { kind: "mediaSource"; resume: AudioResume }
+	| { kind: "failed"; resume: AudioResume }
+	| { kind: "cannotStream" }
 
 // With a service worker: what the browser plays natively (AIFF, CAF, ALAC in Safari) plays as it is through
 // its route, anything else (or anything that turns out not to play) as a decoded WAV stream through the same
@@ -325,9 +333,10 @@ type AudioStage = { kind: "stream" } | { kind: "decoded"; resume: AudioResume } 
 function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 	const contentType = allowedMediaContentType(item)
 	const uuid = item.data.uuid
+	const synth = audioSynthKind(itemTypeExtension(item))
 	const [stage, setStage] = useState<AudioStage>(() => {
 		if (!isMediaStreamAvailable()) {
-			return { kind: "mediaSource", resume: FROM_START }
+			return synth === undefined ? { kind: "mediaSource", resume: FROM_START } : { kind: "cannotStream" }
 		}
 
 		return audioRoute({ extension: itemTypeExtension(item), contentType, demoted: audioDemotions.has(uuid) }) === "direct"
@@ -335,7 +344,13 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 			: { kind: "decoded", resume: FROM_START }
 	})
 	const toMediaSource = (resume: AudioResume): void => {
-		setStage(previous => (previous.kind === "mediaSource" ? previous : { kind: "mediaSource", resume }))
+		setStage(previous =>
+			previous.kind === "mediaSource" || previous.kind === "failed"
+				? previous
+				: synth === undefined
+					? { kind: "mediaSource", resume }
+					: { kind: "failed", resume }
+		)
 	}
 
 	if (stage.kind === "stream" && contentType !== null) {
@@ -359,12 +374,25 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 				item={item}
 				alt={alt}
 				resume={stage.resume}
+				synth={synth}
 				onStreamFailed={toMediaSource}
 			/>
 		)
 	}
 
-	if (!hasMediaSource()) {
+	if (stage.kind === "failed") {
+		const { resume } = stage
+
+		return (
+			<MediaPlaybackFailure
+				onRetry={() => {
+					setStage({ kind: "decoded", resume })
+				}}
+			/>
+		)
+	}
+
+	if (stage.kind === "cannotStream" || !hasMediaSource()) {
 		return <MediaCannotStream item={item} />
 	}
 

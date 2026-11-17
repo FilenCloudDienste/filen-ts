@@ -417,8 +417,8 @@ function ffmpegModuleNotices(): Collected[] {
 	const sources = objectField(manifest, "sources", FFMPEG_MANIFEST)
 	const tag = stringField(ffmpeg, "tag", FFMPEG_MANIFEST)
 	const emcc = stringField(manifest, "emcc", FFMPEG_MANIFEST)
-	const linkedInto = `Statically linked into the FFmpeg decoders module (${FFMPEG_DIR}/decoders.worker.js), built with Emscripten ${emcc}.`
-	const sourceList = ["build-ffmpeg-decoders.sh", "bridge.c", "decoder-worker.js"]
+	const linkedInto = `Statically linked into the FFmpeg decoders module (${FFMPEG_DIR}/decoders.worker.js) and the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.js), built with Emscripten ${emcc}.`
+	const sourceList = ["build-ffmpeg-decoders.sh", "emscripten.sh", "bridge.c", "decoder-worker.js"]
 		.map(name => `${CODECS_SOURCE}/${name} (SHA-256 ${stringField(sources, name, FFMPEG_MANIFEST)})`)
 		.join(", ")
 
@@ -548,6 +548,79 @@ function threeDecoderNotices(installedNpm: InstalledNpmPackage[]): Collected[] {
 					`meshoptimizer's decoder, built to WebAssembly and inlined in examples/jsm/libs/meshopt_decoder.module.js of ${THREE_PACKAGE} ${pkg.version}, bundled into the 3D viewer's worker.`,
 					readFileSync(`${THREE_LICENSES}/meshoptimizer-LICENSE.md`, "utf8")
 				]
+			},
+			"vendored"
+		)
+	]
+}
+
+/**
+ * libopenmpt, built to WebAssembly by scripts/codecs/build-libopenmpt.sh (BSD-3-Clause), with the minimp3 (CC0-1.0),
+ * stb_vorbis (public domain or MIT) and miniz (MIT) it bundles; the release, its tarball's SHA-256 and the licence
+ * texts are read from what the build wrote. Emscripten and musl are in the FFmpeg module's notices; the libc++,
+ * libc++abi and libunwind it also links are LLVM's, whose exception to Apache-2.0 owes an object form no attribution.
+ */
+const LIBOPENMPT_DIR = "src/vendor/libopenmpt"
+const LIBOPENMPT_MANIFEST = `${LIBOPENMPT_DIR}/manifest.json`
+
+function libopenmptNotices(): Collected[] {
+	const manifest = requireJson(LIBOPENMPT_MANIFEST)
+	const libopenmpt = objectField(manifest, "libopenmpt", LIBOPENMPT_MANIFEST)
+	const version = stringField(libopenmpt, "version", LIBOPENMPT_MANIFEST)
+	const linkedInto = `Statically linked into the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.js).`
+	const license = (name: string): string => readFileSync(`${LIBOPENMPT_DIR}/licenses/${name}`, "utf8")
+
+	return [
+		vendoredNotice(
+			{
+				name: "libopenmpt",
+				version,
+				license: "BSD-3-Clause",
+				copyright: [
+					"Copyright (c) 2004-2026, OpenMPT Project Developers and Contributors",
+					"Copyright (c) 1997-2003, Olivier Lapicque"
+				],
+				repository: "https://lib.openmpt.org/libopenmpt/",
+				terms: [
+					`Tracker module rendering, built to WebAssembly from the release tarball ${stringField(libopenmpt, "tarball", LIBOPENMPT_MANIFEST)} (SHA-256 ${stringField(libopenmpt, "sha256", LIBOPENMPT_MANIFEST)}) by packages/filen-web/scripts/codecs/build-libopenmpt.sh in the filen-ts repository (${FILEN_TS_REPOSITORY}).`,
+					license("libopenmpt-LICENSE")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "minimp3",
+				version: `as bundled with libopenmpt ${version}`,
+				license: "CC0-1.0",
+				copyright: ["The minimp3 authors"],
+				repository: "https://github.com/lieff/minimp3",
+				terms: [`MP3 sample decoding. ${linkedInto}`, license("minimp3-LICENSE")]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "stb_vorbis",
+				version: `as bundled with libopenmpt ${version}`,
+				license: "MIT OR Unlicense",
+				copyright: ["Copyright (c) 2017 Sean Barrett"],
+				repository: "https://github.com/nothings/stb",
+				terms: [`Vorbis sample decoding. ${linkedInto}`, license("stb_vorbis-LICENSE")]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "miniz",
+				version: `as bundled with libopenmpt ${version}`,
+				license: "MIT",
+				copyright: [
+					"Copyright 2013-2014 RAD Game Tools and Valve Software",
+					"Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC"
+				],
+				repository: "https://github.com/richgel999/miniz",
+				terms: [`Deflate decompression of packed modules. ${linkedInto}`, license("miniz-LICENSE")]
 			},
 			"vendored"
 		)
@@ -1957,6 +2030,7 @@ function cldrNotices(): Collected[] {
 const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
+const libopenmpt = libopenmptNotices()
 const aacEncoder = aacEncoderNotices(installed)
 const threeDecoders = threeDecoderNotices(installed)
 const engine = wllamaEngineNotices()
@@ -1987,6 +2061,7 @@ const jsquash = jsquashNotices()
 const cldr = cldrNotices()
 const vendored = [
 	...ffmpeg,
+	...libopenmpt,
 	...aacEncoder,
 	...threeDecoders,
 	...engine,

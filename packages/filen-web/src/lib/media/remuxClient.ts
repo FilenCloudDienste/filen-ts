@@ -3,11 +3,11 @@ import RemuxWorker from "@/workers/remux.worker.ts?worker"
 import type { RemuxWorkerApi } from "@/workers/remux.worker"
 import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
+import { REMUX_WORKER_IDLE_MS } from "@/lib/media/remuxTypes"
 
 // The demuxer's buffers and the audio codecs' wasm stay allocated for the worker's lifetime, so it is
 // torn down once nothing has played through it for a while; a later playback starts a fresh one. Sign-out terminates
 // it at once, held or not, and with it the decoder workers it runs.
-const REMUX_WORKER_IDLE_MS = 30_000
 
 const remuxWorker = statelessWorker<RemuxWorkerApi>(() => new RemuxWorker(), REMUX_WORKER_IDLE_MS, "remux")
 

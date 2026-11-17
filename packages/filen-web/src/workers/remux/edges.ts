@@ -2,7 +2,8 @@ import { ADTS, CustomSource, FLAC, Input, MP3, type AudioSample, type InputForma
 import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
 import { emptyRemuxStats, isSourceReadError, type EdgeAnalysis, type WindowPermits } from "@/lib/media/remuxTypes"
 import { log } from "@/lib/log"
-import { openAudioInput, streamStart, type AudioInput } from "@/workers/remux/audioInput"
+import { streamStart, type AudioInput } from "@/workers/remux/audioInput"
+import { playbackAudioInput, type SynthHint } from "@/workers/remux/synthAudioInput"
 import { sampleReader, type SampleReader } from "@/workers/remux/audioTranscode"
 import {
 	accumulateEnvelope,
@@ -372,7 +373,13 @@ function undecodable(error: unknown): EdgeAnalysis {
 }
 
 // Opens the file a range port serves and analyses it, the open in the head window's permit.
-export async function analyzeEdges(port: MessagePort, size: number, permits: WindowPermits = FREE_PERMITS): Promise<EdgeAnalysis> {
+// `synth` names the synthesizer a file a synthesizer renders needs.
+export async function analyzeEdges(
+	port: MessagePort,
+	size: number,
+	permits: WindowPermits = FREE_PERMITS,
+	synth?: SynthHint
+): Promise<EdgeAnalysis> {
 	const permit = new WindowPermit(permits)
 
 	try {
@@ -381,7 +388,7 @@ export async function analyzeEdges(port: MessagePort, size: number, permits: Win
 		let input: AudioInput
 
 		try {
-			input = await openAudioInput(port, size, "analysis")
+			input = await playbackAudioInput(port, size, "analysis", synth)
 		} catch (error) {
 			return undecodable(error)
 		}

@@ -1,0 +1,37 @@
+{
+	"description": "libopenmpt 0.8.10 with its bundled minimp3, stb_vorbis and miniz, built to WebAssembly by scripts/codecs/build-libopenmpt.sh; BSD-3-Clause.",
+	"libopenmpt": {
+		"version": "0.8.10",
+		"tarball": "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.10+release.makefile.tar.gz",
+		"sha256": "95073a10d33d0ed4352f41b68edccb9636002d2626f9fd2e00b191fcaabdd876",
+		"make": ["CONFIG=emscripten", "EMSCRIPTEN_TARGET=wasm", "SHARED_LIB=0", "STATIC_LIB=1", "EXAMPLES=0", "OPENMPT123=0", "TEST=0", "NO_ZLIB=1", "NO_MPG123=1", "NO_OGG=1", "NO_VORBIS=1", "NO_VORBISFILE=1", "NO_PORTAUDIO=1", "NO_PORTAUDIOCPP=1", "NO_PULSEAUDIO=1", "NO_SDL2=1", "NO_FLAC=1", "NO_SNDFILE=1"]
+	},
+	"emcc": "7.0.0-git",
+	"emccBuild": {
+		"clang": "24.0.0git",
+		"homebrew": {"version":"7.0.0","revision":0,"formulaSha256":"55e8c415a22962d6907a31435682a8992924fc4994a902adfed557a82392bf77","tarballSha256":"5a4f436f6e28e669495173674a7bf0fc5e61c58b08fd3373e4e6242e01629cf4","bottle":true}
+	},
+	"emscripten": {
+		"musl": "1.2.6"
+	},
+	"link": ["-ffile-prefix-map=<libopenmpt source>=libopenmpt", "-Oz", "-flto", "-fwasm-exceptions", "-sMODULARIZE=1", "-sEXPORT_ES6=1", "-sEXPORT_NAME=createLibopenmpt", "-sENVIRONMENT=worker", "-sSINGLE_FILE=1", "-sSINGLE_FILE_BINARY_ENCODE=0", "-sDYNAMIC_EXECUTION=0", "-sALLOW_MEMORY_GROWTH=1", "-sMAXIMUM_MEMORY=256MB", "-sFILESYSTEM=0", "-sINCOMING_MODULE_JS_API=[]", "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPF32,UTF8ToString", "-sEXPORTED_FUNCTIONS=_malloc,_free,_openmpt_module_create_from_memory2,_openmpt_module_destroy,_openmpt_module_set_repeat_count,_openmpt_module_get_duration_seconds,_openmpt_module_set_position_seconds,_openmpt_module_read_interleaved_float_stereo,_openmpt_get_supported_extensions,_openmpt_free_string"],
+	"licenses": {
+		"libopenmpt-LICENSE": "2c999e99533c10a347916a72e075bacf10fcedeff793bd90d41d812b46161da2",
+		"minimp3-LICENSE": "6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01",
+		"miniz-LICENSE": "0115478d567121238cf6cc1c0c361926cf07a49d9e4c9e66da97fac6a01646b3",
+		"stb_vorbis-LICENSE": "0459bce8ce9b9b045d20d9c48192226d302f0cce81b151ba71189b2a10c8a8fc",
+		"emscripten-LICENSE": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+		"musl-COPYRIGHT": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"
+	},
+	"sources": {
+		"build-libopenmpt.sh": "3fb59077face8dbb394ebbb276f457215fb3895ab9699a45aa72b5c42e3dfbf9",
+		"emscripten.sh": "3f149991165029949f707376dcfa814c1aa32c1ca91c3dc04ca432f88fa0cc06"
+	},
+	"output": {
+		"libopenmpt.js": {
+			"bytes": 1427946,
+			"sha256": "6140e69c8d308f31a8326722e179a5527f01bdec65c999b289d105f02414741a"
+		},
+		"extensions.json": "4ec91a6a47baa7e8d39c35d7f7d9fb5fa5a1118d2aeb1c1d9e5ff0d81c969e30"
+	}
+}

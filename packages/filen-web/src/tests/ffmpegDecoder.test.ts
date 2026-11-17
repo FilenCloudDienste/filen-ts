@@ -401,6 +401,7 @@ describe("vendored FFmpeg decoders module", () => {
 		// module would no longer match the source the notice points to.
 		expect(sha256(read("../../scripts/codecs/build-ffmpeg-decoders.sh"))).toBe(manifest.sources["build-ffmpeg-decoders.sh"])
 		expect(sha256(read("../../scripts/codecs/bridge.c"))).toBe(manifest.sources["bridge.c"])
+		expect(sha256(read("../../scripts/codecs/emscripten.sh"))).toBe(manifest.sources["emscripten.sh"])
 
 		const loop = read("../../scripts/codecs/decoder-worker.js")
 

@@ -25,7 +25,7 @@ class FakeWorker {
 	}
 }
 
-function nested(idleMs = 0, toError?: (message: string) => Error) {
+function nested(idleMs = 0, toError?: (message: string) => Error, toLostError?: (message: string) => Error) {
 	const spawned: FakeWorker[] = []
 	const helper = new NestedWorker<{ type: string }, NestedResponse>(
 		() => {
@@ -35,7 +35,7 @@ function nested(idleMs = 0, toError?: (message: string) => Error) {
 
 			return worker as unknown as Worker
 		},
-		{ name: "test", idleMs, ...(toError === undefined ? {} : { toError }) }
+		{ name: "test", idleMs, ...(toError === undefined ? {} : { toError }), ...(toLostError === undefined ? {} : { toLostError }) }
 	)
 
 	return { helper, spawned }
@@ -75,7 +75,11 @@ describe("NestedWorker", () => {
 	})
 
 	it("answers by id, rejects an error answer with the error it names, and drops the worker on a fatal one", async () => {
-		const { helper, spawned } = nested(0, message => new TypeError(message))
+		const { helper, spawned } = nested(
+			0,
+			message => new TypeError(message),
+			message => new RangeError(message)
+		)
 		const worker = helper.acquire()
 		const fake = spawned[0]
 		const ok = helper.request(worker, { type: "a" })
@@ -88,7 +92,7 @@ describe("NestedWorker", () => {
 		await expect(failed).rejects.toBeInstanceOf(TypeError)
 
 		fake?.answer({ id: 99, fatal: "trapped" })
-		await expect(waiting).rejects.toThrow("trapped")
+		await expect(waiting).rejects.toThrow(RangeError)
 		expect(fake?.terminated).toBe(true)
 		await expect(helper.request(worker, { type: "d" })).rejects.toThrow("lost")
 	})
