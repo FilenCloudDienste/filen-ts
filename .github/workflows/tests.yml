@@ -23,6 +23,7 @@ on:
       - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
+      - 'packages/filen-encoding-detect/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'packages/filen-assistant-eval/**'
@@ -38,6 +39,7 @@ on:
       - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
+      - 'packages/filen-encoding-detect/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'packages/filen-assistant-eval/**'
@@ -61,6 +63,7 @@ jobs:
       filen-shared: ${{ steps.filter.outputs.filen-shared }}
       filen-office: ${{ steps.filter.outputs.filen-office }}
       filen-spellcheck: ${{ steps.filter.outputs.filen-spellcheck }}
+      filen-encoding-detect: ${{ steps.filter.outputs.filen-encoding-detect }}
       filen-desktop: ${{ steps.filter.outputs.filen-desktop }}
       filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
       filen-web: ${{ steps.filter.outputs.filen-web }}
@@ -93,6 +96,13 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
+            filen-encoding-detect:
+              - '.github/workflows/tests.yml'
+              - 'packages/filen-encoding-detect/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
             filen-desktop:
               - '.github/workflows/tests.yml'
               - 'packages/filen-desktop/**'
@@ -115,6 +125,7 @@ jobs:
               - 'packages/filen-office/**'
               - 'packages/filen-shared/**'
               - 'packages/filen-spellcheck/**'
+              - 'packages/filen-encoding-detect/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -224,7 +235,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
+            packages/filen-encoding-detect/crate/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
@@ -247,6 +259,50 @@ jobs:
         run: pnpm run test:rust
       - name: Test
         working-directory: packages/filen-spellcheck
+        run: pnpm test
+  test-encoding-detect:
+    needs: changes
+    if: needs.changes.outputs.filen-encoding-detect == 'true' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: filen-encoding-detect-tests-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+      # The encoding detector's wasm module is built from source (packages/filen-encoding-detect): rustup installs
+      # the toolchain and wasm target that rust-toolchain.toml pins.
+      - name: Set up Rust
+        working-directory: packages/filen-encoding-detect
+        run: rustup toolchain install
+      - name: Cache Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-encoding-detect/crate/target
+          key: cargo-encoding-detect-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          restore-keys: cargo-encoding-detect-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install dependencies
+        working-directory: packages/filen-encoding-detect
+        run: pnpm install --frozen-lockfile --filter @filen/encoding-detect...
+      - name: Rust format and clippy
+        working-directory: packages/filen-encoding-detect
+        run: pnpm run lint:rust
+      - name: Rust tests
+        working-directory: packages/filen-encoding-detect
+        run: pnpm run test:rust
+      - name: Test
+        working-directory: packages/filen-encoding-detect
         run: pnpm test
   test-desktop:
     needs: changes
@@ -381,7 +437,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
+            packages/filen-encoding-detect/crate/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
@@ -542,7 +599,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
+            packages/filen-encoding-detect/crate/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.

@@ -1,0 +1,26 @@
+[package]
+name = "filen-encoding-detect"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.98"
+description = "Legacy text encoding detection for the Filen apps (chardetng behind a C ABI for wasm)"
+license = "AGPL-3.0-only"
+repository = "https://github.com/FilenCloudDienste/filen-ts"
+publish = false
+
+[lib]
+# cdylib: the wasm module; rlib: tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+chardetng = "=1.0.0"
+
+[dev-dependencies]
+encoding_rs = "=0.8.35"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

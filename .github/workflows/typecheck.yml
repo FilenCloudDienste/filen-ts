@@ -11,6 +11,7 @@ on:
       - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
+      - 'packages/filen-encoding-detect/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -25,6 +26,7 @@ on:
       - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
+      - 'packages/filen-encoding-detect/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -44,6 +46,7 @@ jobs:
       filen-shared: ${{ steps.filter.outputs.filen-shared }}
       filen-office: ${{ steps.filter.outputs.filen-office }}
       filen-spellcheck: ${{ steps.filter.outputs.filen-spellcheck }}
+      filen-encoding-detect: ${{ steps.filter.outputs.filen-encoding-detect }}
       filen-desktop: ${{ steps.filter.outputs.filen-desktop }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -57,6 +60,7 @@ jobs:
               - 'packages/filen-office/**'
               - 'packages/filen-shared/**'
               - 'packages/filen-spellcheck/**'
+              - 'packages/filen-encoding-detect/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -95,6 +99,13 @@ jobs:
             filen-spellcheck:
               - '.github/workflows/typecheck.yml'
               - 'packages/filen-spellcheck/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
+            filen-encoding-detect:
+              - '.github/workflows/typecheck.yml'
+              - 'packages/filen-encoding-detect/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -222,4 +233,24 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @filen/spellcheck...
       - name: Typecheck
         working-directory: packages/filen-spellcheck
+        run: pnpm run typecheck
+  typecheck-encoding-detect:
+    needs: changes
+    if: needs.changes.outputs.filen-encoding-detect == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-encoding-detect
+        run: pnpm install --frozen-lockfile --filter @filen/encoding-detect...
+      - name: Typecheck
+        working-directory: packages/filen-encoding-detect
         run: pnpm run typecheck

@@ -1,0 +1,7 @@
+# The crate's toolchain, for `cargo` run anywhere in this package (rustup reads this file and installs what
+# is missing). wasm32-unknown-unknown is the web build's target.
+[toolchain]
+channel = "1.98.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

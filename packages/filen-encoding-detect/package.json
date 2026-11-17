@@ -1,0 +1,39 @@
+{
+	"name": "@filen/encoding-detect",
+	"version": "0.0.1",
+	"description": "Legacy text encoding detection for the Filen apps: chardetng (Rust) as wasm",
+	"private": true,
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/FilenCloudDienste/filen-ts/packages/filen-encoding-detect"
+	},
+	"author": "Filen Cloud Dienste UG",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": "./src/index.ts",
+		"./build-wasm": "./scripts/build-wasm.mjs",
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build:wasm": "node scripts/build-wasm.mjs",
+		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+		"test": "vitest run",
+		"test:rust": "cargo test --manifest-path crate/Cargo.toml",
+		"lint": "eslint src/ scripts/ && prettier --check \"{src,scripts}/**/*.{ts,mjs}\"",
+		"lint:rust": "cargo fmt --manifest-path crate/Cargo.toml --check && cargo clippy --manifest-path crate/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path crate/Cargo.toml --release --target wasm32-unknown-unknown -- -D warnings"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"license": "AGPLv3",
+	"devDependencies": {
+		"@eslint/js": "^9.39.3",
+		"@types/node": "^24.0.0",
+		"eslint": "^9.39.3",
+		"prettier": "^3.9.6",
+		"typescript": "~6.0.3",
+		"typescript-eslint": "^8.56.1",
+		"vitest": "^4.1.11"
+	}
+}
