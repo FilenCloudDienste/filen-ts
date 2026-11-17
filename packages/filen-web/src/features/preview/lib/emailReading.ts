@@ -38,6 +38,10 @@ export interface EmailMessage {
 	readonly cc: readonly string[]
 	// Addresses past MAX_ADDRESSES, counted.
 	readonly addressesOmitted: number
+	// Reply-To, when it names someone other than the sender; else empty.
+	readonly replyTo: readonly string[]
+	// The sender's domain as written when it is international (shown in its ASCII form in `from`); else null.
+	readonly fromIdnDomain: string | null
 	// ISO 8601, or the header as written when it does not parse; null for none.
 	readonly date: string | null
 	// Null past TEXT_CAP characters too (htmlTooLarge): cut HTML is not a document.
@@ -76,17 +80,53 @@ export function rasterImageType(bytes: Uint8Array): string | null {
 
 const LIMIT_CODES: ReadonlySet<string> = new Set(["EMAXNESTINGDEPTH", "EMAXHEADERSIZE", "EMAXPARTCOUNT", "EMAXFORWARDEDADDRESSES"])
 
+// Header text as shown: format controls (bidi overrides among them) gone, whitespace runs one space (padding cannot push
+// a name's real end out of view), cut short.
 function display(text: string | undefined | null): string | null {
-	const shown = withoutFormatControls(text ?? "").trim()
+	const shown = withoutFormatControls(text ?? "")
+		.replace(/\s+/g, " ")
+		.trim()
 
 	return shown === "" ? null : shown.slice(0, MAX_SHORT)
 }
 
+// An address with an international (non-ASCII) domain in its ASCII form, which no lookalike script can imitate.
+function asciiAddress(address: string): { readonly shown: string; readonly idn: string | null } {
+	const at = address.lastIndexOf("@")
+	const domain = address.slice(at + 1)
+
+	if (at < 0 || /^[\x20-\x7e]*$/.test(domain)) return { shown: address, idn: null }
+
+	try {
+		return { shown: `${address.slice(0, at + 1)}${new URL(`http://${domain}`).hostname}`, idn: domain }
+	} catch {
+		return { shown: address, idn: domain }
+	}
+}
+
+// "Name <address>"; the address first when the name could pass for one ("support@bank.com" <x@evil.io>).
 function mailbox(name: string, address: string): string {
 	const shownName = display(name)
-	const shownAddress = display(address) ?? ""
+	const shownAddress = asciiAddress(display(address) ?? "").shown
 
-	return shownName === null || shownName === shownAddress ? shownAddress : `${shownName} <${shownAddress}>`
+	if (shownAddress === "") return shownName ?? ""
+	if (shownName === null || shownName === shownAddress) return shownAddress
+
+	return shownName.includes("@") ? `${shownAddress} (${shownName})` : `${shownName} <${shownAddress}>`
+}
+
+// The sender's international domain as written, for the viewer to point out; null for an ASCII one.
+function idnDomain(address: string | null | undefined): string | null {
+	return asciiAddress(display(address) ?? "").idn
+}
+
+// Reply-To where it names someone other than the sender.
+function differingReplyTo(replyTo: readonly Address[] | undefined, from: Address | undefined): string[] {
+	const sender = (from?.address ?? "").toLowerCase()
+	const list = addresses(replyTo, { left: MAX_ADDRESSES, omitted: 0 })
+	const members = (replyTo ?? []).flatMap(entry => entry.group ?? [entry])
+
+	return members.every(member => member.address.toLowerCase() === sender) ? [] : list
 }
 
 // Each address once, as "Name <address>"; a group as its members.
@@ -138,6 +178,8 @@ function readMessage(email: Email): EmailMessage {
 		to,
 		cc,
 		addressesOmitted: budget.omitted,
+		replyTo: differingReplyTo(email.replyTo, email.from),
+		fromIdnDomain: idnDomain(email.from?.address),
 		date: display(email.date),
 		...bodies(email.html ?? null, email.text ?? null),
 		attachments: email.attachments.map((attachment, index) => {
@@ -176,6 +218,9 @@ function readMsgMessage(message: MsgMessage): EmailMessage {
 		to: shown(message.to),
 		cc: shown(message.cc),
 		addressesOmitted: message.recipientsOmitted,
+		// Reply-To is not read from a .msg (its recipients are entry IDs, not addresses).
+		replyTo: [],
+		fromIdnDomain: idnDomain(message.from?.address),
 		date: display(message.date),
 		...bodies(message.html, message.text),
 		attachments: message.attachments.map((attachment, index) => {

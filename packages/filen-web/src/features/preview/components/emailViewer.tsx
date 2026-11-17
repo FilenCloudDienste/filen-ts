@@ -108,7 +108,7 @@ function Recipients({ label, list }: { label: string; list: readonly string[] })
 
 	return (
 		<div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
-			<span className="w-10 shrink-0 text-muted-foreground">{label}</span>
+			<span className="min-w-10 shrink-0 text-muted-foreground">{label}</span>
 			<span className="min-w-0 break-words">
 				<bdi>{shown.join(", ")}</bdi>
 			</span>
@@ -459,11 +459,19 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 				</div>
 				<div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 text-sm">
 					<span className="flex min-w-0 gap-2">
-						<span className="w-10 shrink-0 text-muted-foreground">{t("previewEmailFrom")}</span>
+						<span className="min-w-10 shrink-0 text-muted-foreground">{t("previewEmailFrom")}</span>
 						<bdi className="min-w-0 break-words">{message.from ?? ""}</bdi>
 					</span>
 					{date === null ? null : <span className="shrink-0 text-muted-foreground">{date}</span>}
 				</div>
+				{message.fromIdnDomain === null ? null : (
+					<p className="flex items-center gap-2 text-xs text-muted-foreground">
+						<InfoIcon className="size-4 shrink-0" />
+						<span className="min-w-0 break-words">
+							{t("previewEmailIdnDomain")} <bdi>{message.fromIdnDomain}</bdi>
+						</span>
+					</p>
+				)}
 				<Recipients
 					label={t("previewEmailTo")}
 					list={message.to}
@@ -471,6 +479,10 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 				<Recipients
 					label={t("previewEmailCc")}
 					list={message.cc}
+				/>
+				<Recipients
+					label={t("previewEmailReplyTo")}
+					list={message.replyTo}
 				/>
 				{message.addressesOmitted > 0 ? (
 					<p className="text-xs text-muted-foreground">

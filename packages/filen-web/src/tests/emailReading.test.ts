@@ -200,4 +200,42 @@ describe("readEmail", () => {
 		expect(reading).toMatchObject({ status: "ok", html: null, htmlTooLarge: true, textTruncated: true })
 		expect(reading.status === "ok" && reading.text?.length).toBe(4096)
 	})
+
+	it("puts the real address first, shows an international domain in ASCII, Reply-To when it differs, and collapses padding", async () => {
+		const read = async (lines: string[]) => {
+			const reading = await readEmail(encode(CRLF(lines)))
+
+			if (reading.status !== "ok") throw new Error("expected a message")
+
+			return reading
+		}
+
+		expect(await read(['From: "support@bank.com" <evil@x.io>', "Reply-To: drop@y.io", "", "x"])).toMatchObject({
+			from: "evil@x.io (support@bank.com)",
+			replyTo: ["drop@y.io"],
+			fromIdnDomain: null
+		})
+		expect(await read(["From: Anna <anna@x.io>", "Reply-To: ANNA@x.io", "", "x"])).toMatchObject({
+			from: "Anna <anna@x.io>",
+			replyTo: []
+		})
+		expect(await read(["From: a@b\u00fccher.example", "", "x"])).toMatchObject({
+			from: "a@xn--bcher-kva.example",
+			fromIdnDomain: "b\u00fccher.example"
+		})
+
+		const padded = await read([
+			"Subject: Padded",
+			'Content-Type: multipart/mixed; boundary="p"',
+			"",
+			"--p",
+			'Content-Type: application/octet-stream; name="invoice.pdf          .exe"',
+			'Content-Disposition: attachment; filename="invoice.pdf          .exe"',
+			"",
+			"MZ",
+			"--p--"
+		])
+
+		expect(padded.attachments[0]?.name).toBe("invoice.pdf .exe")
+	})
 })
