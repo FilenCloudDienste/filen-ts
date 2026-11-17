@@ -119,6 +119,14 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 	const cspViolations = trackCspViolations(page)
 	const foreign = trackForeignRequests(context, { strictPreview: true })
 
+	// The fallback faces the engine fetched (synchronously, from its worker): MuPDF needs them to lay the book out, so
+	// they are fetched while it opens, not when a page is drawn. Watched from before the open.
+	const faces: string[] = []
+
+	context.on("request", request => {
+		if (request.url().includes("/office-fonts/")) faces.push(request.url())
+	})
+
 	await page.setViewportSize({ width: 1280, height: 900 })
 
 	await withScratchDirectory(page, "ebook-view", async ({ listbox, runId }) => {
@@ -139,7 +147,7 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 
 		await expect(first.getByText(OPENING_WORDS, { exact: false })).toBeAttached()
 
-		await page.keyboard.press("ControlOrMeta+f")
+		await page.getByRole("button", { name: preview.previewDocxFindAction, exact: true }).click()
 		await page.keyboard.type("unique anchor phrase")
 		await page.keyboard.press("Enter")
 		await expect(page.locator(".fo-pdf-text-layer .highlight").first()).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
@@ -151,10 +159,8 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 
 		await expect(tree.getByRole("treeitem")).toHaveCount(CHAPTERS.length)
 
-		const japaneseFace = page.waitForRequest(request => request.url().includes("noto-sans-jp"), { timeout: LAZY_VIEWER_TIMEOUT_MS })
-
+		await expect.poll(() => faces.some(url => url.includes("noto-sans-jp"))).toBe(true)
 		await tree.getByRole("treeitem", { name: "Japanese" }).click()
-		await japaneseFace
 
 		await tree.getByRole("treeitem", { name: "Hebrew" }).click()
 		await expect(page.locator('.fo-pdf-text-layer span[dir="rtl"]').first()).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })

@@ -1,13 +1,18 @@
-import type { Page } from "@playwright/test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { LARGE_UPLOAD_TIMEOUT_MS, LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LARGE_UPLOAD_TIMEOUT_MS, LAZY_VIEWER_TIMEOUT_MS, uploadDiskFiles, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { observeEgest } from "./helpers/requests"
 import { writePdf, type PdfObject } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
 
-// The outline pane: the bar's Outline button opens it beside the pages (kept open for the next PDF), a row goes to its
-// page, the current section follows the page shown, and the arrow keys and Enter work the tree. Under the CSP.
+// The outline of a drive PDF, which opens in the editor's ribbon: the pages rail's Outline tab (the Pages tab's rail
+// toggle, then the rail's own tab) lists the bookmarks as a tree, a row goes to its page, the current section follows the
+// page shown, and the arrow keys and Enter work the tree. Under the CSP. (The viewer's outline pane, for a document the
+// editor does not open, is covered by ebook-view.spec.ts.)
 test.describe.configure({ mode: "default" })
 
 const PDF_MIME = "application/pdf"
@@ -50,11 +55,26 @@ function outlinedPdf(): Uint8Array {
 	return writePdf(objects, 1)
 }
 
+// The editor's left rail on its Outline tab, opened from the ribbon's Pages tab where it is closed; its tree.
+async function openOutlineRail(page: Page): Promise<{ readonly rail: Locator; readonly tree: Locator }> {
+	const rail = page.getByRole("complementary", { name: preview.previewPdfPagesRailToggle })
+
+	if ((await rail.count()) === 0) {
+		// The ribbon's Pages tab, before the rail (whose own Pages tab follows it in the document).
+		await page.getByRole("tab", { name: preview.previewPdfTabPages, exact: true }).first().click()
+		await page.getByRole("button", { name: preview.previewPdfPagesRailToggle }).click()
+	}
+
+	await rail.getByRole("tab", { name: preview.previewPdfOutlineTabOutline }).click()
+
+	return { rail, tree: rail.getByRole("tree", { name: preview.previewPdfOutlinePane }) }
+}
+
 function pageIndicator(page: Page, current: number): ReturnType<Page["getByText"]> {
 	return page.getByText(preview.previewPdfPageIndicator.replace("{{current}}", String(current)).replace("{{total}}", String(PAGES)))
 }
 
-test("the outline pane goes to a chapter, follows the page and works with the keys", async ({ page }) => {
+test("the outline goes to a chapter, follows the page and works with the keys", async ({ page }) => {
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
@@ -70,12 +90,7 @@ test("the outline pane goes to a chapter, follows the page and works with the ke
 			timeout: LAZY_VIEWER_TIMEOUT_MS
 		})
 
-		const toggle = page.getByRole("button", { name: preview.previewPdfOutlinePane })
-
-		await toggle.click()
-		await expect(toggle).toHaveAttribute("aria-pressed", "true")
-
-		const tree = page.getByRole("tree", { name: preview.previewPdfOutlinePane })
+		const { rail, tree } = await openOutlineRail(page)
 
 		await expect(tree.getByRole("treeitem")).toHaveCount(CHAPTERS.length)
 		await expect(tree.getByRole("treeitem", { name: "Chapter 1" })).toHaveAttribute("aria-current", "location")
@@ -91,10 +106,9 @@ test("the outline pane goes to a chapter, follows the page and works with the ke
 		await expect(pageIndicator(page, 5)).toBeVisible()
 		await expect(tree.getByRole("treeitem", { name: "Chapter 2" })).toHaveAttribute("aria-current", "location")
 
-		// Closing hands focus back to the pages.
-		await page.getByRole("button", { name: preview.previewPdfOutlinePaneClose }).click()
+		// Back to the thumbnails: the tree goes.
+		await rail.getByRole("tab", { name: preview.previewPdfOutlineTabPages }).click()
 		await expect(tree).toHaveCount(0)
-		await expect(toggle).toHaveAttribute("aria-pressed", "false")
 	})
 
 	expect(cspViolations).toEqual([])
@@ -166,67 +180,72 @@ function rangedOutlinePdf(): Uint8Array {
 	return writePdf(objects, 1)
 }
 
-test("the outline pane resolves the destinations of the rows near the view only, on a ranged file", async ({ page }) => {
+test("the outline resolves the destinations of the rows near the view only, on a ranged file", async ({ page }) => {
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
-	const bytes = Buffer.from(rangedOutlinePdf())
+	// Over Playwright's 50 MB limit for an in-memory upload: written to disk and uploaded from there.
+	const bytes = rangedOutlinePdf()
 	const chunks = Math.ceil(bytes.length / CHUNK)
+	const dir = mkdtempSync(join(tmpdir(), "filen-e2e-outline-"))
 
 	await page.setViewportSize({ width: 1280, height: 900 })
 
-	await withScratchDirectory(page, "pdf-outline-ranged", async ({ listbox, runId }) => {
-		const name = `e2e-pdf-outline-ranged-${runId}.pdf`
+	try {
+		await withScratchDirectory(page, "pdf-outline-ranged", async ({ listbox, runId }) => {
+			const name = `e2e-pdf-outline-ranged-${runId}.pdf`
 
-		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: bytes }], listbox)
+			const path = join(dir, name)
 
-		const egest = observeEgest(page.context())
+			writeFileSync(path, bytes)
+			await uploadDiskFiles(page, [path], listbox)
 
-		await listbox.getByRole("option", { name }).dblclick()
-		await expect(page.locator('[data-page="1"][data-rendered="true"]')).toBeAttached({ timeout: LARGE_UPLOAD_TIMEOUT_MS })
+			const egest = observeEgest(page.context())
 
-		// What opening read settles first; from here every chunk is the pane's.
-		await expect
-			.poll(async () => {
-				const before = egest.requests()
+			await listbox.getByRole("option", { name }).dblclick()
+			await expect(page.locator('[data-page="1"][data-rendered="true"]')).toBeAttached({ timeout: LARGE_UPLOAD_TIMEOUT_MS })
 
-				await page.waitForTimeout(1500)
+			// What opening read settles first; from here every chunk is the pane's.
+			await expect
+				.poll(async () => {
+					const before = egest.requests()
 
-				return egest.requests() - before
-			})
-			.toBe(0)
-		egest.reset()
+					await page.waitForTimeout(1500)
 
-		const toggle = page.getByRole("button", { name: preview.previewPdfOutlinePane })
+					return egest.requests() - before
+				})
+				.toBe(0)
+			egest.reset()
 
-		if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+			const { tree } = await openOutlineRail(page)
 
-		const tree = page.getByRole("tree", { name: preview.previewPdfOutlinePane })
+			await expect(tree.getByRole("treeitem", { name: "Section 1", exact: true })).toBeVisible()
 
-		await expect(tree.getByRole("treeitem", { name: "Section 1", exact: true })).toBeVisible()
+			// Settled: no chunk for a while.
+			await expect
+				.poll(async () => {
+					const before = egest.requests()
 
-		// Settled: no chunk for a while.
-		await expect
-			.poll(async () => {
-				const before = egest.requests()
+					await page.waitForTimeout(1500)
 
-				await page.waitForTimeout(1500)
+					return egest.requests() - before
+				})
+				.toBe(0)
 
-				return egest.requests() - before
-			})
-			.toBe(0)
+			const rows = Math.ceil((await tree.evaluate(element => element.clientHeight)) / ROW_PX) + 2 * RESOLVE_MARGIN
+			// The leaves of the rows resolved, and the leaves a binary search of the name tree passes through.
+			const bound = Math.ceil(rows / NAMES_PER_LEAF) + Math.ceil(Math.log2(RANGED_LEAVES)) + 2
 
-		const rows = Math.ceil((await tree.evaluate(element => element.clientHeight)) / ROW_PX) + 2 * RESOLVE_MARGIN
-		// The leaves of the rows resolved, and the leaves a binary search of the name tree passes through.
-		const bound = Math.ceil(rows / NAMES_PER_LEAF) + Math.ceil(Math.log2(RANGED_LEAVES)) + 2
+			expect(egest.requests()).toBeLessThanOrEqual(bound)
+			expect(egest.requests()).toBeLessThan(chunks / 2)
 
-		expect(egest.requests()).toBeLessThanOrEqual(bound)
-		expect(egest.requests()).toBeLessThan(chunks / 2)
-
-		// The rows' destinations resolved: a bookmark near the top goes to its page.
-		await tree.getByRole("treeitem", { name: "Section 3", exact: true }).click()
-		await expect(page.getByText(`Page 3 of ${String(RANGED_PAGES)}`, { exact: true }).first()).toBeVisible()
-	})
+			// The rows' destinations resolved: a bookmark near the top goes to its page.
+			await tree.getByRole("treeitem", { name: "Section 3", exact: true }).click()
+			await expect(page.getByText(`Page 3 of ${String(RANGED_PAGES)}`, { exact: true }).first()).toBeVisible()
+		})
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
 
 	expect(cspViolations).toEqual([])
 })
