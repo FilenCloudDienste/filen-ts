@@ -37,7 +37,7 @@ function epub(): Buffer {
 				`<nav xmlns:epub="http://www.idpf.org/2007/ops" epub:type="toc"><ol>${CHAPTERS.map((title, index) => `<li><a href="c${String(index + 1)}.xhtml">${title}</a></li>`).join("")}</ol></nav>`
 			)
 		},
-		{ name: "OEBPS/c1.xhtml", data: XHTML(`<h1>Opening</h1><p>${OPENING_WORDS}. ${LOREM.repeat(30)}</p><p>unique anchor phrase</p>`) },
+		{ name: "OEBPS/c1.xhtml", data: XHTML(`<h1>Opening</h1><p>${OPENING_WORDS}. ${LOREM.repeat(300)}</p><p>unique anchor phrase</p>`) },
 		{ name: "OEBPS/c2.xhtml", data: XHTML(`<h1>日本語の章</h1><p>${"吾輩は猫である。名前はまだ無い。".repeat(20)}</p>`, "ja") },
 		{ name: "OEBPS/c3.xhtml", data: XHTML(`<h1>Hebrew</h1><p dir="rtl">${"שלום עולם, זהו פרק בעברית. ".repeat(10)}</p>`, "he") }
 	])
@@ -88,6 +88,8 @@ function mobi(): Buffer {
 }
 
 async function open(page: Page, listbox: Locator, name: string): Promise<Locator> {
+	// A normal window for the book: the listing's tall one (setTallListingViewport) lays every chapter out on one page.
+	await page.setViewportSize({ width: 1280, height: 900 })
 	await listbox.getByRole("option", { name }).dblclick()
 
 	const first = page.getByRole("region", { name: /Page 1 of \d+/u })
@@ -174,13 +176,14 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 		// size lays the book out over more pages.
 		const pagesBefore = await pageCount(page)
 
-		await page.getByRole("button", { name: preview.previewEbookTextLarger }).click()
+		// Three steps (11 → 16 pt): the opening chapter, several pages long, takes clearly more.
+		for (let step = 0; step < 3; step++) await page.getByRole("button", { name: preview.previewEbookTextLarger }).click()
 		await expect.poll(() => pageCount(page), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(pagesBefore)
 		await expect(page.getByRole("status").filter({ hasText: preview.previewEbookRelayout })).toHaveCount(0)
 		await expect(page.locator(".fo-pdf-text-layer").getByText("It was a bright", { exact: false }).first()).toBeInViewport({
 			timeout: LAZY_VIEWER_TIMEOUT_MS
 		})
-		await page.getByRole("button", { name: preview.previewEbookTextSmaller }).click()
+		for (let step = 0; step < 3; step++) await page.getByRole("button", { name: preview.previewEbookTextSmaller }).click()
 		await page.getByRole("button", { name: preview.previewPdfOutlinePane }).click()
 
 		await close(page)

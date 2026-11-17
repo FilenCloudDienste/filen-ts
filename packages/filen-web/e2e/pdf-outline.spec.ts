@@ -70,8 +70,15 @@ async function openOutlineRail(page: Page): Promise<{ readonly rail: Locator; re
 	return { rail, tree: rail.getByRole("tree", { name: preview.previewPdfOutlinePane }) }
 }
 
-function pageIndicator(page: Page, current: number): ReturnType<Page["getByText"]> {
-	return page.getByText(preview.previewPdfPageIndicator.replace("{{current}}", String(current)).replace("{{total}}", String(PAGES)))
+// The page the view went to: its top at the pages' top, so it is on screen in a normal window.
+function shownPage(page: Page, number: number): Locator {
+	return page.locator(`[data-page="${String(number)}"]`)
+}
+
+// A normal window for the document: the listing's tall one (setTallListingViewport) fits every page at once, so the
+// page in view never moves and every outline row is near the view.
+async function normalWindow(page: Page): Promise<void> {
+	await page.setViewportSize({ width: 1280, height: 900 })
 }
 
 test("the outline goes to a chapter, follows the page and works with the keys", async ({ page }) => {
@@ -85,6 +92,7 @@ test("the outline goes to a chapter, follows the page and works with the keys", 
 		const name = `e2e-pdf-outline-${runId}.pdf`
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(outlinedPdf()) }], listbox)
+		await normalWindow(page)
 		await listbox.getByRole("option", { name }).dblclick()
 		await expect(page.getByRole("region", { name: new RegExp(`Page 1 of ${String(PAGES)}`, "u") })).toBeVisible({
 			timeout: LAZY_VIEWER_TIMEOUT_MS
@@ -96,14 +104,15 @@ test("the outline goes to a chapter, follows the page and works with the keys", 
 		await expect(tree.getByRole("treeitem", { name: "Chapter 1" })).toHaveAttribute("aria-current", "location")
 
 		await tree.getByRole("treeitem", { name: "Chapter 3" }).click()
-		await expect(pageIndicator(page, 9)).toBeVisible()
+		await expect(shownPage(page, 9)).toBeInViewport()
+		await expect(shownPage(page, 1)).not.toBeInViewport()
 		await expect(tree.getByRole("treeitem", { name: "Chapter 3" })).toHaveAttribute("aria-current", "location")
 
 		// The keys: up to Chapter 2, Enter goes there.
 		await page.keyboard.press("ArrowUp")
 		await expect(tree.getByRole("treeitem", { name: "Chapter 2" })).toBeFocused()
 		await page.keyboard.press("Enter")
-		await expect(pageIndicator(page, 5)).toBeVisible()
+		await expect(shownPage(page, 5)).toBeInViewport()
 		await expect(tree.getByRole("treeitem", { name: "Chapter 2" })).toHaveAttribute("aria-current", "location")
 
 		// Back to the thumbnails: the tree goes.
@@ -202,6 +211,7 @@ test("the outline resolves the destinations of the rows near the view only, on a
 
 			const egest = observeEgest(page.context())
 
+			await normalWindow(page)
 			await listbox.getByRole("option", { name }).dblclick()
 			await expect(page.locator('[data-page="1"][data-rendered="true"]')).toBeAttached({ timeout: LARGE_UPLOAD_TIMEOUT_MS })
 
@@ -241,7 +251,7 @@ test("the outline resolves the destinations of the rows near the view only, on a
 
 			// The rows' destinations resolved: a bookmark near the top goes to its page.
 			await tree.getByRole("treeitem", { name: "Section 3", exact: true }).click()
-			await expect(page.getByText(`Page 3 of ${String(RANGED_PAGES)}`, { exact: true }).first()).toBeVisible()
+			await expect(shownPage(page, 3)).toBeInViewport()
 		})
 	} finally {
 		rmSync(dir, { recursive: true, force: true })
