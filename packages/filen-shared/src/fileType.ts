@@ -62,6 +62,11 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	// Fujifilm's name for the same container.
 	["image/heif", "hif", "fromExt"],
 	["image/tiff", "tiff", "both"],
+	["image/tiff", "tif", "fromExt"],
+	["image/jxl", "jxl", "both"],
+	["image/x-qoi", "qoi", "both"],
+	// Gzipped SVG: served (and reversed) as the SVG it inflates to.
+	["image/svg+xml", "svgz", "fromExt"],
 	["video/mp4", "mp4", "both"],
 	["video/webm", "webm", "both"],
 	["video/quicktime", "mov", "both"],

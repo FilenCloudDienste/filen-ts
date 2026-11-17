@@ -101,7 +101,9 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["application/x-sqlite3", "sqlite"],
 	["application/epub+zip", "epub"],
 	["application/x-mobipocket-ebook", "mobi"],
-	["application/x-fictionbook+xml", "fb2"]
+	["application/x-fictionbook+xml", "fb2"],
+	["image/jxl", "jxl"],
+	["image/x-qoi", "qoi"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
@@ -256,6 +258,15 @@ describe("e-book types", () => {
 })
 
 describe("mimeForExtension", () => {
+	it("serves the image extensions the preview decodes itself", () => {
+		expect(mimeForExtension("tif")).toBe("image/tiff")
+		expect(mimeForExtension("jxl")).toBe("image/jxl")
+		expect(mimeForExtension("qoi")).toBe("image/x-qoi")
+		expect(mimeForExtension("svgz")).toBe("image/svg+xml")
+		expect(extensionForMime("image/svg+xml")).toBe("svg")
+		expect(extensionForMime("image/tiff")).toBe("tiff")
+	})
+
 	it("serves an extension as its canonical type, never an alias", () => {
 		expect(mimeForExtension("jpg")).toBe("image/jpeg")
 		expect(mimeForExtension("jpeg")).toBe("image/jpeg")
