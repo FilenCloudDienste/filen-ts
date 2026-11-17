@@ -32,13 +32,14 @@ export function openSyncRange(file: AnyFile, access: PreviewAccessMode, token: s
 	)
 }
 
-// The page's side of a bridge over `length` bytes: the shared buffer, and the reader lock held for as long as the
-// bridge is wanted. `serve` asks the SDK worker to serve it, the port transferred.
+// The page's side of a bridge over `length` bytes: the shared buffer (`slots` blocks), and the reader lock held for as
+// long as the bridge is wanted. `serve` asks the SDK worker to serve it, the port transferred.
 export async function openSyncBridge(
 	length: number,
-	serve: (buffer: SharedArrayBuffer, port: MessagePort, readerLock: string) => Promise<void>
+	serve: (buffer: SharedArrayBuffer, port: MessagePort, readerLock: string) => Promise<void>,
+	slots: number = syncRangeSlots()
 ): Promise<SyncRangeHandle> {
-	const buffer = createSyncRangeBuffer(syncRangeSlots(), BLOCK_BYTES)
+	const buffer = createSyncRangeBuffer(slots, BLOCK_BYTES)
 	const { port1, port2 } = new MessageChannel()
 	const readerLock = `filen-sync-range-${crypto.randomUUID()}`
 	const done = Promise.withResolvers<undefined>()
