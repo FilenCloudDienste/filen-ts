@@ -1,4 +1,5 @@
 import { mimeForExtension } from "@filen/shared"
+import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import type { SaveTarget, SourceInfo, SourceMime } from "@/features/preview/imageEdit/types"
 
 // Where an edit can be saved. In place only where we can re-encode the same format without losing what it is
@@ -61,23 +62,29 @@ export function inPlaceFormatByName(name: string): "image/jpeg" | "image/png" | 
 	}
 }
 
+// The extensions that name each sniffed format: a file whose bytes say another is not edited (its save would write one
+// format under a name that says another).
 const EXTENSION_FAMILIES: Readonly<Record<SourceMime, readonly string[]>> = {
 	"image/jpeg": ["jpg", "jpeg", "jfif", "jpe", "pjpeg", "pjp"],
-	"image/png": ["png"],
+	"image/png": ["png", "apng"],
 	"image/webp": ["webp"],
 	"image/gif": ["gif"],
 	"image/bmp": ["bmp", "dib"],
 	"image/x-icon": ["ico"],
 	"image/avif": ["avif"],
-	"image/heic": ["heic", "heif", "hif"],
+	"image/heic": [...HEIC_EXTENSIONS],
 	"image/x-qoi": ["qoi"],
 	"image/jxl": ["jxl"],
 	"image/tiff": ["tif", "tiff"],
 	"image/vnd.adobe.photoshop": ["psd"]
 }
 
+export function matchesExtension(name: string, mime: SourceMime): boolean {
+	return EXTENSION_FAMILIES[mime].includes(extensionOf(name))
+}
+
 // Whether the sniffed file can be edited at all: a still image whose bytes are the format its name claims (a
 // renamed file would be saved back under a name that lies about it).
 export function isEditableSource(info: SourceInfo, name: string): boolean {
-	return !info.animated && info.width > 0 && info.height > 0 && EXTENSION_FAMILIES[info.mime].includes(extensionOf(name))
+	return !info.animated && info.width > 0 && info.height > 0 && matchesExtension(name, info.mime)
 }

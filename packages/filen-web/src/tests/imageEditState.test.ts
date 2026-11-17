@@ -3,7 +3,7 @@ import { editedCopyName } from "@/features/drive/lib/copyName"
 import { FILTER_PRESETS, effectiveAdjustments } from "@/features/preview/imageEdit/lib/filters"
 import { COALESCE_MS, HISTORY_LIMIT, createHistory } from "@/lib/editHistory"
 import { identityRecipe } from "@/features/preview/imageEdit/lib/recipe"
-import { inPlaceFormatByName, isEditableSource, saveTargets } from "@/features/preview/imageEdit/lib/targets"
+import { inPlaceFormatByName, isEditableSource, matchesExtension, saveTargets } from "@/features/preview/imageEdit/lib/targets"
 import type { ImageEditRecipe, SourceInfo } from "@/features/preview/imageEdit/types"
 
 function withContrast(contrast: number): ImageEditRecipe {
@@ -209,6 +209,15 @@ describe("saveTargets", () => {
 		expect(isEditableSource(info({ mime: "image/png" }), "a.jpg")).toBe(false)
 		expect(isEditableSource(info({ mime: "image/gif", animated: true }), "a.gif")).toBe(false)
 		expect(isEditableSource(info({ mime: "image/jpeg" }), "noextension")).toBe(false)
+		expect(isEditableSource(info({ mime: "image/bmp" }), "a.dib")).toBe(true)
+	})
+
+	it("matches a name to its sniffed format by the one family table the session and the save share", () => {
+		expect(matchesExtension("a.apng", "image/png")).toBe(true)
+		expect(matchesExtension("a.DIB", "image/bmp")).toBe(true)
+		expect(matchesExtension("a.hif", "image/heic")).toBe(true)
+		expect(matchesExtension("a.psd", "image/vnd.adobe.photoshop")).toBe(true)
+		expect(matchesExtension("a.png", "image/jpeg")).toBe(false)
 	})
 })
 

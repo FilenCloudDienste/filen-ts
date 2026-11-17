@@ -1,13 +1,12 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, heldImageCap, imageDecodeFor, imageMupdfFormat } from "@/features/drive/lib/preview.logic"
-import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
+import { heldImageCap, imageDecodeFor, imageMupdfFormat } from "@/features/drive/lib/preview.logic"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { decodeHeicRgba, decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
-import { saveTargets } from "@/features/preview/imageEdit/lib/targets"
+import { matchesExtension, saveTargets } from "@/features/preview/imageEdit/lib/targets"
 import { heifExif, heifIcc } from "@/features/preview/imageEdit/lib/heifMeta"
 import { openEditSession } from "@/features/preview/imageEdit/renderClient"
 import type { EditCapabilities, EditSession, ImageEditSource, SaveTarget, SourceInfo, SourceMime } from "@/features/preview/imageEdit/types"
@@ -51,30 +50,6 @@ export interface ImageEditState {
 export type EnterImageEditOutcome =
 	{ status: "ready"; state: ImageEditState } | { status: "refused"; messageKey: PreviewKey } | { status: "cancelled" }
 
-// The sniffed format each image extension names; a file whose bytes say another is not edited (its save would
-// write one format under a name that says another).
-const EXTENSION_FAMILY: ReadonlyMap<string, SourceMime> = new Map<string, SourceMime>([
-	["jpg", "image/jpeg"],
-	["jpeg", "image/jpeg"],
-	["jfif", "image/jpeg"],
-	["jpe", "image/jpeg"],
-	["pjpeg", "image/jpeg"],
-	["pjp", "image/jpeg"],
-	["png", "image/png"],
-	["apng", "image/png"],
-	["webp", "image/webp"],
-	["gif", "image/gif"],
-	["bmp", "image/bmp"],
-	["ico", "image/x-icon"],
-	["avif", "image/avif"],
-	["qoi", "image/x-qoi"],
-	["jxl", "image/jxl"],
-	["tif", "image/tiff"],
-	["tiff", "image/tiff"],
-	["psd", "image/vnd.adobe.photoshop"],
-	...[...HEIC_EXTENSIONS].map(extension => [extension, "image/heic"] as const)
-])
-
 // The formats whose editing source our own code decodes from the whole file, or ("mupdf") a document engine draws.
 type EditDecoder = "heic" | "qoi" | "jxl" | "mupdf"
 
@@ -82,10 +57,6 @@ function editDecoder(item: DriveItem): EditDecoder | null {
 	const decode = imageDecodeFor(item)
 
 	return decode === "heic" || decode === "qoi" || decode === "jxl" || decode === "mupdf" ? decode : null
-}
-
-export function matchesExtension(name: string, mime: SourceMime): boolean {
-	return EXTENSION_FAMILY.get(extensionOf(name)) === mime
 }
 
 // The names taken in a directory, as the server compares them: one read of its listing (the cached one while it is
