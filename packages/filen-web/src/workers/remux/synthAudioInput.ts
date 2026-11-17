@@ -84,6 +84,7 @@ class Synth {
 		this.nested = new NestedWorker(spawn, {
 			name,
 			idleMs: REMUX_WORKER_IDLE_MS,
+			acknowledges: true,
 			toError: message =>
 				message.startsWith(SYNTH_UNSUPPORTED_PREFIX)
 					? new AudioUnsupportedError(message.slice(SYNTH_UNSUPPORTED_PREFIX.length))

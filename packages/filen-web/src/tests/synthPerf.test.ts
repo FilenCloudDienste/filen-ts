@@ -65,6 +65,7 @@ describe("MIDI parse cost", () => {
 // What the host answers: the MIDI worker's own answers, and its heap and CPU readings.
 interface HostAnswer {
 	id: number
+	started?: true
 	error?: string
 	fatal?: string
 	handle?: number
@@ -120,7 +121,8 @@ describe("MIDI worker", () => {
 			new Promise<HostAnswer>((resolve, reject) => {
 				const id = nextId++
 				const answer = (response: HostAnswer): void => {
-					if (response.id !== id) {
+					// The worker's note that it took the request up is no answer.
+					if (response.id !== id || response.started === true) {
 						return
 					}
 

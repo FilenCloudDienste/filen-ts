@@ -269,6 +269,9 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 scope.addEventListener("message", (event: MessageEvent<SynthRequest & { id: number }>) => {
 	const { id } = event.data
 
+	// Taken up now: the remux worker counts the request's deadline from here, not from the time it queued behind others.
+	scope.postMessage({ id, started: true })
+
 	answer(event.data).then(
 		response => {
 			scope.postMessage({ id, ...response }, response.data === undefined ? [] : [response.data])

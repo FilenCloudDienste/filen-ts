@@ -10,6 +10,8 @@ export interface NestedResponse {
 	error?: string
 	// The worker cannot carry on: it has closed itself.
 	fatal?: string
+	// No answer yet: the worker has started on the request (an `acknowledges` worker says so for every one).
+	started?: true
 }
 
 export interface NestedWorkerOptions {
@@ -21,6 +23,9 @@ export interface NestedWorkerOptions {
 	toError?: (message: string) => Error
 	// The error what waits on a worker that failed rejects with.
 	toLostError?: (message: string) => Error
+	// The worker posts `started` as it takes each request up: a request's deadline then counts from there, not the time
+	// it waited behind others on the same thread.
+	acknowledges?: boolean
 }
 
 interface Pending {
@@ -28,6 +33,7 @@ interface Pending {
 	resolve: (response: unknown) => void
 	reject: (error: Error) => void
 	timer: ReturnType<typeof setTimeout> | null
+	timeoutMs: number | undefined
 }
 
 export class NestedWorker<Request extends object, Response extends NestedResponse> {
@@ -134,16 +140,28 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		const id = this.nextId++
 
 		return new Promise((resolve, reject) => {
-			const timer =
-				timeoutMs === undefined
-					? null
-					: setTimeout(() => {
-							this.end(worker, this.lost(`the ${this.options.name} worker did not answer within ${String(timeoutMs)} ms`))
-						}, timeoutMs)
+			const entry: Pending = { worker, resolve: resolve as (response: unknown) => void, reject, timer: null, timeoutMs }
 
-			this.pending.set(id, { worker, resolve: resolve as (response: unknown) => void, reject, timer })
+			if (this.options.acknowledges !== true) {
+				this.arm(entry)
+			}
+
+			this.pending.set(id, entry)
 			worker.postMessage({ id, ...request }, transfer)
 		})
+	}
+
+	// Starts `entry`'s deadline, if it has one.
+	private arm(entry: Pending): void {
+		const { timeoutMs, worker } = entry
+
+		if (timeoutMs === undefined || entry.timer !== null) {
+			return
+		}
+
+		entry.timer = setTimeout(() => {
+			this.end(worker, this.lost(`the ${this.options.name} worker did not answer within ${String(timeoutMs)} ms`))
+		}, timeoutMs)
 	}
 
 	private start(): Worker {
@@ -161,6 +179,12 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 			const waiting = this.pending.get(response.id)
 
 			if (waiting === undefined) {
+				return
+			}
+
+			if (response.started === true) {
+				this.arm(waiting)
+
 				return
 			}
 

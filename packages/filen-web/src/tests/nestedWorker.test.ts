@@ -31,7 +31,7 @@ class FakeWorker {
 	}
 }
 
-function nested(idleMs = 0, toError?: (message: string) => Error, toLostError?: (message: string) => Error) {
+function nested(idleMs = 0, toError?: (message: string) => Error, toLostError?: (message: string) => Error, acknowledges = false) {
 	const spawned: FakeWorker[] = []
 	const helper = new NestedWorker<{ type: string }, NestedResponse>(
 		() => {
@@ -41,7 +41,13 @@ function nested(idleMs = 0, toError?: (message: string) => Error, toLostError?: 
 
 			return worker as unknown as Worker
 		},
-		{ name: "test", idleMs, ...(toError === undefined ? {} : { toError }), ...(toLostError === undefined ? {} : { toLostError }) }
+		{
+			name: "test",
+			idleMs,
+			acknowledges,
+			...(toError === undefined ? {} : { toError }),
+			...(toLostError === undefined ? {} : { toLostError })
+		}
 	)
 
 	return { helper, spawned }
@@ -121,6 +127,34 @@ describe("NestedWorker", () => {
 		// Its user releases as before, and the next one starts a fresh worker.
 		helper.release(worker)
 		expect(helper.acquire()).not.toBe(worker)
+	})
+
+	it("counts a deadline from when the worker took the request up, not the time it queued behind another", async () => {
+		vi.useFakeTimers()
+
+		const { helper, spawned } = nested(0, undefined, undefined, true)
+		const worker = helper.acquire()
+		const slow = helper.request(worker, { type: "open" }, [], 20_000)
+		const render = helper.request(worker, { type: "render" }, [], 2_000)
+
+		spawned[0]?.answer({ id: 0, started: true })
+		// The open runs for 15 s; the render waits behind it without its deadline running.
+		vi.advanceTimersByTime(15_000)
+		spawned[0]?.answer({ id: 0 })
+		await expect(slow).resolves.toMatchObject({ id: 0 })
+		spawned[0]?.answer({ id: 1, started: true })
+		vi.advanceTimersByTime(1_000)
+		spawned[0]?.answer({ id: 1 })
+		await expect(render).resolves.toMatchObject({ id: 1 })
+		expect(spawned[0]?.terminated).toBe(false)
+
+		// One taken up and never answered is still dropped at its deadline.
+		const stuck = helper.request(worker, { type: "render" }, [], 2_000)
+
+		spawned[0]?.answer({ id: 2, started: true })
+		vi.advanceTimersByTime(2_000)
+		await expect(stuck).rejects.toThrow("did not answer")
+		expect(spawned[0]?.terminated).toBe(true)
 	})
 
 	it("clears a deadline once its answer came", async () => {
