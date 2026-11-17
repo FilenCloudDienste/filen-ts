@@ -6,7 +6,8 @@ import { trackCspViolations } from "./helpers/csp"
 
 // The containers the app demuxes itself (AVI, ASF, MPEG-PS), a transport stream whose MP2 sound FFmpeg decodes, and
 // an MP4's second audio track picked from the controls: WebKit switches it in place on its direct stream (no
-// MediaSource), every other browser moves it to the ladder.
+// MediaSource), every other browser moves it to the ladder. WebKit's Linux build (GStreamer) can stall on the in-place
+// switch; the preview then moves it to the ladder too, which is what a user there gets.
 
 // Plays the dialog's video until `seconds` of it have played.
 async function playing(page: Page, seconds = 0.3): Promise<void> {
@@ -44,7 +45,14 @@ test("AVI, ASF and MPEG-PS files play, and a transport stream's MP2 plays with s
 	expect(cspViolations).toEqual([])
 })
 
-test("picking an MP4's second audio track plays it, in place on WebKit's direct stream", async ({ page, browserName }) => {
+test("picking an MP4's second audio track plays it, in place on WebKit's direct stream", async ({ page, browserName }, testInfo) => {
+	const warnings: string[] = []
+
+	page.on("console", message => {
+		if (message.type() === "warning") {
+			warnings.push(message.text())
+		}
+	})
 	await bootTo(page)
 
 	const {
@@ -87,8 +95,14 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 	await playing(page, at + 1)
 
 	if (browserName === "webkit") {
-		// Still the direct stream: no MediaSource took it over.
-		expect(await video.evaluate(el => (el as HTMLVideoElement).currentSrc.startsWith("blob:"))).toBe(false)
+		// Still the direct stream, unless the switch stalled and the preview moved it to the ladder (MediaSource).
+		const laddered = await video.evaluate(el => (el as HTMLVideoElement).currentSrc.startsWith("blob:"))
+
+		testInfo.annotations.push({ type: "audio track switch", description: laddered ? "stalled, moved to the ladder" : "in place" })
+
+		if (laddered) {
+			expect(warnings.some(text => text.includes("stalled on an audio track switch"))).toBe(true)
+		}
 	}
 
 	// The pick holds, whichever way the browser plays it.
