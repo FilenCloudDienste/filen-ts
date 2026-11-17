@@ -32,7 +32,7 @@ import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/
 import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
-import { previewableSiblings } from "@/features/drive/lib/preview.logic"
+import { previewOpenTarget } from "@/features/drive/lib/preview.logic"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
@@ -171,10 +171,9 @@ function useListingOpen({ items, variant, splat, searchActive, clearSearch, open
 				return
 			}
 
-			const siblings = previewableSiblings(items)
-			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
+			const target = previewOpenTarget(items, item)
 
-			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
+			openPreview(target.siblings, target.index)
 
 			return
 		}

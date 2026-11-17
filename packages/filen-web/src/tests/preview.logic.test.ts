@@ -15,6 +15,7 @@ import {
 	itemTypeExtension,
 	isStreamedCategory,
 	previewableSiblings,
+	previewOpenTarget,
 	stepPreviewIndex,
 	streamFailureAction,
 	extensionOf,
@@ -727,6 +728,37 @@ describe("previewableSiblings", () => {
 		const two = fileNamed("two.flac", { mime: "audio/flac" })
 
 		expect(previewableSiblings([one, two])).toEqual([])
+	})
+
+	// Only its read says what a `.key` is: before it ran it resolves "other", yet it opens, and the gate reads it.
+	it("includes a file waiting on its content read, and drops one the read found to be nothing", () => {
+		const report = fileNamed("report.pages", { mime: "application/vnd.apple.pages" })
+		const slides = fileNamed("unread-slides.key")
+		const keynote = fileNamed("read-slides.key")
+		const keyFile = fileNamed("server.key")
+
+		recordFileKindVerdict(keynote.data.uuid, "iworkPackage")
+		recordFileKindVerdict(keyFile.data.uuid, "notIworkPackage")
+
+		expect(previewType(slides)).toBe("other")
+		expect(previewableSiblings([report, slides, keynote, keyFile])).toEqual([report, slides, keynote])
+	})
+})
+
+describe("previewOpenTarget", () => {
+	it("opens the item at its place among the pager's siblings", () => {
+		const bare = fileNamed("a-bare.pages", { mime: "application/vnd.apple.pages" })
+		const song = fileNamed("b-song.mp3", { mime: "audio/mpeg" })
+		const slides = fileNamed("c-slides.key")
+
+		expect(previewOpenTarget([bare, song, slides], slides)).toEqual({ siblings: [bare, slides], index: 1 })
+	})
+
+	it("opens an item the pager does not hold alone, never its first sibling", () => {
+		const image = fileNamed("a.jpg")
+		const song = fileNamed("b.mp3", { mime: "audio/mpeg" })
+
+		expect(previewOpenTarget([image, song], song)).toEqual({ siblings: [song], index: 0 })
 	})
 })
 

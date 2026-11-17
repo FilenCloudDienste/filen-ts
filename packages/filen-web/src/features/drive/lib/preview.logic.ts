@@ -732,11 +732,23 @@ export function streamFailureAction(item: DriveItem): "buffer" | "error" {
 // deliberately excluded: a drive-hosted audio file hands off to the persistent player instead of the
 // preview overlay (see directoryListing's open handler), so the overlay never renders or pages to it —
 // stepping through a mixed folder skips audio and the pager's count reflects that. The public-link page
-// keeps its own audio surface, which does not route through this helper.
+// keeps its own audio surface, which does not route through this helper. A file whose content read picks its viewer
+// pages before the read ran (an unread `.key` resolves "other"): the overlay's gate reads it.
 export function previewableSiblings(items: DriveItem[]): DriveItem[] {
 	const profile = deviceProfile()
 
-	return items.filter(item => canPreviewWith(item, profile) && CATEGORY_POLICY[previewType(item)].pager)
+	return items.filter(
+		item => canPreviewWith(item, profile) && (needsContentSniff(item) !== null || CATEGORY_POLICY[previewType(item)].pager)
+	)
+}
+
+// What opening `item` from a listing hands the overlay: the pager's list, at the item's place in it. A file the pager
+// does not hold opens alone, never as its first sibling.
+export function previewOpenTarget(items: DriveItem[], item: DriveItem): { siblings: DriveItem[]; index: number } {
+	const siblings = previewableSiblings(items)
+	const index = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
+
+	return index === -1 ? { siblings: [item], index: 0 } : { siblings, index }
 }
 
 // Resolves the sibling one step (no wrap) from whichever sibling currently carries `currentUuid` — a
