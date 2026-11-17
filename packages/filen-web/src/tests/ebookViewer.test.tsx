@@ -364,4 +364,22 @@ describe("EbookViewer", () => {
 		expect(liveRegion().textContent).toBe("")
 		expect(lastShell().fullReadGuard).toBe(false)
 	})
+
+	it("lays the book out again around the page the reader is going to, not one a scroll passes", async () => {
+		vi.useFakeTimers()
+
+		const { reader } = await openBook()
+
+		// The shell's anchor: a chapter just chosen, still scrolling into view.
+		const anchor = lastShell().anchorRef
+
+		if (anchor === undefined) throw new Error("no anchor ref")
+
+		anchor.current = () => 7
+		fireEvent.click(screen.getByRole("button", { name: "Larger text" }))
+		await act(() => vi.advanceTimersByTimeAsync(EBOOK_TEXT_SIZE_DEBOUNCE_MS + 10))
+		expect(reader.relayout.mock.calls.at(-1)?.[1]).toBe(6)
+		fireEvent.click(screen.getByRole("button", { name: "Smaller text" }))
+		await act(() => vi.advanceTimersByTimeAsync(EBOOK_TEXT_SIZE_DEBOUNCE_MS + 10))
+	})
 })

@@ -231,15 +231,19 @@ test("the outline resolves the destinations of the rows near the view only, on a
 
 			await expect(tree.getByRole("treeitem", { name: "Section 1", exact: true })).toBeVisible()
 
-			// Settled: no chunk for a while.
+			// Settled: no chunk for a while. The rows resolve one at a time, each a chunk download behind the last, so
+			// settling takes longer than the default poll on a slow runner.
 			await expect
-				.poll(async () => {
-					const before = egest.requests()
+				.poll(
+					async () => {
+						const before = egest.requests()
 
-					await page.waitForTimeout(1500)
+						await page.waitForTimeout(1500)
 
-					return egest.requests() - before
-				})
+						return egest.requests() - before
+					},
+					{ timeout: LAZY_VIEWER_TIMEOUT_MS }
+				)
 				.toBe(0)
 
 			const rows = Math.ceil((await tree.evaluate(element => element.clientHeight)) / ROW_PX) + 2 * RESOLVE_MARGIN

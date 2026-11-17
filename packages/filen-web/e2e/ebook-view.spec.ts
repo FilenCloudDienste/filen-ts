@@ -158,7 +158,7 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 		await expect(page.locator(".fo-pdf-text-layer .highlight").first()).toBeAttached({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await page.keyboard.press("Escape")
 
-		await page.getByRole("button", { name: preview.previewPdfOutlinePane }).click()
+		await page.getByRole("button", { name: preview.previewPdfOutlinePane, exact: true }).click()
 
 		const tree = page.getByRole("tree", { name: preview.previewPdfOutlinePane })
 
@@ -184,7 +184,7 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 			timeout: LAZY_VIEWER_TIMEOUT_MS
 		})
 		for (let step = 0; step < 3; step++) await page.getByRole("button", { name: preview.previewEbookTextSmaller }).click()
-		await page.getByRole("button", { name: preview.previewPdfOutlinePane }).click()
+		await page.getByRole("button", { name: preview.previewPdfOutlinePane, exact: true }).click()
 
 		await close(page)
 		await expect.poll(() => engineWorkers(page)).toBe(0)

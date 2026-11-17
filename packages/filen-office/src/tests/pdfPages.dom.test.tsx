@@ -496,6 +496,19 @@ describe("PdfPages", () => {
 		expect(scrolled.at(-1)).toBe(pageElement(1))
 	})
 
+	it("keeps a navigation's target as the page to keep in place while it still scrolls there", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([]), fakePage([]), fakePage([]), fakePage([])])
+
+		await mount(pdfjs, opened)
+		expect(latest.viewer?.anchorPage()).toBe(1)
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.goto", page: 4 })
+		})
+		// The smooth scroll has not reached it: the page in view is still the first.
+		expect(latest.viewer?.state.page).toBe(1)
+		expect(latest.viewer?.anchorPage()).toBe(4)
+	})
+
 	it("jumps to a page without a smooth scroll when the host asks for an instant one", async () => {
 		const { pdfjs, opened } = fakePdfJs([fakePage([]), fakePage([]), fakePage([])])
 

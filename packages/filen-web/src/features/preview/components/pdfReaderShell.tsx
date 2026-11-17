@@ -1,5 +1,5 @@
 import { sanitizePdfMathML } from "@/features/preview/lib/pdfMathSanitizer"
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { loadPdfOutline, type PdfOutlineItem, type PdfViewerCommand, type PdfViewport } from "@filen/office/dom/pdf"
 import { PdfPages, usePdfViewer, type PdfDomDocument } from "@filen/office/react/pdf"
@@ -87,6 +87,9 @@ export interface PdfReaderShellProps {
 	pagesOverlay?: ReactNode
 	// The page shown changed (1-based).
 	onPageChange?: (page: number) => void
+	// Filled with the page to keep in place (1-based; a navigation's target while it still scrolls, else the page in
+	// view), for a host that lays the document out again.
+	anchorRef?: RefObject<(() => number) | null>
 	// Goes to `page` (1-based) each time `key` changes.
 	goTo?: { readonly page: number; readonly key: number } | null
 	// Its own properties dialog instead of the PDF's.
@@ -122,6 +125,7 @@ export function PdfReaderShell({
 	commandGroups,
 	pagesOverlay,
 	onPageChange,
+	anchorRef,
 	goTo,
 	renderProperties,
 	fullReadGuard,
@@ -131,9 +135,6 @@ export function PdfReaderShell({
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
-	const pageChanged = useEffectEvent((page: number) => {
-		onPageChange?.(page)
-	})
 	// A host restoring a position (a relayout's anchor): straight there, never smooth-scrolling through the pages between.
 	const goToHostPage = useEffectEvent((page: number) => {
 		viewer.dispatch({ type: "page.goto", page, instant: true })
@@ -141,9 +142,19 @@ export function PdfReaderShell({
 	const goToKey = goTo?.key ?? null
 	const goToTarget = goTo?.page ?? null
 
+	const pageChanged = useEffectEvent((page: number) => {
+		onPageChange?.(page)
+	})
+
 	useEffect(() => {
 		pageChanged(state.page)
 	}, [state.page])
+
+	const anchorPage = viewer.anchorPage
+
+	useEffect(() => {
+		if (anchorRef !== undefined) anchorRef.current = anchorPage
+	}, [anchorRef, anchorPage])
 
 	useEffect(() => {
 		if (goToKey !== null && goToTarget !== null) {

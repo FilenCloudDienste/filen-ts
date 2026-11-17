@@ -81,7 +81,8 @@ export function EbookViewer({ item, alt }: { item: DriveItem; alt: string }) {
 	// Resizes of the pages area that count, each restarting the resize debounce.
 	const [resizes, setResizes] = useState(0)
 	const [goTo, setGoTo] = useState<{ readonly page: number; readonly key: number } | null>(null)
-	const pageRef = useRef(1)
+	// The shell's page to keep in place (a chapter the reader just went to, not a page its scroll passes).
+	const anchorRef = useRef<(() => number) | null>(null)
 	// What the book is laid out at (or asked to be), the pages area's latest page size and text size, the one pending
 	// layout timer, and a layout asked while the page was hidden.
 	const laidRef = useRef<MupdfLayout | null>(null)
@@ -154,7 +155,7 @@ export function EbookViewer({ item, alt }: { item: DriveItem; alt: string }) {
 
 		laidRef.current = layout
 		setRelayouts(count => count + 1)
-		void reader.relayout(layout, pageRef.current - 1).then(
+		void reader.relayout(layout, (anchorRef.current?.() ?? 1) - 1).then(
 			({ document: book, page }) => {
 				// A later layout replaced this one meanwhile: its own answer brings the book.
 				if (reader.document === book) {
@@ -313,9 +314,7 @@ export function EbookViewer({ item, alt }: { item: DriveItem; alt: string }) {
 						</div>
 					) : undefined
 				}
-				onPageChange={page => {
-					pageRef.current = page
-				}}
+				anchorRef={anchorRef}
 				goTo={goTo}
 				renderProperties={(open_, onOpenChange) => (
 					<Dialog
