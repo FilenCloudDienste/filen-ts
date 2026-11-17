@@ -759,7 +759,7 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["../filen-office/src/react/pdf/pageColumn.tsx", "PdfPageView"],
 		["../filen-office/src/react/pdf/usePdfViewer.ts", "usePdfViewer"],
 		["../filen-office/src/react/pdf/usePdfDocument.ts", "usePdfDocument"],
-		["src/features/preview/components/pdfViewer.tsx", "PdfReader"],
+		["src/features/preview/components/pdfReaderShell.tsx", "PdfReaderShell"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfDocument"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfViewer"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfDraftDocument"],
