@@ -21,7 +21,7 @@ export const EPSI_WIDTH = 16
 // Past the native view cap a phone has (50 MP): a black 1-bit PNG, small on disk, 240 MB once the browser decodes it.
 export const HUGE_PNG_SIZE = { width: 7800, height: 7800 } as const
 
-const POSTSCRIPT_AI = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
+export const POSTSCRIPT_AI_TEXT = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
 // Taller than a view, so stepping pages scrolls the column.
 const TIFF_TALL_PAGE = { width: 200, height: 1600 } as const
 
@@ -140,7 +140,7 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		},
 		// Saved PDF-compatible: a PDF inside. Without it, PostScript only.
 		"img-pdfcompat.ai": { buffer: PDF_BYTES, mimeType: "application/illustrator" },
-		"img-postscript.ai": { buffer: Buffer.from(POSTSCRIPT_AI, "latin1"), mimeType: "application/illustrator" },
+		"img-postscript.ai": { buffer: Buffer.from(POSTSCRIPT_AI_TEXT, "latin1"), mimeType: "application/illustrator" },
 		"img-dos.eps": { buffer: Buffer.from(dosEps(tiffSample())), mimeType: "application/postscript" },
 		// A 16 × 8 black frame on white, as the specification's example draws one (1 is black, 0 white).
 		"img-epsi.eps": {

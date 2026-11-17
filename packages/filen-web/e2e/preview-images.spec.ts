@@ -12,6 +12,7 @@ import {
 	EPSI_WIDTH,
 	HUGE_PNG_SIZE,
 	IMAGE_ENTRIES,
+	POSTSCRIPT_AI_TEXT,
 	PSD_SIZE,
 	QOI_SIZE,
 	TIFF_PAGE,
@@ -340,7 +341,9 @@ test("a QOI is edited from the pool's decode and saved as a PNG copy beside it",
 test.describe("public links", () => {
 	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account (E2E_PREMIUM)")
 
-	test("a link's QOI, JPEG XL, TIFF and PDF-compatible Illustrator file are read without a session and shown", async ({ page }) => {
+	test("a link's QOI, JPEG XL, TIFF and Illustrator files are read without a session: shown, or a PostScript-only one as its card", async ({
+		page
+	}) => {
 		test.slow()
 
 		const cspViolations = trackCspViolations(page)
@@ -351,7 +354,14 @@ test.describe("public links", () => {
 				{ name: `e2e-link-${runId}.jxl`, mimeType: "image/jxl", buffer: jxlSample(), ours: false },
 				{ name: `e2e-link-${runId}.tif`, mimeType: "image/tiff", buffer: tiffSample(), ours: true },
 				// Read on the link's page too: a PDF inside, shown by the PDF viewer.
-				{ name: `e2e-link-${runId}.ai`, mimeType: "application/illustrator", buffer: PDF_BYTES, ours: false }
+				{ name: `e2e-link-${runId}.ai`, mimeType: "application/illustrator", buffer: PDF_BYTES, ours: false },
+				// PostScript only: its read finds no PDF, so the page shows the file's card.
+				{
+					name: `e2e-link-${runId}-ps.ai`,
+					mimeType: "application/illustrator",
+					buffer: Buffer.from(POSTSCRIPT_AI_TEXT, "latin1"),
+					ours: false
+				}
 			]
 
 			await uploadFiles(
@@ -373,6 +383,14 @@ test.describe("public links", () => {
 				for (const [index, { name, ours }] of files.entries()) {
 					await settleLeases(page)
 					await page.goto(links[index] ?? "")
+
+					if (name.endsWith("-ps.ai")) {
+						await expect(page.getByRole("button", { name: "Download" })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+						await expect(page.getByRole("button", { name: "Preview" })).toHaveCount(0)
+						await expect(page.getByRole("region", { name: /Page 1 of/u })).toHaveCount(0)
+
+						continue
+					}
 
 					if (name.endsWith(".ai")) {
 						await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
