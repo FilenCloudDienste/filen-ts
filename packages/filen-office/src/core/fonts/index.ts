@@ -79,7 +79,7 @@ export {
 	type FontOutlines
 } from "./info"
 export {
-	WOFF2_MAX_STREAM_BYTES,
+	FONT_MAX_TABLE_BYTES,
 	decompressBrotli,
 	fontContainer,
 	readWoff2Directory,

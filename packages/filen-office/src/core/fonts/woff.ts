@@ -15,8 +15,9 @@ const WOFF_HEADER = 44
 const WOFF_ENTRY = 20
 const WOFF2_HEADER = 48
 const MAX_TABLES = 256
-// Most a WOFF2 table stream may expand to. Real fonts stay far below; the stream is held whole while it is read.
-export const WOFF2_MAX_STREAM_BYTES = 128 * 1024 * 1024
+// Most a font's tables may expand to: a WOFF2 table stream (held whole while it is read), or the WOFF 1.0 tables a read
+// inflates. Real fonts stay far below.
+export const FONT_MAX_TABLE_BYTES = 128 * 1024 * 1024
 // fflate inflates all it is given before handing anything over, so a table goes in steps and stops at its length.
 const INFLATE_STEP = 64 * 1024
 
@@ -98,6 +99,7 @@ export function readWoffTables(bytes: Uint8Array, wanted: ReadonlySet<string>): 
 
 	const tags: string[] = []
 	const tables = new Map<string, Uint8Array>()
+	let inflated = 0
 
 	for (let i = 0; i < numTables; i++) {
 		const entry = WOFF_HEADER + i * WOFF_ENTRY
@@ -111,6 +113,11 @@ export function readWoffTables(bytes: Uint8Array, wanted: ReadonlySet<string>): 
 		if (!wanted.has(tag) || tables.has(tag)) continue
 		if (offset + compressedLength > bytes.length) throw new FontError("truncated", `Table ${tag} lies outside the file`)
 		if (compressedLength > length) throw new FontError("corrupt", `Table ${tag} is longer compressed than whole`)
+
+		inflated += length
+
+		// Checked before anything is allocated: the length is the file's own claim.
+		if (inflated > FONT_MAX_TABLE_BYTES) throw new FontError("tooLarge", "The tables are too large")
 
 		const stored = bytes.subarray(offset, offset + compressedLength)
 
@@ -195,7 +202,7 @@ export function readWoff2Directory(bytes: Uint8Array): Woff2Directory {
 
 		streamLength += length
 
-		if (streamLength > WOFF2_MAX_STREAM_BYTES) throw new FontError("tooLarge", "The table stream is too large")
+		if (streamLength > FONT_MAX_TABLE_BYTES) throw new FontError("tooLarge", "The table stream is too large")
 
 		entries.push({ tag, transformed, length })
 	}

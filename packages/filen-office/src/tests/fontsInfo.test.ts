@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
 	FONT_INFO_TABLES,
 	FontError,
-	WOFF2_MAX_STREAM_BYTES,
+	FONT_MAX_TABLE_BYTES,
 	decompressBrotli,
 	fontContainer,
 	fontInfoTables,
@@ -333,6 +333,15 @@ describe("WOFF", () => {
 		expect(await codeOf(() => readWoffTables(bytes, FONT_INFO_TABLES))).toBe("corrupt")
 	})
 
+	it("refuses a table declaring more than the cap before allocating it", async () => {
+		// About 64 KiB of deflated zeros under a declared length near 4 GiB: a decompression bomb.
+		const bytes = woff(0x00010000, new Map([["name", new Uint8Array(64 * 1024 * 1024)]]))
+
+		new DataView(bytes.buffer).setUint32(44 + 12, 0xfffffff0)
+
+		expect(await codeOf(() => readWoffTables(bytes, FONT_INFO_TABLES))).toBe("tooLarge")
+	})
+
 	it("refuses a table outside the file, a collection and a cut directory", async () => {
 		const bytes = woff(0x00010000, new Map([["head", head()]]))
 
@@ -366,7 +375,7 @@ describe("WOFF2", () => {
 		declared.set(directory, 48)
 		new DataView(declared.buffer).setUint32(20, 0)
 
-		expect(2 ** 31).toBeGreaterThan(WOFF2_MAX_STREAM_BYTES)
+		expect(2 ** 31).toBeGreaterThan(FONT_MAX_TABLE_BYTES)
 		expect(await codeOf(() => readWoff2Directory(declared))).toBe("tooLarge")
 
 		const cut = huge.slice()
