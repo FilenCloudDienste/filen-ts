@@ -113,7 +113,16 @@ describe("sanitizeEmailHtml", () => {
 			'<svg><path fill="url(https://e.vil/a#g)" mask="url(https://e.vil/m#m)" clip-path="url(https://e.vil/c#c)" marker-end="url(https://e.vil/k#k)"></path></svg>'
 		],
 		["an escaped SVG url", '<svg><rect fill="\\75 rl(https://e.vil/a#g)"></rect></svg>'],
-		["an image() function", '<style>p{background:image("https://e.vil/i.png")}</style>']
+		["an image() function", '<style>p{background:image("https://e.vil/i.png")}</style>'],
+		// A dot no digit follows ends the number: a url token comes next, and the comment opener is inside it.
+		["a url after a number's dot", "<style>p{x:1.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}</style>"],
+		["a url after a leading-dot number", "<style>p{x:.5.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}</style>"],
+		["an escaped url after a number's dot", "<style>p{x:1.\\75 rl(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}</style>"],
+		["a url after a number's dot in a style attribute", '<q style="x:1.url(/*);background-image:url(https://e.vil/q);y:*/)">x</q>'],
+		["a url after a number's dot in an SVG style", "<svg><style>a{x:1.url(/*)}rect{fill:url(https://e.vil/s#g)}b{y:*/}</style></svg>"],
+		// "<!--" is a token of its own: the url after it is a url token, the comment opener inside it.
+		["a url after <!--", "<style>p{x:<!--url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}</style>"],
+		["a url after <!-- in a style attribute", '<q style="x:&lt;!--url(/*);background-image:url(https://e.vil/q);y:*/)">x</q>']
 	])("refuses %s", (_, html) => {
 		const result = sanitized(html)
 

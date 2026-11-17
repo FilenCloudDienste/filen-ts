@@ -4,7 +4,11 @@
 // the message's own parts (cid:) is replaced, token by token.
 
 type Token =
-	| { readonly type: "ws" | "{" | "}" | "(" | ")" | "[" | "]" | ";" | ":" | "," | "badString" | "badUrl"; start: number; end: number }
+	| {
+			readonly type: "ws" | "{" | "}" | "(" | ")" | "[" | "]" | ";" | ":" | "," | "badString" | "badUrl" | "cdo" | "cdc"
+			start: number
+			end: number
+	  }
 	| { readonly type: "delim"; readonly value: string; start: number; end: number }
 	| {
 			readonly type: "ident" | "function" | "atKeyword" | "hash" | "string" | "url" | "number"
@@ -100,6 +104,52 @@ class Tokenizer {
 				return name
 			}
 		}
+	}
+
+	// §4.3.10.
+	private startsNumber(): boolean {
+		const first = this.char()
+		const second = this.char(1)
+
+		if (first === "+" || first === "-") {
+			return isDigit(second) || (second === "." && isDigit(this.char(2)))
+		}
+
+		return first === "." ? isDigit(second) : isDigit(first)
+	}
+
+	// §4.3.3 and §4.3.12: a sign, digits, a "." only when a digit follows it, an exponent only when a digit (after an
+	// optional sign) follows it; then a unit or "%".
+	private numeric(start: number): Token {
+		if (this.char() === "+" || this.char() === "-") this.at++
+
+		while (isDigit(this.char())) this.at++
+
+		if (this.char() === "." && isDigit(this.char(1))) {
+			this.at++
+
+			while (isDigit(this.char())) this.at++
+		}
+
+		const exponent = this.char()
+
+		if (exponent === "e" || exponent === "E") {
+			const sign = this.char(1) === "+" || this.char(1) === "-" ? 1 : 0
+
+			if (isDigit(this.char(1 + sign))) {
+				this.at += 1 + sign
+
+				while (isDigit(this.char())) this.at++
+			}
+		}
+
+		if (this.startsIdent(0)) {
+			this.name()
+		} else if (this.char() === "%") {
+			this.at++
+		}
+
+		return { type: "number", value: this.css.slice(start, this.at), start, end: this.at }
 	}
 
 	private string(quote: string, start: number): Token {
@@ -247,21 +297,21 @@ class Tokenizer {
 			return this.string(char, start)
 		}
 
-		if (
-			isDigit(char) ||
-			((char === "+" || char === "-" || char === ".") && (isDigit(this.char(1)) || (this.char(1) === "." && isDigit(this.char(2)))))
-		) {
-			this.at++
+		if (this.startsNumber()) {
+			return this.numeric(start)
+		}
 
-			while (isDigit(this.char()) || this.char() === ".") this.at++
+		// "<!--" and "-->" are tokens of their own (§4.3.1): what follows them is read afresh.
+		if (char === "<" && this.css.startsWith("!--", this.at + 1)) {
+			this.at += 4
 
-			if (this.startsIdent(0)) {
-				this.name()
-			} else if (this.char() === "%") {
-				this.at++
-			}
+			return { type: "cdo", start, end: this.at }
+		}
 
-			return { type: "number", value: this.css.slice(start, this.at), start, end: this.at }
+		if (char === "-" && this.css.startsWith("->", this.at + 1)) {
+			this.at += 3
+
+			return { type: "cdc", start, end: this.at }
 		}
 
 		if (this.startsIdent(0)) {

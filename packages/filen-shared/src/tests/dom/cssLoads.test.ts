@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { tokenize, TokenType } from "@csstools/css-tokenizer"
 import { cssTokens, declarationChunks, preprocessCss, tokensLoad, topLevelChunks } from "@filen/shared/dom/cssLoads"
 
 function types(css: string): string[] {
@@ -25,6 +26,31 @@ describe("css tokens", () => {
 		expect(types("url(/*)")).toEqual(["url:/*"])
 	})
 
+	it("reads numbers as §4.3.12 does: a dot or an exponent only before a digit", () => {
+		expect(types("1.url(/*)")).toEqual(["number:1", "delim:.", "url:/*"])
+		expect(types(".5.url(x)")).toEqual(["number:.5", "delim:.", "url:x"])
+		expect(types("1.\\75 rl(x)")).toEqual(["number:1", "delim:.", "url:x"])
+		expect(types("1e3px 1e+3 1e-x 1.5em 2.%")).toEqual([
+			"number:1e3px",
+			"ws",
+			"number:1e+3",
+			"ws",
+			"number:1e-x",
+			"ws",
+			"number:1.5em",
+			"ws",
+			"number:2",
+			"delim:.",
+			"delim:%"
+		])
+		expect(types("..5")).toEqual(["delim:.", "number:.5"])
+	})
+
+	it("reads <!-- and --> as tokens of their own", () => {
+		expect(types("<!--image-set(-->")).toEqual(["cdo", "function:image-set", "cdc"])
+		expect(types("--x -1")).toEqual(["ident:--x", "ws", "number:-1"])
+	})
+
 	it("ends a string at a newline as a bad string", () => {
 		expect(types("\"a\nb")[0]).toBe("badString")
 	})
@@ -44,7 +70,9 @@ describe("css loads", () => {
 		"@font-face{font-family:x}",
 		"a{background:url(a b)}",
 		"a{content:\"x\n}",
-		"a{background:url(cid:other)}"
+		"a{background:url(cid:other)}",
+		"p{x:1.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}",
+		"p{x:.5.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}"
 	])("judges %j as loading", css => {
 		expect(loads(css)).toBe(true)
 	})
@@ -59,5 +87,150 @@ describe("css loads", () => {
 	it("splits rules at the top level and declarations at semicolons outside blocks", () => {
 		expect(topLevelChunks(cssTokens("a{b:c}@media x{d{e:f}}g{h:i}"))).toHaveLength(3)
 		expect(declarationChunks(cssTokens("color:red;background:url(x);margin:0"))).toHaveLength(3)
+	})
+})
+
+// The judge against an independent CSS Syntax tokenizer: random CSS-hostile strings, the reference's tokens judged by
+// the same rules. Every load the reference sees must be seen here (a stricter verdict is allowed).
+describe("css loads against a reference tokenizer", () => {
+	const PIECES = [
+		"url(",
+		"u",
+		"r",
+		"l",
+		"(",
+		")",
+		"/*",
+		"*/",
+		"\\",
+		"\\75 ",
+		"\\2f",
+		"\\\n",
+		"\"",
+		"'",
+		":",
+		";",
+		"{",
+		"}",
+		".",
+		"..",
+		"5",
+		"1",
+		"e",
+		"E",
+		"+",
+		"-",
+		"@import",
+		"@\\69mport",
+		"@font-face",
+		"image(",
+		"image-set(",
+		"https://e.vil/x",
+		"data:image/png,a",
+		"cid:part",
+		" ",
+		"\n",
+		"\r\n",
+		"\f",
+		"\t",
+		"x",
+		"%",
+		"#",
+		",",
+		"<!--",
+		"-->"
+	]
+	const LOADING = new Set([
+		"url",
+		"src",
+		"image",
+		"image-set",
+		"-webkit-image-set",
+		"cross-fade",
+		"-webkit-cross-fade",
+		"element",
+		"-moz-element"
+	])
+	const CLEAN_DATA_IMAGE = /^data:image\/[a-z0-9.+-]+(?:;[a-z0-9-]+=[a-z0-9.+-]+)*(?:;base64)?,[a-z0-9+/=%._~!$&*,;:@-]*$/i
+	const local = (value: string): boolean => CLEAN_DATA_IMAGE.test(value) || /^\s*cid:\s*<?part>?\s*$/i.test(value)
+
+	function referenceLoads(css: string): boolean {
+		const tokens = tokenize({ css }).filter(token => token[0] !== TokenType.Comment)
+
+		for (let index = 0; index < tokens.length; index++) {
+			const token = tokens[index]
+
+			if (token === undefined) continue
+
+			switch (token[0]) {
+				case TokenType.BadString:
+				case TokenType.BadURL:
+					return true
+				case TokenType.URL:
+					if (!local(token[4].value)) return true
+
+					break
+				case TokenType.AtKeyword:
+					if (token[4].value.toLowerCase() === "import" || token[4].value.toLowerCase() === "font-face") return true
+
+					break
+				case TokenType.Function: {
+					const name = token[4].value.toLowerCase()
+
+					if (!LOADING.has(name)) break
+
+					let at = index + 1
+
+					while (tokens[at]?.[0] === TokenType.Whitespace) at++
+
+					const string = tokens[at]
+
+					at++
+
+					while (tokens[at]?.[0] === TokenType.Whitespace) at++
+
+					if (name !== "url" || string?.[0] !== TokenType.String || tokens[at]?.[0] !== TokenType.CloseParen) return true
+
+					if (!local(string[4].value)) return true
+
+					break
+				}
+				default:
+					break
+			}
+		}
+
+		return false
+	}
+
+	// mulberry32: a fixed seed, so a failure reproduces.
+	function random(seed: number): () => number {
+		let state = seed
+
+		return () => {
+			state = (state + 0x6d2b79f5) | 0
+
+			let t = Math.imul(state ^ (state >>> 15), 1 | state)
+
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+		}
+	}
+
+	it("sees every load the reference sees", () => {
+		const next = random(0x5eed)
+		const missed: string[] = []
+
+		for (let sample = 0; sample < 100_000 && missed.length < 5; sample++) {
+			let css = ""
+			const pieces = 1 + Math.floor(next() * 24)
+
+			for (let piece = 0; piece < pieces; piece++) css += PIECES[Math.floor(next() * PIECES.length)] ?? ""
+
+			if (referenceLoads(preprocessCss(css)) && !loads(preprocessCss(css))) missed.push(css)
+		}
+
+		expect(missed).toEqual([])
 	})
 })
