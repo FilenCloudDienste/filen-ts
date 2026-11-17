@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { decodeQoi, QoiDecodeError } from "@/features/preview/lib/rasterCodecs/qoi"
+import { RasterBudgetError } from "@/features/preview/lib/rasterCodecs/raster"
 import { encodeQoi, qoiTestPixels } from "@/tests/support/qoiBytes"
 
 describe("decodeQoi", () => {
@@ -30,7 +31,7 @@ describe("decodeQoi", () => {
 	it("refuses a header naming more pixels than the budget before decoding", () => {
 		const bytes = encodeQoi(qoiTestPixels(8, 8), 8, 8)
 
-		expect(() => decodeQoi(bytes, 63)).toThrow(QoiDecodeError)
+		expect(() => decodeQoi(bytes, 63)).toThrow(RasterBudgetError)
 	})
 
 	it("refuses a stream that ends before its last pixel", () => {

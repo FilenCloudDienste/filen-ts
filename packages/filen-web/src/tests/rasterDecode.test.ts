@@ -7,15 +7,18 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
 // Comlink.wrap are replaced with plain fakes rather than a second real worker boundary.
 
-const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock, recoverIfNewerBuild } = vi.hoisted(() => ({
-	recoverIfNewerBuild: vi.fn(),
-	WorkerCtor: vi.fn(),
-	wrap: vi.fn(),
-	transformMock: vi.fn(),
-	transferSpy: vi.fn(),
-	terminateMock: vi.fn(),
-	releaseMock: vi.fn()
-}))
+const { WorkerCtor, wrap, transformMock, decodeRgbaMock, transferSpy, terminateMock, releaseMock, recoverIfNewerBuild } = vi.hoisted(
+	() => ({
+		decodeRgbaMock: vi.fn(),
+		recoverIfNewerBuild: vi.fn(),
+		WorkerCtor: vi.fn(),
+		wrap: vi.fn(),
+		transformMock: vi.fn(),
+		transferSpy: vi.fn(),
+		terminateMock: vi.fn(),
+		releaseMock: vi.fn()
+	})
+)
 
 vi.mock("@/features/preview/workers/rasterDecode.worker.ts?worker", () => ({ default: WorkerCtor }))
 vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild }))
@@ -53,7 +56,8 @@ async function freshModule() {
 		return new FakeWorkerTarget()
 	})
 	const { releaseProxy } = await import("comlink")
-	wrap.mockImplementation(() => ({ transform: transformMock, [releaseProxy]: releaseMock }))
+	decodeRgbaMock.mockReset()
+	wrap.mockImplementation(() => ({ transform: transformMock, decodeRgba: decodeRgbaMock, [releaseProxy]: releaseMock }))
 	const module = await import("@/features/preview/lib/rasterDecode")
 	// The registry of the same module instance the pool registered its workers with.
 	const { releaseAllPreviewWorkers } = await import("@/lib/workers/ownedWorker")
@@ -359,5 +363,35 @@ describe("heic worker pool", () => {
 
 		expect(terminateMock).toHaveBeenCalledTimes(2)
 		expect(releaseMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("decodeRasterRgba", () => {
+	it("ends a worker whose decode failed, so the next decode gets a fresh one", async () => {
+		const { decodeRasterRgba } = await freshModule()
+
+		decodeRgbaMock.mockRejectedValueOnce(new Error("RuntimeError: Aborted(OOM)"))
+
+		await expect(decodeRasterRgba("jxl", new Uint8Array([1]), 100)).rejects.toThrow("Aborted(OOM)")
+
+		decodeRgbaMock.mockResolvedValue({ width: 1, height: 1, data: new Uint8ClampedArray(4), hasAlpha: false })
+
+		await expect(decodeRasterRgba("jxl", new Uint8Array([2]), 100)).resolves.toMatchObject({ width: 1 })
+		expect(terminateMock).toHaveBeenCalledOnce()
+		expect(WorkerCtor).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps a worker that only refused a header over the budget", async () => {
+		const { decodeRasterRgba } = await freshModule()
+
+		decodeRgbaMock.mockRejectedValueOnce(Object.assign(new Error("above the pixel budget"), { name: "RasterBudgetError" }))
+
+		await expect(decodeRasterRgba("qoi", new Uint8Array([1]), 1)).rejects.toThrow("above the pixel budget")
+
+		decodeRgbaMock.mockResolvedValue({ width: 1, height: 1, data: new Uint8ClampedArray(4), hasAlpha: false })
+
+		await decodeRasterRgba("qoi", new Uint8Array([2]), 100)
+		expect(terminateMock).not.toHaveBeenCalled()
+		expect(WorkerCtor).toHaveBeenCalledTimes(1)
 	})
 })

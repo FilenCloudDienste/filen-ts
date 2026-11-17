@@ -1,5 +1,5 @@
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
-import type { DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
+import { RasterBudgetError, type DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
 
 // QOI (qoiformat.org, specification 1.0): after the 14-byte header, a stream of ops that each give one pixel or a run,
 // against the previous pixel (starting opaque black) and a 64-entry table of recently seen pixels. The stream ends
@@ -39,7 +39,7 @@ export function decodeQoi(bytes: Uint8Array, maxPixels: number): DecodedRaster {
 	const pixels = width * height
 
 	if (pixels > maxPixels) {
-		throw new QoiDecodeError(`${String(width)}×${String(height)} is above the pixel budget`)
+		throw new RasterBudgetError(`${String(width)}×${String(height)} is above the pixel budget`)
 	}
 
 	const data = new Uint8ClampedArray(pixels * 4)

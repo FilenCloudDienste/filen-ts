@@ -37,7 +37,7 @@ vi.mock("@/features/preview/lib/svgz", () => ({ gunzipSvg }))
 vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/features/preview/lib/rasterDecode", () => ({
 	displayRaster,
-	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 20 },
+	RASTER_BYTES_PER_PIXEL: { qoi: 8, jxl: 70 },
 	transformHeicBytes: vi.fn()
 }))
 
@@ -172,7 +172,7 @@ describe("ImageViewer on a QOI", () => {
 			expect(screen.getByRole("img", { name: "photo" }).getAttribute("width")).toBe("1000")
 		})
 		expect(displayRaster.mock.calls[0]?.[0]).toBe("jxl")
-		expect(displayRaster.mock.calls[0]?.[2].maxPixels).toBe(Math.floor((1024 * 1024 * 1024 - 6) / 20))
+		expect(displayRaster.mock.calls[0]?.[2].maxPixels).toBe(Math.floor((1024 * 1024 * 1024 - 6) / 70))
 	})
 
 	it("shows a gzipped SVG inflated, through a blob <img>, and a card for one that inflates past its cap", async () => {

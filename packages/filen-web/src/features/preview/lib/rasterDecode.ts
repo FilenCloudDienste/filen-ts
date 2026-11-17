@@ -2,7 +2,12 @@ import * as Comlink from "comlink"
 import RasterDecodeWorker from "@/features/preview/workers/rasterDecode.worker.ts?worker"
 import type { RasterDecodeWorkerApi } from "@/features/preview/workers/rasterDecode.worker"
 import type { DisplayedRaster } from "@/features/preview/lib/rasterCodecs/display"
-import type { DecodedRaster, DisplayRasterFormat, RasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
+import {
+	isRasterBudgetError,
+	type DecodedRaster,
+	type DisplayRasterFormat,
+	type RasterFormat
+} from "@/features/preview/lib/rasterCodecs/raster"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
 import type { IdleResource } from "@/lib/idleResource"
 
@@ -53,20 +58,37 @@ function giveBack(worker: PooledWorker): void {
 	freeWorkers.push(worker)
 }
 
+// `fresh`: a failure other than a budget refusal ends the worker, so the next decode gets a fresh one. A wasm decoder
+// that ran out of memory aborts its module for good, and every later decode in that worker would fail too.
 async function onWorker<T>(
 	take: () => Uint8Array,
 	signal: AbortSignal | undefined,
-	run: (remote: Comlink.Remote<RasterDecodeWorkerApi>, bytes: Uint8Array) => Promise<T>
+	run: (remote: Comlink.Remote<RasterDecodeWorkerApi>, bytes: Uint8Array) => Promise<T>,
+	fresh = false
 ): Promise<T> {
 	const worker = await takeWorker()
+	// Ended once the call has failed, so the caller gets the decoder's own error rather than the worker's end.
+	const broken: { handle: WorkerHandle<RasterDecodeWorkerApi> | null } = { handle: null }
 
 	try {
 		signal?.throwIfAborted()
 
 		const bytes = take()
 
-		return await worker.use(({ remote }) => run(remote, Comlink.transfer(bytes, [bytes.buffer])))
+		return await worker.use(handle =>
+			run(handle.remote, Comlink.transfer(bytes, [bytes.buffer])).catch((error: unknown) => {
+				if (fresh && !isRasterBudgetError(error)) {
+					broken.handle = handle
+				}
+
+				throw error
+			})
+		)
 	} finally {
+		if (broken.handle !== null) {
+			worker.invalidate(broken.handle)
+		}
+
 		giveBack(worker)
 	}
 }
@@ -106,11 +128,13 @@ export async function decodeHeicRgba(bytes: Uint8Array, signal?: AbortSignal): P
 	return await decodeRasterRgba("heic", bytes, Number.POSITIVE_INFINITY, signal)
 }
 
-// What one pixel of each format costs the worker while it is shown: the decoder's frame plus every copy made of it
-// (QOI: its RGBA, then the bitmap; JPEG XL: libjxl's working frames in its wasm heap, the RGBA handed out, the bitmap).
+// What one pixel of each format costs the worker while it is shown: the decoder's frame plus every copy made of it.
+// QOI: its RGBA, then the bitmap. JPEG XL: libjxl's wasm heap grows by 61 bytes a pixel decoding (measured with
+// @jsquash/jxl 1.3.0 in Node on lossy 3 MP and 12 MP images: 60.9 and 61.2 B/px of linear memory), then the RGBA copied
+// out of it and the bitmap.
 export const RASTER_BYTES_PER_PIXEL: Readonly<Record<DisplayRasterFormat, number>> = {
 	qoi: 8,
-	jxl: 20
+	jxl: 70
 }
 
 // The whole image as RGBA, decoded off the main thread from a private copy of `bytes`; `maxPixels` refuses a larger
@@ -124,7 +148,8 @@ export async function decodeRasterRgba(
 	return await onWorker(
 		() => bytes.slice(),
 		signal,
-		(remote, copy) => remote.decodeRgba(format, copy, maxPixels)
+		(remote, copy) => remote.decodeRgba(format, copy, maxPixels),
+		true
 	)
 }
 
@@ -138,7 +163,8 @@ export async function displayRaster(
 	const shown = await onWorker(
 		() => bytes.slice(),
 		options.signal,
-		(remote, copy) => remote.display(format, copy, options.maxPixels, options.maxLongSide)
+		(remote, copy) => remote.display(format, copy, options.maxPixels, options.maxLongSide),
+		true
 	)
 
 	if (options.signal?.aborted === true) {

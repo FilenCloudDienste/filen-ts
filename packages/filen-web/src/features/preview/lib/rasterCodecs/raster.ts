@@ -24,3 +24,13 @@ export function anyTranslucent(data: Uint8ClampedArray): boolean {
 
 	return false
 }
+
+// A header naming more pixels than the decode's budget: refused before anything is allocated, so the decoder that
+// refused it is as good as before. Told apart by name, which survives the worker boundary.
+export class RasterBudgetError extends Error {
+	override readonly name = "RasterBudgetError"
+}
+
+export function isRasterBudgetError(error: unknown): boolean {
+	return error instanceof Error && error.name === "RasterBudgetError"
+}

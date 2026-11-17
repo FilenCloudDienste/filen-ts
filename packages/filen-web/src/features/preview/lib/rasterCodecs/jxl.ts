@@ -3,11 +3,11 @@ import decodeJxlImage, { init as initJxl } from "@jsquash/jxl/decode"
 // lookup would point into the dependency pre-bundle in dev. CSP's 'wasm-unsafe-eval' admits the compile.
 import jxlWasmUrl from "@jsquash/jxl/codec/dec/jxl_dec.wasm?url"
 import { sniffJxl } from "@/features/preview/lib/imageSniff/jxl"
-import { anyTranslucent, type DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
+import { anyTranslucent, RasterBudgetError, type DecodedRaster } from "@/features/preview/lib/rasterCodecs/raster"
 
 // JPEG XL where the browser has no decoder of its own: libjxl through @jsquash/jxl, in the raster decode pool. The
 // first frame of an animation is what it gives. Its wasm heap grows to the largest image decoded and never shrinks;
-// the pool's idle termination is what returns it.
+// the pool's idle termination is what returns it, and a failed decode ends the worker (rasterDecode.ts).
 
 let ready: Promise<unknown> | null = null
 
@@ -32,7 +32,7 @@ export async function decodeJxl(bytes: Uint8Array, maxPixels: number): Promise<D
 	}
 
 	if (header.width * header.height > maxPixels) {
-		throw new Error(`${String(header.width)}×${String(header.height)} is above the pixel budget`)
+		throw new RasterBudgetError(`${String(header.width)}×${String(header.height)} is above the pixel budget`)
 	}
 
 	await ensureDecoder()
@@ -41,7 +41,12 @@ export async function decodeJxl(bytes: Uint8Array, maxPixels: number): Promise<D
 		bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
 			? bytes.buffer
 			: bytes.slice().buffer
-	const image = await decodeJxlImage(buffer)
+	// A decode that failed may have aborted the module (out of memory): the next one starts a fresh instance.
+	const image = await decodeJxlImage(buffer).catch((error: unknown) => {
+		ready = null
+
+		throw error
+	})
 
 	// libjxl hands back RGBA whether or not the file has an alpha channel.
 	return { width: image.width, height: image.height, data: image.data, hasAlpha: anyTranslucent(image.data) }
