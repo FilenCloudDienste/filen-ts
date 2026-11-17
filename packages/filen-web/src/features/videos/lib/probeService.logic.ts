@@ -1,6 +1,6 @@
 import { type } from "arktype"
 import { extensionStart } from "@filen/shared"
-import { MEDIA_CODECS, PROBE_CONTAINERS, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
+import { MEDIA_CODECS, PROBE_CONTAINERS, PROBE_INDEXES, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
 
 // The probe scheduler's rules and the persisted probe record. Plain and DOM-free.
 
@@ -53,7 +53,7 @@ const videoProbeSchema = type({
 	v: "1",
 	container: type.enumerated(...PROBE_CONTAINERS),
 	durationSec: "number | null",
-	index: "'moov' | 'cues' | 'mfra' | 'none' | null",
+	index: type.enumerated(...PROBE_INDEXES).or("null"),
 	video: probeVideoSchema.or("null"),
 	audio: type({
 		id: "number",

@@ -4,6 +4,7 @@ import {
 	subtitleFormatFromExtension,
 	type LadderDecision,
 	type MediaCodec,
+	type ProbeContainer,
 	type VideoProbe
 } from "@filen/shared/videos"
 import { extensionStart } from "@filen/shared"
@@ -67,6 +68,12 @@ const NO_PICTURE_REASONS: ReadonlySet<string> = new Set([
 // MediaSource): nothing about the file's codecs, so nothing names them.
 export function cannotStream(decision: LadderDecision | null): boolean {
 	return decision?.reasons.includes("no-media-source") === true
+}
+
+// The container to name when no rung exists for it in this browser, whatever its tracks hold (Ogg where neither the
+// element nor a remux reads it): naming its codecs would suggest they are the problem. Null otherwise.
+export function unplayableContainer(probe: VideoProbe | null, decision: LadderDecision | null): ProbeContainer | null {
+	return probe !== null && decision?.reasons.includes("container-unsupported") === true ? probe.container : null
 }
 
 // The codecs to name when the ladder found no rung: the picture's when that is what failed, else every

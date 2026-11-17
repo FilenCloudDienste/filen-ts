@@ -25,18 +25,39 @@ export const MEDIA_CODECS = [
 	"vp9",
 	"vp8",
 	"theora",
-	"mpeg4"
+	"mpeg4",
+	"mpeg1",
+	"mpeg2",
+	"vc1",
+	"wmv",
+	"h263",
+	"vp6",
+	"mjpeg",
+	"wma",
+	"wmapro",
+	"wmalossless",
+	"mp1",
+	"mp2",
+	"amr",
+	"amrwb",
+	"pcm",
+	"adpcm",
+	"speex"
 ] as const
 
 export type MediaCodec = (typeof MEDIA_CODECS)[number]
 
-export const PROBE_CONTAINERS = ["mp4", "mov", "mkv", "webm", "ts"] as const
+export const PROBE_CONTAINERS = ["mp4", "mov", "mkv", "webm", "ts", "avi", "flv", "asf", "ps", "ogg"] as const
 
-// "ts" is an MPEG transport stream: 188-byte packets, or 192-byte BDAV (.m2ts/.mts).
+// "ts" is an MPEG transport stream: 188-byte packets, or 192-byte BDAV (.m2ts/.mts); "ps" an MPEG program stream
+// (.mpg, .vob); "asf" Windows Media (.wmv, .asf).
 export type ProbeContainer = (typeof PROBE_CONTAINERS)[number]
 
-// Where a player finds keyframes: the MP4 sample tables, Matroska Cues, a fragmented MP4's mfra, or nowhere.
-export type ProbeIndex = "moov" | "cues" | "mfra" | "none"
+// Where a player finds keyframes: the MP4 sample tables, Matroska Cues, a fragmented MP4's mfra, an AVI's idx1 or
+// OpenDML index, an FLV's onMetaData keyframes, an ASF Simple Index, or nowhere.
+export const PROBE_INDEXES = ["moov", "cues", "mfra", "idx", "keyframes", "simple", "none"] as const
+
+export type ProbeIndex = (typeof PROBE_INDEXES)[number]
 
 export type ProbeTransfer = "sdr" | "pq" | "hlg"
 

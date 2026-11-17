@@ -9,7 +9,8 @@ import {
 	mseOpenFailureKind,
 	sidecarSubtitles,
 	silentAudioCodec,
-	unplayableCodecs
+	unplayableCodecs,
+	unplayableContainer
 } from "@/features/preview/lib/previewPlayback.logic"
 
 function probeOf(video: MediaCodec | null, audio: MediaCodec[], container: VideoProbe["container"] = "mp4"): VideoProbe {
@@ -62,6 +63,20 @@ describe("initialVideoRoute", () => {
 	it("takes everything to the ladder without a stream or an inline content type", () => {
 		expect(initialVideoRoute({ extension: "mp4", contentType: "video/mp4", streamAvailable: false })).toBe("ladder")
 		expect(initialVideoRoute({ extension: "mp4", contentType: null, streamAvailable: true })).toBe("ladder")
+	})
+})
+
+describe("unplayableContainer", () => {
+	it("names the container when no rung reads it, whatever its tracks hold", () => {
+		expect(unplayableContainer(probeOf("theora", ["vorbis"], "ogg"), unsupported("direct-not-playable", "container-unsupported"))).toBe(
+			"ogg"
+		)
+	})
+
+	it("names nothing when a codec, not the container, is what fails", () => {
+		expect(unplayableContainer(probeOf("mpeg4", ["mp3"]), unsupported("remux-video-unsupported"))).toBeNull()
+		expect(unplayableContainer(null, unsupported("container-unsupported"))).toBeNull()
+		expect(unplayableContainer(probeOf("h264", []), null)).toBeNull()
 	})
 })
 

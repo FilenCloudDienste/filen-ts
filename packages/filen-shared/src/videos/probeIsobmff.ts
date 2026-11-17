@@ -209,7 +209,10 @@ const VIDEO_ENTRIES: Readonly<Record<string, MediaCodec>> = {
 	av01: "av1",
 	dav1: "av1",
 	vp09: "vp9",
-	vp08: "vp8"
+	vp08: "vp8",
+	// 3GPP H.263 (QuickTime names it h263).
+	s263: "h263",
+	h263: "h263"
 }
 
 const AUDIO_ENTRIES: Readonly<Record<string, MediaCodec>> = {
@@ -223,7 +226,10 @@ const AUDIO_ENTRIES: Readonly<Record<string, MediaCodec>> = {
 	Opus: "opus",
 	fLaC: "flac",
 	alac: "alac",
-	".mp3": "mp3"
+	".mp3": "mp3",
+	// 3GPP AMR narrowband and wideband.
+	samr: "amr",
+	sawb: "amrwb"
 }
 
 // ISO/IEC 14496-1 objectTypeIndication values an `esds` names.

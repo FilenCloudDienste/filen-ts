@@ -37,12 +37,17 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { setVideoPosition } from "@/features/preview/lib/videoContinuity"
 import { CODECS, type CodecId } from "@/features/preview/lib/containerTracks"
-import { cannotStream, unplayableCodecs } from "@/features/preview/lib/previewPlayback.logic"
+import { cannotStream, unplayableCodecs, unplayableContainer } from "@/features/preview/lib/previewPlayback.logic"
 import { usePreviewVideo } from "@/features/preview/hooks/usePreviewVideo"
 import { usePreviewSubtitles, type PreviewSubtitleOption, type PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { SubtitleOverlay } from "@/components/media/video/subtitleOverlay"
-import { MediaCannotStream, MediaFormatFailure, MediaPlaybackFailure } from "@/features/preview/components/mediaFailureState"
+import {
+	MediaCannotStream,
+	MediaContainerFailure,
+	MediaFormatFailure,
+	MediaPlaybackFailure
+} from "@/features/preview/components/mediaFailureState"
 import { PreviewDownloadButton } from "@/features/preview/components/previewErrorState"
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
@@ -116,6 +121,7 @@ export function VideoPlayer({
 	const { controller, snapshot } = usePreviewVideo(item, video, positionKey)
 	const subtitles = usePreviewSubtitles(item, controller, snapshot)
 	const status = snapshot?.status ?? "active"
+	const failedContainer = unplayableContainer(snapshot?.probe ?? null, snapshot?.decision ?? null)
 	const failed = status !== "active"
 	const [gapDismissed, setGapDismissed] = useState(false)
 	const [pointerActive, setPointerActive] = useState(false)
@@ -184,6 +190,11 @@ export function VideoPlayer({
 				<div className="absolute inset-0">
 					{cannotStream(snapshot?.decision ?? null) ? (
 						<MediaCannotStream item={item} />
+					) : failedContainer !== null ? (
+						<MediaContainerFailure
+							item={item}
+							container={failedContainer}
+						/>
 					) : (
 						<MediaFormatFailure
 							item={item}

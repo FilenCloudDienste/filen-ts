@@ -1,4 +1,4 @@
-import { codecStringAlternatives, type MediaCodec } from "@filen/shared/videos"
+import { codecStringAlternatives, type MediaCodec, type ProbeContainer } from "@filen/shared/videos"
 
 // The audio/video codecs a preview names when a browser cannot play part of a file, and how to ask a
 // browser whether it can.
@@ -25,10 +25,41 @@ export const CODECS = {
 	vp9: { kind: "video", label: "VP9", query: 'video/webm; codecs="vp9"' },
 	vp8: { kind: "video", label: "VP8", query: 'video/webm; codecs="vp8"' },
 	theora: { kind: "video", label: "Theora", query: 'video/ogg; codecs="theora"' },
-	mpeg4: { kind: "video", label: "MPEG-4 Part 2", query: 'video/mp4; codecs="mp4v.20.9"' }
+	mpeg4: { kind: "video", label: "MPEG-4 Part 2", query: 'video/mp4; codecs="mp4v.20.9"' },
+	mpeg1: { kind: "video", label: "MPEG-1 Video", query: 'video/mp4; codecs="mp4v.6a"' },
+	mpeg2: { kind: "video", label: "MPEG-2 Video", query: 'video/mp4; codecs="mp4v.61"' },
+	vc1: { kind: "video", label: "VC-1", query: 'video/mp4; codecs="vc-1"' },
+	wmv: { kind: "video", label: "Windows Media Video", query: 'video/x-ms-wmv; codecs="wmv3"' },
+	h263: { kind: "video", label: "H.263", query: 'video/3gpp; codecs="s263"' },
+	vp6: { kind: "video", label: "VP6", query: 'video/x-flv; codecs="vp6"' },
+	mjpeg: { kind: "video", label: "Motion JPEG", query: 'video/x-motion-jpeg; codecs="mjpg"' },
+	wma: { kind: "audio", label: "WMA", query: 'audio/x-ms-wma; codecs="wmav2"' },
+	wmapro: { kind: "audio", label: "WMA Pro", query: 'audio/x-ms-wma; codecs="wmapro"' },
+	wmalossless: { kind: "audio", label: "WMA Lossless", query: 'audio/x-ms-wma; codecs="wmalossless"' },
+	mp1: { kind: "audio", label: "MP1", query: 'audio/mpeg; codecs="mp1"' },
+	mp2: { kind: "audio", label: "MP2", query: 'audio/mpeg; codecs="mp2"' },
+	amr: { kind: "audio", label: "AMR", query: 'audio/3gpp; codecs="samr"' },
+	amrwb: { kind: "audio", label: "AMR-WB", query: 'audio/3gpp; codecs="sawb"' },
+	pcm: { kind: "audio", label: "PCM", query: 'audio/wav; codecs="1"' },
+	adpcm: { kind: "audio", label: "ADPCM", query: 'audio/wav; codecs="2"' },
+	speex: { kind: "audio", label: "Speex", query: 'audio/ogg; codecs="speex"' }
 } as const satisfies Record<MediaCodec, { kind: TrackKind; label: string; query: string }>
 
 export type CodecId = MediaCodec
+
+// Each container a probe reads, by the name a "can't play these files" message gives it.
+export const CONTAINER_LABELS = {
+	mp4: "MP4",
+	mov: "QuickTime",
+	mkv: "Matroska",
+	webm: "WebM",
+	ts: "MPEG-TS",
+	avi: "AVI",
+	flv: "Flash Video",
+	asf: "Windows Media",
+	ps: "MPEG",
+	ogg: "Ogg"
+} as const satisfies Record<ProbeContainer, string>
 
 // `codec` is null for a track whose format this module does not recognise.
 export interface ContainerTrack {

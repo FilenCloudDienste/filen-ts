@@ -570,6 +570,8 @@ export const preview = {
 	// ── Video player ─────────────────────────────────────────────────────────
 	/** Video/audio preview — the browser can't decode the file; {{codecs}} lists the formats it reported it can't play, e.g. "HEVC, AC-3" (format names, not translated). Shown with a Download button */
 	previewMediaFormatUnsupportedCodecs: "This file's format can't be played here ({{codecs}}).",
+	/** Video preview — nothing in this browser reads the file's container, whatever it holds; {{container}} is the container format's name, e.g. Ogg or AVI (not translated). Shown with a Download button */
+	previewMediaContainerUnsupported: "This browser can't play {{container}} files.",
 	/** Video player — notice over a video that plays without sound because the browser can't decode its audio; {{codec}} is the audio format's name, e.g. AC-3 */
 	previewMediaNoSound: "No sound: this video's {{codec}} audio can't be played here.",
 	/** Video player — notice over a video that plays its sound without a picture because the browser can't decode its video; {{codec}} is the video format's name, e.g. HEVC */

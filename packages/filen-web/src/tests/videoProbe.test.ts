@@ -381,6 +381,28 @@ const VIDEO_TRACK = trackEntry(
 	element(0xe0, uintElement(0xb0, 1920), uintElement(0xba, 1080))
 )
 
+describe("probeVideo — 3GPP", () => {
+	it("names H.263 pictures and AMR sound, which no browser plays as they are", async () => {
+		const file = concat(
+			FTYP,
+			box(
+				"moov",
+				mvhd({ timescale: 1000, duration: 4000 }),
+				trak(tkhd({ id: 1 }), [mdhd({}), hdlr("vide")], videoEntry("s263", { width: 176, height: 144 })),
+				trak(tkhd({ id: 2 }), [mdhd({}), hdlr("soun")], audioEntry("samr", { channels: 1, rate: 8000 })),
+				trak(tkhd({ id: 3 }), [mdhd({}), hdlr("soun")], audioEntry("sawb", { channels: 1, rate: 16000 }))
+			)
+		)
+		const record = (await probe(file, "card")).record
+
+		expect(record?.video).toMatchObject({ codec: "h263", fourcc: "s263", codecString: null, w: 176, h: 144 })
+		expect(record?.audio.map(({ codec, codecString, rate }) => ({ codec, codecString, rate }))).toEqual([
+			{ codec: "amr", codecString: null, rate: 8000 },
+			{ codec: "amrwb", codecString: null, rate: 16000 }
+		])
+	})
+})
+
 describe("probeVideo — Matroska", () => {
 	it("reads track flags, BCP 47 languages first, and Matroska's English default", async () => {
 		const file = mkv(

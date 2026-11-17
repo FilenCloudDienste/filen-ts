@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
-import type { ProbeTier, VideoProbe } from "@filen/shared/videos"
+import { type } from "arktype"
+import { PROBE_INDEXES, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/lib/storage/adapter", () => ({
@@ -104,6 +105,18 @@ describe("probe records", () => {
 		expect(recordSatisfies(card, "full")).toBe(false)
 		expect(recordSatisfies(mergeProbe(card, "full", probe(), 2), "cover")).toBe(true)
 		expect(recordSatisfies(mergeProbe(null, "card", null, 1), "full")).toBe(true)
+	})
+
+	it("validates every index a walker records", () => {
+		for (const index of PROBE_INDEXES) {
+			const record = mergeProbe(null, "card", probe({ index }), 1)
+
+			expect(probeRecordSchema(JSON.parse(JSON.stringify(record)))).toEqual(record)
+		}
+
+		expect(probeRecordSchema({ ...mergeProbe(null, "card", probe(), 1), probe: { ...probe(), index: "bogus" } })).toBeInstanceOf(
+			type.errors
+		)
 	})
 
 	it("persists no playability and validates what it stored", () => {
