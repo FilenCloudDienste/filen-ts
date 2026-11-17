@@ -14,7 +14,7 @@ import {
 	type Rotation,
 	type VideoCodec
 } from "mediabunny"
-import { BlockSource, probeVideo, walkContainer } from "@filen/shared/videos"
+import { BlockSource, probeVideo, videoReorderFrames, walkContainer } from "@filen/shared/videos"
 import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
 import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput } from "@/lib/media/blockInput"
 import { isInitSegment } from "@/lib/media/fmp4Split"
@@ -110,6 +110,8 @@ interface VideoSource {
 	rotation: Rotation
 	// Set when a start must be an IDR picture: the NAL length field size of its packets (null: Annex B).
 	idrOnly: { lengthSize: number | null } | null
+	// The most frames the stream's SPS says can be reordered (videoReorderFrames); null when it does not say.
+	reorderFrames: number | null
 }
 
 function bytesOf(source: AllowSharedBufferSource | undefined): Uint8Array | null {
@@ -293,12 +295,18 @@ export class RemuxEngine {
 			return null
 		}
 
+		const description = bytesOf(config.description)
+		// Without a configuration record, an H.264 or HEVC stream is Annex B with its SPS in band, at its first picture.
+		const first =
+			description === null && (codec === "avc" || codec === "hevc") ? await new EncodedPacketSink(track).getFirstPacket() : null
+
 		this.video = {
 			track,
 			codec,
 			config,
 			rotation,
-			idrOnly: this.idrOnlyStart && codec === "hevc" ? { lengthSize: hevcLengthSize(bytesOf(config.description)) } : null
+			idrOnly: this.idrOnlyStart && codec === "hevc" ? { lengthSize: hevcLengthSize(description) } : null,
+			reorderFrames: videoReorderFrames(codec, description, first?.data ?? null)
 		}
 
 		return { id: track.id, codec, mime: `video/mp4; codecs="${outputVideoCodecString(codec, config)}"`, width, height }
@@ -537,7 +545,13 @@ export class RemuxEngine {
 		// The window the caller asked for, moved along with a clamped start.
 		const gate = new PumpGate(params.horizon - params.time + time)
 		const output = new FragmentedTrackOutput({
-			track: { kind: "video", codec: video.codec, decoderConfig: video.config, rotation: video.rotation },
+			track: {
+				kind: "video",
+				codec: video.codec,
+				decoderConfig: video.config,
+				rotation: video.rotation,
+				reorderFrames: video.reorderFrames
+			},
 			gate,
 			maxFragmentBytes: this.maxFragmentBytes.video,
 			onSegment: bytes => {

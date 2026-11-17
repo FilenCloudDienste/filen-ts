@@ -6,13 +6,15 @@ import { AVI } from "@/lib/media/demux/aviDemuxer"
 import { ASF } from "@/lib/media/demux/asfDemuxer"
 import { MPEG_PS } from "@/lib/media/demux/mpegPsDemuxer"
 import type { RemuxEvent } from "@/lib/media/remuxTypes"
+import { videoReorderFrames } from "@filen/shared/videos"
 import { fmp4Samples } from "@/tests/support/fmp4"
 
 const { RemuxEngine } = await import("@/workers/remux/engine")
 
 // The legacy containers' B-frame streams remuxed to fragmented MP4: decode times lag presentation by the reorder
-// delay, so every sample is decoded no later than it is presented (version-0 trun, offsets never negative), the first
-// fragment decodes from 0, and the edit list puts each picture back at its source time, on the audio's timeline.
+// delay (the SPS's max_num_reorder_frames, in frames), so every sample is decoded no later than it is presented
+// (version-0 trun, offsets never negative), the first fragment decodes from 0, and the edit list puts each picture back
+// at its source time, on the audio's timeline.
 
 const FILES = [
 	["h264-bframes-mp3.avi", AVI],
@@ -108,6 +110,12 @@ describe("legacy B-frame streams remuxed to fragmented MP4", () => {
 			const tick = 1 / (timescale ?? 1)
 
 			expect(Math.abs(Math.min(...samples.map(sample => sample.pts)) - shift - output.keyTime), name).toBeLessThanOrEqual(tick)
+
+			// The lag is the SPS's bound: the first picture decodes that many frames (of 40 ms) before it shows.
+			const reorder = videoReorderFrames("avc", null, new Uint8Array(bytes))
+
+			expect(reorder, name).toBeGreaterThan(0)
+			expect(Math.abs(shift + output.keyTime - (reorder ?? 0) * 0.04), name).toBeLessThanOrEqual(tick)
 
 			for (const [index, sample] of samples.entries()) {
 				expect(Math.abs(sample.pts - shift - (source[index] ?? Number.NaN)), `${name} #${String(index)}`).toBeLessThanOrEqual(tick)

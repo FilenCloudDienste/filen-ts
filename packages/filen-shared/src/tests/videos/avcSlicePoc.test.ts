@@ -12,6 +12,7 @@ function sps(poc: Partial<AvcPocParams>): AvcSps {
 		par: 1,
 		transfer: null,
 		frameSeconds: null,
+		reorderFrames: null,
 		poc: {
 			log2MaxFrameNum: 4,
 			pocType: 0,

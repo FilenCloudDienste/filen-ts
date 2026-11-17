@@ -469,9 +469,15 @@ export type AvcSps = SpsPicture &
 		poc: AvcPocParams
 		// A frame's duration from the VUI's timing info; null when it does not say.
 		frameSeconds: number | null
+		// How many frames can come before one in decode order and after it in output order (avcReorderFrames).
+		reorderFrames: number | null
 	}
 
-export type HevcSps = SpsPicture & Omit<HevcConfig, "bitDepth">
+export type HevcSps = SpsPicture &
+	Omit<HevcConfig, "bitDepth"> & {
+		// sps_max_num_reorder_pics of the highest sub-layer; null when the SPS could not be read that far.
+		reorderFrames: number | null
+	}
 
 // A NAL unit's payload with the emulation-prevention bytes (00 00 03 → 00 00) removed.
 export function unescapeRbsp(nal: Uint8Array): Uint8Array {
@@ -520,10 +526,32 @@ interface Vui {
 	transfer: number | null
 	// AVC only: a frame's duration from timing_info (two ticks a frame); null when the VUI does not say.
 	frameSeconds: number | null
+	// AVC only: bitstream_restriction's max_num_reorder_frames and max_dec_frame_buffering; null when absent.
+	maxNumReorderFrames: number | null
+	maxDecFrameBuffering: number | null
+}
+
+const NO_VUI: Vui = { par: 1, transfer: null, frameSeconds: null, maxNumReorderFrames: null, maxDecFrameBuffering: null }
+
+// hrd_parameters() (H.264 E.1.2); false when it runs past the end.
+function skipAvcHrd(bits: BitReader): boolean {
+	const count = bits.ue()
+
+	if (count === null || count > 31 || bits.read(8) === null) {
+		return false
+	}
+
+	for (let i = 0; i <= count; i++) {
+		if (bits.ue() === null || bits.ue() === null || bits.read(1) === null) {
+			return false
+		}
+	}
+
+	return bits.read(20) !== null
 }
 
 // The VUI fields read: the sample aspect ratio, the transfer characteristics and, for AVC (`avc`), whose timing info
-// follows the chroma location directly, the frame duration.
+// follows the chroma location directly, the frame duration and the bitstream restriction's reorder bounds.
 function readVui(bits: BitReader, avc: boolean): Vui {
 	let par = 1
 
@@ -561,7 +589,7 @@ function readVui(bits: BitReader, avc: boolean): Vui {
 	}
 
 	if (!avc) {
-		return { par, transfer, frameSeconds: null }
+		return { ...NO_VUI, par, transfer }
 	}
 
 	if (bits.read(1) === 1) {
@@ -576,9 +604,103 @@ function readVui(bits: BitReader, avc: boolean): Vui {
 		const scale = bits.read(32)
 
 		frameSeconds = units !== null && scale !== null && units > 0 && scale > 0 ? (2 * units) / scale : null
+		bits.read(1)
 	}
 
-	return { par, transfer, frameSeconds }
+	const absent = { par, transfer, frameSeconds, maxNumReorderFrames: null, maxDecFrameBuffering: null }
+	const nalHrd = bits.read(1)
+
+	if (nalHrd === null || (nalHrd === 1 && !skipAvcHrd(bits))) {
+		return absent
+	}
+
+	const vclHrd = bits.read(1)
+
+	if (vclHrd === null || (vclHrd === 1 && !skipAvcHrd(bits))) {
+		return absent
+	}
+
+	// low_delay_hrd_flag, then pic_struct_present_flag.
+	if ((nalHrd === 1 || vclHrd === 1) && bits.read(1) === null) {
+		return absent
+	}
+
+	if (bits.read(1) === null || bits.read(1) !== 1) {
+		return absent
+	}
+
+	// motion_vectors_over_pic_boundaries_flag, then four bounds this does not need.
+	bits.read(1)
+
+	for (let i = 0; i < 4; i++) {
+		if (bits.ue() === null) {
+			return absent
+		}
+	}
+
+	const maxNumReorderFrames = bits.ue()
+	const maxDecFrameBuffering = bits.ue()
+
+	return { par, transfer, frameSeconds, maxNumReorderFrames, maxDecFrameBuffering }
+}
+
+// MaxDpbMbs by level_idc (H.264 Table A-1); level 1b is 9, or 11 with constraint_set3_flag in Baseline, Main and
+// Extended.
+const AVC_MAX_DPB_MBS: ReadonlyMap<number, number> = new Map([
+	[9, 396],
+	[10, 396],
+	[11, 900],
+	[12, 2376],
+	[13, 2376],
+	[20, 2376],
+	[21, 4752],
+	[22, 8100],
+	[30, 8100],
+	[31, 18000],
+	[32, 20480],
+	[40, 32768],
+	[41, 32768],
+	[42, 34816],
+	[50, 110400],
+	[51, 184320],
+	[52, 184320],
+	[60, 696320],
+	[61, 696320],
+	[62, 696320]
+])
+
+// Profiles whose constraint_set3_flag marks an intra-only stream (H.264 A.2.8 to A.2.11, E.2.1).
+const AVC_INTRA_PROFILES = new Set([44, 86, 100, 110, 122, 244])
+
+// The most frames that can precede a frame in decode order and follow it in output order: the VUI's
+// max_num_reorder_frames, else its max_dec_frame_buffering; without them, what H.264 E.2.1 infers (0 for an intra
+// profile, else the level's DPB size in frames). Null for a level the table does not know.
+export function avcReorderFrames(params: {
+	profile: number
+	compatibility: number
+	level: number
+	widthMbs: number
+	frameHeightMbs: number
+	vui: Pick<Vui, "maxNumReorderFrames" | "maxDecFrameBuffering">
+}): number | null {
+	const { profile, compatibility, level, widthMbs, frameHeightMbs, vui } = params
+	const set3 = (compatibility & 0x10) !== 0
+
+	if (vui.maxNumReorderFrames !== null) {
+		return vui.maxNumReorderFrames
+	}
+
+	if (vui.maxDecFrameBuffering !== null) {
+		return vui.maxDecFrameBuffering
+	}
+
+	if (set3 && AVC_INTRA_PROFILES.has(profile)) {
+		return 0
+	}
+
+	const mbs = level === 11 && set3 && (profile === 66 || profile === 77 || profile === 88) ? 396 : AVC_MAX_DPB_MBS.get(level)
+
+	return mbs === undefined ? null : Math.min(Math.floor(mbs / (widthMbs * frameHeightMbs)), 16)
 }
 
 // Cropped picture size; null for one no decoder would produce.
@@ -747,7 +869,7 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 		return null
 	}
 
-	const vui = bits.read(1) === 1 ? readVui(bits, true) : { par: 1, transfer: null, frameSeconds: null }
+	const vui = bits.read(1) === 1 ? readVui(bits, true) : NO_VUI
 
 	return {
 		profile,
@@ -756,7 +878,17 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 		width: size[0],
 		height: size[1],
 		bitDepth,
-		...vui,
+		par: vui.par,
+		transfer: vui.transfer,
+		frameSeconds: vui.frameSeconds,
+		reorderFrames: avcReorderFrames({
+			profile,
+			compatibility,
+			level,
+			widthMbs: widthMbs + 1,
+			frameHeightMbs: (heightUnits + 1) * fieldFactor,
+			vui
+		}),
 		poc: {
 			log2MaxFrameNum,
 			pocType,
@@ -907,20 +1039,29 @@ function skipShortTermRefPicSets(bits: BitReader, count: number): boolean {
 	return true
 }
 
-// The rest of an HEVC SPS up to its VUI; false when it cannot be walked.
-function skipToHevcVui(bits: BitReader, maxSubLayersMinus1: number): boolean {
+// The rest of an HEVC SPS up to its VUI: whether it has one (false when it cannot be walked), and the highest
+// sub-layer's sps_max_num_reorder_pics (null when it could not be read).
+function skipToHevcVui(bits: BitReader, maxSubLayersMinus1: number): { vui: boolean; reorderFrames: number | null } {
 	const pocBits = bits.ue()
+	let reorderFrames: number | null = null
 
 	if (pocBits === null || pocBits > 12) {
-		return false
+		return { vui: false, reorderFrames }
 	}
 
 	for (let i = bits.read(1) === 1 ? 0 : maxSubLayersMinus1; i <= maxSubLayersMinus1; i++) {
 		bits.ue()
-		bits.ue()
+		reorderFrames = bits.ue()
 		bits.ue()
 	}
 
+	const vui = skipToHevcVuiRest(bits, pocBits)
+
+	return { vui, reorderFrames }
+}
+
+// skipToHevcVui past the sub-layer ordering info.
+function skipToHevcVuiRest(bits: BitReader, pocBits: number): boolean {
 	for (let i = 0; i < 6; i++) {
 		bits.ue()
 	}
@@ -1036,7 +1177,8 @@ export function parseHevcSps(nal: Uint8Array): HevcSps | null {
 		return null
 	}
 
-	const vui = skipToHevcVui(bits, maxSubLayersMinus1) ? readVui(bits, false) : { par: 1, transfer: null, frameSeconds: null }
+	const walked = skipToHevcVui(bits, maxSubLayersMinus1)
+	const vui = walked.vui ? readVui(bits, false) : NO_VUI
 
 	return {
 		profileSpace: first >> 6,
@@ -1049,7 +1191,8 @@ export function parseHevcSps(nal: Uint8Array): HevcSps | null {
 		height: size[1],
 		bitDepth: luma + 8,
 		par: vui.par,
-		transfer: vui.transfer
+		transfer: vui.transfer,
+		reorderFrames: walked.reorderFrames
 	}
 }
 

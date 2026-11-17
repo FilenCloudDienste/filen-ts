@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { avcConfigCodecString, hevcConfigCodecString, parseAvcSps, parseHevcSps, unescapeRbsp } from "@filen/shared/videos"
+import {
+	avcConfigCodecString,
+	avcReorderFrames,
+	hevcConfigCodecString,
+	parseAvcSps,
+	parseHevcSps,
+	unescapeRbsp,
+	videoReorderFrames
+} from "@filen/shared/videos"
 
 // SPS NAL units cut from x264/x265 output; expectations are ffprobe's reading of the same streams.
 
@@ -185,5 +193,82 @@ describe("parseHevcSps", () => {
 				expect(() => parseAvcSps(flipped)).not.toThrow()
 			}
 		}
+	})
+})
+
+// A 1280x720 progressive SPS with no VUI: `profile`, `compatibility` (constraint flags) and `level` as given.
+function plainAvcSps(profile: number, compatibility: number, level: number, widthMbs = 80, heightMbs = 45): Uint8Array {
+	return avcSps(({ u, ue }) => {
+		u(profile, 8)
+		u(compatibility, 8)
+		u(level, 8)
+		ue(0)
+		ue(0)
+		ue(2)
+		ue(1)
+		u(0, 1)
+		ue(widthMbs - 1)
+		ue(heightMbs - 1)
+		u(1, 1)
+		u(1, 1)
+		u(0, 1)
+		u(0, 1)
+	})
+}
+
+describe("reorder frames", () => {
+	it("reads x264's and x265's bounds from the SPS", () => {
+		expect(parseAvcSps(AVC_HIGH_720P)?.reorderFrames).toBe(2)
+		expect(parseAvcSps(AVC_MAIN_1080P_PQ_SAR)?.reorderFrames).toBe(2)
+		expect(parseHevcSps(HEVC_MAIN10_720P)?.reorderFrames).toBe(2)
+		expect(parseHevcSps(HEVC_MAIN10_1080P_HLG_SAR)?.reorderFrames).toBe(2)
+	})
+
+	it("infers the level's DPB size without a VUI, and 0 for an intra profile", () => {
+		// Level 3.1: 18000 macroblocks over 80x45 is 5 frames.
+		expect(parseAvcSps(plainAvcSps(77, 0, 31))?.reorderFrames).toBe(5)
+		// Capped at 16: level 5.1 at 1280x720.
+		expect(parseAvcSps(plainAvcSps(77, 0, 51))?.reorderFrames).toBe(16)
+		// Level 1b (11 with constraint_set3 in Main): 396 macroblocks over QCIF's 99.
+		expect(parseAvcSps(plainAvcSps(77, 0x10, 11, 11, 9))?.reorderFrames).toBe(4)
+		// High with constraint_set3: High Intra.
+		expect(avcReorderFrames({ profile: 100, compatibility: 0x10, level: 31, widthMbs: 80, frameHeightMbs: 45, vui: { maxNumReorderFrames: null, maxDecFrameBuffering: null } })).toBe(0)
+		expect(parseAvcSps(plainAvcSps(77, 0, 7))?.reorderFrames).toBeNull()
+	})
+
+	it("falls back from max_num_reorder_frames to max_dec_frame_buffering", () => {
+		const base = { profile: 100, compatibility: 0, level: 31, widthMbs: 80, frameHeightMbs: 45 }
+
+		expect(avcReorderFrames({ ...base, vui: { maxNumReorderFrames: 1, maxDecFrameBuffering: 4 } })).toBe(1)
+		expect(avcReorderFrames({ ...base, vui: { maxNumReorderFrames: null, maxDecFrameBuffering: 4 } })).toBe(4)
+	})
+
+	it("finds the SPS in an avcC, an hvcC or an Annex B picture", () => {
+		const avcC = Uint8Array.from([1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, AVC_HIGH_720P.length, ...AVC_HIGH_720P, 0])
+		const vps = fromHex("40010c01ffff")
+		const hvcC = Uint8Array.from([
+			1,
+			...new Array<number>(21).fill(0),
+			2,
+			0x20,
+			0,
+			1,
+			0,
+			vps.length,
+			...vps,
+			0x21,
+			0,
+			1,
+			0,
+			HEVC_MAIN_720P.length,
+			...HEVC_MAIN_720P
+		])
+
+		expect(videoReorderFrames("avc", avcC, null)).toBe(2)
+		expect(videoReorderFrames("hevc", hvcC, null)).toBe(2)
+		expect(videoReorderFrames("avc", null, Uint8Array.from([0, 0, 0, 1, ...AVC_HIGH_720P, 0, 0, 1, 0x65, 0x88]))).toBe(2)
+		expect(videoReorderFrames("hevc", null, Uint8Array.from([0, 0, 1, ...HEVC_MAIN_720P]))).toBe(2)
+		expect(videoReorderFrames("avc", null, null)).toBeNull()
+		expect(videoReorderFrames("vp9", avcC, null)).toBeNull()
 	})
 })

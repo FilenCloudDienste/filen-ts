@@ -191,7 +191,7 @@ patchedDependencies:
   expo-video@58.0.13: 6fb16ecb6426e070bb4b38279c307b8071dfffbb28255fafba66c69a9476b7fe
   file-type@22.2.0: a25744dce2cc85b7b7df582aa7b56fd1bedf8ce9e2e2317655e87be4a4e3b24e
   hucre@1.2.0: 5f5ada98495cb608ef0d4f0d1097036950756915c8210d92cc290756afe3feec
-  mediabunny@1.66.0: 712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367
+  mediabunny@1.66.0: e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49
   pressto@0.7.0: ce80592e446002864888a4f51e2ceaf385c24a3f4c95a1266d5ff268deea4f4e
   react-native-ios-utilities@5.2.0: 5153d1d449fd7e01ce55ed1774332b5029f0065a7e968abc597635cade9b7954
   react-native-notify-kit@10.9.0: 5e3f20eed565eb625d67ebb2a8e56a2940472a6176625d7f8a28a2f5897db678
@@ -1141,7 +1141,7 @@ importers:
         version: 1.2.5
       '@mediabunny/aac-encoder':
         specifier: 1.66.0
-        version: 1.66.0(mediabunny@1.66.0(patch_hash=712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367))
+        version: 1.66.0(mediabunny@1.66.0(patch_hash=e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49))
       '@replit/codemirror-lang-nix':
         specifier: 6.0.1
         version: 6.0.1(@codemirror/autocomplete@6.20.4)(@codemirror/language@6.13.1)(@codemirror/state@6.7.6)(@codemirror/view@6.43.15)(@lezer/common@1.5.2)(@lezer/highlight@1.2.5)(@lezer/lr@1.4.10)
@@ -1216,7 +1216,7 @@ importers:
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       mediabunny:
         specifier: 1.66.0
-        version: 1.66.0(patch_hash=712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367)
+        version: 1.66.0(patch_hash=e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49)
       mupdf:
         specifier: 1.28.6
         version: 1.28.6
@@ -14031,9 +14031,9 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.4': {}
 
-  '@mediabunny/aac-encoder@1.66.0(mediabunny@1.66.0(patch_hash=712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367))':
+  '@mediabunny/aac-encoder@1.66.0(mediabunny@1.66.0(patch_hash=e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49))':
     dependencies:
-      mediabunny: 1.66.0(patch_hash=712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367)
+      mediabunny: 1.66.0(patch_hash=e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49)
 
   '@mermaid-js/parser@2.0.1':
     dependencies:
@@ -20012,7 +20012,7 @@ snapshots:
 
   media-typer@2.0.0: {}
 
-  mediabunny@1.66.0(patch_hash=712381b3154e0a93f2fcd341ce3ae24bcf21b736ac4d850a7123f397764ce367):
+  mediabunny@1.66.0(patch_hash=e52db05aba61a7442ebaa75df49c6e425c58f3e8a16b0c351794034df628ca49):
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.12
       '@types/dom-webcodecs': 0.1.13

@@ -56,6 +56,7 @@ export {
 } from "./probeMpegps"
 export { oggHeadVideo, type OggVideoFacts } from "./probeOgg"
 export * from "./probeTypes"
+export * from "./reorderFrames"
 export * from "./segments"
 export * from "./sidecars"
 export * from "./smi"

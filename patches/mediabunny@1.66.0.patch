@@ -160,7 +160,7 @@ index 74078d872b6994c7c5052fd899de90e65f923860..d05057a749d0a181cf9a8c2ac351c686
      currentChunk: Chunk | null;
      compactlyCodedChunkTable: {
 diff --git a/dist/modules/src/isobmff/isobmff-muxer.js b/dist/modules/src/isobmff/isobmff-muxer.js
-index 8d888423e2c4dc0eeb70a3b8892034f406ec6016..b1c63b2eb150840538cc0582e16f4cfabe0a8d2b 100644
+index 8d888423e2c4dc0eeb70a3b8892034f406ec6016..da7bddbb59b1fface60bf0f7be05c1b80974ec8d 100644
 --- a/dist/modules/src/isobmff/isobmff-muxer.js
 +++ b/dist/modules/src/isobmff/isobmff-muxer.js
 @@ -302,6 +302,7 @@ export class IsobmffMuxer extends Muxer {
@@ -187,18 +187,32 @@ index 8d888423e2c4dc0eeb70a3b8892034f406ec6016..b1c63b2eb150840538cc0582e16f4cfa
              finalizedChunks: [],
              currentChunk: null,
              compactlyCodedChunkTable: [],
-@@ -726,6 +729,22 @@ export class IsobmffMuxer extends Muxer {
+@@ -726,6 +729,36 @@ export class IsobmffMuxer extends Muxer {
          }
          const sortedTimestamps = trackData.timestampProcessingQueue.map(x => x.timestamp).sort((a, b) => a - b);
          if (this.isFragmented) {
 +            // Decode times lag presentation by the reorder delay, so no sample is presented before it is decoded and
-+            // composition offsets stay non-negative. The delay is the first window's; a later one needing more has its
-+            // decode times held at or before every presentation still to come.
++            // composition offsets stay non-negative. The delay is the bitstream's reorder bound in frames (the track's
++            // reorderFrames) where given, at least the first window's own; a later window needing more still has its
++            // decode times held at or before every presentation to come, some then sharing one decode time.
 +            const queue = trackData.timestampProcessingQueue;
 +            if (trackData.decodeDelay === null) {
 +                let delay = 0;
 +                for (let i = 0; i < queue.length; i++) {
 +                    delay = Math.max(delay, sortedTimestamps[i] - queue[i].timestamp);
++                }
++                const reorderFrames = trackData.track.metadata.reorderFrames;
++                if (trackData.type === 'video' && reorderFrames !== undefined && reorderFrames > 0) {
++                    // A frame: the first sample's duration, else the smallest step between presentation times.
++                    let frame = queue[0].duration > 0 ? queue[0].duration : Infinity;
++                    const measure = frame === Infinity;
++                    for (let i = 1; measure && i < sortedTimestamps.length; i++) {
++                        const step = sortedTimestamps[i] - sortedTimestamps[i - 1];
++                        frame = step > 0 ? Math.min(frame, step) : frame;
++                    }
++                    if (frame < Infinity) {
++                        delay = Math.max(delay, reorderFrames * frame);
++                    }
 +                }
 +                trackData.decodeDelay = delay;
 +            }
@@ -210,7 +224,7 @@ index 8d888423e2c4dc0eeb70a3b8892034f406ec6016..b1c63b2eb150840538cc0582e16f4cfa
              trackData.startTimestampOffset ??= Math.min(sortedTimestamps[0], 0);
          }
          else {
-@@ -820,7 +839,7 @@ export class IsobmffMuxer extends Muxer {
+@@ -820,7 +853,7 @@ export class IsobmffMuxer extends Muxer {
              // the last sample's duration in each fragment be "0" for fragmented files. The guess we make here is
              // actually correct most of the time, since typically, no delta frame with a lower timestamp follows the key
              // frame (although it can happen).
@@ -283,6 +297,38 @@ index a4caccedc192e8811f38d1f0d47cdb1b4a02af03..391244542ff45f130b392c74a08ce82b
          if (options.onFtyp !== undefined && typeof options.onFtyp !== 'function') {
              throw new TypeError('options.onFtyp, when provided, must be a function.');
          }
+diff --git a/dist/modules/src/output.d.ts b/dist/modules/src/output.d.ts
+index 1c4bfbad7cadd3f2e5578e9379df5fbaed21ab43..f0a571247a5c591155eafc2248a2ea92167425d8 100644
+--- a/dist/modules/src/output.d.ts
++++ b/dist/modules/src/output.d.ts
+@@ -181,6 +181,12 @@ export type VideoTrackMetadata = BaseTrackMetadata & {
+      * with the same timestamp.
+      */
+     frameRate?: number;
++    /**
++     * In a fragmented MP4, the most frames that can precede a frame in decode order and follow it in presentation
++     * order (from the bitstream: H.264 max_num_reorder_frames, HEVC sps_max_num_reorder_pics). Decode times then lag
++     * presentation by that many frames from the start, rather than by the first key-to-key window's reorder alone.
++     */
++    reorderFrames?: number;
+     /**
+      * When true, this track is marked as being made only out of key frames (I-frames). It is an error to add a non-key
+      * frame to this track.
+diff --git a/dist/modules/src/output.js b/dist/modules/src/output.js
+index 62f44132178eff1a12a666ab83cd51720b60dd8a..b8a8f280079065ad39e1eb91e9e505df0663fe45 100644
+--- a/dist/modules/src/output.js
++++ b/dist/modules/src/output.js
+@@ -397,6 +397,10 @@ export class Output extends EventEmitter {
+                 || !metadata.transformationMatrix.every(x => Number.isFinite(x)))) {
+             throw new TypeError('metadata.transformationMatrix, when provided, must be an array of 9 finite numbers.');
+         }
++        if (metadata.reorderFrames !== undefined
++            && (!Number.isInteger(metadata.reorderFrames) || metadata.reorderFrames < 0)) {
++            throw new TypeError(`Invalid reorder frame count: ${metadata.reorderFrames}. Must be a non-negative integer.`);
++        }
+         if (metadata.frameRate !== undefined
+             && (!Number.isFinite(metadata.frameRate) || metadata.frameRate <= 0)) {
+             throw new TypeError(`Invalid video frame rate: ${metadata.frameRate}. Must be a positive number.`);
 diff --git a/src/isobmff/isobmff-boxes.ts b/src/isobmff/isobmff-boxes.ts
 index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..4d76bdb8a0de4bf5d8bbbe5935a24e5896c66721 100644
 --- a/src/isobmff/isobmff-boxes.ts
@@ -355,10 +401,27 @@ index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..4d76bdb8a0de4bf5d8bbbe5935a24e58
  	]);
  };
 diff --git a/src/isobmff/isobmff-muxer.ts b/src/isobmff/isobmff-muxer.ts
-index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86b8aeb849 100644
+index e1f3fcca03d424696addc69809779a7ef10e4473..c200bd80e2f1893f0e651a5a30d243c618b9784c 100644
 --- a/src/isobmff/isobmff-muxer.ts
 +++ b/src/isobmff/isobmff-muxer.ts
-@@ -101,6 +101,8 @@ export type IsobmffTrackData = {
+@@ -22,7 +22,15 @@ import {
+ 	vtte,
+ } from './isobmff-boxes';
+ import { Muxer } from '../muxer';
+-import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack, TrackType } from '../output';
++import {
++	Output,
++	OutputAudioTrack,
++	OutputSubtitleTrack,
++	OutputTrack,
++	OutputVideoTrack,
++	TrackType,
++	VideoTrackMetadata,
++} from '../output';
+ import { Writer } from '../writer';
+ import { BufferTarget } from '../target';
+ import { assert, computeRationalApproximation, last, promiseWithResolvers, Rational, simplifyRational } from '../misc';
+@@ -101,6 +109,8 @@ export type IsobmffTrackData = {
  	lastTimescaleUnits: number | null;
  	lastSample: Sample | null;
  	startTimestampOffset: number | null;
@@ -367,7 +430,7 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
  
  	finalizedChunks: Chunk[];
  	currentChunk: Chunk | null;
-@@ -544,6 +546,7 @@ export class IsobmffMuxer extends Muxer {
+@@ -544,6 +554,7 @@ export class IsobmffMuxer extends Muxer {
  			lastTimescaleUnits: null,
  			lastSample: null,
  			startTimestampOffset: null,
@@ -375,7 +438,7 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
  			finalizedChunks: [],
  			currentChunk: null,
  			compactlyCodedChunkTable: [],
-@@ -666,6 +669,7 @@ export class IsobmffMuxer extends Muxer {
+@@ -666,6 +677,7 @@ export class IsobmffMuxer extends Muxer {
  			lastTimescaleUnits: null,
  			lastSample: null,
  			startTimestampOffset: null,
@@ -383,7 +446,7 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
  			finalizedChunks: [],
  			currentChunk: null,
  			compactlyCodedChunkTable: [],
-@@ -710,6 +714,7 @@ export class IsobmffMuxer extends Muxer {
+@@ -710,6 +722,7 @@ export class IsobmffMuxer extends Muxer {
  			lastTimescaleUnits: null,
  			lastSample: null,
  			startTimestampOffset: null,
@@ -391,13 +454,14 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
  			finalizedChunks: [],
  			currentChunk: null,
  			compactlyCodedChunkTable: [],
-@@ -1125,6 +1130,28 @@ export class IsobmffMuxer extends Muxer {
+@@ -1125,6 +1138,49 @@ export class IsobmffMuxer extends Muxer {
  		const sortedTimestamps = trackData.timestampProcessingQueue.map(x => x.timestamp).sort((a, b) => a - b);
  
  		if (this.isFragmented) {
 +			// Decode times lag presentation by the reorder delay, so no sample is presented before it is decoded and
-+			// composition offsets stay non-negative. The delay is the first window's; a later one needing more has its
-+			// decode times held at or before every presentation still to come.
++			// composition offsets stay non-negative. The delay is the bitstream's reorder bound in frames (the track's
++			// reorderFrames) where given, at least the first window's own; a later window needing more still has its
++			// decode times held at or before every presentation to come, some then sharing one decode time.
 +			const queue = trackData.timestampProcessingQueue;
 +
 +			if (trackData.decodeDelay === null) {
@@ -405,6 +469,26 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
 +
 +				for (let i = 0; i < queue.length; i++) {
 +					delay = Math.max(delay, sortedTimestamps[i]! - queue[i]!.timestamp);
++				}
++
++				const reorderFrames = trackData.type === 'video'
++					? (trackData.track.metadata as VideoTrackMetadata).reorderFrames
++					: undefined;
++
++				if (reorderFrames !== undefined && reorderFrames > 0) {
++					// A frame: the first sample's duration, else the smallest step between presentation times.
++					let frame = queue[0]!.duration > 0 ? queue[0]!.duration : Infinity;
++
++					const measure = frame === Infinity;
++
++					for (let i = 1; measure && i < sortedTimestamps.length; i++) {
++						const step = sortedTimestamps[i]! - sortedTimestamps[i - 1]!;
++						frame = step > 0 ? Math.min(frame, step) : frame;
++					}
++
++					if (frame < Infinity) {
++						delay = Math.max(delay, reorderFrames * frame);
++					}
 +				}
 +
 +				trackData.decodeDelay = delay;
@@ -420,7 +504,7 @@ index e1f3fcca03d424696addc69809779a7ef10e4473..d78c06dbc82777c9e031409c209a7b86
  			trackData.startTimestampOffset ??= Math.min(sortedTimestamps[0]!, 0);
  		} else {
  			trackData.startTimestampOffset ??= sortedTimestamps[0]!;
-@@ -1235,7 +1262,11 @@ export class IsobmffMuxer extends Muxer {
+@@ -1235,7 +1291,11 @@ export class IsobmffMuxer extends Muxer {
  			// the last sample's duration in each fragment be "0" for fragmented files. The guess we make here is
  			// actually correct most of the time, since typically, no delta frame with a lower timestamp follows the key
  			// frame (although it can happen).
@@ -494,3 +578,35 @@ index fded545ce95cb8061790876b40c91ecf58474cb0..c5f3b2ec717c951d2140abe7b2de451f
  		if (options.onFtyp !== undefined && typeof options.onFtyp !== 'function') {
  			throw new TypeError('options.onFtyp, when provided, must be a function.');
  		}
+diff --git a/src/output.ts b/src/output.ts
+index dacf9f3fe404b22bc32081fa2695fa1ec9b44cb7..4efb3d32a1a4decb76c3d21d513284102573c267 100644
+--- a/src/output.ts
++++ b/src/output.ts
+@@ -290,6 +290,12 @@ export type VideoTrackMetadata = BaseTrackMetadata & {
+ 	 * with the same timestamp.
+ 	 */
+ 	frameRate?: number;
++	/**
++	 * In a fragmented MP4, the most frames that can precede a frame in decode order and follow it in presentation
++	 * order (from the bitstream: H.264 max_num_reorder_frames, HEVC sps_max_num_reorder_pics). Decode times then lag
++	 * presentation by that many frames from the start, rather than by the first key-to-key window's reorder alone.
++	 */
++	reorderFrames?: number;
+ 	/**
+ 	 * When true, this track is marked as being made only out of key frames (I-frames). It is an error to add a non-key
+ 	 * frame to this track.
+@@ -701,6 +707,14 @@ export class Output<
+ 		) {
+ 			throw new TypeError('metadata.transformationMatrix, when provided, must be an array of 9 finite numbers.');
+ 		}
++		if (
++			metadata.reorderFrames !== undefined
++			&& (!Number.isInteger(metadata.reorderFrames) || metadata.reorderFrames < 0)
++		) {
++			throw new TypeError(
++				`Invalid reorder frame count: ${metadata.reorderFrames}. Must be a non-negative integer.`,
++			);
++		}
+ 		if (
+ 			metadata.frameRate !== undefined
+ 			&& (!Number.isFinite(metadata.frameRate) || metadata.frameRate <= 0)

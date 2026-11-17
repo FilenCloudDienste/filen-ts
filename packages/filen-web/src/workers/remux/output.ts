@@ -27,7 +27,8 @@ export class FragmentTooLargeError extends Error {
 
 // One track muxed to fragmented MP4. The first segment carries the init segment (ftyp + moov) ahead of
 // its first fragment. Every packet keeps its source timestamp as its presentation time. Decode times lag
-// them by the stream's reorder delay (the patched muxer), so no picture is presented before it is decoded;
+// them by the stream's reorder delay (the patched muxer: `reorderFrames` frames, the SPS's bound, else what
+// the first key-to-key window reorders), so no picture is presented before it is decoded;
 // where that puts the first decode time before 0 (a start at the file's first key picture), the muxer
 // starts decoding at 0 and writes an edit list that trims the lag back off.
 export class FragmentedTrackOutput {
@@ -44,7 +45,7 @@ export class FragmentedTrackOutput {
 
 	public constructor(params: {
 		track:
-			| { kind: "video"; codec: VideoCodec; decoderConfig: VideoDecoderConfig; rotation: Rotation }
+			| { kind: "video"; codec: VideoCodec; decoderConfig: VideoDecoderConfig; rotation: Rotation; reorderFrames: number | null }
 			| { kind: "audio"; codec: AudioCodec; decoderConfig: AudioDecoderConfig | null }
 		gate: PumpGate
 		maxFragmentBytes: number
@@ -79,7 +80,10 @@ export class FragmentedTrackOutput {
 			const source = new EncodedVideoPacketSource(track.codec)
 			let first: EncodedVideoChunkMetadata | undefined = { decoderConfig: track.decoderConfig }
 
-			this.output.addVideoTrack(source, { rotation: track.rotation })
+			this.output.addVideoTrack(source, {
+				rotation: track.rotation,
+				...(track.reorderFrames === null ? {} : { reorderFrames: track.reorderFrames })
+			})
 			this.add = packet => {
 				const meta = first
 
