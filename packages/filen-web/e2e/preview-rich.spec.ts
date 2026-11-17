@@ -26,7 +26,9 @@ async function expectDatabase(page: Page, dialog: Locator): Promise<void> {
 	await dialog.getByRole("button", { name: "users", exact: true }).click({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText("Checked", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByText(/70,000 rows|≥ 50,000 rows/)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// A click selects the cell under the pointer, wherever the grid has scrolled to: back to the first cell first.
 	await dialog.getByLabel("Table rows").click()
+	await page.keyboard.press("ControlOrMeta+Home")
 	await page.keyboard.press("ArrowDown")
 	await expect(dialog.getByText("users.id, row 1", { exact: true })).toBeVisible()
 	// Views and virtual tables are listed with their SQL and never run.

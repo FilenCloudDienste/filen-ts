@@ -177,7 +177,8 @@ describe("SqliteViewer", () => {
 		outcome.next = { ok: true, database: database({ autoCheck: false, size: 300 * 1024 * 1024 }) }
 		await renderViewer()
 
-		expect(await screen.findByText("Not checked")).toBeTruthy()
+		// Its own element, so a full-text lookup (an e2e locator) finds it apart from the button beside it.
+		expect((await screen.findByText("Not checked")).textContent).toBe("Not checked")
 		expect(checks.runs).toBe(0)
 
 		fireEvent.click(screen.getByRole("button", { name: "Check integrity" }))

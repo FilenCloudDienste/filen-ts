@@ -230,7 +230,7 @@ function CheckChip({ check, onCheck }: { check: CheckState; onCheck: () => void 
 			return (
 				<span className="flex items-center gap-2 text-xs text-muted-foreground">
 					<CircleAlertIcon className="size-3.5" />
-					{t("previewSqliteNotChecked")}
+					<span>{t("previewSqliteNotChecked")}</span>
 					<Button
 						size="sm"
 						variant="outline"
@@ -252,7 +252,7 @@ function CheckChip({ check, onCheck }: { check: CheckState; onCheck: () => void 
 		case "failed":
 			return (
 				<span className="flex items-center gap-2 text-xs text-muted-foreground">
-					{t("previewSqliteCheckFailed")}
+					<span>{t("previewSqliteCheckFailed")}</span>
 					<Button
 						size="sm"
 						variant="outline"
