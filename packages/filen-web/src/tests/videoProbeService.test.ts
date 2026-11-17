@@ -186,10 +186,14 @@ describe("probe records", () => {
 			]
 		})
 
-		expect(recordSatisfies(withRev(amr, 2), "card")).toBe(false)
-		expect(recordSatisfies(withRev(amr, 3), "card")).toBe(true)
-		expect(recordSatisfies(withRev(probe({ container: "mp4" }), 2), "card")).toBe(true)
-		expect(recordSatisfies(withRev({ ...amr, container: "mkv" }, 2), "card")).toBe(true)
+		expect(recordSatisfies(withRev(amr, 2), "card", () => "call.3gp")).toBe(false)
+		expect(recordSatisfies(withRev(amr, 2), "card", () => "call.3G2")).toBe(false)
+		expect(recordSatisfies(withRev(amr, 3), "card", () => "call.3gp")).toBe(true)
+		// Only a 3GPP name: an MP4 or QuickTime file's unnamed PCM or ProRes stays unnamed at revision 3.
+		expect(recordSatisfies(withRev(amr, 2), "card", () => "film.mp4")).toBe(true)
+		expect(recordSatisfies(withRev({ ...amr, container: "mov" }, 2), "card", () => "film.mov")).toBe(true)
+		expect(recordSatisfies(withRev(probe({ container: "mp4" }), 2), "card", () => "call.3gp")).toBe(true)
+		expect(recordSatisfies(withRev({ ...amr, container: "mkv" }, 2), "card", () => "call.3gp")).toBe(true)
 	})
 
 	it("probes again at revision 4 a transport stream's unnamed audio, which MP1/MP2 now names, and nothing else", () => {

@@ -113,6 +113,8 @@ const TRANSPORT_STREAM_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "
 
 // The probe's containers revision 3 first read.
 const REVISION_3_CONTAINERS: ReadonlySet<ProbeContainer> = new Set(["ogg", "avi", "flv", "asf", "ps"])
+// The 3GPP names, whose AMR and H.263 sample entries revision 3 names.
+const THREE_GPP_EXTENSIONS: ReadonlySet<string> = new Set(["3gp", "3g2"])
 
 function extensionOfName(name: string | null): string | null {
 	const dot = name === null ? -1 : extensionStart(name)
@@ -122,8 +124,8 @@ function extensionOfName(name: string | null): string | null {
 
 // A record a probe now would answer otherwise, by the revision that changed the answer: before 2, no container for a
 // transport stream's name, or a Matroska cover read that never looked for the landscape one; before 3, no container
-// for a name the new walkers read, or an MP4/QuickTime track whose codec the 3GPP sample entries now name; before 4,
-// a transport stream's audio track with no codec, which MP1 or MP2 now names.
+// for a name the new walkers read, or a 3GPP file's track whose codec its sample entries now name; before 4, a
+// transport stream's audio track with no codec, which MP1 or MP2 now names.
 function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => string | null): boolean {
 	const revision = record.rev ?? 1
 	const probe = record.probe
@@ -152,14 +154,16 @@ function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => stri
 	}
 
 	if (probe.container === "ts") {
-		return probe.audio.some(audio => audio.codec === null)
+		return revision < 4 && probe.audio.some(audio => audio.codec === null)
 	}
 
-	return (
-		revision < 3 &&
-		(probe.container === "mp4" || probe.container === "mov") &&
-		(probe.video?.codec === null || probe.audio.some(audio => audio.codec === null))
-	)
+	if (revision >= 3 || probe.container !== "mp4" || (probe.video?.codec !== null && probe.audio.every(audio => audio.codec !== null))) {
+		return false
+	}
+
+	const extension = extensionOfName(nameOf())
+
+	return extension !== null && THREE_GPP_EXTENSIONS.has(extension)
 }
 
 function outdatedCover(record: ProbeRecord): boolean {
