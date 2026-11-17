@@ -16,7 +16,7 @@ import {
 } from "mediabunny"
 import { BlockSource, probeVideo, walkContainer } from "@filen/shared/videos"
 import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
-import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
+import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput } from "@/lib/media/blockInput"
 import { isInitSegment } from "@/lib/media/fmp4Split"
 import {
 	IdrUnreachableError,
@@ -184,6 +184,7 @@ export class RemuxEngine {
 
 	public constructor(params: RemuxOpenParams, emit: Emit) {
 		this.source = openBlockInput(params.port, params.size, "playback", {
+			formats: PLAYBACK_INPUT_FORMATS,
 			onBlock: (index, bytes) => {
 				this.tap?.addBlock(index, bytes)
 			}

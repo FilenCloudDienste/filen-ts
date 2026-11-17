@@ -167,7 +167,7 @@ export class WaveformTap {
 
 	private async open(): Promise<void> {
 		const input = new Input({
-			formats: BLOCK_INPUT_FORMATS,
+			formats: [...BLOCK_INPUT_FORMATS],
 			source: new CustomSource({
 				getSize: () => this.options.size,
 				read: (start, end) => this.read(start, end),

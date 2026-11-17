@@ -1,3 +1,68 @@
+diff --git a/dist/modules/src/index.d.ts b/dist/modules/src/index.d.ts
+index a8e9d72cab395f77b3a6930bc5cea83507f96665..a746ab21f47d06ed10e41ab74f2562e47ab14086 100644
+--- a/dist/modules/src/index.d.ts
++++ b/dist/modules/src/index.d.ts
+@@ -23,6 +23,9 @@ export { Source, type SourceEvents, SourceRef, type SourceRequest, BlobSource, t
+ export { InputFormat, type InputFormatOptions, AdtsInputFormat, FlacInputFormat, IsobmffInputFormat, type IsobmffInputFormatOptions, HlsInputFormat, type HlsInputFormatOptions, MatroskaInputFormat, Mp3InputFormat, Mp4InputFormat, MpegTsInputFormat, OggInputFormat, QuickTimeInputFormat, WaveInputFormat, WebMInputFormat, ALL_FORMATS, HLS_FORMATS, ADTS, FLAC, HLS, MATROSKA, MP3, MP4, MPEG_TS, OGG, QTFF, WAVE, WEBM, } from './input-format.js';
+ export { Input, type InputOptions, type InputEvents, InputDisposedError, UnsupportedInputFormatError, } from './input.js';
+ export { type DurationMetadataRequestOptions, } from './demuxer.js';
++export type { Demuxer } from './demuxer.js';
++export type { InputTrackBacking, InputVideoTrackBacking, InputAudioTrackBacking } from './input-track.js';
++export type { Reader, FileSlice } from './reader.js';
+ export { InputTrack, InputVideoTrack, InputAudioTrack, type InputTrackQuery, type FrameRateMetrics, type FrameRateMetricsOptions, type PacketStats, asc, desc, prefer, } from './input-track.js';
+ export { EncodedPacket, type EncodedPacketSideData, type PacketType, } from './packet.js';
+ export { AudioSample, type AudioSampleInit, type AudioSampleCopyToOptions, AudioSampleResource, VideoSample, type VideoSampleInit, type VideoSamplePixelFormat, VideoSampleColorSpace, VideoSampleResource, type VideoSampleTransformOptions, type VideoSampleTransformationDescription, type CropRectangle, VIDEO_SAMPLE_PIXEL_FORMATS, type VideoDataPlane, registerVideoSampleTransformer, } from './sample.js';
+diff --git a/dist/modules/src/input-format.d.ts b/dist/modules/src/input-format.d.ts
+index ed7b7a1207f7de707343702ad0a9f2061efdd604..9c791b391416aecf88dd42e5a7240e5633e02854 100644
+--- a/dist/modules/src/input-format.d.ts
++++ b/dist/modules/src/input-format.d.ts
+@@ -5,6 +5,8 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
++import type { Input } from './input.js';
++import type { Demuxer } from './demuxer.js';
+ import type { PsshBox } from './isobmff/isobmff-misc.js';
+ import { MaybePromise } from './misc.js';
+ /**
+@@ -13,6 +15,13 @@ import { MaybePromise } from './misc.js';
+  * @public
+  */
+ export declare abstract class InputFormat {
++    /**
++     * Local patch: where this format's data starts in the input, or null when it is not this format. Implemented by
++     * every built-in format; typed so the app's own formats can implement it too.
++     */
++    _getMatchPosition(input: Input): Promise<number | null>;
++    /** Local patch: the demuxer reading an input of this format. */
++    _createDemuxer(input: Input): Demuxer;
+     /** Returns the name of the input format. */
+     abstract get name(): string;
+     /** Returns the typical base MIME type of the input format. */
+diff --git a/dist/modules/src/input.d.ts b/dist/modules/src/input.d.ts
+index 0ea468bba3be007cb844727b41a6d08148d2cdbd..4acf4a7766a3b5a276339e864ccd20c659b79992 100644
+--- a/dist/modules/src/input.d.ts
++++ b/dist/modules/src/input.d.ts
+@@ -10,6 +10,7 @@ import { InputFormat, InputFormatOptions } from './input-format.js';
+ import { InputAudioTrack, InputTrack, InputVideoTrack, InputTrackQuery } from './input-track.js';
+ import { PacketRetrievalOptions } from './media-sink.js';
+ import { EventEmitter } from './misc.js';
++import type { Reader } from './reader.js';
+ import { Source, SourceRef, SourceRequest } from './source.js';
+ export declare const DEFAULT_SOURCE_CACHE_GROUP = 1;
+ export declare const ENCRYPTION_KEY_CACHE_GROUP = 2;
+@@ -63,6 +64,11 @@ export type InputEvents = {
+  * @public
+  */
+ export declare class Input<S extends Source = Source> extends EventEmitter<InputEvents> implements Disposable {
++    /**
++     * Local patch: the reader a demuxer reads the file through, set once the format is being determined. Typed for
++     * the app's own demuxers (their InputFormat subclasses), which read exactly as the built-in ones do.
++     */
++    _reader: Reader;
+     /** True if the input has been disposed. */
+     get disposed(): boolean;
+     /**
 diff --git a/dist/modules/src/isobmff/isobmff-boxes.d.ts b/dist/modules/src/isobmff/isobmff-boxes.d.ts
 index 8966d2a6db735c2085b0ff75a56b084ed798a321..23395cf17d7b0929c4a14a873150e6ab18d996e3 100644
 --- a/dist/modules/src/isobmff/isobmff-boxes.d.ts

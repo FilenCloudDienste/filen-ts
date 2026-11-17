@@ -1,4 +1,4 @@
-import { ADTS, CustomSource, FLAC, Input, MATROSKA, MP3, MP4, MPEG_TS, OGG, QTFF, WAVE, WEBM } from "mediabunny"
+import { ADTS, CustomSource, FLAC, Input, MATROSKA, MP3, MP4, MPEG_TS, OGG, QTFF, WAVE, WEBM, type InputFormat } from "mediabunny"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import { BlockCache, MAX_RUN_BLOCKS, type BlockCacheOptions } from "@/lib/media/blockCache"
 import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
@@ -6,7 +6,11 @@ import { SourceReadError } from "@/lib/media/remuxTypes"
 
 // Containers a worker may read. Not every format the demuxer knows: each one parsed is attack surface. The
 // audio-only ones come last, so a file any of the others recognises is read exactly as it would be without them.
-export const BLOCK_INPUT_FORMATS = [MATROSKA, WEBM, MP4, QTFF, MPEG_TS, WAVE, OGG, FLAC, MP3, ADTS]
+export const BLOCK_INPUT_FORMATS: readonly InputFormat[] = [MATROSKA, WEBM, MP4, QTFF, MPEG_TS, WAVE, OGG, FLAC, MP3, ADTS]
+
+// What playback reads (the remux engine, the decoded-audio route): the above, and the containers the app demuxes
+// itself (demux/), which the editor and the waveform never read.
+export const PLAYBACK_INPUT_FORMATS: readonly InputFormat[] = [...BLOCK_INPUT_FORMATS]
 
 // Reads longer than this reach the demuxer as a stream of blocks rather than one assembled buffer.
 const STREAM_READ_BYTES = 2 * BLOCK_BYTES
@@ -42,6 +46,8 @@ export interface BlockInput {
 }
 
 export interface BlockInputOptions {
+	// The containers it may read; BLOCK_INPUT_FORMATS unless given.
+	formats?: readonly InputFormat[]
 	// Sees every block as it lands, before any reader gets it (a subtitle tap, a progressive waveform). Never reads.
 	onBlock?: (index: number, bytes: Uint8Array) => void
 }
@@ -59,7 +65,7 @@ export function openBlockInput(port: MessagePort, size: number, profile: BlockIn
 		{ ...BLOCK_INPUT_PROFILES[profile], ...(options.onBlock === undefined ? {} : { onBlock: options.onBlock }) }
 	)
 	const input = new Input({
-		formats: BLOCK_INPUT_FORMATS,
+		formats: [...(options.formats ?? BLOCK_INPUT_FORMATS)],
 		source: new CustomSource({
 			getSize: () => size,
 			read: (start, end) => (end - start > STREAM_READ_BYTES ? cache.stream(start, end) : cache.read(start, end)),

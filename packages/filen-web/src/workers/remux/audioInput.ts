@@ -12,7 +12,7 @@ import {
 } from "mediabunny"
 import { BlockSource, walkContainer } from "@filen/shared/videos"
 import type { BlockCache } from "@/lib/media/blockCache"
-import { openBlockInput, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
+import { openBlockInput, PLAYBACK_INPUT_FORMATS, type BlockInput, type BlockInputProfile } from "@/lib/media/blockInput"
 import { AUDIO_UNSUPPORTED_ERROR, type RemuxStats } from "@/lib/media/remuxTypes"
 import { sampleReader, type SampleItem, type SampleReader } from "@/workers/remux/audioTranscode"
 import { estimateFrameStreamDuration, ID3V2_HEADER_BYTES, id3v2Bytes } from "@/workers/remux/audioDuration.logic"
@@ -689,7 +689,7 @@ async function estimatedOrComputed(cache: BlockCache, input: Input, format: Inpu
 // Opens the file a range port serves. Throws AudioUnsupportedError when nothing in it can be decoded. Audio is
 // read in order and at a low bitrate; an analysis reads two windows of it without read-ahead.
 export async function openAudioInput(port: MessagePort, size: number, profile: BlockInputProfile = "audio"): Promise<AudioInput> {
-	const source = openBlockInput(port, size, profile)
+	const source = openBlockInput(port, size, profile, { formats: PLAYBACK_INPUT_FORMATS })
 
 	try {
 		const raw = await rawStreamOf(source.cache, source.input)
