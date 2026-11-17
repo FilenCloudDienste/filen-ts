@@ -1,3 +1,5 @@
+import { mpegAudioHeader } from "@filen/shared/videos"
+
 // A duration for a raw audio stream whose header states none (ADTS never does; MP3 does only through a
 // Xing frame count): the stream's size over the byte rate of the frames at its start. Exact for a
 // constant bitrate; for a variable one an estimate the MediaSource corrects when the stream ends.
@@ -40,43 +42,23 @@ export interface Frame {
 	tagAt: number | null
 }
 
-// kbps by [MPEG-1, MPEG-2/2.5] and layer (III, II, I); index 0 (free format) and 15 are no rate.
-const MPEG_BITRATES: readonly (readonly (readonly number[])[])[] = [
-	[
-		[0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
-		[0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
-		[0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448]
-	],
-	[
-		[0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
-		[0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
-		[0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256]
-	]
-]
-const MPEG_RATES = [44100, 48000, 32000]
-
 function mpegFrame(bytes: Uint8Array, at: number): Frame | null {
-	const b1 = bytes[at + 1] ?? 0
-	const b2 = bytes[at + 2] ?? 0
-	const version = (b1 >> 3) & 0x03
-	const layer = (b1 >> 1) & 0x03
-	const mpeg1 = version === 3
-	const kbps = MPEG_BITRATES[mpeg1 ? 0 : 1]?.[layer - 1]?.[b2 >> 4] ?? 0
-	const base = MPEG_RATES[(b2 >> 2) & 0x03]
+	const header = mpegAudioHeader(bytes, at)
 
-	if (bytes[at] !== 0xff || (b1 & 0xe0) !== 0xe0 || version === 1 || layer === 0 || kbps === 0 || base === undefined) {
+	// A free-format frame states no length to step to the next by.
+	const frameBytes = header === null ? null : header.frameBytes
+
+	if (header === null || frameBytes === null) {
 		return null
 	}
 
-	const rate = mpeg1 ? base : version === 2 ? base / 2 : base / 4
-	const padding = (b2 >> 1) & 0x01
-	const samples = layer === 3 ? 384 : layer === 2 || mpeg1 ? 1152 : 576
-	const frameBytes =
-		layer === 3 ? (Math.floor((12 * kbps * 1000) / rate) + padding) * 4 : Math.floor(((samples / 8) * kbps * 1000) / rate) + padding
-	const mono = (bytes[at + 3] ?? 0) >> 6 === 3
-	const sideInfo = mpeg1 ? (mono ? 17 : 32) : mono ? 9 : 17
-
-	return { bytes: frameBytes, samples, rate, shape: (b1 << 8) | (b2 & 0x0c), tagAt: layer === 1 ? at + 4 + sideInfo : null }
+	return {
+		bytes: frameBytes,
+		samples: header.samples,
+		rate: header.rate,
+		shape: header.shape,
+		tagAt: header.layer === 3 ? at + 4 + header.sideInfoBytes : null
+	}
 }
 
 const ADTS_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]

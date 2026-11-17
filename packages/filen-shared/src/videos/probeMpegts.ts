@@ -1,8 +1,6 @@
 import {
 	avcConfigCodecString,
 	hevcConfigCodecString,
-	mp4aCodecString,
-	parseAudioSpecificConfig,
 	parseAvcSps,
 	parseHevcSps,
 	simpleAudioCodecString,
@@ -10,7 +8,7 @@ import {
 } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
 import { ascii, readBytes, seconds, transferKind, uint16 } from "./probeBytes"
-import { AC3_CHANNELS, AC3_RATES } from "./probeIsobmff"
+import { AUDIO_HEADERS, pesStart, type ElementaryAudio } from "./probeElementary"
 import type { MediaCodec, ParsedContainer, ParsedTrack, ProbeTier } from "./probeTypes"
 import {
 	TS_MIN_PACKETS,
@@ -45,7 +43,7 @@ const TAIL_PES = 4
 const PTS_MODULUS = 2 ** 33
 const PTS_HZ = 90_000
 
-type Need = "avc" | "hevc" | "adts" | "dolby" | "mpeg-audio" | "dts" | null
+type Need = "avc" | "hevc" | ElementaryAudio | null
 
 interface StreamKind {
 	kind: "video" | "audio"
@@ -263,163 +261,6 @@ function readPmt(walk: Walk, section: Uint8Array): void {
 
 	walk.pmtFound = true
 	walk.timingPid = (walk.streams.find(stream => stream.kind === "video") ?? walk.streams[0])?.pid ?? null
-}
-
-const NO_PES_HEADER = new Set([0xbc, 0xbe, 0xbf, 0xf0, 0xf1, 0xf2, 0xf8, 0xff])
-
-function timestamp(bytes: Uint8Array, at: number): number {
-	return (
-		(((bytes[at] ?? 0) >> 1) & 0x07) * 2 ** 30 +
-		((bytes[at + 1] ?? 0) << 22) +
-		(((bytes[at + 2] ?? 0) >> 1) << 15) +
-		((bytes[at + 3] ?? 0) << 7) +
-		((bytes[at + 4] ?? 0) >> 1)
-	)
-}
-
-// A PES packet starting in one TS payload: its PTS and where its data begins in the payload; null when
-// the payload starts no PES or its header runs past the packet.
-function pesStart(payload: Uint8Array): { pts: number | null; data: number } | null {
-	if (payload.length < 9 || payload[0] !== 0 || payload[1] !== 0 || payload[2] !== 1) {
-		return null
-	}
-
-	if (NO_PES_HEADER.has(payload[3] ?? 0)) {
-		return { pts: null, data: 6 }
-	}
-
-	if (((payload[6] ?? 0) & 0xc0) !== 0x80) {
-		return null
-	}
-
-	const data = 9 + (payload[8] ?? 0)
-
-	if (data > payload.length) {
-		return null
-	}
-
-	return { pts: ((payload[7] ?? 0) & 0x80) !== 0 && data >= 14 ? timestamp(payload, 9) : null, data }
-}
-
-function readBits(bytes: Uint8Array, position: number, count: number): number {
-	let value = 0
-
-	for (let i = position; i < position + count; i++) {
-		value = value * 2 + (((bytes[i >> 3] ?? 0) >> (7 - (i & 7))) & 1)
-	}
-
-	return value
-}
-
-interface AudioFormat {
-	ch: number | null
-	rate: number | null
-	codec?: MediaCodec | null
-	codecString?: string | null
-}
-
-// ADTS: the AudioSpecificConfig the header implies (object type = profile + 1).
-function adtsFormat(bytes: Uint8Array, at: number): AudioFormat | null {
-	if (bytes[at] !== 0xff || ((bytes[at + 1] ?? 0) & 0xf6) !== 0xf0) {
-		return null
-	}
-
-	const packed = bytes[at + 2] ?? 0
-	const objectType = (packed >> 6) + 1
-	const rateIndex = (packed >> 2) & 0x0f
-	const channels = ((packed & 1) << 2) | ((bytes[at + 3] ?? 0) >> 6)
-
-	if (rateIndex > 12) {
-		return null
-	}
-
-	const config = Uint8Array.of((objectType << 3) | (rateIndex >> 1), ((rateIndex & 1) << 7) | (channels << 3))
-	const parsed = parseAudioSpecificConfig(config)
-
-	return {
-		ch: parsed?.channels ?? null,
-		rate: parsed?.sampleRate ?? null,
-		codecString: mp4aCodecString({ objectTypeIndication: 0x40, audioSpecificConfig: config })
-	}
-}
-
-// AC-3 (bsid ≤ 10) and E-AC-3 (11-16) sync frames: the main (or first independent) stream's channels.
-function dolbyFormat(bytes: Uint8Array, at: number): AudioFormat | null {
-	if (bytes[at] !== 0x0b || bytes[at + 1] !== 0x77) {
-		return null
-	}
-
-	const bsid = (bytes[at + 5] ?? 0) >> 3
-
-	if (bsid <= 10) {
-		const fscod = (bytes[at + 4] ?? 0) >> 6
-		const acmod = (bytes[at + 6] ?? 0) >> 5
-		let position = (at + 6) * 8 + 3
-
-		position += (acmod & 1) !== 0 && acmod !== 1 ? 2 : 0
-		position += (acmod & 4) !== 0 ? 2 : 0
-		position += acmod === 2 ? 2 : 0
-
-		return fscod === 3 ? null : { ch: (AC3_CHANNELS[acmod] ?? 2) + readBits(bytes, position, 1), rate: AC3_RATES[fscod] ?? null }
-	}
-
-	const packed = bytes[at + 4] ?? 0
-	const fscod = packed >> 6
-	const rate = fscod === 3 ? [24000, 22050, 16000][(packed >> 4) & 0x03] : AC3_RATES[fscod]
-
-	if (bsid > 16 || (bytes[at + 2] ?? 0) >> 6 === 1 || rate === undefined) {
-		return null
-	}
-
-	return { ch: (AC3_CHANNELS[(packed >> 1) & 0x07] ?? 2) + (packed & 1), rate }
-}
-
-const MPEG_AUDIO_RATES = [44100, 48000, 32000]
-
-// MPEG-1/2/2.5 audio frame header; layer III is MP3, layers I and II no codec this names.
-function mpegAudioFormat(bytes: Uint8Array, at: number): AudioFormat | null {
-	const first = bytes[at + 1] ?? 0
-	const second = bytes[at + 2] ?? 0
-	const version = (first >> 3) & 0x03
-	const layer = (first >> 1) & 0x03
-	const base = MPEG_AUDIO_RATES[(second >> 2) & 0x03]
-
-	if (bytes[at] !== 0xff || (first & 0xe0) !== 0xe0 || version === 1 || layer === 0 || second >> 4 === 0x0f || base === undefined) {
-		return null
-	}
-
-	const mp3 = layer === 1
-
-	return {
-		ch: (bytes[at + 3] ?? 0) >> 6 === 3 ? 1 : 2,
-		rate: version === 3 ? base : version === 2 ? base / 2 : base / 4,
-		codec: mp3 ? "mp3" : null,
-		codecString: mp3 ? simpleAudioCodecString("mp3") : null
-	}
-}
-
-const DTS_CHANNELS = [1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 6, 7, 8, 8]
-const DTS_RATES = [0, 8000, 16000, 32000, 0, 0, 11025, 22050, 44100, 0, 0, 12000, 24000, 48000, 0, 0]
-
-// DTS core frame header: AMODE at bit 60, SFREQ at 66, LFF at 85.
-function dtsFormat(bytes: Uint8Array, at: number): AudioFormat | null {
-	if (bytes[at] !== 0x7f || bytes[at + 1] !== 0xfe || bytes[at + 2] !== 0x80 || bytes[at + 3] !== 0x01) {
-		return null
-	}
-
-	const base = at * 8
-	const rate = DTS_RATES[readBits(bytes, base + 66, 4)] ?? 0
-	const channels = DTS_CHANNELS[readBits(bytes, base + 60, 6)]
-	const lfe = readBits(bytes, base + 85, 2)
-
-	return rate === 0 ? null : { ch: channels === undefined ? null : channels + (lfe === 1 || lfe === 2 ? 1 : 0), rate }
-}
-
-const AUDIO_HEADERS: Readonly<Record<"adts" | "dolby" | "mpeg-audio" | "dts", { bytes: number; read: typeof adtsFormat }>> = {
-	adts: { bytes: 7, read: adtsFormat },
-	dolby: { bytes: 8, read: dolbyFormat },
-	"mpeg-audio": { bytes: 4, read: mpegAudioFormat },
-	dts: { bytes: 11, read: dtsFormat }
 }
 
 function resolve(stream: Stream): void {
