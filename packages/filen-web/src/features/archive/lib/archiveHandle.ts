@@ -114,9 +114,31 @@ function asciiLower(value: string): string {
 	return value.replace(/[A-Z]/g, char => char.toLowerCase())
 }
 
+// The directory node at `path` ("" the root), each segment spelled exactly, else the same up to ASCII case; -1 when
+// there is none. Not findDir, whose key folds every letter's case.
+function findDirByPath(store: EntryStore, path: string): number {
+	let dir = 0
+
+	for (const segment of path === "" ? [] : path.split("/")) {
+		const children = store.childDirs(dir)
+		const folded = asciiLower(segment)
+
+		dir =
+			children.find(child => store.dirName(child) === segment) ??
+			children.find(child => asciiLower(store.dirName(child)) === folded) ??
+			-1
+
+		if (dir === -1) {
+			return -1
+		}
+	}
+
+	return dir
+}
+
 function findByPath(store: EntryStore, path: string): number | null {
 	const cut = path.lastIndexOf("/")
-	const dir = cut === -1 ? 0 : store.findDir(path.slice(0, cut))
+	const dir = findDirByPath(store, cut === -1 ? "" : path.slice(0, cut))
 
 	if (dir === -1) {
 		return null

@@ -189,6 +189,25 @@ describe("acquireArchiveHandle", () => {
 		handle.release()
 	})
 
+	// Directories match as names do: exact, then up to ASCII case only.
+	it("finds a directory spelled the same up to ASCII case, and no further", () => {
+		const { deps } = harness()
+		const handle = opened(fileOrigin(), deps)
+		const store = storeOf([
+			{ path: "Über/", access: DIRECT },
+			{ path: "Über/Preview.pdf", access: DIRECT },
+			{ path: "Data/Sub/", access: DIRECT },
+			{ path: "Data/Sub/preview.jpg", access: DIRECT }
+		])
+
+		expect(handle.findByPath(store, "Über/Preview.pdf")).toBe(1)
+		expect(handle.findByPath(store, "DATA/sub/preview.jpg")).toBe(3)
+		// Ü and ü differ beyond ASCII; the rest of "ÜBER" differs only in ASCII case.
+		expect(handle.findByPath(store, "über/Preview.pdf")).toBeNull()
+		expect(handle.findByPath(store, "ÜBER/Preview.pdf")).toBe(1)
+		handle.release()
+	})
+
 	it("leases an entry's whole-read origin through its own entry reader, released with the lease", async () => {
 		const { deps, readers } = harness()
 		const handle = opened(fileOrigin(), deps)
