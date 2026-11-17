@@ -21,7 +21,7 @@ The Rust SDK is the backbone of all Filen apps. It handles everything below the 
 
 ## Repository layout
 
-- pnpm workspace; every package lives in `packages/<name>` and is named `@filen/<name without filen->`: `filen-web`, `filen-mobile`, `filen-desktop` (apps), `filen-shared` (logic shared by the apps), `filen-office` (document engines and editors), `filen-spellcheck` (Rust/wasm spellchecker), `filen-assistant-eval` (model eval harness, not shipped). `packages/filen-mobile/CLAUDE.md` and `packages/filen-desktop/CLAUDE.md` hold per-app guidance; the other packages document themselves in their README.
+- pnpm workspace; every package lives in `packages/<name>` and is named `@filen/<name without filen->`: `filen-web`, `filen-mobile`, `filen-desktop` (apps), `filen-shared` (logic shared by the apps), `filen-office` (document engines and editors), `filen-spellcheck` (Rust/wasm spellchecker), `filen-encoding-detect` (Rust/wasm legacy text encoding detector), `filen-assistant-eval` (model eval harness, not shipped). `packages/filen-mobile/CLAUDE.md` and `packages/filen-desktop/CLAUDE.md` hold per-app guidance; the other packages document themselves in their README.
 - Git submodules (`.gitmodules`) are other repositories: `filen-rs`, `filen-ios-file-provider` and `filen-android-documents-provider` under filen-mobile, `filen-rs` and `filen-ios-file-provider` under filen-desktop. Never edit them from here.
 - Workspace settings live only in `pnpm-workspace.yaml`, never in a `package.json`: `overrides`, `packageExtensions`, `allowBuilds`, `patchedDependencies` (patch files in the root `patches/`) and `minimumReleaseAge` exclusions. Third-party versions younger than pnpm's one-day `minimumReleaseAge` do not install; `@filen/*` is exempt by name.
 
