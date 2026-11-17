@@ -69,6 +69,7 @@ import { thumbnailRaster } from "@/features/drive/lib/thumbRaster"
 import { gunzipSvg } from "@/features/preview/lib/svgz"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { sniffJxlUpright } from "@/features/preview/lib/imageSniff/jxl"
+import { sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 import { supportsNativeImage } from "@/lib/nativeImageSupport"
 import { thumbnail } from "@/lib/pixelBudget"
 
@@ -882,12 +883,12 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 // What a raster thumbnail reads of a larger file before deciding to read it whole: every header sits within it.
 const RASTER_THUMB_HEAD_BYTES = 64 * 1024
 
-// The first `length` bytes of the file (or the bytes a preview already holds), stopped when `signal` aborts.
-async function readHeadBytes(item: BaseFileItem, length: number, signal: AbortSignal): Promise<Uint8Array> {
+// The file's bytes `start` to `end` (or those a preview already holds), stopped when `signal` aborts.
+async function readFileRange(item: BaseFileItem, start: number, end: number, signal: AbortSignal): Promise<Uint8Array> {
 	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
 
 	if (held !== undefined) {
-		return held.subarray(0, length)
+		return held.subarray(start, end)
 	}
 
 	signal.throwIfAborted()
@@ -900,7 +901,7 @@ async function readHeadBytes(item: BaseFileItem, length: number, signal: AbortSi
 	signal.addEventListener("abort", stop, { once: true })
 
 	try {
-		return await runOp(sdkApi.readFileBytesRange(narrowToAnyFile(item), 0, length, token))
+		return await runOp(sdkApi.readFileBytesRange(narrowToAnyFile(item), start, end, token))
 	} finally {
 		signal.removeEventListener("abort", stop)
 	}
@@ -931,7 +932,7 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 	try {
 		// Its header first, from a head read: one past the budget costs that, not the whole file. A small file's head is
 		// the file.
-		const head = size <= RASTER_THUMB_HEAD_BYTES ? null : await readHeadBytes(item, RASTER_THUMB_HEAD_BYTES, signal)
+		const head = size <= RASTER_THUMB_HEAD_BYTES ? null : await readFileRange(item, 0, RASTER_THUMB_HEAD_BYTES, signal)
 		const headed = head === null ? null : sniffJxlUpright(head, size)
 
 		if (headed !== null && headed.width * headed.height > thumbnail()) {
@@ -965,6 +966,58 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 		}
 
 		log.warn("thumb-generators", "generateRasterThumb: draw failed", item.data.uuid, e)
+
+		return { type: "failed" }
+	}
+}
+
+// A Photoshop file's head, and how far its image resources may be read to find the embedded thumbnail.
+const PSD_THUMB_HEAD_BYTES = 64 * 1024
+const PSD_THUMB_RESOURCES_MAX = 16 * 1024 * 1024
+
+// A Photoshop file (PSB too): the JPEG thumbnail Photoshop 5.0 and later embed (image resource 1036), found from range
+// reads (the head, then up to the image resources section's end, at most 16 MiB) and decoded by the SDK. Nothing is
+// decoded of the image itself; one without that resource has none. Photoshop 4.0's BGR thumbnail (1033) is not used.
+export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
+	const size = Number(item.data.size)
+
+	try {
+		let head = await readFileRange(item, 0, Math.min(size, PSD_THUMB_HEAD_BYTES), signal)
+		let psd = sniffPsd(head, size)
+
+		if (psd !== null && psd.thumbnail?.id !== 1036 && psd.resources === "needsMore") {
+			const reach = Math.min(size, PSD_THUMB_RESOURCES_MAX, psd.resourcesEnd ?? PSD_THUMB_RESOURCES_MAX)
+
+			if (reach > head.length) {
+				head = await readFileRange(item, 0, reach, signal)
+				psd = sniffPsd(head, size)
+			}
+		}
+
+		if (psd === null) {
+			return { type: "unavailable", reason: "corrupt" }
+		}
+
+		const thumbnail = psd.thumbnail?.id === 1036 ? psd.thumbnail.jpeg : null
+
+		if (thumbnail === null || BigInt(thumbnail.length) > THUMB_WARM_SIZE_GATE) {
+			return { type: "unavailable", reason: "unsupported" }
+		}
+
+		const end = thumbnail.offset + thumbnail.length
+		const jpeg = end <= head.length ? head.slice(thumbnail.offset, end) : await readFileRange(item, thumbnail.offset, end, signal)
+		const result = await sdkApi.makeSdkThumbnailFromFile(
+			new File([jpeg as Uint8Array<ArrayBuffer>], "thumbnail.jpg", { type: "image/jpeg" }),
+			THUMB_MAX_DIM,
+			THUMB_SDK_MAX_HEIGHT,
+			THUMB_SDK_LOSSY_QUALITY
+		)
+
+		return asGenerationResult(result)
+	} catch (e) {
+		if (!signal.aborted) {
+			log.warn("thumb-generators", "generatePsdThumb failed", item.data.uuid, e)
+		}
 
 		return { type: "failed" }
 	}
@@ -1215,3 +1268,4 @@ registerThumbGenerator("video", generateVideoThumb)
 registerThumbGenerator("pdf", generatePdfThumb)
 registerThumbGenerator("svg", generateSvgThumb)
 registerThumbGenerator("raster", generateRasterThumb)
+registerThumbGenerator("psd", generatePsdThumb)

@@ -1,6 +1,8 @@
 import { gzipSync } from "node:zlib"
 import { encodeQoi, qoiTestPixels } from "@/tests/support/qoiBytes"
 import { bigTiffHeader, encodeTiff } from "@/tests/support/tiffBytes"
+import { encodePsd } from "@/tests/support/psdBytes"
+import { JPEG_BYTES } from "../helpers/fixtureBytes"
 import { JXL_PROBE_BASE64 } from "@/lib/imageProbeFixtures"
 import { buildZip } from "../helpers/archiveFixtures"
 import { scenarioModule } from "./scenarios"
@@ -10,6 +12,8 @@ import { scenarioModule } from "./scenarios"
 export const QOI_SIZE = { width: 96, height: 64 } as const
 
 export const TIFF_PAGE = { width: 120, height: 80 } as const
+
+export const PSD_SIZE = { width: 90, height: 60 } as const
 // Taller than a view, so stepping pages scrolls the column.
 const TIFF_TALL_PAGE = { width: 200, height: 1600 } as const
 
@@ -37,7 +41,8 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"images-jxl": ["img-sample.jxl"],
 		"images-svgz": ["img-sample.svgz", "img-bomb.svgz"],
 		"images-tiff": ["img-single.tif", "img-multipage.tiff", "img-big.tif"],
-		"images-archive": ["img-entries.zip"]
+		"images-archive": ["img-entries.zip"],
+		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"]
 	},
 	() => ({
 		"img-sample.qoi": { buffer: qoiSample(), mimeType: "image/x-qoi" },
@@ -70,6 +75,20 @@ export const IMAGE_SCENARIOS = scenarioModule(
 			mimeType: "image/tiff"
 		},
 		"img-big.tif": { buffer: Buffer.from(bigTiffHeader()), mimeType: "image/tiff" },
+		// Its composite, and the JPEG thumbnail Photoshop embeds (resource 1036).
+		"img-flat.psd": {
+			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { thumbnail: { id: 1036, jpeg: new Uint8Array(JPEG_BYTES) } })),
+			mimeType: "image/vnd.adobe.photoshop"
+		},
+		// Saved without "Maximize compatibility": no composite to show.
+		"img-noflat.psd": {
+			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { composite: false })),
+			mimeType: "image/vnd.adobe.photoshop"
+		},
+		"img-large.psb": {
+			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { version: 2 })),
+			mimeType: "image/vnd.adobe.photoshop"
+		},
 		"img-entries.zip": {
 			buffer: buildZip([
 				{ name: IMAGE_ENTRIES.qoi, data: qoiSample() },

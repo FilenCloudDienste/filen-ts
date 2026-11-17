@@ -4,7 +4,7 @@ import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
 // route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi",
 // "jxl" in libjxl), inflated first ("svgz", then shown as the SVG it is), or read by the MuPDF read role ("mupdf", a
-// TIFF's pages). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
+// TIFF's pages, a Photoshop file's composite). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
 // tier of the preview's category table is this table's keys.
 export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz" | "mupdf"
 
@@ -16,6 +16,8 @@ export interface ImageFormat {
 	cap?: bigint | ((profile: DeviceProfile) => bigint | null)
 	// Shown in Photos; absent for the image category's own answer (yes).
 	photo?: boolean
+	// The read role's format, for a "mupdf" decode.
+	mupdf?: "tiff" | "psd"
 }
 
 const MIB = 1024n * 1024n
@@ -32,7 +34,12 @@ const JXL: ImageFormat = { decode: "jxl", editable: true, cap: 256n * MIB }
 // Markup, not pixels: no raster editor, and no photo.
 const SVGZ: ImageFormat = { decode: "svgz", editable: false, cap: 32n * MIB, photo: false }
 // TIFF, read whole into the MuPDF engine's heap: a phone's heap holds less. Its editor takes the page shown.
-const TIFF: ImageFormat = { decode: "mupdf", editable: true, cap: profile => (profile.mobile ? 64n * MIB : 256n * MIB) }
+const MUPDF_CAP = (profile: DeviceProfile): bigint => (profile.mobile ? 64n * MIB : 256n * MIB)
+const TIFF: ImageFormat = { decode: "mupdf", mupdf: "tiff", editable: true, cap: MUPDF_CAP }
+// Photoshop: its flattened composite, never its layers; no photo. A Large Document Format file (PSB) is refused from
+// its header (the engine reads version 1 only), so it never edits.
+const PSD: ImageFormat = { decode: "mupdf", mupdf: "psd", editable: true, cap: MUPDF_CAP, photo: false }
+const PSB: ImageFormat = { decode: "mupdf", mupdf: "psd", editable: false, cap: MUPDF_CAP, photo: false }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -58,7 +65,9 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["jxl", JXL],
 	["svgz", SVGZ],
 	["tif", TIFF],
-	["tiff", TIFF]
+	["tiff", TIFF],
+	["psd", PSD],
+	["psb", PSB]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.

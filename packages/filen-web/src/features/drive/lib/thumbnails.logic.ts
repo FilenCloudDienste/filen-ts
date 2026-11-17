@@ -7,8 +7,9 @@ import { itemTypeExtension, previewType } from "@/features/drive/lib/preview.log
 // them ever sees now. "video", "pdf" and "svg" stay client-side because Rust decodes none of them.
 // "none" covers every directory arm, an undecryptable file, an svg over its size gate, and
 // anything the SDK itself says it cannot thumbnail. "raster" is an image the SDK cannot decode but a browser can (JPEG
-// XL), drawn by the browser itself in a worker of its own.
-export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "none"
+// XL), drawn by the browser itself in a worker of its own. "psd" is a Photoshop file's embedded thumbnail (its 1036
+// resource, a JPEG), read by range and handed to the SDK.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "psd" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
 // roughly the same size. The video and pdf generators use it for both dimensions (a square fit), the
@@ -128,6 +129,7 @@ const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
 //   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
 //   4. pdf                       -> pdf    (client-side: pdf.js reading page 1 in ranges)
 //   5. jxl                       -> raster (client-side: the browser's own decoder, where it has one)
+//      psd, psb                  -> psd    (the embedded thumbnail, decoded by the SDK)
 //   6. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
 //   7. everything else           -> none
 //
@@ -161,6 +163,10 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 
 	if (RASTER_THUMBNAIL_EXTENSIONS.has(ext)) {
 		return "raster"
+	}
+
+	if (ext === "psd" || ext === "psb") {
+		return "psd"
 	}
 
 	return base.data.canMakeThumbnail ? "sdk" : "none"

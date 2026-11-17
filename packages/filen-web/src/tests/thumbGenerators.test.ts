@@ -223,6 +223,7 @@ import {
 	generatePdfThumb,
 	generateSvgThumb,
 	generateRasterThumb,
+	generatePsdThumb,
 	rasterizeSvgThumb,
 	resetDriveKeyframes,
 	warmUploadThumbnail
@@ -230,6 +231,7 @@ import {
 import { frameHints, probeRecords } from "@/features/videos/lib/records"
 import { rangeReads } from "@/lib/media/rangeReads"
 import { testUuid } from "@/tests/support/uuid"
+import { encodePsd } from "@/tests/support/psdBytes"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
 // side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
@@ -306,13 +308,14 @@ beforeEach(() => {
 
 describe("registration", () => {
 	// The old image and heic arms are gone, both folded into the single sdk arm.
-	it("registers sdk/video/pdf/svg/raster generators exactly once, at import", () => {
+	it("registers sdk/video/pdf/svg/raster/psd generators exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
 			["sdk", generateSdkThumb],
 			["video", generateVideoThumb],
 			["pdf", generatePdfThumb],
 			["svg", generateSvgThumb],
-			["raster", generateRasterThumb]
+			["raster", generateRasterThumb],
+			["psd", generatePsdThumb]
 		])
 	})
 })
@@ -776,6 +779,68 @@ function jxlHead30Bit(heightMinusOne: number): number[] {
 
 	return [...out, 0, 0]
 }
+
+describe("generatePsdThumb", () => {
+	const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9])
+
+	function psdItem(size: number): BaseFileItem {
+		return itemAsBaseFile(narrowItem(namedFile("art.psd", "image/vnd.adobe.photoshop", { size: BigInt(size) })))
+	}
+
+	// The file whose ranges the SDK reads.
+	function serve(file: Uint8Array): void {
+		readFileBytesRangeMock.mockImplementation((_file, start, end) => Promise.resolve(file.slice(start, end)))
+	}
+
+	beforeEach(() => {
+		readFileBytesRangeMock.mockReset()
+		makeSdkThumbnailFromFileMock.mockReset()
+		makeSdkThumbnailFromFileMock.mockResolvedValue({
+			type: "thumbnail",
+			bytes: new Uint8Array([7]),
+			width: 1,
+			height: 1,
+			fromEmbeddedPreview: false
+		})
+	})
+
+	it("hands the embedded JPEG to the SDK from the head, decoding nothing of the image", async () => {
+		const file = encodePsd(400, 300, { thumbnail: { id: 1036, jpeg: JPEG } })
+
+		serve(file)
+
+		await expect(generatePsdThumb(psdItem(file.length), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
+
+		const handed = makeSdkThumbnailFromFileMock.mock.calls[0]?.[0]
+
+		expect(handed?.type).toBe("image/jpeg")
+		expect(new Uint8Array((await handed?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(JPEG)
+		expect(readFileBytesRangeMock).toHaveBeenCalledOnce()
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("reads on to the resources' end when the thumbnail lies past the head", async () => {
+		const file = encodePsd(400, 300, { padding: 70_000, thumbnail: { id: 1036, jpeg: JPEG } })
+
+		serve(file)
+
+		await expect(generatePsdThumb(psdItem(file.length), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
+		expect(readFileBytesRangeMock.mock.calls.map(call => call.slice(1, 3))[0]).toEqual([0, 64 * 1024])
+		expect(readFileBytesRangeMock.mock.calls.length).toBeGreaterThan(1)
+	})
+
+	it("has none without a Photoshop 5 thumbnail (none, or only the BGR one of Photoshop 4)", async () => {
+		for (const options of [{}, { thumbnail: { id: 1033 as const, jpeg: JPEG } }]) {
+			const file = encodePsd(400, 300, options)
+
+			serve(file)
+
+			await expect(generatePsdThumb(psdItem(file.length), live())).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+		}
+
+		expect(makeSdkThumbnailFromFileMock).not.toHaveBeenCalled()
+	})
+})
 
 describe("generateRasterThumb", () => {
 	// A bare JPEG XL codestream of 1000 × 750 (13-bit height, 4:3).

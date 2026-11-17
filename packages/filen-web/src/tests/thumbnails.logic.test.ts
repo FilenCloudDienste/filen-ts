@@ -130,6 +130,11 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed("logo.svgz", { canMakeThumbnail: false, size: THUMB_SVG_SIZE_GATE + 1n }))).toBe("none")
 	})
 
+	it("routes a Photoshop file to its embedded thumbnail, whatever the SDK says", () => {
+		expect(thumbnailCategory(fileNamed("art.psd", { canMakeThumbnail: false }))).toBe("psd")
+		expect(thumbnailCategory(fileNamed("art.psb", { canMakeThumbnail: false }))).toBe("psd")
+	})
+
 	it("routes a JPEG XL to the browser's own decoder, whatever the SDK says", () => {
 		expect(thumbnailCategory(fileNamed("photo.jxl", { canMakeThumbnail: false }))).toBe("raster")
 		expect(thumbnailCategory(fileNamed("photo.JXL", { canMakeThumbnail: true }))).toBe("raster")
@@ -170,7 +175,7 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false }))).toBe("pdf")
 	})
 
-	it.each(["exe", "zip", "txt", "psd"])("%s -> none when the SDK cannot thumbnail it", ext => {
+	it.each(["exe", "zip", "txt"])("%s -> none when the SDK cannot thumbnail it", ext => {
 		expect(thumbnailCategory(fileNamed(`file.${ext}`, { canMakeThumbnail: false }))).toBe("none")
 	})
 

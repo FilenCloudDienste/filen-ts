@@ -1,13 +1,13 @@
 import type { Locator, Page } from "@playwright/test"
 import { test, expect, readFixtureManifest, settleLeases } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
-import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
+import { FIXTURE_FILES, gotoFixture, openFixtureRows } from "./helpers/fixtures"
 import { itemRow, openArchive } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { PDF_BYTES } from "./helpers/fixtureBytes"
-import { IMAGE_ENTRIES, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
+import { IMAGE_ENTRIES, PSD_SIZE, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
 import { preview } from "@/locales/en/preview"
 
 // Images only the app's own decoders show (QOI, JPEG XL where the browser has no decoder, gzipped SVG, TIFF): decoded
@@ -377,4 +377,41 @@ test.describe("public links", () => {
 
 		expect(cspViolations).toEqual([])
 	})
+})
+
+test("a Photoshop file shows its composite and its embedded thumbnail; without a composite, or as PSB, it says so", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const [FLAT, NO_COMPOSITE, LARGE] = FIXTURE_FILES["images-psd"]
+
+	await bootTo(page)
+
+	const { listbox, rows } = await openFixtureRows(page, "images-psd")
+
+	// The embedded JPEG thumbnail, through the SDK: the flattened file's tile swaps to it; the others have none.
+	await expect(rows[0].locator("img")).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
+
+	await itemRow(listbox, FLAT).dblclick()
+
+	const composite = picture(page, FLAT)
+
+	await expect(composite).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+	expect(await tagOf(composite)).toBe("CANVAS")
+	await expect(composite).toHaveAttribute("width", String(PSD_SIZE.width))
+	await page.keyboard.press("Escape")
+	await expect(composite).toHaveCount(0)
+
+	await itemRow(listbox, NO_COMPOSITE).dblclick()
+	await expect(page.getByText(preview.previewPsdNoComposite, { exact: true })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+	await page.keyboard.press("Escape")
+
+	await itemRow(listbox, LARGE).dblclick()
+	await expect(page.getByText(preview.previewPsbUnsupported, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await page.keyboard.press("Escape")
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
 })

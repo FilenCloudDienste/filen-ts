@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { imageDecodeFor, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
+import { imageDecodeFor, imageMupdfFormat, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import type { DeviceProfile } from "@/lib/deviceProfile"
 import type { PreviewKey } from "@/lib/i18n"
@@ -17,7 +17,7 @@ import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/previ
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomableImage"
 import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
-import { TiffImage } from "@/features/preview/components/tiffImage"
+import { MupdfImage } from "@/features/preview/components/mupdfImage"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 
 export interface ImageViewerProps {
@@ -243,11 +243,14 @@ function DecodedRoute({
 }) {
 	const decode = imageDecodeFor(item)
 
-	if (decode === "mupdf") {
+	const mupdf = imageMupdfFormat(item)
+
+	if (mupdf !== null) {
 		return (
-			<TiffImage
+			<MupdfImage
 				item={item}
 				alt={alt}
+				format={mupdf}
 				pageSourceRef={pageSourceRef}
 			/>
 		)

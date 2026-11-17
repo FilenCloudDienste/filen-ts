@@ -72,7 +72,8 @@ const EXTENSION_FAMILIES: Readonly<Record<SourceMime, readonly string[]>> = {
 	"image/heic": ["heic", "heif", "hif"],
 	"image/x-qoi": ["qoi"],
 	"image/jxl": ["jxl"],
-	"image/tiff": ["tif", "tiff"]
+	"image/tiff": ["tif", "tiff"],
+	"image/vnd.adobe.photoshop": ["psd"]
 }
 
 // Whether the sniffed file can be edited at all: a still image whose bytes are the format its name claims (a

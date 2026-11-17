@@ -1,6 +1,6 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, heldImageCap, imageDecodeFor } from "@/features/drive/lib/preview.logic"
+import { extensionOf, heldImageCap, imageDecodeFor, imageMupdfFormat } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
@@ -71,6 +71,7 @@ const EXTENSION_FAMILY: ReadonlyMap<string, SourceMime> = new Map<string, Source
 	["jxl", "image/jxl"],
 	["tif", "image/tiff"],
 	["tiff", "image/tiff"],
+	["psd", "image/vnd.adobe.photoshop"],
 	...[...HEIC_EXTENSIONS].map(extension => [extension, "image/heic"] as const)
 ])
 
@@ -212,12 +213,13 @@ async function pageSourced(
 	}
 
 	const origin: ByteOrigin = { kind: "file", file: narrowToAnyFile(item) }
+	const format = imageMupdfFormat(item) ?? "tiff"
 	const reader = await openMupdfReader({
 		origin,
 		access: "authed",
 		scope: cacheScope,
-		format: "tiff",
-		maxImagePixels: mupdfImagePixels(deviceProfile(), origin, "tiff"),
+		format,
+		maxImagePixels: mupdfImagePixels(deviceProfile(), origin, format),
 		signal
 	})
 

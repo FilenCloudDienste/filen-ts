@@ -67,3 +67,14 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("")).toBe("other")
 	})
 })
+
+describe("fileIconKey for the image formats", () => {
+	it("gives every image the image glyph but Photoshop's, which keeps its own", () => {
+		for (const name of ["a.jpg", "b.png", "c.svg", "d.heic", "e.qoi", "f.jxl", "g.tif", "h.svgz"]) {
+			expect(fileIconKey(name), name).toBe("image")
+		}
+
+		expect(fileIconKey("art.psd")).toBe("psd")
+		expect(fileIconKey("art.psb")).toBe("psd")
+	})
+})

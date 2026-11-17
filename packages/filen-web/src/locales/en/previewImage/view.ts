@@ -15,6 +15,10 @@ export const previewImageView = {
 	previewSvgzTooLarge: "This image is too large to show once uncompressed.",
 	/** Image preview — a TIFF in the BigTIFF format (for files over 4 GB), which the preview doesn't read */
 	previewBigTiffUnsupported: "BigTIFF images can't be previewed.",
+	/** Image preview — a Photoshop Large Document Format file (.psb), which the preview doesn't read */
+	previewPsbUnsupported: "Large Document Format (.psb) files can't be previewed.",
+	/** Image preview — a Photoshop file saved without the flattened image the preview shows */
+	previewPsdNoComposite: "This Photoshop file has no flattened image to show.",
 	/** Image editing header — beside the save button when the image has several pages: the copy holds the page shown */
 	previewImageSaveCopyPage: "Current page only"
 } as const

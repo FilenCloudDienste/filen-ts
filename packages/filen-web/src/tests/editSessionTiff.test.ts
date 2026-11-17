@@ -5,6 +5,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { ImagePageSlot, ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { tiffHead } from "@/tests/support/tiffBytes"
+import { encodePsd } from "@/tests/support/psdBytes"
 
 // Entering the editor on a TIFF: the page the viewer shows is drawn whole by the engine that holds the file (nothing
 // is downloaded here), refused when it is larger than the editor takes, and a page of several is saved alone.
@@ -149,6 +150,36 @@ describe("enterImageEdit on a TIFF", () => {
 		expect(readerClose).toHaveBeenCalledOnce()
 
 		if (outcome.status === "ready") {
+			outcome.state.release()
+		}
+	})
+
+	it("edits a Photoshop file's composite from an engine of its Photoshop format", async () => {
+		readFileBytesRange.mockResolvedValue(encodePsd(8, 4))
+		openMupdfReader.mockReset()
+		openMupdfReader.mockResolvedValue({
+			pageCount: 1,
+			imageExtent: () => Promise.resolve({ width: 8, height: 4 }),
+			renderPage: () => Promise.resolve({ rgba: new Uint8ClampedArray(8 * 4 * 4).fill(255), width: 8, height: 4 }),
+			close: () => Promise.resolve()
+		})
+
+		const item = linkedFileItem("art.psd", { size: 4096n })
+		const outcome = await enterImageEdit({
+			item,
+			frozenUuid: item.data.uuid,
+			cacheScope: null,
+			image: null,
+			page: null,
+			signal: new AbortController().signal
+		})
+
+		expect(outcome.status).toBe("ready")
+		expect(openMupdfReader.mock.calls[0]?.[0]).toMatchObject({ format: "psd" })
+
+		if (outcome.status === "ready") {
+			expect(outcome.state.info.mime).toBe("image/vnd.adobe.photoshop")
+			expect(outcome.state.pageOnly).toBe(false)
 			outcome.state.release()
 		}
 	})

@@ -69,6 +69,7 @@ export type SourceMime =
 	| "image/x-qoi"
 	| "image/jxl"
 	| "image/tiff"
+	| "image/vnd.adobe.photoshop"
 
 // What the sniffers learn about the original from its header bytes (magic, never the extension).
 export interface SourceInfo {

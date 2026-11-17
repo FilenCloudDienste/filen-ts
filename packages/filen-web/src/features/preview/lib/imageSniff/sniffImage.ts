@@ -28,6 +28,7 @@ import { startsWith, viewOf } from "@/features/preview/lib/imageSniff/bytes"
 import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 import { sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
 import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
+import { sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 
 // What an image's leading bytes say about it, from its magic and headers (never its name). `head` is the start of
 // the file (the whole file when small), `totalSize` the file's length. Retained metadata (ICC, Exif) is copied out
@@ -641,6 +642,13 @@ export function sniffImage(head: Uint8Array, totalSize: number): SourceInfo | nu
 		const tiff = sniffTiff(head, totalSize)
 
 		return tiff?.kind !== "tiff" ? null : { ...BASE, mime: "image/tiff", width: tiff.size?.width ?? 0, height: tiff.size?.height ?? 0 }
+	}
+
+	// "8BPS": a Photoshop file (version 1; the Large Document Format is not edited).
+	if (startsWith(head, [0x38, 0x42, 0x50, 0x53])) {
+		const psd = sniffPsd(head, totalSize)
+
+		return psd?.version !== 1 ? null : { ...BASE, mime: "image/vnd.adobe.photoshop", width: psd.width, height: psd.height }
 	}
 
 	// An ISOBMFF "ftyp" box at the start.

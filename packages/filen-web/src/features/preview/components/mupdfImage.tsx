@@ -11,6 +11,7 @@ import { originKey, originSize, type ByteOrigin, type OriginAccess } from "@/lib
 import { mupdfImagePixels, openMupdfReader, type MupdfReader } from "@/lib/mupdf/reader"
 import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { sniffTiff } from "@/features/preview/lib/imageSniff/tiff"
+import { sniffPsd } from "@/features/preview/lib/imageSniff/psd"
 import { fitLongSide, fullResolution } from "@/features/preview/lib/rasterCodecs/display"
 import { readerPageSource, type ImagePageSlot, type ImagePageSource } from "@/features/preview/lib/imagePageSource"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
@@ -20,33 +21,41 @@ import { PdfReaderShell } from "@/features/preview/components/pdfReaderShell"
 import { usePreviewAccessMode, usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
 
-// A TIFF, read by the MuPDF read role in an engine of its own (sign-out and unmount end it): one page drawn whole as a
-// bitmap at the display long side, its full resolution a click away; several pages in the PDF viewer's page column
-// (tiles, zoom, page keys), with no find (an image has no text). Its header is read first: a BigTIFF, which the engine
-// does not read, and a first page larger than the engine's pixel budget are refused before any engine starts.
+// A TIFF or a Photoshop file, read by the MuPDF read role in an engine of its own (sign-out and unmount end it): one
+// page (a Photoshop file's flattened composite) drawn whole as a bitmap at the display long side, its full resolution a
+// click away; a TIFF's several pages in the shared PDF reader, with no find (an image has no text). Its header is read
+// first, so what the engine does not read (a BigTIFF, a Large Document Format file, a Photoshop colour mode or depth it
+// has no decoder for) and a first page larger than the engine's pixel budget are refused before any engine starts.
 
-// The head every TIFF header and, usually, the first IFD sit in.
-const TIFF_HEAD_BYTES = 64 * 1024
+// The head every TIFF and Photoshop header (and, usually, a TIFF's first IFD) sits in.
+const HEAD_BYTES = 64 * 1024
+
+// The Photoshop colour modes the engine composites (greyscale, RGB, CMYK), at 8 or 16 bits a channel.
+const PSD_MODES: ReadonlySet<number> = new Set([1, 3, 4])
+const PSD_DEPTHS: ReadonlySet<number> = new Set([8, 16])
+
+export type MupdfImageFormat = "tiff" | "psd"
 
 type Opened =
 	| { readonly status: "refused"; readonly message: PreviewKey }
 	| { readonly status: "failed" }
 	| { readonly status: "open"; readonly reader: MupdfReader }
 
-export interface TiffImageProps {
+export interface MupdfImageProps {
 	item: DriveItem
 	alt: string
+	format: MupdfImageFormat
 	// Holds the page shown while it is mounted, for the image editor to draw from the engine that holds the file.
 	pageSourceRef?: RefObject<ImagePageSlot | null> | undefined
 }
 
-export function TiffImage(props: TiffImageProps) {
+export function MupdfImage(props: MupdfImageProps) {
 	return (
 		<HeldImageGate
 			item={props.item}
 			tooLarge="previewTooLargeToShowHere"
 		>
-			<TiffDocument {...props} />
+			<MupdfDocument {...props} />
 		</HeldImageGate>
 	)
 }
@@ -60,14 +69,52 @@ function refusalOf(error: unknown): PreviewKey | null {
 	switch (error.failure) {
 		case "overBudget":
 			return "previewImageTooLarge"
+		// A Photoshop file saved without its composite ("Maximize compatibility" off), or with a deflated one.
 		case "notSupported":
-			return "previewImageNotDisplayable"
+			return /Unflattened|Deflate/u.test(error.message) ? "previewPsdNoComposite" : "previewImageNotDisplayable"
 		default:
 			return null
 	}
 }
 
-async function openTiff(
+// Why the header in `head` says the engine cannot show the file, or how large its first page is (null: unknown).
+function headerVerdict(
+	format: MupdfImageFormat,
+	head: Uint8Array,
+	size: number
+): { readonly refused: PreviewKey } | { readonly pixels: number | null } {
+	if (format === "psd") {
+		const psd = sniffPsd(head, size)
+
+		if (psd === null) {
+			return { refused: "previewImageNotDisplayable" }
+		}
+
+		if (psd.version === 2) {
+			return { refused: "previewPsbUnsupported" }
+		}
+
+		return PSD_MODES.has(psd.mode) && PSD_DEPTHS.has(psd.depth)
+			? { pixels: psd.width * psd.height }
+			: { refused: "previewImageNotDisplayable" }
+	}
+
+	const tiff = sniffTiff(head, size)
+
+	if (tiff === null) {
+		return { refused: "previewImageNotDisplayable" }
+	}
+
+	if (tiff.kind === "bigTiff") {
+		return { refused: "previewBigTiffUnsupported" }
+	}
+
+	// A first page past the head is checked by the engine from its header, before it is drawn.
+	return { pixels: tiff.size === null ? null : tiff.size.width * tiff.size.height }
+}
+
+async function openMupdfImage(
+	format: MupdfImageFormat,
 	origin: ByteOrigin,
 	access: OriginAccess,
 	scope: string | null,
@@ -76,32 +123,27 @@ async function openTiff(
 ): Promise<Opened> {
 	const head = await openByteReader(origin, crypto.randomUUID(), { access, blocks: 1 }).then(async reader => {
 		try {
-			return await reader.read(0, TIFF_HEAD_BYTES, signal)
+			return await reader.read(0, HEAD_BYTES, signal)
 		} finally {
 			reader.close()
 		}
 	})
-	const header = sniffTiff(head, originSize(origin))
+	const verdict = headerVerdict(format, head, originSize(origin))
 
-	if (header === null) {
-		return { status: "refused", message: "previewImageNotDisplayable" }
+	if ("refused" in verdict) {
+		return { status: "refused", message: verdict.refused }
 	}
 
-	if (header.kind === "bigTiff") {
-		return { status: "refused", message: "previewBigTiffUnsupported" }
-	}
+	const maxImagePixels = mupdfImagePixels(profile, origin, format)
 
-	const maxImagePixels = mupdfImagePixels(profile, origin, "tiff")
-
-	// A first page past the head is checked by the engine from its header, before it is drawn.
-	if (header.size !== null && header.size.width * header.size.height > maxImagePixels) {
+	if (verdict.pixels !== null && verdict.pixels > maxImagePixels) {
 		return { status: "refused", message: "previewImageTooLarge" }
 	}
 
-	return { status: "open", reader: await openMupdfReader({ origin, access, scope, format: "tiff", maxImagePixels, signal }) }
+	return { status: "open", reader: await openMupdfReader({ origin, access, scope, format, maxImagePixels, signal }) }
 }
 
-function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
+function MupdfDocument({ item, alt, format, pageSourceRef }: MupdfImageProps) {
 	const { t } = useTranslation("preview")
 	const origin = usePreviewOrigin(item)
 	const access = usePreviewAccessMode()
@@ -128,7 +170,7 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 			pageSourceRef.current = slot
 		}
 
-		openTiff(current, access, scope, now, controller.signal).then(
+		openMupdfImage(format, current, access, scope, now, controller.signal).then(
 			result => {
 				if (controller.signal.aborted) {
 					if (result.status === "open") {
@@ -155,7 +197,7 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 				const refusal = refusalOf(error)
 
 				if (refusal === null) {
-					log.warn("preview", "opening a TIFF failed", error)
+					log.warn("preview", "opening an image in the read role failed", error)
 				}
 
 				setOpened({ key, opened: refusal === null ? { status: "failed" } : { status: "refused", message: refusal } })
@@ -172,7 +214,7 @@ function TiffDocument({ item, alt, pageSourceRef }: TiffImageProps) {
 
 			void reader?.close()
 		}
-	}, [key, access, scope, pageSourceRef])
+	}, [key, format, access, scope, pageSourceRef])
 
 	const current = opened?.key === key ? opened.opened : null
 
@@ -237,7 +279,7 @@ function TiffPage({
 	item: DriveItem
 	alt: string
 	reader: MupdfReader
-	pageSourceRef: TiffImageProps["pageSourceRef"]
+	pageSourceRef: MupdfImageProps["pageSourceRef"]
 }) {
 	const { t } = useTranslation("preview")
 	const longSide = displayLongSide(useDeviceProfile())
@@ -288,7 +330,7 @@ function TiffPage({
 					return
 				}
 
-				log.warn("preview", "drawing a TIFF page failed", error)
+				log.warn("preview", "drawing an image page failed", error)
 
 				// The reduced view stays.
 				if (full) {
@@ -354,7 +396,7 @@ function TiffPages({
 	item: DriveItem
 	alt: string
 	reader: MupdfReader
-	pageSourceRef: TiffImageProps["pageSourceRef"]
+	pageSourceRef: MupdfImageProps["pageSourceRef"]
 }) {
 	const [page, setPage] = useState(1)
 

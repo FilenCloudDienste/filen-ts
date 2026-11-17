@@ -8,6 +8,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { bigTiffHeader, encodeTiff, tiffHead } from "@/tests/support/tiffBytes"
+import { encodePsd } from "@/tests/support/psdBytes"
 import "@/lib/i18n"
 
 // A TIFF: its header read first (a BigTIFF or a first page past the engine's pixel budget refused before any engine
@@ -161,5 +162,50 @@ describe("ImageViewer on a TIFF", () => {
 		render(createElement(ImageViewer, { item: tiff("eeeeeeee-0000-0000-0000-000000000024"), alt: "scan" }))
 
 		await screen.findByText("This image can't be displayed in this browser.")
+	})
+})
+
+describe("ImageViewer on a Photoshop file", () => {
+	function psd(uuid: LinkedFile["uuid"], name = "art.psd"): DriveItem {
+		return linkedFileItem(name, {
+			uuid,
+			size: BigInt(Math.max(head.bytes.length, 1024)),
+			mime: { Decrypted: "image/vnd.adobe.photoshop" }
+		})
+	}
+
+	it("draws its composite through the read role's Photoshop format", async () => {
+		head.bytes = encodePsd(40, 30)
+		openMupdfReader.mockResolvedValue(onePage({ width: 40, height: 30 }))
+		render(createElement(ImageViewer, { item: psd("eeeeeeee-0000-0000-0000-000000000031"), alt: "art" }))
+
+		await waitFor(() => {
+			expect(screen.getByRole("img", { name: "art" })).toBeTruthy()
+		})
+		expect(openMupdfReader.mock.calls[0]?.[0]).toMatchObject({ format: "psd" })
+	})
+
+	it("refuses a Large Document Format file and a depth the engine has no decoder for from the header, starting no engine", async () => {
+		head.bytes = encodePsd(40, 30, { version: 2 })
+		const large = render(createElement(ImageViewer, { item: psd("eeeeeeee-0000-0000-0000-000000000032", "art.psb"), alt: "art" }))
+
+		await screen.findByText("Large Document Format (.psb) files can't be previewed.")
+		large.unmount()
+
+		head.bytes = encodePsd(40, 30, { depth: 32 })
+		render(createElement(ImageViewer, { item: psd("eeeeeeee-0000-0000-0000-000000000033"), alt: "art" }))
+
+		await screen.findByText("This image can't be displayed in this browser.")
+		expect(openMupdfReader).not.toHaveBeenCalled()
+	})
+
+	it("says a file saved without its flattened image has none to show", async () => {
+		const { PdfEngineError } = await import("@filen/office/dom/pdfedit")
+
+		head.bytes = encodePsd(40, 30, { composite: false })
+		openMupdfReader.mockRejectedValue(new PdfEngineError("notSupported", "Unflattened PSD not supported"))
+		render(createElement(ImageViewer, { item: psd("eeeeeeee-0000-0000-0000-000000000034"), alt: "art" }))
+
+		await screen.findByText("This Photoshop file has no flattened image to show.")
 	})
 })

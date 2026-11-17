@@ -10,11 +10,15 @@ export type { FileIconKey }
 // never disagree. Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive
 // Record in itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key
 // would mean a new asset. A RAW file reads as an image to a user either way.
+// The shared table alone, no app's media sets.
+const NO_MEDIA: FileIconSets = { isImage: () => false, isVideo: () => false, isAudio: () => false }
+
 const ICON_SETS: FileIconSets = {
+	// An image format with a glyph of its own (Photoshop's) keeps it.
 	isImage: ext => {
 		const category = previewCategoryForExtension(ext)
 
-		return category === "image" || category === "rawImage"
+		return (category === "image" && sharedFileIconKey(ext, NO_MEDIA) === "other") || category === "rawImage"
 	},
 	isVideo: ext => previewCategoryForExtension(ext) === "video",
 	isAudio: ext => previewCategoryForExtension(ext) === "audio"

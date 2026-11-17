@@ -301,7 +301,7 @@ describe("previewType — extension category map", () => {
 	})
 
 	// An unknown extension with no mime hint lands here. rar and pkg have the archive icon but no reader.
-	it.each(["exe", "psd", "rar", "pkg"])("%s -> other", ext => {
+	it.each(["exe", "rar", "pkg"])("%s -> other", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("other")
 	})
 

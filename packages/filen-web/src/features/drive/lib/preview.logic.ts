@@ -721,6 +721,11 @@ export function imageDecodeFor(item: DriveItem): ImageDecode | null {
 	return IMAGE_FORMATS.get(itemTypeExtension(item))?.decode ?? null
 }
 
+// The MuPDF read role's format for an image it reads (TIFF, Photoshop), by its name; null for any other file.
+export function imageMupdfFormat(item: DriveItem): "tiff" | "psd" | null {
+	return IMAGE_FORMATS.get(itemTypeExtension(item))?.mupdf ?? null
+}
+
 // The probe an image's route waits on (pendingProbe); null once the route is known, and for any other file.
 export function pendingImageProbe(item: DriveItem, profile: DeviceProfile): NativeImageFormat | null {
 	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
