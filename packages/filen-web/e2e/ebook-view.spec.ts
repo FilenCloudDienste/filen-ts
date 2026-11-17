@@ -97,6 +97,13 @@ async function open(page: Page, listbox: Locator, name: string): Promise<Locator
 	return first
 }
 
+// The book's page count, from page 1's region name ("… Page 1 of 42").
+async function pageCount(page: Page): Promise<number> {
+	const name = (await page.getByRole("region", { name: /Page 1 of \d+/u }).getAttribute("aria-label")) ?? ""
+
+	return Number(/of (\d+)/u.exec(name)?.[1] ?? "0")
+}
+
 async function close(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
 	await expect(page.getByRole("region", { name: /Page 1 of \d+/u })).toHaveCount(0)
@@ -154,9 +161,13 @@ test("EPUB, FB2 and MOBI books open laid out, find, follow the outline, relayout
 
 		// Back to the opening chapter, then a larger text size: the book is laid out again and the chapter stays.
 		await tree.getByRole("treeitem", { name: "Opening" }).click()
+		// The relayout itself is observed, not its veil (which a short book shows for less than a poll): a larger text
+		// size lays the book out over more pages.
+		const pagesBefore = await pageCount(page)
+
 		await page.getByRole("button", { name: preview.previewEbookTextLarger }).click()
-		await expect(page.getByText(preview.previewEbookRelayout)).toBeVisible()
-		await expect(page.getByText(preview.previewEbookRelayout)).toHaveCount(0, { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expect.poll(() => pageCount(page), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(pagesBefore)
+		await expect(page.getByRole("status").filter({ hasText: preview.previewEbookRelayout })).toHaveCount(0)
 		await expect(page.locator(".fo-pdf-text-layer").getByText("It was a bright", { exact: false }).first()).toBeInViewport({
 			timeout: LAZY_VIEWER_TIMEOUT_MS
 		})
