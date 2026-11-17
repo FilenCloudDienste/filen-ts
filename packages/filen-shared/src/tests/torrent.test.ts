@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readTorrent, torrentHashes, torrentMagnet, TorrentError, TORRENT_FILE_LIMIT } from "@filen/shared/torrent"
+import { readTorrent, torrentHashes, torrentMagnet, TORRENT_FILE_LIMIT } from "@filen/shared/torrent"
 
 // Bencoding, as a torrent writes it: dictionary keys sorted, strings length-prefixed.
 type B = number | bigint | string | Uint8Array | B[] | { [key: string]: B }
@@ -24,7 +24,8 @@ function bencode(value: B): Buffer {
 	return Buffer.concat([Buffer.from("d"), ...keys.flatMap(key => [bencode(key), bencode(value[key] ?? "")]), Buffer.from("e")])
 }
 
-const digest = (algorithm: "SHA-1" | "SHA-256", data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> => crypto.subtle.digest(algorithm, data)
+const digest = (algorithm: "SHA-1" | "SHA-256", data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> =>
+	crypto.subtle.digest(algorithm, data)
 
 async function sha1Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
 	return [...new Uint8Array(await digest("SHA-1", data))].map(byte => byte.toString(16).padStart(2, "0")).join("")
@@ -82,19 +83,26 @@ describe("readTorrent", () => {
 	})
 
 	it("reads a single-file torrent and a UTF-8 name", () => {
-		const info = readTorrent(bencode({ info: { name: "x", "name.utf-8": "Grüße.txt", length: 5, "piece length": 16384, pieces: new Uint8Array(20) } }))
+		const info = readTorrent(
+			bencode({ info: { name: "x", "name.utf-8": "Grüße.txt", length: 5, "piece length": 16384, pieces: new Uint8Array(20) } })
+		)
 
 		expect(info).toMatchObject({ name: "Grüße.txt", files: [{ path: "Grüße.txt", size: 5n }], private: false, trackers: [] })
 	})
 
 	it("reads a v2 file tree, and a hybrid's both hashes", async () => {
-		const tree = { "file tree": { docs: { "a.txt": { "": { length: 3, "pieces root": new Uint8Array(32) } } }, "b.bin": { "": { length: 7 } } } }
+		const tree = {
+			"file tree": { docs: { "a.txt": { "": { length: 3, "pieces root": new Uint8Array(32) } } }, "b.bin": { "": { length: 7 } } }
+		}
 		const v2 = readTorrent(bencode({ info: { name: "Set", "meta version": 2, "piece length": 16384, ...tree } }))
-		const hybridBytes = bencode({ info: { name: "Set", "meta version": 2, "piece length": 16384, pieces: new Uint8Array(20), length: 10, ...tree } })
+		const hybridBytes = bencode({
+			info: { name: "Set", "meta version": 2, "piece length": 16384, pieces: new Uint8Array(20), length: 10, ...tree }
+		})
 		const hybrid = readTorrent(hybridBytes)
 
 		expect(v2).toMatchObject({ version: 2, pieceCount: null, totalSize: 10n })
-		expect(v2.files.map(file => file.path).sort()).toEqual(["Set/b.bin", "Set/docs/a.txt"])
+		// The file tree's own order, depth first.
+		expect(v2.files.map(file => file.path)).toEqual(["Set/b.bin", "Set/docs/a.txt"])
 		expect(hybrid.version).toBe("hybrid")
 
 		const hashes = await torrentHashes(new Uint8Array(hybridBytes), hybrid, digest)
@@ -118,12 +126,105 @@ describe("readTorrent", () => {
 		["trailing bytes", Buffer.concat([bencode({ info: { name: "x", length: 1, pieces: new Uint8Array(20) } }), Buffer.from("x")])],
 		["a string past the end", Buffer.from("d4:info999:x")],
 		["a malformed number", Buffer.from("d4:infoi01ee")],
-		["nesting past the limit", Buffer.from(`${"l".repeat(100)}${"e".repeat(100)}`)],
 		["no info dictionary", bencode({ announce: "x" })],
 		["pieces of a wrong length", bencode({ info: { name: "x", length: 1, pieces: new Uint8Array(21) } })],
 		["neither v1 nor v2", bencode({ info: { name: "x", length: 1 } })],
-		["a negative size", bencode({ info: { name: "x", length: -1, pieces: new Uint8Array(20) } })]
-	])("refuses %s", (_, bytes) => {
-		expect(() => readTorrent(bytes)).toThrow(TorrentError)
+		["a negative size", bencode({ info: { name: "x", length: -1, pieces: new Uint8Array(20) } })],
+		["a duplicate key", Buffer.from("d4:infod6:lengthi1e6:lengthi2e4:name1:x6:pieces20:aaaaaaaaaaaaaaaaaaaaee")]
+	])("refuses %s as malformed", (_, bytes) => {
+		expect(() => readTorrent(bytes)).toThrow(expect.objectContaining({ kind: "malformed" }))
+	})
+
+	it("refuses nesting and value counts past its caps as too large", () => {
+		expect(() => readTorrent(Buffer.from(`${"l".repeat(100)}${"e".repeat(100)}`))).toThrow(
+			expect.objectContaining({ kind: "tooLarge" })
+		)
+		expect(() => readTorrent(Buffer.from(`l${"de".repeat(1_000_001)}e`))).toThrow(expect.objectContaining({ kind: "tooLarge" }))
+	})
+
+	// 999,999 empty dictionaries: the most values a file may hold, each one an allocation.
+	it("keeps the heap small for a file full of values", () => {
+		const bomb = Buffer.from(`l${"de".repeat(999_998)}e`)
+		const before = process.memoryUsage().heapUsed
+		let peak = before
+
+		try {
+			readTorrent(bomb)
+		} catch (e) {
+			peak = Math.max(peak, process.memoryUsage().heapUsed)
+			expect(e).toMatchObject({ kind: "malformed" })
+		}
+
+		expect(peak - before).toBeLessThan(200 * 1024 * 1024)
+	})
+
+	// A long name repeated into every path, or a path per file, cannot grow past the caps.
+	it("caps names, paths and the characters of all paths together", () => {
+		const name = "n".repeat(2 * 1024 * 1024)
+		const files = Array.from({ length: 50_000 }, () => ({ length: 1, path: ["p".repeat(5000)] }))
+		const started = Date.now()
+		const info = readTorrent(
+			bencode({ comment: "c".repeat(100_000), info: { name, "piece length": 16384, pieces: new Uint8Array(20), files } })
+		)
+
+		expect(Date.now() - started).toBeLessThan(10_000)
+		expect(info.name.length).toBe(1024)
+		expect(info.comment?.length).toBe(4096)
+		expect(info.files.every(file => file.path.length <= 4096)).toBe(true)
+		expect(info.files.reduce((sum, file) => sum + file.path.length, 0)).toBeLessThanOrEqual(16 * 1024 * 1024)
+		expect(info.files.length + info.filesOmitted).toBe(50_000)
+		expect(info.filesOmitted).toBeGreaterThan(0)
+		expect(info.totalSize).toBe(50_000n)
+	})
+
+	it("removes format and bidi controls from names, paths, comments and addresses", () => {
+		const info = readTorrent(
+			bencode({
+				announce: "https://t.example/\u202eannounce",
+				comment: "a\u202bb",
+				info: { name: "invoice\u202efdp.exe", length: 1, "piece length": 16384, pieces: new Uint8Array(20) }
+			})
+		)
+
+		expect(info).toMatchObject({ name: "invoicefdp.exe", comment: "ab", trackers: ["https://t.example/announce"] })
+		expect(info.files[0]?.path).toBe("invoicefdp.exe")
+	})
+
+	it("lists at most 500 web seeds and trackers", () => {
+		const seeds = Array.from({ length: 2000 }, (_, index) => `https://seed${String(index)}.example/`)
+		const info = readTorrent(
+			bencode({
+				"announce-list": [seeds],
+				"url-list": seeds,
+				info: { name: "x", length: 1, "piece length": 16384, pieces: new Uint8Array(20) }
+			})
+		)
+
+		expect(info.webSeeds).toHaveLength(500)
+		expect(info.trackers).toHaveLength(500)
+	})
+
+	// Keys out of order are read as written, and the infohash is over the file's own bytes, not a re-encoding.
+	it("hashes the info dictionary's bytes as the file holds them", async () => {
+		const info = Buffer.concat([
+			Buffer.from("d"),
+			bencode("pieces"),
+			bencode(new Uint8Array(20)),
+			bencode("name"),
+			bencode("x"),
+			bencode("length"),
+			bencode(1),
+			bencode("piece length"),
+			bencode(16384),
+			Buffer.from("e")
+		])
+		const bytes = new Uint8Array(Buffer.concat([Buffer.from("d4:info"), info, Buffer.from("e")]))
+		const read = readTorrent(bytes)
+		const hashes = await torrentHashes(bytes, read, digest)
+
+		expect(hashes.v1).toBe(await sha1Hex(new Uint8Array(info)))
+		expect(hashes.v1).not.toBe(
+			await sha1Hex(new Uint8Array(bencode({ pieces: new Uint8Array(20), name: "x", length: 1, "piece length": 16384 })))
+		)
 	})
 })

@@ -1,4 +1,5 @@
 import { OCR_ASSETS } from "virtual:ocr-assets"
+import { bytesToHex } from "@filen/shared/bytes"
 import { serveOcr, type OcrEngineVariant, type TesseractCore, type TesseractFactory } from "@filen/office/dom/pdfedit/ocr"
 import { readOcrModel } from "@/features/pdf/ocr/ocrWorkerHost"
 import { transferList } from "@/lib/transferList"
@@ -49,9 +50,7 @@ export function serveOcrWorker(variant: OcrEngineVariant, factory: TesseractFact
 		{
 			fetchModel: readOcrModel,
 			sha256: async bytes => {
-				const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
-
-				return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("")
+				return bytesToHex(await crypto.subtle.digest("SHA-256", bytes))
 			}
 		}
 	)

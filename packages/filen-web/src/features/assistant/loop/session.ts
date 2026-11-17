@@ -12,6 +12,7 @@ import {
 	type AssistantTurnEvent,
 	type AssistantTurnResult
 } from "@filen/shared/assistant"
+import { bytesToHex } from "@filen/shared/bytes"
 import type { ToolExecutor } from "@/features/assistant/runtime/executor"
 import { userCalendar } from "@/features/assistant/tools/dates"
 import {
@@ -272,7 +273,7 @@ function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 }
 
 function randomHex(bytes: number): string {
-	return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), byte => byte.toString(16).padStart(2, "0")).join("")
+	return bytesToHex(crypto.getRandomValues(new Uint8Array(bytes)))
 }
 
 function nonce(): string {

@@ -96,11 +96,18 @@ describe("TorrentViewer", () => {
 		expect(screen.getByText("Yes")).toBeTruthy()
 	})
 
-	it("says when the file is no torrent it can read", async () => {
-		reading.current = { status: "unreadable" }
+	it("says when the file is no torrent it can read, or one past its caps", async () => {
+		reading.current = { status: "malformed" }
 
 		mount()
 
 		expect(await screen.findByText("This torrent file can't be read.")).toBeTruthy()
+
+		cleanup()
+		reading.current = { status: "tooLarge" }
+
+		mount()
+
+		expect(await screen.findByText("This torrent is too large to show here.")).toBeTruthy()
 	})
 })

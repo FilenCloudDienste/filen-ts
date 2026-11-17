@@ -9,6 +9,7 @@ import { MetadataCard } from "@/features/preview/components/metadataCard"
 import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import type { MetadataField, MetadataSectionData, MetadataTableData } from "@/features/preview/lib/metadataCard.types"
 import { formatDateTime } from "@/lib/formatDate"
+import { log } from "@/lib/log"
 
 type ReadingState = { status: "pending" } | { status: "done"; reading: TorrentReading } | { status: "failed" }
 
@@ -23,7 +24,9 @@ function useTorrentReading(bytes: Uint8Array): ReadingState {
 			reading => {
 				if (live) setState({ status: "done", reading })
 			},
-			() => {
+			(e: unknown) => {
+				log.error("preview", "reading a torrent failed", e)
+
 				if (live) setState({ status: "failed" })
 			}
 		)
@@ -116,11 +119,11 @@ function TorrentView({ item, bytes }: { item: DriveItem; bytes: Uint8Array }) {
 		return <PreviewErrorState message={t("previewTorrentFailed")} />
 	}
 
-	if (state.reading.status === "unreadable") {
+	if (state.reading.status !== "ok") {
 		return (
 			<PreviewUnsupportedState
 				item={item}
-				message={t("previewTorrentUnreadable")}
+				message={t(state.reading.status === "tooLarge" ? "previewTorrentTooLarge" : "previewTorrentUnreadable")}
 			/>
 		)
 	}

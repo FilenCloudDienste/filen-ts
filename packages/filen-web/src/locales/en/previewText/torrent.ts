@@ -52,6 +52,8 @@ export const previewTextTorrent = {
 	previewTorrentNotContacted: "Read from the file only: no tracker or peer was contacted.",
 	/** Torrent preview — the file is not a torrent this preview can read */
 	previewTorrentUnreadable: "This torrent file can't be read.",
+	/** Torrent preview — the torrent lists more (values, nesting) than the preview reads */
+	previewTorrentTooLarge: "This torrent is too large to show here.",
 	/** Torrent preview — reading the file failed (the reader stopped) */
 	previewTorrentFailed: "This torrent file couldn't be read. Try again."
 } as const

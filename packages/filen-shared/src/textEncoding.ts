@@ -1,14 +1,10 @@
+import { platformTextDecoder, type PlatformTextDecoder } from "./bytes"
 import { normalizeLanguage } from "./videos/languages"
 import { MAX_SUBTITLE_CHARS } from "./videos/subtitles/cues"
 
 // How a text file's bytes become text, and whether they can be written back unchanged.
 
-interface TextDecoderLike {
-	readonly encoding: string
-	decode(input?: Uint8Array, options?: { stream?: boolean }): string
-}
-
-type TextDecoderCtor = new (label: string, options?: { fatal?: boolean; ignoreBOM?: boolean }) => TextDecoderLike
+type TextDecoderLike = PlatformTextDecoder
 
 // "convert": shown read-only; only an explicit conversion makes it UTF-8.
 export type TextWritable = "yes" | "convert"
@@ -161,11 +157,9 @@ export function legacyEncodingForLanguage(hint: string | null | undefined): stri
 }
 
 function decoderFor(label: string, fatal: boolean): TextDecoderLike | null {
-	const Decoder = (globalThis as unknown as { TextDecoder: TextDecoderCtor }).TextDecoder
-
 	try {
 		// ignoreBOM: a mark is stripped here, by bytes; a second U+FEFF is text.
-		return new Decoder(label, { fatal, ignoreBOM: true })
+		return platformTextDecoder(label, { fatal, ignoreBOM: true })
 	} catch {
 		return null
 	}
@@ -526,7 +520,12 @@ function singleByteTable(encoding: string): Map<number, number> | null {
 		return cached
 	}
 
-	const decoded = decodeWith(encoding, Uint8Array.from({ length: 256 }, (_, byte) => byte), false, false)
+	const decoded = decodeWith(
+		encoding,
+		Uint8Array.from({ length: 256 }, (_, byte) => byte),
+		false,
+		false
+	)
 
 	if (decoded === null || decoded.text.length !== 256) {
 		return null
