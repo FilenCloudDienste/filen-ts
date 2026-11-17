@@ -1,10 +1,13 @@
 import type { AnyFile } from "@filen/sdk-rs"
 import {
+	languagesMatch,
+	normalizeLanguage,
 	selectAudioTrack,
 	type CueStore,
 	type LadderDecision,
 	type LadderSubtitle,
 	type MediaCodec,
+	type ProbeAudio,
 	type VideoProbe
 } from "@filen/shared/videos"
 import { openPlayback, type Playback, type PlaybackDeps } from "@/lib/media/playback/openPlayback"
@@ -62,6 +65,19 @@ export interface PreviewVideoSnapshot {
 export interface NativeAudioTrack {
 	label: string
 	language: string
+}
+
+// Whether the probe's audio tracks are the element's, in order: as many, each in the language the element names for it
+// where both name one.
+export function describesTracks(probed: readonly ProbeAudio[], native: readonly NativeAudioTrack[]): boolean {
+	return (
+		probed.length === native.length &&
+		probed.every((track, index) => {
+			const element = native[index]?.language ?? ""
+
+			return normalizeLanguage(track.lang) === null || normalizeLanguage(element) === null || languagesMatch(track.lang, element)
+		})
+	)
 }
 
 // What the outcome of a probe was: the record (null: no container the probe reads), or no answer at all.
@@ -332,12 +348,17 @@ export class PreviewVideo {
 		}
 
 		const probe = result.status === "probed" ? result.probe : null
-		const codec = probe?.audio[index]?.codec ?? null
-		const canPlay = browserCanPlay(video)
-		// The element's tracks are the probe's, in order, only where it lists as many.
-		const inPlace = probe !== null && probe.audio.length === native.length && codec !== null && canPlay(CODECS[codec].query)
+		const codec = probe !== null && describesTracks(probe.audio, native) ? (probe.audio[index]?.codec ?? null) : null
 
-		if (inPlace && enableAudioTrack(video, index)) {
+		// Only a codec the probe names for that very track, which the element cannot play, moves the stream to the ladder.
+		// Without one (no probe, none that reads the file, a track it cannot name) the element switches its own track.
+		if (codec !== null && !browserCanPlay(video)(CODECS[codec].query)) {
+			await this.escalate(index)
+
+			return
+		}
+
+		if (enableAudioTrack(video, index)) {
 			this.update({ audioIndex: index })
 
 			return

@@ -697,6 +697,62 @@ describe("PreviewVideo — audio tracks", () => {
 		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 1, subtitle: "none" })
 	})
 
+	it("switches in place where the probe could not be read, read nothing, or names no codec for the track", async () => {
+		for (const probe of ["unavailable", null, probeOf(["aac", "aac"])] as const) {
+			const audioTracks = twoTracks()
+			const unnamed =
+				probe !== null && probe !== "unavailable"
+					? { ...probe, audio: probe.audio.map(track => ({ ...track, codec: null })) }
+					: probe
+			const harness = setUp({ route: "direct", audioTracks, probe: unnamed })
+
+			await flush()
+			harness.video.loadMetadata()
+			await flush()
+			harness.controller.selectAudio(1)
+			await flush()
+
+			expect(audioTracks.map(track => track.enabled)).toEqual([false, true])
+			expect(harness.controller.getSnapshot()).toMatchObject({ route: "direct", audioIndex: 1 })
+			expect(harness.open).not.toHaveBeenCalled()
+		}
+	})
+
+	it("switches in place by the element's own tracks where the probe lists others", async () => {
+		const audioTracks = twoTracks()
+		// The probe's tracks are not the element's: its codec for the second says nothing about the element's second.
+		const probe = probeOf(["aac", "dts", "aac"])
+		const harness = setUp({ route: "direct", audioTracks, probe })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		harness.controller.selectAudio(1)
+		await flush()
+
+		expect(audioTracks.map(track => track.enabled)).toEqual([false, true])
+		expect(harness.open).not.toHaveBeenCalled()
+	})
+
+	it("matches the probe's tracks to the element's by language where both name one", async () => {
+		const { describesTracks } = await import("@/features/preview/lib/previewVideo")
+		const [english, german] = probeOf(["aac", "aac"]).audio.map((track, index) => ({ ...track, lang: index === 0 ? "eng" : "ger" }))
+		const native = [
+			{ label: "Main", language: "en" },
+			{ label: "Kommentar", language: "de" }
+		]
+
+		expect(describesTracks([english ?? expect.unreachable(), german ?? expect.unreachable()], native)).toBe(true)
+		expect(describesTracks([german ?? expect.unreachable(), english ?? expect.unreachable()], native)).toBe(false)
+		expect(
+			describesTracks(
+				[english ?? expect.unreachable(), german ?? expect.unreachable()],
+				[native[0] ?? expect.unreachable(), { label: "", language: "" }]
+			)
+		).toBe(true)
+		expect(describesTracks([english ?? expect.unreachable()], native)).toBe(false)
+	})
+
 	it("marks the track a direct stream plays without a list of its own, and picking it again changes nothing", async () => {
 		const held = probeOf(["aac", "aac"])
 		const harness = setUp({ route: "direct", peek: held })
