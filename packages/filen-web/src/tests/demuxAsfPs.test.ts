@@ -133,3 +133,54 @@ describe("MPEG program stream demuxer", () => {
 		}
 	})
 })
+
+// ── E-AC-3 with dependent substreams, in packs built by hand ──
+
+function ptsField(value: number): number[] {
+	return [
+		0x21 | (Math.floor(value / 2 ** 30) << 1),
+		(value >> 22) & 0xff,
+		(((value >> 15) & 0x7f) << 1) | 1,
+		(value >> 7) & 0xff,
+		((value & 0x7f) << 1) | 1
+	]
+}
+
+// An MPEG-2 pack header, then a private stream 1 PES of AC-3 sub-stream 0x80 holding `data`, with a PTS.
+function privatePack(pts: number, data: number[]): number[] {
+	const header = [0x80, 0x80, 5, ...ptsField(pts)]
+	const payload = [0x80, 1, 0, 1, ...data]
+	const length = header.length + payload.length
+
+	return [0, 0, 1, 0xba, 0x44, 0, 4, 0, 4, 1, 0x01, 0x89, 0xc3, 0xf8, 0, 0, 1, 0xbd, length >> 8, length & 0xff, ...header, ...payload]
+}
+
+// A 64-byte E-AC-3 frame at 48 kHz, six blocks of 256 samples, 5.1 (bsid 16): an independent one, or a dependent one
+// (stream type 1) carrying the channels past 5.1.
+function eac3Frame(dependent: boolean): number[] {
+	const frame = new Array<number>(64).fill(0)
+
+	frame.splice(0, 6, 0x0b, 0x77, dependent ? 0x40 : 0x00, 31, (3 << 4) | (7 << 1) | 1, 16 << 3)
+
+	return frame
+}
+
+describe("MPEG program stream demuxer over E-AC-3 with dependent substreams", () => {
+	it("keeps each independent frame with its dependent one in one packet, 32 ms apart", async () => {
+		const unit = [...eac3Frame(false), ...eac3Frame(true)]
+		const bytes = Uint8Array.from(Array.from({ length: 10 }, (_, i) => privatePack(90_000 + i * 2 * 2880, [...unit, ...unit])).flat())
+		const audio = await all(new Input({ formats: [MPEG_PS], source: new BufferSource(bytes) }).getPrimaryAudioTrack())
+
+		expect(audio.length).toBeGreaterThanOrEqual(18)
+
+		for (const [i, packet] of audio.entries()) {
+			expect(packet.data.length).toBe(128)
+			expect(packet.data[2]).toBe(0x00)
+			expect(packet.data[66]).toBe(0x40)
+
+			if (i > 0) {
+				expect(packet.timestamp - (audio[i - 1]?.timestamp ?? 0)).toBeCloseTo(0.032, 6)
+			}
+		}
+	})
+})

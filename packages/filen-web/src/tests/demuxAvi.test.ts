@@ -314,3 +314,82 @@ describe("AVI demuxer over a large MP3 chunk", () => {
 		expect(packets.reduce((sum, packet) => sum + packet.data.length, 0)).toBe(FRAME_COUNT * frame.length)
 	})
 })
+
+describe("AVI demuxer over a long all-intra idx1", () => {
+	it("seeks through a key index it thinned past its cap, reading only around the target after the index", async () => {
+		// Two hours and sixteen minutes of 25 fps pictures, every one a key picture, as 200-byte chunks under idx1: far
+		// more than reading forward to a time in the middle would take.
+		const COUNT = 25 * 8200
+		const PICTURE = 200
+		const strh = chunk("strh", [
+			...encoder.encode("vids"),
+			...le(0, 4),
+			...le(0, 12),
+			...le(1, 4),
+			...le(25, 4),
+			...le(0, 4),
+			...le(COUNT, 4),
+			...le(0, 8),
+			...le(0, 4),
+			...le(0, 8)
+		])
+		const strf = chunk("strf", [
+			...le(40, 4),
+			...le(64, 4),
+			...le(36, 4),
+			...le(1, 2),
+			...le(24, 2),
+			...encoder.encode("XVID"),
+			...le(0, 20)
+		])
+		const head = [...encoder.encode("AVI "), ...list("hdrl", chunk("avih", le(0, 56)), list("strl", strh, strf))]
+		const moviHeader = 12
+		const moviBody = COUNT * (8 + PICTURE)
+		const total = head.length + moviHeader + moviBody + 8 + COUNT * 16
+		const bytes = new Uint8Array(8 + total)
+		const view = new DataView(bytes.buffer)
+		bytes.set([...encoder.encode("RIFF"), ...le(total, 4), ...head], 0)
+
+		let at = 8 + head.length
+
+		bytes.set([...encoder.encode("LIST"), ...le(4 + moviBody, 4), ...encoder.encode("movi")], at)
+
+		at += moviHeader
+
+		for (let frame = 0; frame < COUNT; frame++) {
+			bytes.set(encoder.encode("00dc"), at)
+			view.setUint32(at + 4, PICTURE, true)
+			view.setUint16(at + 8, frame & 0xffff, true)
+			at += 8 + PICTURE
+		}
+
+		bytes.set([...encoder.encode("idx1"), ...le(COUNT * 16, 4)], at)
+		at += 8
+
+		for (let frame = 0; frame < COUNT; frame++, at += 16) {
+			bytes.set(encoder.encode("00dc"), at)
+			view.setUint32(at + 4, 0x10, true)
+			view.setUint32(at + 8, 4 + frame * (8 + PICTURE), true)
+			view.setUint32(at + 12, PICTURE, true)
+		}
+
+		const reads: [number, number][] = []
+		const sink = await sinkOf(inputOf(bytes, reads).getPrimaryVideoTrack())
+		const key = defined(await sink.getKeyPacket(5000.5))
+
+		const moviStart = 8 + head.length + moviHeader
+		const chunkAt = (frame: number): number => moviStart + frame * (8 + PICTURE)
+
+		expect(key.timestamp).toBeCloseTo(5000.48, 6)
+		// Past 8192 positions the index keeps one every two seconds: reading starts at the even second, not at the
+		// picture an index of every key picture would name.
+		expect(reads.some(([start]) => start === chunkAt(125_000))).toBe(true)
+		expect(reads.some(([start]) => start === chunkAt(125_012))).toBe(false)
+		expect(new DataView(key.data.buffer, key.data.byteOffset).getUint16(0, true)).toBe(Math.round(key.timestamp * 25) & 0xffff)
+
+		const idx1Start = 8 + head.length + moviHeader + moviBody
+		const outsideIndex = reads.filter(([start]) => start < idx1Start).reduce((sum, [start, end]) => sum + end - start, 0)
+
+		expect(outsideIndex).toBeLessThan(1024 * 1024)
+	})
+})
