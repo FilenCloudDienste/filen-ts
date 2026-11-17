@@ -165,6 +165,13 @@ const AUTO_HEIGHT_REVERSALS = 6
 // itself cannot be heard.
 const AUTO_HEIGHT_QUIET_MS = 400
 
+// A width change this small is a scrollbar appearing or going (the host's, as the frame's height crosses the viewport):
+// the frame's own doing, not a new width to settle at.
+const AUTO_HEIGHT_SCROLLBAR_PX = 24
+// Fresh settles a document gets in all (its first included): past them, a held height is held for good, so content that
+// cycles slowly, or toggles the host's scrollbar, cannot keep resizing the frame.
+const AUTO_HEIGHT_SETTLES = 10
+
 export interface AutoHeightSteps {
 	// The frame's next height, from its current one, the measured content, the frame's width and the time (ms).
 	step(current: number, measured: { height: number; followsFrame: boolean }, width: number, now: number): number
@@ -181,6 +188,7 @@ export function autoHeightSteps(cap: number): AutoHeightSteps {
 	let lastChange = 0
 	let lastWidth: number | null = null
 	let lastStep = Number.NEGATIVE_INFINITY
+	let settles = 0
 
 	const reset = (): void => {
 		given.clear()
@@ -191,7 +199,10 @@ export function autoHeightSteps(cap: number): AutoHeightSteps {
 
 	return {
 		step: (current, measured, width, now) => {
-			if (lastWidth !== width || now - lastStep > AUTO_HEIGHT_QUIET_MS) {
+			const widthChanged = lastWidth === null || Math.abs(width - lastWidth) > AUTO_HEIGHT_SCROLLBAR_PX
+
+			if ((widthChanged || now - lastStep > AUTO_HEIGHT_QUIET_MS) && settles < AUTO_HEIGHT_SETTLES) {
+				settles++
 				lastWidth = width
 				reset()
 			}

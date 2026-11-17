@@ -288,6 +288,40 @@ describe("nextAutoHeight", () => {
 		expect(steps.step(420, { height: 380, followsFrame: false }, 800, 48)).toBe(380)
 	})
 
+	// Content that answers each resize 450 ms later, past the quiet time, or toggles the host's scrollbar: settled afresh
+	// only a bounded number of times, then held.
+	it("holds a slow cycle, and one that toggles a scrollbar, after a bounded number of settles", () => {
+		const slow = autoHeightSteps(4000)
+		let frame = 150
+		const changes: number[] = []
+
+		for (let call = 0; call < 200; call++) {
+			const next = slow.step(frame, { height: frame <= 600 ? 1016 : 116, followsFrame: false }, 800, call * 450)
+
+			if (next !== frame) changes.push(call)
+
+			frame = next
+		}
+
+		expect(changes.length).toBeLessThanOrEqual(20)
+
+		const scrollbar = autoHeightSteps(4000)
+		let height = 150
+		let moves = 0
+
+		for (let call = 0; call < 200; call++) {
+			// Past 600px the host shows a scrollbar: the frame is 15px narrower, and narrower content is short again.
+			const width = height > 600 ? 785 : 800
+			const next = scrollbar.step(height, { height: width === 800 ? 1016 : 116, followsFrame: false }, width, call * 16)
+
+			if (next !== height) moves++
+
+			height = next
+		}
+
+		expect(moves).toBeLessThanOrEqual(2)
+	})
+
 	// A <details> opened and closed returns to a height it had: a change after a quiet spell is followed, both ways.
 	it("follows a details opened and closed again, and a new width", () => {
 		const steps = autoHeightSteps(4000)
