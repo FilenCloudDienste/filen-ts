@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@/tests/support/officeKeys"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRef } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
@@ -16,10 +16,10 @@ import { preview } from "@/locales/en/preview"
 // The spreadsheet viewer over real sessions, on this thread (the in-thread host stands in for the workers):
 // what is typed in the formula bar reaches the session, and the overlay's save hands out what it holds.
 
-const { bytes } = vi.hoisted(() => {
+const { bytes, hosts } = vi.hoisted(() => {
 	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
 
-	return { bytes: held }
+	return { bytes: held, hosts: { current: null as ReturnType<typeof import("@filen/office/dom/sheet").inThreadSheetHost> | null } }
 })
 
 vi.mock("@/providers/themeProvider", async importOriginal => ({
@@ -31,19 +31,21 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
 }))
 
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
+// A host of its own per test (beforeEach): a test that times out leaves its sessions' work behind, which a shared host
+// would make the next test's open wait behind.
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
+	openSheet: (...args: Parameters<ReturnType<typeof inThreadSheetHost>["open"]>) => {
+		if (hosts.current === null) throw new Error("no sheet host")
 
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
+		return hosts.current.open(...args)
 	}
-})
+}))
 
 const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
 
 beforeEach(() => {
+	hosts.current = inThreadSheetHost()
 	// jsdom lays nothing out and draws no canvas: the grid sees neither a size nor a context.
 	vi.stubGlobal(
 		"ResizeObserver",
@@ -54,6 +56,11 @@ beforeEach(() => {
 		}
 	)
 	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+})
+
+afterEach(() => {
+	hosts.current?.dispose()
+	hosts.current = null
 })
 
 function file(name: string): DriveItem {
@@ -124,6 +131,9 @@ async function enter(cell: string, text: string): Promise<void> {
 }
 
 describe("the spreadsheet viewer", () => {
+	// The real workbook engine on this thread, a whole viewer re-rendering in jsdom for every event, a save and three
+	// reopenings: 0.6–1.6 s alone (3.5 s with its transforms cold), several times that on a saturated CPU (5.1–5.7 s
+	// measured with every core busy), past the default 5 s. Its own budget, as the password test has.
 	it("edits a workbook through the formula bar and saves it for the overlay", async () => {
 		bytes.current = await budget()
 
@@ -163,7 +173,7 @@ describe("the spreadsheet viewer", () => {
 		await waitFor(() => {
 			expect(dirty).toHaveBeenLastCalledWith(false)
 		})
-	})
+	}, 30_000)
 
 	it("opens a password-protected workbook with its password and saves it sealed", async () => {
 		bytes.current = await encryptedWorkbook("agile")
