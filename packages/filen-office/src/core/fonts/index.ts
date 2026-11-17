@@ -37,7 +37,7 @@ export {
 } from "./manager"
 export { lineSpacingUnits, verticalMetrics, type LineSpacingRule, type VerticalMetrics } from "./metrics"
 export { deobfuscateFont, obfuscateFont, parseFontKey } from "./obfuscation"
-export { SfntFont, readSfnt, type SfntNames } from "./sfnt"
+export { SfntFont, cmapCoverage, readNameValues, readSfnt, sfntDirectory, type SfntNames, type SfntTable } from "./sfnt"
 export {
 	DEFAULT_SLOT_CONTEXT,
 	eastAsiaUsesAscii,
@@ -67,3 +67,26 @@ export {
 } from "./substitutes"
 export { symbolTable, symbolText, symbolToUnicode, type SymbolTable } from "./symbols"
 export { BUNDLED_FACES, CLONE_METRICS, LINE_METRICS } from "./tables.generated"
+export {
+	FONT_INFO_NAME_IDS,
+	FONT_INFO_TABLES,
+	fontInfoTables,
+	readFontInfo,
+	sfntInfoTables,
+	type FontAxis,
+	type FontInfo,
+	type FontName,
+	type FontOutlines
+} from "./info"
+export {
+	WOFF2_MAX_STREAM_BYTES,
+	decompressBrotli,
+	fontContainer,
+	readWoff2Directory,
+	readWoff2Tables,
+	readWoffTables,
+	woff2Tables,
+	type FontContainer,
+	type FontTableSet,
+	type Woff2Directory
+} from "./woff"

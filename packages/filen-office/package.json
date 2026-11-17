@@ -215,6 +215,7 @@
 	},
 	"dependencies": {
 		"@filen/shared": "workspace:*",
+		"brotli": "2.1.0",
 		"fflate": "0.8.3",
 		"hyperformula": "3.4.0"
 	},

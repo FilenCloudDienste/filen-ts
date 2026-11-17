@@ -36,6 +36,7 @@ const NAME_POSTSCRIPT = 6
 const NAME_TYPOGRAPHIC_FAMILY = 16
 const NAME_TYPOGRAPHIC_SUBFAMILY = 17
 const WANTED_NAMES = new Set([NAME_FAMILY, NAME_SUBFAMILY, NAME_FULL, NAME_POSTSCRIPT, NAME_TYPOGRAPHIC_FAMILY, NAME_TYPOGRAPHIC_SUBFAMILY])
+const FAMILY_NAMES = new Set([NAME_FAMILY, NAME_TYPOGRAPHIC_FAMILY])
 
 // Mac Roman 0x80-0xFF, for fonts whose only names are Macintosh records.
 const MAC_ROMAN =
@@ -50,10 +51,13 @@ export interface SfntNames {
 	readonly typographicSubfamily: string | undefined
 }
 
-interface Table {
+// A table's byte range in the file.
+export interface SfntTable {
 	readonly offset: number
 	readonly length: number
 }
+
+type Table = SfntTable
 
 type CodePointLookup = (codePoint: number) => number
 
@@ -221,46 +225,38 @@ export class SfntFont {
 	}
 
 	private buildLookup(): CodePointLookup {
-		const cmap = this.cmap
+		if (this.cmap === undefined) return noGlyph
 
-		if (cmap === undefined || cmap.length < 4) return noGlyph
+		for (const subtable of cmapSubtables(this.data, this.cmap)) {
+			const lookup =
+				subtable.format === 12
+					? format12(this.data, subtable.offset, subtable.end)
+					: format4(this.data, subtable.offset, subtable.end)
 
-		const data = this.data
-		const end = cmap.offset + cmap.length
-		const count = data.getUint16(cmap.offset + 2)
-
-		if (4 + count * 8 > cmap.length) return noGlyph
-
-		let best: CodePointLookup = noGlyph
-		let bestRank = 0
-
-		for (let i = 0; i < count; i++) {
-			const record = cmap.offset + 4 + i * 8
-			const platform = data.getUint16(record)
-			const encoding = data.getUint16(record + 2)
-			const offset = cmap.offset + data.getUint32(record + 4)
-
-			if (offset + 4 > end) continue
-
-			const format = data.getUint16(offset)
-			const rank = subtableRank(platform, encoding, format)
-
-			if (rank <= bestRank) continue
-
-			const lookup = format === 12 ? format12(data, offset, end) : format4(data, offset, end)
-
-			if (lookup !== null) {
-				best = lookup
-				bestRank = rank
-			}
+			if (lookup !== null) return lookup
 		}
 
-		return best
+		return noGlyph
 	}
 }
 
 export function readSfnt(bytes: Uint8Array, faceIndex: number = 0): SfntFont {
 	return new SfntFont(bytes, faceIndex)
+}
+
+// The sfnt version (0x00010000, "OTTO" or "true") and the table directory of a TrueType/OpenType file, by tag; reads
+// the directory only (at most 12 + 16 × 256 bytes). Collections and WOFF are refused.
+export function sfntDirectory(bytes: Uint8Array): { readonly flavor: number; readonly tables: ReadonlyMap<string, SfntTable> } {
+	const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+
+	if (data.byteLength >= 4 && data.getUint32(0) === COLLECTION) throw new FontError("unsupported", "Font collections are not read here")
+
+	const base = sfntOffset(data, 0)
+	const tables = new Map<string, SfntTable>()
+
+	for (const [tag, table] of readDirectory(data, base)) tables.set(tagName(tag), table)
+
+	return { flavor: data.getUint32(base), tables }
 }
 
 const NO_NAMES: SfntNames = {
@@ -351,7 +347,7 @@ function tagName(tag: number): string {
 }
 
 // Some old fonts store weight classes 1-9 meaning 100-900.
-function normalizeWeight(value: number): number {
+export function normalizeWeight(value: number): number {
 	if (value >= 1 && value <= 9) return value * 100
 	if (value < 1 || value > 1000) return 400
 
@@ -371,6 +367,112 @@ function subtableRank(platform: number, encoding: number, format: number): numbe
 	}
 
 	return 0
+}
+
+// A Unicode cmap subtable the readers here understand (format 4 or 12).
+export interface CmapSubtable {
+	readonly format: 4 | 12
+	// Its range in the file.
+	readonly offset: number
+	readonly end: number
+}
+
+// The cmap's usable subtables, most preferred first (subtableRank).
+export function cmapSubtables(data: DataView, cmap: SfntTable): readonly CmapSubtable[] {
+	if (cmap.length < 4) return []
+
+	const end = cmap.offset + cmap.length
+	const count = data.getUint16(cmap.offset + 2)
+
+	if (4 + count * 8 > cmap.length) return []
+
+	const ranked: { rank: number; subtable: CmapSubtable }[] = []
+
+	for (let i = 0; i < count; i++) {
+		const record = cmap.offset + 4 + i * 8
+		const offset = cmap.offset + data.getUint32(record + 4)
+
+		if (offset + 4 > end) continue
+
+		const format = data.getUint16(offset)
+		const rank = subtableRank(data.getUint16(record), data.getUint16(record + 2), format)
+
+		if (rank > 0 && (format === 4 || format === 12)) ranked.push({ rank, subtable: { format, offset, end } })
+	}
+
+	return ranked.sort((a, b) => b.rank - a.rank).map(({ subtable }) => subtable)
+}
+
+// The code points the best readable subtable maps to a glyph below `numGlyphs`, as [first, last] pairs (inclusive),
+// ascending and merged. Format 4 is walked code point by code point (at most 65,535); format 12 by group.
+export function cmapCoverage(data: DataView, cmap: SfntTable, numGlyphs: number): Uint32Array {
+	for (const subtable of cmapSubtables(data, cmap)) {
+		const runs = subtable.format === 12 ? format12Runs(data, subtable, numGlyphs) : format4Runs(data, subtable, numGlyphs)
+
+		if (runs !== null) return runs
+	}
+
+	return new Uint32Array(0)
+}
+
+const MAX_CODE_POINT = 0x10ffff
+
+// Appends [first, last] to `runs`, merging it into the previous run when they touch.
+function pushRun(runs: number[], first: number, last: number): void {
+	const previous = runs.length - 1
+
+	if (previous > 0 && (runs[previous] ?? 0) + 1 >= first) runs[previous] = Math.max(runs[previous] ?? 0, last)
+	else runs.push(first, last)
+}
+
+function format4Runs(data: DataView, subtable: CmapSubtable, numGlyphs: number): Uint32Array | null {
+	const lookup = format4(data, subtable.offset, subtable.end)
+
+	if (lookup === null) return null
+
+	const segments = data.getUint16(subtable.offset + 6) >>> 1
+	const ends = subtable.offset + 14
+	const starts = ends + segments * 2 + 2
+	const runs: number[] = []
+	let previousEnd = -1
+
+	for (let s = 0; s < segments; s++) {
+		const last = Math.min(data.getUint16(ends + s * 2), 0xfffe)
+		const first = Math.max(data.getUint16(starts + s * 2), previousEnd + 1)
+
+		for (let codePoint = first; codePoint <= last; codePoint++) {
+			const glyph = lookup(codePoint)
+
+			if (glyph !== 0 && glyph < numGlyphs) pushRun(runs, codePoint, codePoint)
+		}
+
+		previousEnd = Math.max(previousEnd, last)
+	}
+
+	return Uint32Array.from(runs)
+}
+
+function format12Runs(data: DataView, subtable: CmapSubtable, numGlyphs: number): Uint32Array | null {
+	if (format12(data, subtable.offset, subtable.end) === null) return null
+
+	const count = data.getUint32(subtable.offset + 12)
+	const runs: number[] = []
+
+	for (let g = 0; g < count; g++) {
+		const at = subtable.offset + 16 + g * 12
+		const start = data.getUint32(at)
+		const startGlyph = data.getUint32(at + 8)
+
+		if (start > MAX_CODE_POINT || startGlyph >= numGlyphs) continue
+
+		// .notdef is no glyph; ids past the font's are none either.
+		const first = startGlyph === 0 ? start + 1 : start
+		const last = Math.min(data.getUint32(at + 4), MAX_CODE_POINT, start + (numGlyphs - 1 - startGlyph))
+
+		if (first <= last) pushRun(runs, first, last)
+	}
+
+	return Uint32Array.from(runs)
 }
 
 function format4(data: DataView, offset: number, end: number): CodePointLookup | null {
@@ -471,24 +573,28 @@ function format12(data: DataView, offset: number, end: number): CodePointLookup 
 	}
 }
 
-function readNames(data: DataView, table: Table): { names: SfntNames; familyNames: string[] } {
-	const found = new Map<number, { rank: number; value: string }>()
-	const familyNames = new Set<string>()
-
-	if (table.length < 6) return { names: NO_NAMES, familyNames: [] }
+// Every wanted name record the table holds, decoded, with how much each platform's record is preferred: Windows
+// Unicode (US English first), then Unicode, then Mac Roman. Bounded however many records or bytes the table claims.
+function scanNames(
+	data: DataView,
+	table: Table,
+	wanted: ReadonlySet<number>,
+	visit: (nameId: number, rank: number, value: string) => void
+): void {
+	if (table.length < 6) return
 
 	const count = Math.min(data.getUint16(table.offset + 2), MAX_NAME_RECORDS)
 	const storage = table.offset + data.getUint16(table.offset + 4)
 	const end = table.offset + table.length
 	let decoded = 0
 
-	if (6 + count * 12 > table.length) return { names: NO_NAMES, familyNames: [] }
+	if (6 + count * 12 > table.length) return
 
 	for (let i = 0; i < count && decoded < MAX_TOTAL_NAME_BYTES; i++) {
 		const record = table.offset + 6 + i * 12
 		const nameId = data.getUint16(record + 6)
 
-		if (!WANTED_NAMES.has(nameId)) continue
+		if (!wanted.has(nameId)) continue
 
 		const platform = data.getUint16(record)
 		const encoding = data.getUint16(record + 2)
@@ -500,7 +606,7 @@ function readNames(data: DataView, table: Table): { names: SfntNames; familyName
 
 		decoded += length
 
-		let value: string | undefined
+		let value: string
 		let rank: number
 
 		// Encoding 0 (symbol fonts) is UTF-16 too.
@@ -517,22 +623,40 @@ function readNames(data: DataView, table: Table): { names: SfntNames; familyName
 			continue
 		}
 
-		if (value.length === 0) continue
-		if ((nameId === NAME_FAMILY || nameId === NAME_TYPOGRAPHIC_FAMILY) && familyNames.size < MAX_FAMILY_NAMES) familyNames.add(value)
+		if (value.length > 0) visit(nameId, rank, value)
+	}
+}
 
+// The preferred value of each wanted name ID the table holds (`table` is a range of `data`).
+export function readNameValues(data: DataView, table: SfntTable, wanted: ReadonlySet<number>): ReadonlyMap<number, string> {
+	const found = new Map<number, { rank: number; value: string }>()
+
+	scanNames(data, table, wanted, (nameId, rank, value) => {
 		const current = found.get(nameId)
 
 		if (current === undefined || rank > current.rank) found.set(nameId, { rank, value })
-	}
+	})
+
+	return new Map([...found].map(([nameId, { value }]) => [nameId, value]))
+}
+
+function readNames(data: DataView, table: Table): { names: SfntNames; familyNames: string[] } {
+	const familyNames = new Set<string>()
+
+	scanNames(data, table, FAMILY_NAMES, (_nameId, _rank, value) => {
+		if (familyNames.size < MAX_FAMILY_NAMES) familyNames.add(value)
+	})
+
+	const found = readNameValues(data, table, WANTED_NAMES)
 
 	return {
 		names: {
-			family: found.get(NAME_FAMILY)?.value,
-			subfamily: found.get(NAME_SUBFAMILY)?.value,
-			fullName: found.get(NAME_FULL)?.value,
-			postScriptName: found.get(NAME_POSTSCRIPT)?.value,
-			typographicFamily: found.get(NAME_TYPOGRAPHIC_FAMILY)?.value,
-			typographicSubfamily: found.get(NAME_TYPOGRAPHIC_SUBFAMILY)?.value
+			family: found.get(NAME_FAMILY),
+			subfamily: found.get(NAME_SUBFAMILY),
+			fullName: found.get(NAME_FULL),
+			postScriptName: found.get(NAME_POSTSCRIPT),
+			typographicFamily: found.get(NAME_TYPOGRAPHIC_FAMILY),
+			typographicSubfamily: found.get(NAME_TYPOGRAPHIC_SUBFAMILY)
 		},
 		familyNames: [...familyNames]
 	}

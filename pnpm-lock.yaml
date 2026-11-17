@@ -723,6 +723,9 @@ importers:
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
+      brotli:
+        specifier: 2.1.0
+        version: 2.1.0
       fflate:
         specifier: 0.8.3
         version: 0.8.3
@@ -5376,6 +5379,9 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  brotli@2.1.0:
+    resolution: {integrity: sha512-4KAtOr4Z3jaIQlXy9AeuaVz1vPWTyZ6eiQYu4SsSz6VcUsV6Epz6kA3Vf7eTGTaspaqlnQLBqvkozKP5WyQMZQ==}
 
   browserslist@4.29.4:
     resolution: {integrity: sha512-2TcbbiwXEq+N0kD36tykpCfyyQigUXmuwNQbnPp4Xk4PX9JOqVIKjJlIDjpH7uY6tmRGoAd+apeT1p60T8wsdA==}
@@ -15809,6 +15815,10 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
+
+  brotli@2.1.0:
+    dependencies:
+      base64-js: 1.5.1
 
   browserslist@4.29.4:
     dependencies:
