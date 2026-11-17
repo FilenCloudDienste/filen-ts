@@ -12,7 +12,7 @@ export const ROUTING_PACKAGE_ENTRY_BYTES = 9 * 1024 * 1024
 
 export const ROUTING_YAML_TEXT = "name: routing\nitems:\n  - one\n  - two\n"
 export const ROUTING_SUBTITLE_TEXT = "1\n00:00:01,000 --> 00:00:02,000\nHello from a subtitle\n"
-// Windows-1252 (not UTF-8, so the editor opens read-only): the cue's line as it reads once decoded.
+// Windows-1252 (a bijective codepage, so the editor saves it back as it was): the cue's line as it reads once decoded.
 export const ROUTING_LATIN1_LINE = "Café crème à la carte"
 export const ROUTING_MAIL_TEXT = "From: a@example.com\r\nTo: b@example.com\r\nSubject: Routing probe\r\n\r\nHello from a message\r\n"
 

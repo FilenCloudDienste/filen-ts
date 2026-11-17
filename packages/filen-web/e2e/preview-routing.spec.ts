@@ -52,7 +52,10 @@ async function closeText(page: Page): Promise<void> {
 	await expect(editorContent(page)).toHaveCount(0)
 }
 
-test("code and text open in the editor, writable only as strict UTF-8, and binary is never shown as text", async ({ page, context }) => {
+test("code and text open in the editor, writable when a save writes them back as they were, and binary is never shown as text", async ({
+	page,
+	context
+}) => {
 	const cspViolations = trackCspViolations(page)
 	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: false })
 
@@ -84,10 +87,10 @@ test("code and text open in the editor, writable only as strict UTF-8, and binar
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "true")
 	await closeText(page)
 
-	// Windows-1252 reads correctly but cannot be written back as it is.
+	// Windows-1252 reads correctly and, a bijective codepage, saves back in it byte for byte: it edits too.
 	await openText(page, listbox, LATIN1, ROUTING_LATIN1_LINE)
 	await toSource(page)
-	await expect(editorContent(page)).toHaveAttribute("contenteditable", "false")
+	await expect(editorContent(page)).toHaveAttribute("contenteditable", "true")
 	await closeText(page)
 
 	// A message is kept as it arrived.
