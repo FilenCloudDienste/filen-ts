@@ -119,6 +119,8 @@ export interface PreviewVideoOptions {
 
 // Playback a browser must have decoded something of by now if it can decode the track at all.
 const PLAYED_SECONDS_BEFORE_CHECK = 1.5
+// How long the playhead may stand still after an in-place audio track switch before it is seeked, then given up on.
+const SWITCH_STALL_MS = 4_000
 
 // Audio codecs every browser decodes without re-encoding: what a default track choice prefers.
 const NATIVE_AUDIO: ReadonlySet<string> = new Set(["aac", "mp3", "opus", "vorbis", "flac"])
@@ -144,6 +146,7 @@ export class PreviewVideo {
 	private playIntent = true
 	private escalated = false
 	private stopStallWatch: (() => void) | null = null
+	private stopSwitchWatch: (() => void) | null = null
 	// The direct start's registration, until it is handed back.
 	private directUrl: string | null = null
 	// Ends the direct start's hold on the worker.
@@ -372,11 +375,51 @@ export class PreviewVideo {
 
 		if (enableAudioTrack(video, index)) {
 			this.update({ audioIndex: index })
+			this.watchSwitch(video, index)
 
 			return
 		}
 
 		await this.escalate(index)
+	}
+
+	// A media pipeline can stall on an in-place switch (WebKit's on Linux does): playing, the playhead then stays put. A
+	// seek to where it stands restarts it; one that still does not move goes to the ladder, which plays the track.
+	private watchSwitch(video: HTMLVideoElement, index: number): void {
+		this.stopSwitchWatch?.()
+
+		let nudged = false
+		let from = video.currentTime
+		const timer = setInterval(() => {
+			if (this.isDisposed() || this.escalated || this.snapshot.audioIndex !== index) {
+				this.stopSwitchWatch?.()
+
+				return
+			}
+
+			if (!expectsProgress(video) || video.currentTime !== from) {
+				this.stopSwitchWatch?.()
+
+				return
+			}
+
+			if (!nudged) {
+				nudged = true
+				from = video.currentTime
+				video.currentTime = from
+
+				return
+			}
+
+			this.stopSwitchWatch?.()
+			log.warn("preview.video", "the element stalled on an audio track switch")
+			void this.escalate(index)
+		}, SWITCH_STALL_MS)
+
+		this.stopSwitchWatch = () => {
+			clearInterval(timer)
+			this.stopSwitchWatch = null
+		}
 	}
 
 	// The embedded cues of `track` read so far; null before any. Rebuilt only when that track got cues; `_version`
@@ -392,6 +435,7 @@ export class PreviewVideo {
 
 		this.disposed = true
 		this.stopStallWatch?.()
+		this.stopSwitchWatch?.()
 		this.releaseDirect()
 		this.abort.abort()
 		this.stopPlayback()

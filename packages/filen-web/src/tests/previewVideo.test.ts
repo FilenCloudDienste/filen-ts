@@ -682,6 +682,62 @@ describe("PreviewVideo — audio tracks", () => {
 		expect(harness.video.loads).toBe(loads)
 	})
 
+	it("seeks the element where it stands when an in-place switch stalls it, then moves to the ladder if it still does", async () => {
+		vi.useFakeTimers()
+
+		const audioTracks = twoTracks()
+		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "aac"]) })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		harness.video.paused = false
+		harness.video.currentTime = 3
+		harness.controller.selectAudio(1)
+		await flush()
+		expect(audioTracks.map(track => track.enabled)).toEqual([false, true])
+
+		// The playhead stands still: the element is seeked where it is.
+		const seeks: number[] = []
+		let current = harness.video.currentTime
+
+		Object.defineProperty(harness.video, "currentTime", {
+			configurable: true,
+			get: () => current,
+			set: (value: number) => {
+				seeks.push(value)
+				current = value
+			}
+		})
+		await vi.advanceTimersByTimeAsync(4_000)
+		expect(seeks).toEqual([3])
+		expect(harness.open).not.toHaveBeenCalled()
+
+		// Still stuck: the ladder plays the track.
+		await vi.advanceTimersByTimeAsync(4_000)
+		expect(harness.open).toHaveBeenCalledOnce()
+		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 1, subtitle: "none" })
+		vi.useRealTimers()
+	})
+
+	it("leaves an in-place switch be once the playhead moves", async () => {
+		vi.useFakeTimers()
+
+		const audioTracks = twoTracks()
+		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "aac"]) })
+
+		await flush()
+		harness.video.loadMetadata()
+		await flush()
+		harness.video.paused = false
+		harness.controller.selectAudio(1)
+		await flush()
+		harness.video.playFor(1)
+		await vi.advanceTimersByTimeAsync(12_000)
+		expect(harness.open).not.toHaveBeenCalled()
+		vi.useRealTimers()
+	})
+
 	it("moves to the ladder rather than switch in place to a track the element cannot decode", async () => {
 		const audioTracks = twoTracks()
 		const harness = setUp({ route: "direct", audioTracks, probe: probeOf(["aac", "dts"]) })
