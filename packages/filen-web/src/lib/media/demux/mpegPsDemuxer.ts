@@ -208,7 +208,9 @@ function startsDecoding(codec: VideoCodec | null, data: Uint8Array): boolean {
 }
 
 interface PendingVideo {
+	// The access units' bytes so far: a view of `store`, which grows by doubling.
 	bytes: Uint8Array
+	store: Uint8Array
 	// PES PTS by where its data starts in `bytes`.
 	anchors: { at: number; pts: number }[]
 	// The pack holding the PES whose data starts at each offset.
@@ -315,8 +317,24 @@ class MpegPsReader implements ContainerReader {
 			return null
 		}
 
+		// A picture the bytes read past the window do not finish (a large intra picture) is read again with twice as
+		// many, up to the largest picture assembled.
+		for (let finish = FINISH_BYTES; ; finish *= 2) {
+			const read = await this.readWindow(pos, finish)
+
+			if (!read.cut || finish >= MAX_FRAME_BYTES) {
+				return read.result
+			}
+		}
+	}
+
+	private async readWindow(
+		pos: number,
+		finish: number
+	): Promise<{ result: { packets: DemuxPacket[]; next: number } | null; cut: boolean }> {
 		const windowEnd = Math.min(this.size, pos + WINDOW_BYTES)
-		const bytes = (await readAt(this.input, pos, Math.min(this.size - pos, WINDOW_BYTES + FINISH_BYTES))) ?? new Uint8Array()
+		const bytes = (await readAt(this.input, pos, Math.min(this.size - pos, WINDOW_BYTES + finish))) ?? new Uint8Array()
+		const readEnd = pos + bytes.length
 		const packets: DemuxPacket[] = []
 		const open = new Map<number, Open>()
 		const audio = new Map<number, PendingAudio>()
@@ -387,7 +405,9 @@ class MpegPsReader implements ContainerReader {
 			return true
 		})
 
-		// Pictures still open at the end of what was read finish there.
+		// Pictures still open at the end of what was read finish there: cut short, unless the file ends there too.
+		const cut = readEnd < this.size && (video.size > 0 || open.size > 0)
+
 		for (const key of video.keys()) {
 			const entry = this.streams.get(key)
 
@@ -409,9 +429,9 @@ class MpegPsReader implements ContainerReader {
 		packets.sort((a, b) => a.unit - b.unit || a.part - b.part)
 		this.durations(packets)
 
-		const end = reach.next ?? pos + bytes.length
+		const end = reach.next ?? readEnd
 
-		return end <= pos ? null : { packets, next: end }
+		return { result: end <= pos ? null : { packets, next: end }, cut }
 	}
 
 	private closed(entry: Track, frame: Open): DemuxPacket {
@@ -458,6 +478,7 @@ class MpegPsReader implements ContainerReader {
 			// A PES with a PTS starts an access unit.
 			pending = {
 				bytes: new Uint8Array(),
+				store: new Uint8Array(),
 				anchors: [],
 				units: [],
 				scan: { at: 0, picture: false },
@@ -480,7 +501,7 @@ class MpegPsReader implements ContainerReader {
 			}
 
 			pending.units.push({ at, unit })
-			pending.bytes = concat([pending.bytes, data], at + data.length)
+			append(pending, data)
 			for (const start of auStarts(pending.bytes, pending.scan)) {
 				if (start > (pending.starts.at(-1) ?? -1)) {
 					pending.starts.push(start)
@@ -531,7 +552,8 @@ class MpegPsReader implements ContainerReader {
 			return
 		}
 
-		pending.bytes = pending.bytes.slice(keep)
+		pending.store.copyWithin(0, keep, pending.bytes.length)
+		pending.bytes = pending.store.subarray(0, pending.bytes.length - keep)
 		pending.scan.at = Math.max(0, pending.scan.at - keep)
 		pending.starts = pending.starts.slice(emitted).map(start => start - keep)
 		pending.anchors = pending.anchors.map(anchor => ({ at: anchor.at - keep, pts: anchor.pts }))
@@ -746,6 +768,22 @@ class MpegPsReader implements ContainerReader {
 
 		return null
 	}
+}
+
+// `data` added to the pending bytes in place while their store has room, else in a store twice the size: assembling a
+// picture of n bytes from its PES copies O(n) bytes, not O(n²).
+function append(pending: { bytes: Uint8Array; store: Uint8Array }, data: Uint8Array): void {
+	const length = pending.bytes.length + data.length
+
+	if (length > pending.store.length) {
+		const store = new Uint8Array(Math.max(length, pending.store.length * 2, 64 * 1024))
+
+		store.set(pending.bytes)
+		pending.store = store
+	}
+
+	pending.store.set(data, pending.bytes.length)
+	pending.bytes = pending.store.subarray(0, length)
 }
 
 function concat(chunks: Uint8Array[], length: number): Uint8Array {

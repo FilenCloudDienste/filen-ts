@@ -184,3 +184,42 @@ describe("MPEG program stream demuxer over E-AC-3 with dependent substreams", ()
 		}
 	})
 })
+
+// x264 High@L3.1's SPS and PPS, Annex B.
+const SPS_NAL = [
+	0x67, 0x64, 0x00, 0x1f, 0xac, 0xd9, 0x40, 0x50, 0x05, 0xbb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0x00,
+	0xf1, 0x83, 0x19, 0x60
+]
+const PPS_NAL = [0x68, 0xef, 0x89, 0xcb]
+
+// A video PES of stream E0, with a PTS or without.
+function videoPack(pts: number | null, data: number[]): number[] {
+	const header = pts === null ? [0x80, 0x00, 0] : [0x80, 0x80, 5, ...ptsField(pts)]
+	const length = header.length + data.length
+
+	return [0, 0, 1, 0xba, 0x44, 0, 4, 0, 4, 1, 0x01, 0x89, 0xc3, 0xf8, 0, 0, 1, 0xe0, length >> 8, length & 0xff, ...header, ...data]
+}
+
+describe("MPEG program stream demuxer over a large picture", () => {
+	it("assembles a picture spread over thousands of PES in linear time", async () => {
+		const PES_COUNT = 4000
+		const filler = new Array<number>(2000).fill(0x55)
+		const idr = [0, 0, 0, 1, ...SPS_NAL, 0, 0, 0, 1, ...PPS_NAL, 0, 0, 0, 1, 0x65, 0x88, ...filler]
+		const packs = [videoPack(90_000, idr)]
+
+		for (let i = 1; i < PES_COUNT; i++) {
+			packs.push(videoPack(null, filler))
+		}
+
+		packs.push(videoPack(90_000 + 3600, [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1, 0x65, 0x88, 0x84]))
+		packs.push(videoPack(90_000 + 7200, [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1, 0x65, 0x88, 0x84]))
+
+		const bytes = Uint8Array.from(packs.flat())
+		const started = performance.now()
+		const file = new Input({ formats: [MPEG_PS], source: new BufferSource(bytes) })
+		const first = await new EncodedPacketSink(defined(await file.getPrimaryVideoTrack())).getFirstPacket()
+
+		expect(first?.data.length).toBeGreaterThan(PES_COUNT * filler.length)
+		expect(performance.now() - started).toBeLessThan(3000)
+	})
+})
