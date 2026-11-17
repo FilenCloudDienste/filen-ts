@@ -88,6 +88,11 @@ export interface PdfReaderShellProps {
 	goTo?: { readonly page: number; readonly key: number } | null
 	// Its own properties dialog instead of the PDF's.
 	renderProperties?: (open: boolean, onOpenChange: (open: boolean) => void) => ReactNode
+	// False where the whole document is in memory already (a book MuPDF read at open): find and print never ask to
+	// read the whole file.
+	fullReadGuard?: boolean
+	// The pages area's size (its scroller's content box, CSS pixels), each time it changes.
+	onPagesResize?: (width: number, height: number) => void
 }
 
 // The signature status of the document shown: its verifier (null: none), and either the way to open the byte prefix a
@@ -113,7 +118,9 @@ export function PdfReaderShell({
 	pagesOverlay,
 	onPageChange,
 	goTo,
-	renderProperties
+	renderProperties,
+	fullReadGuard,
+	onPagesResize
 }: PdfReaderShellProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
@@ -139,7 +146,29 @@ export function PdfReaderShell({
 	}, [goToKey, goToTarget])
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const [findFocus, setFindFocus] = useState(0)
-	const fullRead = usePdfFullReadGuard(size)
+	const fullRead = usePdfFullReadGuard(fullReadGuard === false ? 0 : size)
+	const pagesResized = useEffectEvent((width: number, height: number) => {
+		onPagesResize?.(width, height)
+	})
+	const scroller = viewer.pages.scrollerRef
+
+	useEffect(() => {
+		const element = scroller.current
+
+		if (element === null) {
+			return
+		}
+
+		const observer = new ResizeObserver(() => {
+			pagesResized(element.clientWidth, element.clientHeight)
+		})
+
+		observer.observe(element)
+
+		return () => {
+			observer.disconnect()
+		}
+	}, [scroller])
 	// The confirmed full reads already followed by a reopen, and the reopens nobody asked for: pdf.js reading
 	// everything on its own (a damaged file) would read it all again after a reopen, so that is done once.
 	const reopenedAt = useRef(0)

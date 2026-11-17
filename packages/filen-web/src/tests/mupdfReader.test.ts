@@ -281,6 +281,35 @@ describe("the MuPDF read service", () => {
 		expect(worker?.args("pages").at(-1)).toEqual({ from: 0, count: 1, generation: 1 })
 	})
 
+	it("lays nothing out again for the layout the book already has", async () => {
+		engine(10, call => {
+			if (call.op === "text") return { value: { lines: [{ str: "some words on the page here" }], links: [] } }
+			if (call.op === "layout")
+				return { value: { pageCount: 12, generation: Reflect.get(call.args as object, "generation") as number } }
+			if (call.op === "locate") return { value: 3 }
+
+			return undefined
+		})
+
+		const layout = { width: 400, height: 600, em: 11 }
+		const reader = await openMupdfReader({
+			origin: file(10),
+			access: "authed",
+			scope: null,
+			format: "epub",
+			layout,
+			maxImagePixels: BUDGET
+		})
+		const same = await reader.relayout(layout, 4)
+
+		expect(same).toEqual({ document: reader.document, page: 4 })
+		expect(workers[0]?.ops()).not.toContain("layout")
+
+		await reader.relayout({ ...layout, em: 14 }, 4)
+		await reader.relayout({ ...layout, em: 14 }, 3)
+		expect(workers[0]?.ops().filter(op => op === "layout")).toHaveLength(1)
+	})
+
 	it("keeps the anchor for a relayout asked while one runs, and the newest layout wins", async () => {
 		let layouts = 0
 

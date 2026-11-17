@@ -92,17 +92,20 @@ class Reader implements MupdfReader {
 	private readonly tileSize: number
 	private current: Laid
 	private nextGeneration = 1
+	// The layout last asked (the open's, else MuPDF's default: unknown).
+	private asked: MupdfLayout | null
 	// The anchor text of the page a relayout starts from, kept for a relayout asked while it runs (the view is frozen
 	// on that page, and its generation's text may already be gone).
 	private anchor: { readonly generation: number; readonly page: number; readonly text: Promise<string | null> } | null = null
 	private closing: Promise<void> | null = null
 
-	constructor(engine: PdfEngine, format: MupdfFormat, metadata: PdfReadMetadata, pageCount: number) {
+	constructor(engine: PdfEngine, format: MupdfFormat, metadata: PdfReadMetadata, pageCount: number, layout: MupdfLayout | null) {
 		this.engine = engine
 		this.reflowable = MUPDF_FORMATS[format].reflowable
 		this.metadata = metadata
 		this.tileSize = pdfMemoryConstrained() ? PDF_TILE_MOBILE : PDF_TILE_DESKTOP
 		this.current = this.laid(0, pageCount)
+		this.asked = layout
 	}
 
 	get document(): MupdfPdfDocument {
@@ -154,6 +157,14 @@ class Reader implements MupdfReader {
 		if (!this.reflowable) throw new PdfEngineError("badRequest", "the document has a fixed layout")
 
 		const from = this.current
+		const asked = this.asked
+
+		// The book is set so already: nothing to lay out, nothing moves.
+		if (asked !== null && asked.width === layout.width && asked.height === layout.height && asked.em === layout.em)
+			return { document: from.document, page: Math.min(Math.max(0, page), from.pageCount - 1) }
+
+		this.asked = layout
+
 		const anchor = await this.anchorText(from, Math.min(Math.max(0, page), from.pageCount - 1))
 		const generation = this.nextGeneration++
 		const { client } = this.engine
@@ -290,5 +301,5 @@ export async function openMupdfReader(options: OpenMupdfReaderOptions): Promise<
 		throw new PdfEngineError("closed", "the open was aborted")
 	}
 
-	return new Reader(engine, format, metadata, pageCount)
+	return new Reader(engine, format, metadata, pageCount, options.layout ?? null)
 }
