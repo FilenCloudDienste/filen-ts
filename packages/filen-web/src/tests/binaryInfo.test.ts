@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { isExecutableHead, readBinaryInfo } from "@/features/preview/lib/binaryInfo/read"
 import type { BinarySource } from "@/features/preview/lib/binaryInfo/types"
+import { budgetedSource } from "@/features/preview/lib/binaryInfo/budget"
+import { readBinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 
 // Executables and disk images read by their headers alone, from synthetic files laid out as each format's
 // specification says; truncated and hostile input gives nothing (or less), never an exception or a large read.
@@ -361,5 +363,89 @@ describe("isExecutableHead", () => {
 		expect(isExecutableHead(Uint8Array.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 0x41]))).toBe(false)
 		expect(isExecutableHead(new Bytes(0x100).ascii(0, "MZ").bytes)).toBe(false)
 		expect(isExecutableHead(new TextEncoder().encode("#!/bin/sh\necho hi"))).toBe(false)
+	})
+})
+
+describe("the read budget", () => {
+	const MIB = 1024 * 1024
+
+	it("lets the headers touch four distinct 1 MiB blocks, cutting a read where they end", async () => {
+		const source = budgetedSource(sourceOf(new Uint8Array(8 * MIB)))
+
+		expect((await source.read(0, 10)).length).toBe(10)
+		expect((await source.read(MIB + 5, 3 * MIB)).length).toBe(3 * MIB - 5)
+		expect(source.blocksTouched()).toBe(4)
+		// Blocks already touched read freely; a new one does not.
+		expect((await source.read(2 * MIB, 100)).length).toBe(100)
+		expect((await source.read(6 * MIB, 100)).length).toBe(0)
+		expect((await source.read(3 * MIB + 10, 2 * MIB)).length).toBe(MIB - 10)
+	})
+
+	// 32 slices at one offset, each with 1024 code signature commands of 4 MiB at an unaligned offset.
+	it("reads a hostile universal Mach-O in a few small reads", async () => {
+		const file = new Bytes(0x1000 + 0x2000 + 5 * MIB)
+
+		file.u32(0, 0xcafebabe, false).u32(4, 32, false)
+
+		for (let index = 0; index < 32; index++) {
+			file.u32(8 + index * 20, 0x0100000c, false)
+				.u32(16 + index * 20, 0x1000, false)
+				.u32(20 + index * 20, 5 * MIB, false)
+		}
+
+		const slice = 0x1000
+
+		file.u32(slice, 0xfeedfacf)
+			.u32(slice + 4, 0x0100000c)
+			.u32(slice + 12, 2)
+			.u32(slice + 16, 1024)
+			.u32(slice + 20, 1024 * 16)
+
+		for (let command = 0; command < 1024; command++) {
+			const at = slice + 32 + command * 16
+
+			file.u32(at, 0x1d)
+				.u32(at + 4, 16)
+				.u32(at + 8, 0x2001)
+				.u32(at + 12, 4 * MIB)
+		}
+
+		const source = sourceOf(file.bytes)
+		const started = Date.now()
+		const reading = await readBinaryReading(source, "app", () => null)
+		const bytes = source.reads.reduce((sum, [, length]) => sum + length, 0)
+
+		expect(reading.info).toMatchObject({ format: "macho", slices: [{ cpu: "ARM64" }] })
+		// Over 1 MiB: not read, shown as unreadable.
+		expect(reading.info?.format === "macho" && reading.info.signature).toEqual({ state: "unreadable" })
+		expect(source.reads.length).toBeLessThanOrEqual(8)
+		expect(bytes).toBeLessThanOrEqual(4 * MIB)
+		expect(Date.now() - started).toBeLessThan(2000)
+	})
+
+	it("reads no ELF program header table with an impossible entry size", async () => {
+		const bytes = elfFile()
+		const view = new DataView(bytes.buffer)
+
+		view.setUint16(54, 65_535, true)
+		view.setUint16(56, 256, true)
+
+		const source = sourceOf(bytes)
+
+		expect(await readBinaryInfo(source, "tool")).toMatchObject({ format: "elf", interpreter: null })
+		expect(source.reads.every(([, length]) => length <= 4096)).toBe(true)
+	})
+
+	it("sends a present signature back without its DER, with its signer", async () => {
+		const reading = await readBinaryReading(sourceOf(peFile()), "setup.exe", der => ({
+			subject: `CN=${String(der.length)} bytes`,
+			issuer: "CN=CA",
+			commonName: null,
+			organization: null,
+			signedAt: null
+		}))
+
+		expect(reading.signer?.subject).toBe(`CN=${String(DER.length)} bytes`)
+		expect(reading.info?.format === "pe" && reading.info.signature).toEqual({ state: "present", der: new Uint8Array(0) })
 	})
 })

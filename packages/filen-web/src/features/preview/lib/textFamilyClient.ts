@@ -5,7 +5,8 @@ import { statelessWorker } from "@/lib/workers/ownedWorker"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 import type { CalendarFile } from "@filen/shared/calendarFile"
 import type { ContactFile } from "@filen/shared/contactFile"
-import type { CmsSignerSummary } from "@filen/office/core/pdfsign"
+import type { BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
+import type { BinarySource } from "@/features/preview/lib/binaryInfo/types"
 
 export type { TorrentReading } from "@/features/preview/workers/textFamily.worker"
 
@@ -35,9 +36,14 @@ export async function readContactFile(text: string): Promise<ContactFile> {
 	return await textFamilyWorker.use<ContactFile>(({ remote }) => remote.contacts(text))
 }
 
-// The signer a code signature's CMS names; null when it names none. A copy of the bytes is sent.
-export async function readCodeSigner(der: Uint8Array): Promise<CmsSignerSummary | null> {
-	const copy = der.slice()
+// An executable's or disk image's headers, parsed in the worker; it asks the page for each range it reads, which
+// `source` answers (a copy is sent, never a view of the reader's memo).
+export async function readBinaryHeaders(source: BinarySource, name: string, signal: AbortSignal): Promise<BinaryReading> {
+	const read = Comlink.proxy(async (offset: number, length: number): Promise<Uint8Array> => {
+		const copy = (await source.read(offset, length, signal)).slice()
 
-	return await textFamilyWorker.use<CmsSignerSummary | null>(({ remote }) => remote.codeSigner(Comlink.transfer(copy, [copy.buffer])))
+		return Comlink.transfer(copy, [copy.buffer])
+	})
+
+	return await textFamilyWorker.use<BinaryReading>(({ remote }) => remote.binary(read, source.size, name))
 }

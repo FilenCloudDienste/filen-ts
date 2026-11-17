@@ -3,7 +3,8 @@ import * as Comlink from "comlink"
 import { readTorrent, torrentHashes, torrentMagnet, TorrentError, type TorrentHashes, type TorrentInfo } from "@filen/shared/torrent"
 import { readCalendar, type CalendarFile } from "@filen/shared/calendarFile"
 import { readContacts, type ContactFile } from "@filen/shared/contactFile"
-import { cmsSigner, type CmsSignerSummary } from "@filen/office/core/pdfsign"
+import { cmsSigner } from "@filen/office/core/pdfsign"
+import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
@@ -42,8 +43,16 @@ const api = {
 	calendar: (text: string): CalendarFile => readCalendar(text),
 	// The text the page decoded, read as vCards.
 	contacts: (text: string): ContactFile => readContacts(text),
-	// Who signed a code signature's CMS (parsed with pkijs, which stays off the page), never verified.
-	codeSigner: (der: Uint8Array): CmsSignerSummary | null => cmsSigner(der)
+	// An executable's or disk image's headers, read through the page's byte reader (`read`, a proxy the page answers with
+	// copies), and the signer its signature names (parsed with pkijs, which stays off the page; never verified).
+	binary: async (read: (offset: number, length: number) => Promise<Uint8Array>, size: number, name: string): Promise<BinaryReading> => {
+		try {
+			return await readBinaryReading({ size, read: (offset, length) => read(offset, length) }, name, cmsSigner)
+		} finally {
+			// What arrives is Comlink's proxy of the page's function: let the page drop it.
+			;(read as unknown as Comlink.Remote<typeof read>)[Comlink.releaseProxy]()
+		}
+	}
 }
 
 export type TextFamilyWorkerApi = typeof api

@@ -12,9 +12,11 @@ const FAT_MAGIC = 0xcafebabe
 const FAT_MAGIC_64 = 0xcafebabf
 // A Java class file shares the fat magic; its next word (a version) is far above any architecture count.
 const MAX_FAT_ARCHES = 32
-const MAX_COMMANDS_BYTES = 1024 * 1024
+// Load commands read per slice: real ones take a few KiB.
+const MAX_COMMANDS_BYTES = 256 * 1024
 const MAX_COMMANDS = 1024
-const MAX_SIGNATURE = 4 * 1024 * 1024
+// The code signature's SuperBlob, as the PE's WIN_CERTIFICATE: past this it is not read.
+const MAX_SIGNATURE = 1024 * 1024
 const MAX_BLOBS = 64
 
 const LC_CODE_SIGNATURE = 0x1d
@@ -128,7 +130,8 @@ interface Slice {
 	readonly signature: BinarySignature
 }
 
-async function readSlice(source: BinarySource, start: number, signal?: AbortSignal): Promise<Slice | null> {
+// `withSignature`: the slice shown, whose first LC_CODE_SIGNATURE (and only that) is read.
+async function readSlice(source: BinarySource, start: number, withSignature: boolean, signal?: AbortSignal): Promise<Slice | null> {
 	const header = await source.read(start, 32, signal)
 	const magic = u32(header, 0, false)
 
@@ -146,6 +149,7 @@ async function readSlice(source: BinarySource, start: number, signal?: AbortSign
 	let platform: string | null = null
 	let minimumOs: string | null = null
 	let signature: BinarySignature = { state: "none" }
+	let signed = false
 	let at = 0
 
 	for (let index = 0; index < commands && at + 8 <= table.length; index++) {
@@ -158,8 +162,11 @@ async function readSlice(source: BinarySource, start: number, signal?: AbortSign
 		} else if (VERSION_MIN_PLATFORMS.has(command) && platform === null) {
 			platform = VERSION_MIN_PLATFORMS.get(command) ?? null
 			minimumOs = version(u32(table, at + 8, little))
-		} else if (command === LC_CODE_SIGNATURE) {
-			signature = await codeSignature(source, start + u32(table, at + 8, little), u32(table, at + 12, little), signal)
+		} else if (command === LC_CODE_SIGNATURE && !signed) {
+			signed = true
+			signature = withSignature
+				? await codeSignature(source, start + u32(table, at + 8, little), u32(table, at + 12, little), signal)
+				: { state: "present", der: null }
 		}
 
 		if (size < 8) break
@@ -181,7 +188,7 @@ export async function readMachO(source: BinarySource, head: Uint8Array, signal?:
 	const magic = u32(head, 0, false)
 
 	if (isThin(magic)) {
-		const slice = await readSlice(source, 0, signal)
+		const slice = await readSlice(source, 0, true, signal)
 
 		return slice === null
 			? null
@@ -208,14 +215,18 @@ export async function readMachO(source: BinarySource, head: Uint8Array, signal?:
 	const wideFat = magic === FAT_MAGIC_64
 	const entries = await source.read(8, count * (wideFat ? 32 : 20), signal)
 	const slices: Slice[] = []
+	const offsets = new Set<number>()
 
 	for (let index = 0; index < count; index++) {
 		const at = index * (wideFat ? 32 : 20)
 		const offset = wideFat ? u32(entries, at + 8, false) * 0x100000000 + u32(entries, at + 12, false) : u32(entries, at + 8, false)
 
-		if (offset >= source.size) continue
+		// The same slice twice is read once.
+		if (offset >= source.size || offsets.has(offset)) continue
 
-		const slice = await readSlice(source, offset, signal)
+		offsets.add(offset)
+
+		const slice = await readSlice(source, offset, slices.length === 0, signal)
 
 		if (slice !== null) slices.push(slice)
 	}

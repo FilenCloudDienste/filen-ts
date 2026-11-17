@@ -1,42 +1,17 @@
 import { useEffect, useEffectEvent, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { CmsSignerSummary } from "@filen/office/core/pdfsign"
 import { driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { usePreviewAccessMode, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { openByteReader } from "@/features/preview/lib/origin/byteReader"
-import { readBinaryInfo } from "@/features/preview/lib/binaryInfo/read"
-import { readCodeSigner } from "@/features/preview/lib/textFamilyClient"
+import { readBinaryHeaders } from "@/features/preview/lib/textFamilyClient"
+import type { BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 import { binaryCard } from "@/features/preview/lib/binaryInfo/card"
-import type { BinaryInfo, BinarySource } from "@/features/preview/lib/binaryInfo/types"
+import type { BinarySource } from "@/features/preview/lib/binaryInfo/types"
 import { MetadataCard } from "@/features/preview/components/metadataCard"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
-
-interface BinaryReading {
-	readonly info: BinaryInfo | null
-	readonly signer: CmsSignerSummary | null
-}
-
-// The headers, then the signer of the signature they carry (parsed in the text-family worker, never verified).
-async function readBinary(source: BinarySource, name: string, signal: AbortSignal): Promise<BinaryReading> {
-	const info = await readBinaryInfo(source, name, signal)
-	const signature = info !== null && (info.format === "pe" || info.format === "macho") ? info.signature : null
-
-	if (signature?.state !== "present" || signature.der === null) {
-		return { info, signer: null }
-	}
-
-	// A signer that cannot be read leaves the signature shown as unreadable.
-	const signer = await readCodeSigner(signature.der).catch((e: unknown) => {
-		log.error("preview", "reading a code signature's signer failed", e)
-
-		return null
-	})
-
-	return { info, signer }
-}
 
 type State = { status: "pending" } | { status: "done"; reading: BinaryReading } | { status: "failed" }
 
@@ -94,7 +69,7 @@ export function BinaryInfoViewer({ item }: { item: DriveItem }) {
 
 		void openByteReader(readFrom(), token, { access, blocks: 4 })
 			.then(async reader => {
-				const reading = await readBinary(reader, name, abort.signal).finally(() => {
+				const reading = await readBinaryHeaders(reader, name, abort.signal).finally(() => {
 					reader.close()
 					abort.signal.removeEventListener("abort", stop)
 				})
@@ -144,7 +119,7 @@ export function HeldBinaryInfo({ item, bytes }: { item: DriveItem; bytes: Uint8A
 				Promise.resolve(bytes.subarray(Math.min(offset, bytes.length), Math.min(offset + length, bytes.length)))
 		}
 
-		readBinary(source, name, abort.signal).then(
+		readBinaryHeaders(source, name, abort.signal).then(
 			reading => {
 				if (!abort.signal.aborted) setState({ status: "done", reading })
 			},

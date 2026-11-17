@@ -7,6 +7,7 @@ import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
+import type { BinarySource } from "@/features/preview/lib/binaryInfo/types"
 
 // An executable opens on a card of its headers (never run), read in ranges through the byte layer; one opened as text
 // without the name that says what it is shows the same card from the bytes the text path holds.
@@ -32,6 +33,12 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: elf(), refetch: vi.fn() })
 }))
+// The worker's parse, run in place (no signature here, so no signer).
+vi.mock("@/features/preview/lib/textFamilyClient", async () => {
+	const { readBinaryReading } = await import("@/features/preview/lib/binaryInfo/reading")
+
+	return { readBinaryHeaders: (source: BinarySource, name: string) => readBinaryReading(source, name, () => null) }
+})
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: () => Promise.resolve() } }))
 vi.mock("@/features/preview/lib/origin/byteReader", () => ({
 	openByteReader: () => {

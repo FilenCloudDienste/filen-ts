@@ -6,6 +6,8 @@ import type { BinarySource, ElfInfo } from "@/features/preview/lib/binaryInfo/ty
 
 const PT_INTERP = 3
 const MAX_PROGRAM_HEADERS = 256
+// A program header is 32 (ELF32) or 56 (ELF64) bytes; a larger entry size is no real file's.
+const MAX_PROGRAM_HEADER_SIZE = 64
 const MAX_INTERPRETER = 256
 
 const MACHINES: ReadonlyMap<number, string> = new Map([
@@ -70,7 +72,13 @@ export async function readElf(source: BinarySource, head: Uint8Array, signal?: A
 	const count = Math.min(u16(head, wide ? 56 : 44, little), MAX_PROGRAM_HEADERS)
 	let interpreter: string | null = null
 
-	if (programHeaders !== null && programHeaders > 0 && entrySize >= (wide ? 56 : 32) && programHeaders < source.size) {
+	if (
+		programHeaders !== null &&
+		programHeaders > 0 &&
+		entrySize >= (wide ? 56 : 32) &&
+		entrySize <= MAX_PROGRAM_HEADER_SIZE &&
+		programHeaders < source.size
+	) {
 		const table = await source.read(programHeaders, count * entrySize, signal)
 
 		for (let index = 0; index < count; index++) {
