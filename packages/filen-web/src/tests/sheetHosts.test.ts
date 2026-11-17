@@ -47,7 +47,12 @@ vi.mock("@/features/spreadsheet/workers/sheetText.worker.ts?worker", () => ({ de
 vi.mock("@/features/spreadsheet/workers/sheetWorkbook.worker.ts?worker", () => ({ default: FakeWorker }))
 vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild: vi.fn() }))
 
-let openSheet: typeof import("@/features/spreadsheet/lib/sheetHosts").openSheet
+// The module graph's first load (its transform: @filen/office's sheet host and text worker from source) happens here,
+// while the file is collected, where no hook timeout applies. Under a full parallel run that load waits on the shared
+// transform with every other file: in the first beforeEach it overran the 10 s hook timeout, and the next test's
+// resetModules then raced the import still in flight, failing it too. Each beforeEach below only evaluates the
+// already-transformed graph again (milliseconds), for a fresh worker pool per test.
+let { openSheet } = await import("@/features/spreadsheet/lib/sheetHosts")
 
 function csv(text: string): Uint8Array {
 	return new TextEncoder().encode(text)
