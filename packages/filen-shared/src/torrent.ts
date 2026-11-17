@@ -63,6 +63,8 @@ const MAX_COMMENT = 4096
 const MAX_CREATED_BY = 256
 const MAX_ADDRESS = 2048
 const MAX_ADDRESSES = 500
+// A dictionary key's bytes at most: real keys are short, and a file name is cut to MAX_PART anyway.
+const MAX_KEY_BYTES = 8192
 
 type Value = bigint | Uint8Array | Value[] | Dict
 
@@ -184,7 +186,13 @@ class Reader {
 			let seen: Set<string> | null = null
 
 			while (this.byte() !== 0x65) {
-				const key = byteString(this.string())
+				const raw = this.string()
+
+				if (raw.length > MAX_KEY_BYTES) {
+					throw new TorrentError("tooLarge", "dictionary key too long")
+				}
+
+				const key = byteString(raw)
 				const last = dict.keys.at(-1)
 
 				if (last !== undefined && key <= last) {
@@ -265,30 +273,50 @@ interface Files {
 	omitted: number
 	total: bigint
 	pathChars: number
+	// No further path fits: the file limit is reached or a path ran past the characters left. Every later file is
+	// counted without building its path.
+	full: boolean
 }
 
-function joinPath(parts: readonly string[]): string {
-	const path = parts.join("/")
-
-	return path.length > MAX_PATH ? `${path.slice(0, MAX_PATH - 1)}…` : path
+// A path being built, cut once it reaches MAX_PATH: a cut path takes no more parts.
+interface PathPrefix {
+	readonly path: string
+	readonly cut: boolean
 }
 
-function addFile(files: Files, parts: readonly string[], size: bigint): void {
+function withPart(prefix: PathPrefix, part: string): PathPrefix {
+	if (prefix.cut) {
+		return prefix
+	}
+
+	const room = MAX_PATH - prefix.path.length - 1
+
+	return part.length <= room
+		? { path: `${prefix.path}/${part}`, cut: false }
+		: { path: `${`${prefix.path}/${part.slice(0, room + 1)}`.slice(0, MAX_PATH - 1)}…`, cut: true }
+}
+
+// Whether another file's path is to be built: a file past the limit or the budget is only counted.
+function admits(files: Files, size: bigint): boolean {
 	if (size < 0n) {
 		throw new TorrentError("malformed", "negative file size")
 	}
 
 	files.total += size
 
-	if (files.list.length >= TORRENT_FILE_LIMIT) {
+	if (files.full || files.list.length >= TORRENT_FILE_LIMIT) {
+		files.full = true
 		files.omitted++
 
-		return
+		return false
 	}
 
-	const path = joinPath(parts)
+	return true
+}
 
+function addFile(files: Files, path: string, size: bigint): void {
 	if (files.pathChars + path.length > MAX_PATH_TOTAL) {
+		files.full = true
 		files.omitted++
 
 		return
@@ -303,7 +331,9 @@ function v1Files(info: Dict, name: string, files: Files): void {
 	const list = info.get("files")
 
 	if (!Array.isArray(list)) {
-		addFile(files, [name], integer(info.get("length")) ?? 0n)
+		const size = integer(info.get("length")) ?? 0n
+
+		if (admits(files, size)) addFile(files, name, size)
 
 		return
 	}
@@ -318,17 +348,40 @@ function v1Files(info: Dict, name: string, files: Files): void {
 			continue
 		}
 
-		const raw = entry.get("path.utf-8") ?? entry.get("path")
-		const parts = Array.isArray(raw) ? raw.map(part => text(part, MAX_PART)).filter((part): part is string => part !== null) : []
+		const size = integer(entry.get("length")) ?? 0n
 
-		addFile(files, [name, ...parts], integer(entry.get("length")) ?? 0n)
+		if (!admits(files, size)) {
+			continue
+		}
+
+		const raw = entry.get("path.utf-8") ?? entry.get("path")
+		let path: PathPrefix = { path: name, cut: false }
+
+		for (const part of Array.isArray(raw) ? raw : []) {
+			if (path.cut) break
+
+			const decoded = text(part, MAX_PART)
+
+			if (decoded !== null) path = withPart(path, decoded)
+		}
+
+		addFile(files, path.path, size)
 	}
 }
 
+// A file tree key as a path part: only the bytes a part can show are decoded.
+function keyPart(key: string): string {
+	return display(
+		Uint8Array.from(key.slice(0, MAX_PART * 4), char => char.charCodeAt(0)),
+		MAX_PART
+	)
+}
+
 // v2: `file tree` of nested directories, each key a file or directory name, a file's value holding props under its ""
-// key ({ length, pieces root }). Depth first in the file's order, without recursion.
+// key ({ length, pieces root }). Depth first in the file's order, without recursion; each directory's path is built
+// (and cut) once, when it is entered, and a file only appends its own name.
 function v2Files(tree: Dict, name: string, files: Files): void {
-	const stack: { dict: Dict; parts: readonly string[]; index: number }[] = [{ dict: tree, parts: [name], index: 0 }]
+	const stack: { dict: Dict; prefix: PathPrefix; index: number }[] = [{ dict: tree, prefix: { path: name, cut: false }, index: 0 }]
 
 	for (let frame = stack.at(-1); frame !== undefined; frame = stack.at(-1)) {
 		if (frame.index >= frame.dict.keys.length) {
@@ -345,23 +398,22 @@ function v2Files(tree: Dict, name: string, files: Files): void {
 		}
 
 		if (key === "") {
-			addFile(files, frame.parts, integer(value.get("length")) ?? 0n)
+			const size = integer(value.get("length")) ?? 0n
+
+			if (admits(files, size)) addFile(files, frame.prefix.path, size)
+
 			continue
 		}
 
-		const parts = [
-			...frame.parts,
-			display(
-				Uint8Array.from(key, char => char.charCodeAt(0)),
-				MAX_PART
-			)
-		]
 		const leaf = value.get("")
 
 		if (leaf instanceof Dict) {
-			addFile(files, parts, integer(leaf.get("length")) ?? 0n)
+			const size = integer(leaf.get("length")) ?? 0n
+
+			if (admits(files, size)) addFile(files, withPart(frame.prefix, keyPart(key)).path, size)
 		} else {
-			stack.push({ dict: value, parts, index: 0 })
+			// Past the budget, a directory's files are only counted: its name is not decoded.
+			stack.push({ dict: value, prefix: files.full ? frame.prefix : withPart(frame.prefix, keyPart(key)), index: 0 })
 		}
 	}
 }
@@ -402,7 +454,7 @@ export function readTorrent(bytes: Uint8Array): TorrentInfo {
 		throw new TorrentError("malformed", "malformed pieces")
 	}
 
-	const files: Files = { list: [], omitted: 0, total: 0n, pathChars: 0 }
+	const files: Files = { list: [], omitted: 0, total: 0n, pathChars: 0, full: false }
 
 	if (v2) {
 		v2Files(tree, name, files)

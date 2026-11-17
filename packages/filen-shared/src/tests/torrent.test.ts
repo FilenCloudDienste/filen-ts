@@ -177,6 +177,41 @@ describe("readTorrent", () => {
 		expect(info.totalSize).toBe(50_000n)
 	})
 
+	// Deep directories of long names over many files: each directory's path is cut once, and files past the budget are
+	// counted without a path being built.
+	it("bounds a v2 tree whose every file sits under a long, deep path", () => {
+		const leaves: Record<string, B> = {}
+
+		for (let index = 0; index < 200_000; index++) leaves[`f${String(index).padStart(6, "0")}`] = { "": { length: 1 } }
+
+		let tree: B = leaves
+
+		for (let depth = 0; depth < 58; depth++) tree = { [`${String(depth)}${"d".repeat(8000)}`]: tree }
+
+		const bytes = bencode({ info: { name: "Deep", "meta version": 2, "piece length": 16384, "file tree": tree } })
+		const before = process.memoryUsage().heapUsed
+		const started = Date.now()
+		const info = readTorrent(bytes)
+
+		expect(Date.now() - started).toBeLessThan(5000)
+		expect(process.memoryUsage().heapUsed - before).toBeLessThan(256 * 1024 * 1024)
+		expect(info.files.length + info.filesOmitted).toBe(200_000)
+		expect(info.files.every(file => file.path.length === 4096 && file.path.endsWith("…"))).toBe(true)
+		expect(info.files.length).toBe(4096)
+		expect(info.totalSize).toBe(200_000n)
+	})
+
+	it("refuses a dictionary key past a few KiB as too large", () => {
+		expect(() => readTorrent(bencode({ ["k".repeat(8193)]: 0, info: { name: "x", length: 1 } }))).toThrow(
+			expect.objectContaining({ kind: "tooLarge" })
+		)
+		expect(
+			readTorrent(
+				bencode({ ["k".repeat(8192)]: 0, info: { name: "x", length: 1, "piece length": 16384, pieces: new Uint8Array(20) } })
+			).name
+		).toBe("x")
+	})
+
 	it("removes format and bidi controls from names, paths, comments and addresses", () => {
 		const info = readTorrent(
 			bencode({
