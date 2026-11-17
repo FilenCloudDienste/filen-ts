@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import TextFamilyWorker from "@/features/preview/workers/textFamily.worker.ts?worker"
 import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
-import { workerJob, type JobClock } from "@/features/preview/lib/workerJob"
+import { WorkerJobTimeoutError, workerJob, type JobClock } from "@/features/preview/lib/workerJob"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 import type { EmailReading } from "@/features/preview/lib/emailReading"
 import type { CalendarFile } from "@filen/shared/calendarFile"
@@ -33,14 +33,23 @@ export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading
 	})
 }
 
-// A message's headers, bodies and attachments (Blobs), from a copy of its bytes.
+// A message's headers, bodies and attachments (Blobs), from a copy of its bytes. A parse past the job's budget is a
+// message too large to read here (a slow device on a hostile one), not a failure.
 export async function readEmailFile(bytes: Uint8Array): Promise<EmailReading> {
-	return await job<EmailReading>(async remote => {
-		// A copy per attempt: a transferred one is gone.
-		const copy = bytes.slice()
+	try {
+		return await job<EmailReading>(async remote => {
+			// A copy per attempt: a transferred one is gone.
+			const copy = bytes.slice()
 
-		return await remote.email(Comlink.transfer(copy, [copy.buffer]))
-	})
+			return await remote.email(Comlink.transfer(copy, [copy.buffer]))
+		})
+	} catch (e) {
+		if (e instanceof WorkerJobTimeoutError) {
+			return { status: "tooLarge" }
+		}
+
+		throw e
+	}
 }
 
 // A subtitle file's cues, from the text the page decoded; the worker transfers the times back.

@@ -33,10 +33,10 @@ const api = {
 
 		return { status: "ok", info, hashes, magnet: torrentMagnet(info, hashes) }
 	},
-	// The text the page already decoded (in the encoding it shows), parsed by its extension's format: cue times as
-	// transferred arrays, cue text as plain text.
 	// A message: a copy of its bytes, parsed and dropped; attachments come back as Blobs (no copy on the way).
 	email: (bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> => readEmail(bytes),
+	// The text the page already decoded (in the encoding it shows), parsed by its extension's format: cue times as
+	// transferred arrays, cue text as plain text.
 	subtitles: (text: string, extension: string): SubtitleReading => {
 		const reading = readSubtitleText(text, extension)
 
