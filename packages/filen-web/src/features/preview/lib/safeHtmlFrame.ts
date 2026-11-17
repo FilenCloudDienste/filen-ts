@@ -158,33 +158,66 @@ export function nextAutoHeight(current: number, measured: { height: number; foll
 	return measured.followsFrame ? current : Math.min(Math.ceil(measured.height), cap)
 }
 
-// Heights a frame was recently given, to tell settling from flipping.
-const AUTO_HEIGHT_HISTORY = 4
+// Direction changes (grow, shrink, grow…) a document's height may take before it is held, whatever the heights.
+const AUTO_HEIGHT_REVERSALS = 6
+// A change after this long without one is the reader's (a <details> opened or closed), not the frame's own layout
+// answering its last height: the height settles afresh. A script-less frame runs no listener in WebKit, so the toggle
+// itself cannot be heard.
+const AUTO_HEIGHT_QUIET_MS = 400
 
-// nextAutoHeight over one document's life, held for good once it would go back to a height it was given recently
-// (content that flips with the frame's height across a media query, A, B, A…): the frame keeps its height and the
-// document scrolls inside.
-export function autoHeightSteps(cap: number): (current: number, measured: { height: number; followsFrame: boolean }) => number {
-	const given: number[] = []
+export interface AutoHeightSteps {
+	// The frame's next height, from its current one, the measured content, the frame's width and the time (ms).
+	step(current: number, measured: { height: number; followsFrame: boolean }, width: number, now: number): number
+}
+
+// nextAutoHeight over one document's life, held once it would go back to any height it was given while settling
+// (content that cycles with the frame's height across media queries, however many steps the cycle has), or after a few
+// direction changes: the frame keeps its height and the document scrolls inside. A new width, or a change after a quiet
+// spell, settles afresh, so content the reader opens and closes is followed both ways.
+export function autoHeightSteps(cap: number): AutoHeightSteps {
+	const given = new Set<number>()
 	let held: number | null = null
+	let reversals = 0
+	let lastChange = 0
+	let lastWidth: number | null = null
+	let lastStep = Number.NEGATIVE_INFINITY
 
-	return (current, measured) => {
-		if (held !== null) {
-			return held
+	const reset = (): void => {
+		given.clear()
+		held = null
+		reversals = 0
+		lastChange = 0
+	}
+
+	return {
+		step: (current, measured, width, now) => {
+			if (lastWidth !== width || now - lastStep > AUTO_HEIGHT_QUIET_MS) {
+				lastWidth = width
+				reset()
+			}
+
+			lastStep = now
+
+			if (held !== null) {
+				return held
+			}
+
+			const next = nextAutoHeight(current, measured, cap)
+			const change = Math.sign(next - current)
+
+			if (change !== 0 && lastChange !== 0 && change !== lastChange) reversals++
+
+			if (change !== 0) lastChange = change
+
+			if (next !== current && (given.has(next) || reversals >= AUTO_HEIGHT_REVERSALS)) {
+				held = current
+
+				return current
+			}
+
+			given.add(next)
+
+			return next
 		}
-
-		const next = nextAutoHeight(current, measured, cap)
-
-		if (next !== current && given.includes(next)) {
-			held = current
-
-			return current
-		}
-
-		given.push(next)
-
-		if (given.length > AUTO_HEIGHT_HISTORY) given.shift()
-
-		return next
 	}
 }

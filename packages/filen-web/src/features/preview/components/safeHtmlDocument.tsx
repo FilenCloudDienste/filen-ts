@@ -87,13 +87,13 @@ export function SafeHtmlDocument({ html, links, title, layout, paper }: SafeHtml
 
 		const frame = frameRef.current
 		const root = frameDocument.documentElement
-		const step = autoHeightSteps(AUTO_HEIGHT_MAX)
+		const steps = autoHeightSteps(AUTO_HEIGHT_MAX)
 		const observer = new ResizeObserver(() => {
 			if (frame === null) {
 				return
 			}
 
-			setHeight(step(frame.offsetHeight, measureFrameContent(frame, root)))
+			setHeight(steps.step(frame.offsetHeight, measureFrameContent(frame, root), frame.clientWidth, performance.now()))
 		})
 
 		observer.observe(root)

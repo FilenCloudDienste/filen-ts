@@ -250,29 +250,54 @@ describe("nextAutoHeight", () => {
 		expect(nextAutoHeight(150, { height: 180, followsFrame: true }, 4000)).toBe(150)
 	})
 
-	// A media query on the frame's height: 1000px tall below 601px, 100px above. Held at the second height, for good.
-	it("holds a height that flips with the frame instead of following it forever", () => {
-		const step = autoHeightSteps(4000)
-		const flipping = (frame: number) => ({ height: frame <= 600 ? 1016 : 116, followsFrame: false })
-
+	// Media queries on the frame's height: each band's content puts the frame in the next band.
+	function run(steps: ReturnType<typeof autoHeightSteps>, layout: (frame: number) => number, calls: number): number[] {
 		let frame = 150
 		const given: number[] = []
 
-		for (let call = 0; call < 10; call++) {
-			const next = step(frame, flipping(frame))
-
-			given.push(next)
-			frame = next
+		for (let call = 0; call < calls; call++) {
+			// One layout after another, as a ResizeObserver delivers them.
+			frame = steps.step(frame, { height: layout(frame), followsFrame: false }, 800, call * 16)
+			given.push(frame)
 		}
+
+		return given
+	}
+
+	it("holds a height that flips with the frame instead of following it forever", () => {
+		const given = run(autoHeightSteps(4000), frame => (frame <= 600 ? 1016 : 116), 10)
 
 		expect(given).toEqual([1016, 116, 116, 116, 116, 116, 116, 116, 116, 116])
 	})
 
-	it("keeps following content that settles, growing and shrinking", () => {
-		const step = autoHeightSteps(4000)
+	it("holds a cycle of five heights too", () => {
+		const bands = [200, 400, 600, 800, 1000]
+		const given = run(autoHeightSteps(4000), frame => bands[(bands.findIndex(band => frame <= band) + 1) % bands.length] ?? 200, 30)
 
-		expect([step(150, { height: 300, followsFrame: false }), step(300, { height: 420, followsFrame: false })]).toEqual([300, 420])
-		expect(step(420, { height: 420, followsFrame: false })).toBe(420)
-		expect(step(420, { height: 380, followsFrame: false })).toBe(380)
+		expect(new Set(given.slice(10)).size).toBe(1)
+	})
+
+	it("keeps following content that settles, growing and shrinking", () => {
+		const steps = autoHeightSteps(4000)
+
+		expect([
+			steps.step(150, { height: 300, followsFrame: false }, 800, 0),
+			steps.step(300, { height: 420, followsFrame: false }, 800, 16)
+		]).toEqual([300, 420])
+		expect(steps.step(420, { height: 420, followsFrame: false }, 800, 32)).toBe(420)
+		expect(steps.step(420, { height: 380, followsFrame: false }, 800, 48)).toBe(380)
+	})
+
+	// A <details> opened and closed returns to a height it had: a change after a quiet spell is followed, both ways.
+	it("follows a details opened and closed again, and a new width", () => {
+		const steps = autoHeightSteps(4000)
+
+		expect(steps.step(150, { height: 300, followsFrame: false }, 800, 0)).toBe(300)
+		expect(steps.step(300, { height: 500, followsFrame: false }, 800, 2000)).toBe(500)
+		expect(steps.step(500, { height: 300, followsFrame: false }, 800, 4000)).toBe(300)
+		// A repeat at layout pace holds; a new width settles afresh.
+		expect(steps.step(300, { height: 500, followsFrame: false }, 800, 4016)).toBe(500)
+		expect(steps.step(500, { height: 300, followsFrame: false }, 800, 4032)).toBe(500)
+		expect(steps.step(500, { height: 300, followsFrame: false }, 640, 4048)).toBe(300)
 	})
 })
