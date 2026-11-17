@@ -183,12 +183,13 @@ export default defineConfig([
 		}
 	},
 	{
-		// The remux worker and its modules run Mediabunny, as do the worker-only input opener the media workers share
-		// and the video editor's workers; tests exercise them directly.
+		// The remux worker and its modules run Mediabunny, as do the worker-only input opener the media workers share,
+		// the app's own demuxers it reads through, and the video editor's workers; tests exercise them directly.
 		files: [
 			"src/workers/remux.worker.ts",
 			"src/workers/remux/**/*.{ts,tsx}",
 			"src/lib/media/blockInput.ts",
+			"src/lib/media/demux/**/*.{ts,tsx}",
 			"src/features/preview/videoEdit/worker/**/*.{ts,tsx}",
 			"src/tests/**/*.{ts,tsx}"
 		],

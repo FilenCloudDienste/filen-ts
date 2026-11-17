@@ -31,10 +31,11 @@ function container(probe: ProbeContainer, fields: Partial<VideoContainer> = {}):
 	return { drive: true, library: "video", transportStream: false, editorReads: true, photo: true, probe, keyframes: true, ...fields }
 }
 
-// Read by the probe but played by nothing yet: not a drive video, not a photo, no thumbnails, and not in the editor.
-function unplayable(probe: ProbeContainer, library: VideoContainer["library"]): VideoContainer {
+// A container only the app's own demuxers read: no photo, no keyframe thumbnails, not in the editor; a drive video
+// (`drive`) once its demuxer plays it.
+function demuxed(probe: ProbeContainer, library: VideoContainer["library"], drive: boolean): VideoContainer {
 	return {
-		drive: false,
+		drive,
 		...(library === undefined ? {} : { library }),
 		transportStream: false,
 		editorReads: false,
@@ -61,16 +62,17 @@ export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<str
 	["m2ts", container("ts")],
 	// Plays only where the browser plays Ogg from a plain src; nothing remuxes it.
 	["ogv", container("ogg", { editorReads: false, photo: false, keyframes: false })],
-	["avi", unplayable("avi", "unsupportedVideo")],
-	["divx", unplayable("avi", undefined)],
-	["flv", unplayable("flv", "unsupportedVideo")],
-	["f4v", unplayable("flv", undefined)],
-	["asf", unplayable("asf", undefined)],
-	["wmv", unplayable("asf", "unsupportedVideo")],
-	["mpg", unplayable("ps", "unsupportedVideo")],
-	["mpeg", unplayable("ps", "unsupportedVideo")],
-	["vob", unplayable("ps", "unsupportedVideo")],
-	["m2v", unplayable("ps", undefined)]
+	["avi", demuxed("avi", "unsupportedVideo", false)],
+	["divx", demuxed("avi", undefined, false)],
+	["flv", demuxed("flv", "video", true)],
+	// Adobe's MP4: mediabunny and the MP4 walker read it; outside Photos (R26) and the editor.
+	["f4v", { drive: true, transportStream: false, editorReads: false, photo: false, probe: "mp4", keyframes: true }],
+	["asf", demuxed("asf", undefined, false)],
+	["wmv", demuxed("asf", "unsupportedVideo", false)],
+	["mpg", demuxed("ps", "unsupportedVideo", false)],
+	["mpeg", demuxed("ps", "unsupportedVideo", false)],
+	["vob", demuxed("ps", "unsupportedVideo", false)],
+	["m2v", demuxed("ps", undefined, false)]
 ])
 
 const FILE_KINDS = new Map<string, VideoFileKind>([

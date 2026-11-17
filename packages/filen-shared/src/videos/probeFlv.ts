@@ -17,7 +17,8 @@ import type { MediaCodec, ParsedContainer, ProbeAudio, ProbeVideo } from "./prob
 const HEAD_BYTES = BLOCK_BYTES
 const TAG_HEADER_BYTES = 11
 const AMF_MAX_DEPTH = 4
-const AMF_MAX_ENTRIES = 4096
+// A two-hour file indexed every second lists 7200 keyframes.
+const AMF_MAX_ENTRIES = 131_072
 
 // AMF0 values. Objects are Maps, so no key a file names can reach a prototype.
 type AmfValue = number | boolean | string | null | AmfObject | AmfValue[]
@@ -135,9 +136,10 @@ const VIDEO_CODECS: Readonly<Record<number, MediaCodec>> = { 2: "h263", 4: "vp6"
 // Enhanced RTMP video FourCCs.
 const EX_VIDEO: Readonly<Record<string, MediaCodec>> = { avc1: "h264", hvc1: "hevc", av01: "av1", vp09: "vp9" }
 
-type AudioFields = Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate">
+export type AudioFields = Pick<ProbeAudio, "codec" | "codecString" | "ch" | "rate">
 
-function audioTag(data: Uint8Array): AudioFields {
+// The codec, channels and rate an audio tag states; its AAC sequence header, when it is one, decides them.
+export function flvAudioTag(data: Uint8Array): AudioFields {
 	const flags = data[0] ?? 0
 	const format = flags >> 4
 	const codec = SOUND_FORMATS[format] ?? null
@@ -160,7 +162,8 @@ function audioTag(data: Uint8Array): AudioFields {
 	return { codec, codecString, ch, rate }
 }
 
-function videoTag(data: Uint8Array, width: number, height: number): ProbeVideo {
+// The codec a video tag states, named by its sequence header (legacy AVC or Enhanced RTMP) when it is one.
+export function flvVideoTag(data: Uint8Array, width: number, height: number): ProbeVideo {
 	const flags = data[0] ?? 0
 	const enhanced = (flags & 0x80) !== 0
 	const fourcc = enhanced ? ascii(data, 1, 5) : String(flags & 0x0f)
@@ -190,12 +193,49 @@ function videoTag(data: Uint8Array, width: number, height: number): ProbeVideo {
 	}
 }
 
+export interface FlvMetaData {
+	duration: number | null
+	width: number | null
+	height: number | null
+	frameRate: number | null
+	// The keyframes' times (seconds) and their tags' file positions, in order; null when not listed.
+	keyframes: { times: number[]; positions: number[] } | null
+}
+
+function numbers(value: AmfValue | undefined): number[] {
+	return Array.isArray(value) ? value.map(entry => (typeof entry === "number" && Number.isFinite(entry) ? entry : Number.NaN)) : []
+}
+
+// A script tag's onMetaData, from the tag's data; null for any other script tag.
+export function readFlvMetaData(data: Uint8Array): FlvMetaData | null {
+	const reader = new AmfReader(data, 0, data.length)
+	const name = reader.value()
+	const meta = reader.value()
+
+	if (name !== "onMetaData" || !(meta instanceof Map)) {
+		return null
+	}
+
+	const index = meta.get("keyframes")
+	const times = index instanceof Map ? numbers(index.get("times")) : []
+	const positions = index instanceof Map ? numbers(index.get("filepositions")) : []
+	const usable = times.length > 0 && times.length === positions.length && [...times, ...positions].every(Number.isFinite)
+
+	return {
+		duration: numberOf(meta.get("duration")),
+		width: numberOf(meta.get("width")),
+		height: numberOf(meta.get("height")),
+		frameRate: numberOf(meta.get("framerate")),
+		keyframes: usable ? { times, positions } : null
+	}
+}
+
 // The duration is onMetaData's, else the last tag's timestamp. The index is "keyframes" when onMetaData lists
 // them (filepositions and times), else "none".
 export async function walkFlv(source: BlockSource, result: ParsedContainer): Promise<void> {
 	const bytes = await readBytes(source, 0, Math.min(source.size, HEAD_BYTES))
 	const flags = bytes[4] ?? 0
-	let meta: AmfObject | null = null
+	let meta: FlvMetaData | null = null
 	let video: ProbeVideo | null = null
 	let audio: AudioFields | null = null
 	let at = uint32(bytes, 5) + 4
@@ -218,17 +258,11 @@ export async function walkFlv(source: BlockSource, result: ParsedContainer): Pro
 		const data = bytes.subarray(start, end)
 
 		if (type === 18 && meta === null) {
-			const reader = new AmfReader(data, 0, data.length)
-			const name = reader.value()
-			const value = reader.value()
-
-			if (name === "onMetaData" && value instanceof Map) {
-				meta = value
-			}
+			meta = readFlvMetaData(data)
 		} else if (type === 9 && video === null && size > 0) {
-			video = videoTag(data, numberOf(meta?.get("width")) ?? 0, numberOf(meta?.get("height")) ?? 0)
+			video = flvVideoTag(data, meta?.width ?? 0, meta?.height ?? 0)
 		} else if (type === 8 && audio === null && size > 0) {
-			audio = audioTag(data)
+			audio = flvAudioTag(data)
 		}
 
 		at = end + 4
@@ -249,15 +283,9 @@ export async function walkFlv(source: BlockSource, result: ParsedContainer): Pro
 	result.tracksFound = (!wantVideo || video !== null) && (!wantAudio || audio !== null)
 	result.partial = !result.tracksFound
 
-	const keyframes = meta?.get("keyframes")
+	result.index = meta === null || meta.keyframes === null ? "none" : "keyframes"
 
-	if (keyframes instanceof Map) {
-		const times = keyframes.get("times")
-
-		result.index = Array.isArray(times) && times.length > 0 ? "keyframes" : "none"
-	}
-
-	const duration = numberOf(meta?.get("duration")) ?? (await lastTimestamp(source))
+	const duration = meta?.duration ?? (await lastTimestamp(source))
 
 	result.durationSec = duration === null ? null : seconds(duration)
 }

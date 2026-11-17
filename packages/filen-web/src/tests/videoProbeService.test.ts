@@ -160,7 +160,7 @@ describe("probe records", () => {
 		})
 		const withRev = (record: VideoProbe, rev: number) => ({ probe: record, tiers: { card: true, full: true, cover: true }, at: 1, rev })
 
-		for (const name of ["film.avi", "film.divx", "film.flv", "film.f4v", "film.wmv", "film.asf", "film.mpg", "film.vob", "film.ogv"]) {
+		for (const name of ["film.avi", "film.divx", "film.flv", "film.wmv", "film.asf", "film.mpg", "film.vob", "film.ogv"]) {
 			expect(recordSatisfies(none(2), "card", () => name)).toBe(false)
 			expect(recordSatisfies(none(3), "card", () => name)).toBe(true)
 		}

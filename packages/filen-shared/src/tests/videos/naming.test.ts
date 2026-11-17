@@ -426,9 +426,12 @@ describe("ignore rules", () => {
 
 describe("VIDEO_CONTAINERS", () => {
 	it("keeps fail-by-name containers out of the drive's video, Photos, thumbnails and the editor", () => {
-		for (const extension of ["avi", "divx", "flv", "f4v", "asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
+		for (const extension of ["avi", "divx", "asf", "wmv", "mpg", "mpeg", "vob", "m2v"]) {
 			expect(VIDEO_CONTAINERS.get(extension)).toMatchObject({ drive: false, photo: false, keyframes: false, editorReads: false })
 		}
+
+		// Played through the app's own demuxer: a drive and library video, still out of Photos, thumbnails and the editor.
+		expect(VIDEO_CONTAINERS.get("flv")).toMatchObject({ drive: true, library: "video", photo: false, keyframes: false, editorReads: false })
 
 		expect(VIDEO_CONTAINERS.get("ogv")).toMatchObject({ drive: true, photo: false, keyframes: false, editorReads: false, probe: "ogg" })
 	})
@@ -445,6 +448,7 @@ describe("VIDEO_CONTAINERS", () => {
 	it("changes the library's signature, so a stored index re-walks its names once", () => {
 		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("qt=video")
 		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("avi=unsupportedVideo")
+		expect(VIDEO_FILE_KINDS_SIGNATURE).toContain("flv=video")
 		expect(VIDEO_FILE_KINDS_SIGNATURE).not.toContain("divx")
 	})
 })
@@ -468,7 +472,7 @@ describe("videoFileKind", () => {
 		["ts", big, "video"],
 		["ts", 4096, null],
 		["avi", big, "unsupportedVideo"],
-		["flv", big, "unsupportedVideo"],
+		["flv", big, "video"],
 		["divx", big, null],
 		["f4v", big, null],
 		["asf", big, null],

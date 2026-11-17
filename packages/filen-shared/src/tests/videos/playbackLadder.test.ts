@@ -275,7 +275,7 @@ describe("rung B: remux", () => {
 	})
 
 	it("accepts the other remux input containers and rejects the rest", () => {
-		for (const container of ["mp4", "mov", "webm", "ts", "matroska"]) {
+		for (const container of ["mp4", "mov", "webm", "ts", "matroska", "flv"]) {
 			expect(decidePlayback(probe(container, H264, AAC), sel(), caps(base)).path).not.toBe("unsupported")
 		}
 
