@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import * as mupdf from "mupdf"
 import { PdfEngineError, type PdfEngineClient } from "../../dom/pdfedit/client"
 import { MUPDF_FORMATS, type MupdfFormat } from "../../dom/pdfedit/formats"
-import type { PdfEngineArgs, PdfEngineValue } from "../../dom/pdfedit/protocol"
+import type { FromPdfEngine, PdfBitmapLike, PdfEngineArgs, PdfEngineValue } from "../../dom/pdfedit/protocol"
+import { servePdfEngine } from "../../dom/pdfedit/server"
 import { localEngine, stopLocalEngines } from "./localEngine"
 import { startEngine, stopEngines } from "./harness"
 import { imageSample, makePsd, makeTiff } from "./imageFixtures"
@@ -184,6 +186,43 @@ describe("the read role's image files", () => {
 		},
 		budget(30_000)
 	)
+
+	it("starts a whole-page draw's watchdog, as a tile's", async () => {
+		const sent: FromPdfEngine[] = []
+		const listeners = new Set<(event: { readonly data: unknown }) => void>()
+		const stop = servePdfEngine(
+			mupdf,
+			{
+				postMessage: message => {
+					sent.push(message)
+				},
+				addEventListener: (_type, listener) => {
+					listeners.add(listener)
+				},
+				removeEventListener: (_type, listener) => {
+					listeners.delete(listener)
+				}
+			},
+			{
+				readDeadlineMs: 60_000,
+				now: () => performance.now(),
+				toBitmap: (_rgba, width, height) => Promise.resolve({ width, height, close: () => undefined } as PdfBitmapLike)
+			}
+		)
+		const call = async (id: number, op: string, args: unknown): Promise<void> => {
+			for (const listener of listeners) listener({ data: { t: "call", id, op, args } })
+
+			await vi.waitFor(() => {
+				expect(sent.some(message => (message.t === "ok" || message.t === "error") && message.id === id)).toBe(true)
+			})
+		}
+
+		await call(1, "open", { bytes: makeTiff([[30, 20]]), role: "read", format: "tiff", maxImagePixels: UNBOUNDED })
+		await call(2, "renderPage", { page: 0, generation: 0, maxPixels: 100, output: "rgba" })
+		stop()
+
+		expect(sent.filter(message => message.t === "started").map(message => ("id" in message ? message.id : 0))).toEqual([2])
+	})
 
 	it("keeps the image rows fixed and read whole", () => {
 		for (const format of ["tiff", "psd"] as const) expect(MUPDF_FORMATS[format]).toMatchObject({ reflowable: false, readsWhole: true })

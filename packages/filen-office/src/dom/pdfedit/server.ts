@@ -152,7 +152,8 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 
 		const handler = handlerOf(item.op) as (context: PdfEngineContext, args: unknown) => ReturnType<PdfRequestTable[PdfEngineOp]>
 
-		if (item.op === "render") post({ t: "started", id: item.id })
+		// The page's watchdog times a draw from here (a whole-page draw runs every tile of the page in one go).
+		if (item.op === "render" || item.op === "renderPage") post({ t: "started", id: item.id })
 
 		try {
 			const handled = await handler(context, item.args)
