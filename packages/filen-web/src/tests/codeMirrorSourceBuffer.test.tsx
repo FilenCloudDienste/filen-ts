@@ -12,6 +12,7 @@ vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
 
 const { CodeMirrorSource } = await import("@/features/preview/components/codeMirrorSource")
 const { Text } = await import("@codemirror/state")
+const { undo } = await import("@codemirror/commands")
 type TextBuffer = import("@/features/preview/lib/textFile").TextBuffer
 
 function editorView(container: HTMLElement): EditorView {
@@ -356,5 +357,34 @@ describe("CodeMirrorSource buffer", () => {
 		append(editorView(container), "four")
 
 		expect(contentRef.current?.text()).toBe("one\r\ntwo\nthree\r\nfour")
+	})
+
+	// Deleting a line's own break and undoing that saves the file as it was, that break's ending included.
+	it("saves byte for byte after a deleted break is undone", () => {
+		const contentRef = createRef<TextBuffer | null>()
+		const original = "one\r\ntwo\nthree\r\n"
+		const { container } = render(
+			<CodeMirrorSource
+				text={original}
+				tag="text"
+				alt="notes.txt"
+				editable
+				format={{ encoding: "utf-8", bom: false, lineEnding: "crlf" }}
+				contentRef={contentRef}
+			/>
+		)
+		const view = editorView(container)
+
+		// The LF after "two".
+		act(() => {
+			view.dispatch({ changes: { from: 7, to: 8 }, userEvent: "delete" })
+		})
+		expect(contentRef.current?.text()).toBe("one\r\ntwothree\r\n")
+
+		act(() => {
+			undo(view)
+		})
+
+		expect(contentRef.current?.bytes()).toEqual({ bytes: new TextEncoder().encode(original) })
 	})
 })
