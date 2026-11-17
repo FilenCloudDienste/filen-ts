@@ -1,0 +1,61 @@
+{
+	"engine": "webkit",
+	"version": "27.2",
+	"crashThreshold": null,
+	"results": {
+		"jpeg-24mp.jpg": {
+			"megapixels": 24,
+			"firstPaintMs": 135,
+			"fitPeakMb": 494,
+			"zoomPeakMb": 497,
+			"stepMs": 950,
+			"stepPeakMb": 4740,
+			"crashed": false
+		},
+		"jpeg-48mp.jpg": {
+			"megapixels": 48,
+			"firstPaintMs": 182,
+			"fitPeakMb": 94,
+			"zoomPeakMb": 97,
+			"stepMs": 1957,
+			"stepPeakMb": 5189,
+			"crashed": false
+		},
+		"jpeg-100mp.jpg": {
+			"megapixels": 101,
+			"firstPaintMs": 379,
+			"fitPeakMb": 1044,
+			"zoomPeakMb": 1048,
+			"stepMs": 4215,
+			"stepPeakMb": 8798,
+			"crashed": false
+		},
+		"png-100mp.png": {
+			"megapixels": 101,
+			"firstPaintMs": 464,
+			"fitPeakMb": 1547,
+			"zoomPeakMb": 1149,
+			"stepMs": 4280,
+			"stepPeakMb": 9144,
+			"crashed": false
+		},
+		"png-400mp.png": {
+			"megapixels": 400,
+			"firstPaintMs": 3495,
+			"fitPeakMb": 6982,
+			"zoomPeakMb": 6984,
+			"stepMs": 35121,
+			"stepPeakMb": 20729,
+			"crashed": false
+		},
+		"webp-64mp.webp": {
+			"megapixels": 64,
+			"firstPaintMs": 244,
+			"fitPeakMb": 197,
+			"zoomPeakMb": 200,
+			"stepMs": 2061,
+			"stepPeakMb": 7052,
+			"crashed": false
+		}
+	}
+}
