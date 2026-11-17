@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest"
-import { buildStructTree, pageStructTree } from "../react/pdf/structTree"
+import { buildStructTree } from "../react/pdf/structTree"
+import { pageStructTree } from "../dom/pdf/structGate"
 
 // A tagged page's structure tree as the accessible tree in its canvas (react/pdf/structTree.ts), over the text layer's
 // marked content spans as pdf.js's TextLayer writes them.
@@ -145,5 +146,18 @@ describe("the structure tree", () => {
 		await Promise.all([1, 2, 3].map(() => pageStructTree(tagged, { getStructTree: some })))
 		expect(some).toHaveBeenCalledTimes(3)
 		expect(await pageStructTree({}, {})).toBeNull()
+	})
+
+	it("reads a page's tree once, however often the page comes back into view", async () => {
+		const tagged = {}
+		const read = vi.fn(() => Promise.resolve(TREE))
+		const first = { getStructTree: read }
+		const second = { getStructTree: read }
+
+		await pageStructTree(tagged, first)
+		await pageStructTree(tagged, second)
+		await pageStructTree(tagged, second)
+		await pageStructTree(tagged, first)
+		expect(read).toHaveBeenCalledTimes(2)
 	})
 })

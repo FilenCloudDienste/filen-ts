@@ -19,7 +19,8 @@ import {
 	type PdfViewport
 } from "../../dom/pdf/index"
 import { paintMatches } from "./highlight"
-import { buildStructTree, documentStructPrefix, pageStructTree, type StructTree } from "./structTree"
+import { buildStructTree, type StructTree } from "./structTree"
+import { documentStructPrefix, pageStructTree } from "../../dom/pdf/structGate"
 import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
 
 // The page column, unstyled, for either engine: a document is anything with pdf.js's page contract (PdfDomDocument:
