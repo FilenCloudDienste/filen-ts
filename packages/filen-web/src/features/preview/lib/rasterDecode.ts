@@ -1,6 +1,8 @@
 import * as Comlink from "comlink"
 import RasterDecodeWorker from "@/features/preview/workers/rasterDecode.worker.ts?worker"
 import type { RasterDecodeWorkerApi } from "@/features/preview/workers/rasterDecode.worker"
+import type { DisplayedRaster } from "@/features/preview/lib/rasterCodecs/display"
+import type { DecodedRaster, DisplayRasterFormat, RasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
 import type { IdleResource } from "@/lib/idleResource"
 
@@ -100,13 +102,48 @@ export async function transformHeicBytesOwned(bytes: Uint8Array): Promise<Blob> 
 
 // The image editor's HEIC source: full-resolution RGBA (transferred back) and whether it has alpha. A private copy of
 // `bytes` crosses, as for transformHeicBytes: the preview's cache keeps its own.
-export async function decodeHeicRgba(
+export async function decodeHeicRgba(bytes: Uint8Array, signal?: AbortSignal): Promise<DecodedRaster> {
+	return await decodeRasterRgba("heic", bytes, Number.POSITIVE_INFINITY, signal)
+}
+
+// What one pixel of each format costs the worker while it is shown: the decoder's frame plus every copy made of it
+// (QOI: its RGBA, then the bitmap).
+export const RASTER_BYTES_PER_PIXEL: Readonly<Record<DisplayRasterFormat, number>> = {
+	qoi: 8
+}
+
+// The whole image as RGBA, decoded off the main thread from a private copy of `bytes`; `maxPixels` refuses a larger
+// one before anything is allocated (a HEIC is decoded at any size).
+export async function decodeRasterRgba(
+	format: RasterFormat,
 	bytes: Uint8Array,
+	maxPixels: number,
 	signal?: AbortSignal
-): Promise<{ width: number; height: number; data: Uint8ClampedArray<ArrayBuffer>; hasAlpha: boolean }> {
+): Promise<DecodedRaster> {
 	return await onWorker(
 		() => bytes.slice(),
 		signal,
-		(remote, copy) => remote.decodeRgba(copy)
+		(remote, copy) => remote.decodeRgba(format, copy, maxPixels)
 	)
+}
+
+// The image as a bitmap to draw, its long side at most `maxLongSide` (null: its own size), decoded off the main thread
+// from a private copy of `bytes`. The caller closes the bitmap (or hands it to a canvas).
+export async function displayRaster(
+	format: DisplayRasterFormat,
+	bytes: Uint8Array,
+	options: { readonly maxPixels: number; readonly maxLongSide: number | null; readonly signal?: AbortSignal }
+): Promise<DisplayedRaster> {
+	const shown = await onWorker(
+		() => bytes.slice(),
+		options.signal,
+		(remote, copy) => remote.display(format, copy, options.maxPixels, options.maxLongSide)
+	)
+
+	if (options.signal?.aborted === true) {
+		shown.bitmap.close()
+		options.signal.throwIfAborted()
+	}
+
+	return shown
 }

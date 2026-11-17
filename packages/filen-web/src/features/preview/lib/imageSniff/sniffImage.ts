@@ -25,6 +25,7 @@ import {
 } from "@/features/preview/imageEdit/lib/webpMeta"
 import type { Orientation, SourceInfo } from "@/features/preview/imageEdit/types"
 import { startsWith, viewOf } from "@/features/preview/lib/imageSniff/bytes"
+import { sniffQoi } from "@/features/preview/lib/imageSniff/qoi"
 
 // What an image's leading bytes say about it, from its magic and headers (never its name). `head` is the start of
 // the file (the whole file when small), `totalSize` the file's length. Retained metadata (ICC, Exif) is copied out
@@ -601,6 +602,13 @@ export function sniffImage(head: Uint8Array, totalSize: number): SourceInfo | nu
 	// Reserved 0, type 1 (icon; 2 is a cursor).
 	if (startsWith(head, [0, 0, 1, 0]) && head.length >= 6) {
 		return sniffIco(head)
+	}
+
+	// "qoif"
+	if (startsWith(head, [0x71, 0x6f, 0x69, 0x66])) {
+		const qoi = sniffQoi(head)
+
+		return qoi === null ? null : { ...BASE, mime: "image/x-qoi", width: qoi.width, height: qoi.height, hasAlpha: qoi.hasAlpha }
 	}
 
 	// An ISOBMFF "ftyp" box at the start.

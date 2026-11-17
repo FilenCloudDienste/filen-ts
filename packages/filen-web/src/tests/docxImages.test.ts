@@ -360,6 +360,8 @@ describe("isPictureFile", () => {
 		])
 		expect(isPictureFile(file("notes.docx"))).toBe(false)
 		expect(isPictureFile(dir)).toBe(false)
+		// Only our own decoders read it: Word could not show it.
+		expect(isPictureFile(file("h.qoi"))).toBe(false)
 	})
 })
 

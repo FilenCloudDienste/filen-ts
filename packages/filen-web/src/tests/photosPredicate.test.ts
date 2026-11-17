@@ -55,6 +55,7 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("beach.webp"))).toBe(true)
 		expect(isPhotoItem(fileNamed("beach.heic"))).toBe(true)
 		expect(isPhotoItem(fileNamed("DSCF0001.HIF"))).toBe(true)
+		expect(isPhotoItem(fileNamed("render.qoi"))).toBe(true)
 	})
 
 	// A camera RAW is a photo by any user's reckoning, and the grid tile is thumbnail-driven — the SDK

@@ -1,7 +1,7 @@
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, sniffImage, type DocxEditorCommand, type DocxImageInfo } from "@filen/office/core/docx/edit"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
-import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
+import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { HEIC_EXTENSIONS, IMAGE_FORMATS, type ImageDecode } from "@/features/preview/lib/imageFormat"
 import type { PreviewKey } from "@/lib/i18n"
 
 // A picture on its way into a DOCX document, from any source (this device, the drive, the clipboard, a drop):
@@ -385,9 +385,14 @@ export function insertPicture(
 // Extensions of pictures Word shows that the drive's preview categories do not count as images.
 const WORD_PICTURES: ReadonlySet<string> = new Set(["tif", "tiff", "emf", "wmf"])
 
+// The preview's images whose kind Word might show: those a browser decodes, and HEIC (refused with a reason when
+// picked). The formats only our own decoders read are not offered.
+const WORD_PICTURE_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic"])
+
 // The drive files the picture picker offers: images (HEIC and AVIF too, refused with a reason when picked).
 export function isPictureFile(item: DriveItem): boolean {
 	const extension = itemTypeExtension(item)
+	const format = IMAGE_FORMATS.get(extension)
 
-	return previewCategoryForExtension(extension) === "image" || WORD_PICTURES.has(extension)
+	return (format !== undefined && WORD_PICTURE_DECODES.has(format.decode)) || WORD_PICTURES.has(extension)
 }

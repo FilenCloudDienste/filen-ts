@@ -1,6 +1,7 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { FileVerdict } from "@filen/shared"
-import { CATEGORY_POLICY, needsContentSniff, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, itemFileKind, needsContentSniff, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { IMAGE_FORMATS, isPhotoFormat } from "@/features/preview/lib/imageFormat"
 
 // Mobile parity (features/photos/utils.ts's own isPhotoGridItem): keep only file-kind items with
 // decrypted metadata whose preview category is image, rawImage or video — directories and
@@ -25,7 +26,17 @@ export function isPhotoItem(item: DriveItem, verdict?: FileVerdict | null): bool
 		return false
 	}
 
-	return isPhotoCategory(previewType(item, verdict))
+	const kind = itemFileKind(item, verdict)
+	const category = kind?.kind ?? null
+
+	if (!isPhotoCategory(category)) {
+		return false
+	}
+
+	// An image format may opt out on its own row (a gzipped SVG is no photo).
+	const format = category === "image" && kind !== null ? IMAGE_FORMATS.get(kind.extension) : undefined
+
+	return format === undefined || isPhotoFormat(format)
 }
 
 // rawImage joins image/video: a camera RAW is a photo by any user's reckoning, and the grid's tile is

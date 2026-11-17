@@ -1,10 +1,10 @@
 import { driveItemName, nameCollisionKey } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, heldImageCap, isHeicName } from "@/features/drive/lib/preview.logic"
+import { extensionOf, heldImageCap, imageDecodeFor } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveListingQueryOptions } from "@/features/drive/queries/drive"
-import { decodeHeicRgba } from "@/features/preview/lib/rasterDecode"
+import { decodeHeicRgba, decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 import { saveTargets } from "@/features/preview/imageEdit/lib/targets"
@@ -17,6 +17,7 @@ import { runOp } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { deviceProfile } from "@/lib/deviceProfile"
+import { workerDecodePixels } from "@/lib/pixelBudget"
 
 // Entering the image editor: what the original is (sniffed from its own bytes, never its name), whether this device
 // can edit it, and where the editor gets its full-resolution pixels, reusing whatever the viewer already holds.
@@ -59,8 +60,18 @@ const EXTENSION_FAMILY: ReadonlyMap<string, SourceMime> = new Map<string, Source
 	["bmp", "image/bmp"],
 	["ico", "image/x-icon"],
 	["avif", "image/avif"],
+	["qoi", "image/x-qoi"],
 	...[...HEIC_EXTENSIONS].map(extension => [extension, "image/heic"] as const)
 ])
+
+// The formats whose editing source our own code decodes from the whole file, whatever the viewer shows.
+type EditDecoder = "heic" | "qoi"
+
+function editDecoder(item: DriveItem): EditDecoder | null {
+	const decode = imageDecodeFor(item)
+
+	return decode === "heic" || decode === "qoi" ? decode : null
+}
 
 export function matchesExtension(name: string, mime: SourceMime): boolean {
 	return EXTENSION_FAMILY.get(extensionOf(name)) === mime
@@ -171,6 +182,26 @@ async function heicSource(
 	}
 }
 
+// The full-resolution RGBA a decoder of our own makes from the whole file.
+async function decodedSource(
+	decoder: EditDecoder,
+	bytes: Uint8Array,
+	info: SourceInfo,
+	signal: AbortSignal
+): Promise<{ source: ImageEditSource; info: SourceInfo }> {
+	if (decoder === "heic") {
+		return await heicSource(bytes, info, signal)
+	}
+
+	const maxPixels = workerDecodePixels(deviceProfile(), bytes.byteLength, RASTER_BYTES_PER_PIXEL[decoder])
+	const decoded = await decodeRasterRgba(decoder, bytes, maxPixels, signal)
+
+	return {
+		source: { kind: "rgba", width: decoded.width, height: decoded.height, data: decoded.data },
+		info: { ...info, width: decoded.width, height: decoded.height, hasAlpha: decoded.hasAlpha }
+	}
+}
+
 async function enter(
 	item: DriveItem,
 	frozenUuid: string,
@@ -180,19 +211,19 @@ async function enter(
 ): Promise<EnterImageEditOutcome> {
 	const name = driveItemName(item)
 	const size = Number(narrowToAnyFile(item).size)
-	// Decoded by libheif from its whole bytes on every browser, also where the viewer streams it natively: the editor
-	// needs its Exif and ICC, which only the bytes give.
-	const heic = isHeicName(item)
+	// Decoded by our own code from its whole bytes on every browser, also where the viewer streams it natively: a HEIC's
+	// Exif and ICC only the bytes give.
+	const decoder = editDecoder(item)
 	const cached = getPreviewBytes(cacheScope, item.data.uuid)
 	// Where the viewer streams a HEIC natively it opens at any size: one past what is ever held is refused before its
 	// download, never buffered.
-	const cap = heic && cached === undefined ? heldImageCap(item, deviceProfile()) : null
+	const cap = decoder !== null && cached === undefined ? heldImageCap(item, deviceProfile()) : null
 
 	if (cap !== null && BigInt(size) > cap) {
 		return { status: "refused", messageKey: "previewImageSaveRefusedTooLarge" }
 	}
 
-	let held = cached ?? (heic ? await wholeBytes(item, cacheScope, signal) : undefined)
+	let held = cached ?? (decoder !== null ? await wholeBytes(item, cacheScope, signal) : undefined)
 	let info = sniffImage(held ?? (await headBytes(item, signal)), size)
 
 	if (info === null || !matchesExtension(name, info.mime)) {
@@ -212,7 +243,7 @@ async function enter(
 	const opened = await openEditSession()
 
 	// Whatever goes wrong from here closes the session, which would otherwise hold the worker.
-	return await prepare(item, frozenUuid, info, held, heic, opened, cacheScope, image, signal).catch((e: unknown) => {
+	return await prepare(item, frozenUuid, info, held, decoder, opened, cacheScope, image, signal).catch((e: unknown) => {
 		opened.session.close()
 
 		throw e
@@ -224,7 +255,7 @@ async function prepare(
 	frozenUuid: string,
 	info: SourceInfo,
 	held: Uint8Array | undefined,
-	heic: boolean,
+	decoder: EditDecoder | null,
 	opened: { session: EditSession; capabilities: EditCapabilities },
 	cacheScope: string | null,
 	image: HTMLImageElement | null,
@@ -245,8 +276,8 @@ async function prepare(
 	}
 
 	const prepared =
-		heic && held !== undefined
-			? { ...(await heicSource(held, info, signal)), buffered: true }
+		decoder !== null && held !== undefined
+			? { ...(await decodedSource(decoder, held, info, signal)), buffered: true }
 			: await sourceFor(item, info, held, image, cacheScope, signal)
 
 	if (signal.aborted) {

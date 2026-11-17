@@ -19,7 +19,7 @@ import {
 } from "@filen/shared"
 import { codeLanguageExtensions, codeLanguageForExtension, type CodeLanguageId } from "@filen/office/core/code"
 import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
-import { HEIC_EXTENSIONS, IMAGE_FORMATS, pendingProbe, streamsNatively } from "@/features/preview/lib/imageFormat"
+import { HEIC_EXTENSIONS, IMAGE_FORMATS, pendingProbe, streamsNatively, type ImageDecode } from "@/features/preview/lib/imageFormat"
 import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
@@ -714,6 +714,11 @@ export function needsImageTransform(item: DriveItem, profile: DeviceProfile = de
 // A HEIC/HEIF by its name, whatever this browser shows by itself: the image editor always decodes one with libheif.
 export function isHeicName(item: DriveItem): boolean {
 	return HEIC_EXTENSIONS.has(itemTypeExtension(item))
+}
+
+// How an image is decoded by its name (IMAGE_FORMATS); null for any other file.
+export function imageDecodeFor(item: DriveItem): ImageDecode | null {
+	return IMAGE_FORMATS.get(itemTypeExtension(item))?.decode ?? null
 }
 
 // The probe an image's route waits on (pendingProbe); null once the route is known, and for any other file.

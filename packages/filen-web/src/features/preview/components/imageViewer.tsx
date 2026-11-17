@@ -1,29 +1,23 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
+import { useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { heldImageCap, isHeicName, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
+import { imageDecodeFor, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import type { DeviceProfile } from "@/lib/deviceProfile"
 import type { PreviewKey } from "@/lib/i18n"
 import { probeNativeImage } from "@/lib/nativeImageSupport"
 import { transformHeicBytes } from "@/features/preview/lib/rasterDecode"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
-import { getPreviewBytes } from "@/features/preview/lib/previewCache"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 // side-effect: registers the generators getThumbnailUrl needs, as useThumbnail.ts does.
 import "@/features/drive/lib/thumbGenerators"
 import { useObjectUrl } from "@/lib/useObjectUrl"
-import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
-import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
-import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
-import { imageKeyTransform, imageViewerKey } from "@/features/preview/lib/imageViewerKeys.logic"
-import { keyForEditor } from "@/lib/keymap/dialogGuard"
-import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
-import { useLatestRef } from "@/lib/useLatestRef"
-import { isImeKeydown } from "@filen/shared/keymap"
+import { ZoomableImage } from "@/features/preview/components/zoomableImage"
+import { DecodedImage, HeldImageGate } from "@/features/preview/components/decodedImage"
 
 export interface ImageViewerProps {
 	item: DriveItem
@@ -31,184 +25,6 @@ export interface ImageViewerProps {
 	// Holds the shown <img> while it is mounted, for the image editor to take its decoded pixels instead of fetching
 	// the file again. Not set for HEIC/HEIF (the editor decodes those itself).
 	imageRef?: RefObject<HTMLImageElement | null> | undefined
-}
-
-// <img> from an already-resolved URL (streamed, blob or thumbnail). Fit-to-screen via object-contain, plus
-// pointer-drag pan while zoomed, double-click zoom toggle, and wheel-zoom-toward-cursor — all pure math
-// lives in imageViewer.logic.ts, this component only wires DOM events to it. No pan/zoom library:
-// identical rendering regardless of whether `url` is a blob: URL or the SW's inline-preview route.
-function ZoomableImage({
-	url,
-	alt,
-	onError,
-	imageRef
-}: {
-	url: string
-	alt: string
-	// Takes the <img> that failed. Unset on a blob URL with nowhere further to fall back to (see RenderPreviewUrl).
-	onError?: ((image: HTMLImageElement) => void) | undefined
-	imageRef?: RefObject<HTMLImageElement | null> | undefined
-}) {
-	const [transform, setTransform] = useState<ZoomTransform>({ scale: 1, x: 0, y: 0 })
-	const [natural, setNatural] = useState<Size | null>(null)
-	const containerRef = useRef<HTMLDivElement | null>(null)
-	const [image, setImage] = useState<HTMLImageElement | null>(null)
-	// Pointerdown-time snapshot: the transform's own x/y right then, plus the pointer's own screen
-	// position — every subsequent pointermove computes its delta against THIS, never the previous
-	// pointermove's position, so per-event float drift can never accumulate.
-	const dragOrigin = useRef<{ x: number; y: number; pointerX: number; pointerY: number } | null>(null)
-
-	// A React onWheel prop can never preventDefault a page scroll here: react-dom registers the wheel
-	// listener PASSIVE at its root for scroll performance (verified against the installed react-dom
-	// build), so preventDefault silently no-ops inside a synthetic handler. A real, non-passive native
-	// listener is the only way to stop the page scrolling under the zoom.
-	useEffect(() => {
-		const container = containerRef.current
-
-		if (!container) {
-			return
-		}
-
-		const handleWheel = (event: WheelEvent): void => {
-			event.preventDefault()
-
-			const rect = containerRef.current?.getBoundingClientRect()
-
-			if (!rect) {
-				return
-			}
-
-			const pointerOffset = { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }
-			const containerSize: Size = { width: rect.width, height: rect.height }
-
-			setTransform(prev => wheelZoom(prev, event.deltaY, pointerOffset, containerSize, natural))
-		}
-
-		container.addEventListener("wheel", handleWheel, { passive: false })
-
-		return () => {
-			container.removeEventListener("wheel", handleWheel)
-		}
-	}, [natural])
-
-	// Stepping past a streamed image before it has loaded stops its download.
-	useReleaseOnUnmount(image)
-
-	const bindings = useBindings()
-	const zoomed = transform.scale > 1
-	const onViewerKey = useLatestRef((event: KeyboardEvent): void => {
-		const container = containerRef.current
-
-		if (
-			container === null ||
-			event.defaultPrevented ||
-			isImeKeydown(event) ||
-			isRecordingCombo() ||
-			!keyForEditor(container, event.target)
-		) {
-			return
-		}
-
-		const action = imageViewerKey(event, bindings, zoomed)
-
-		if (action === undefined) {
-			return
-		}
-
-		// Kept from the browser (its page zoom) and from the pager under it, even at a zoom limit.
-		event.preventDefault()
-
-		const rect = container.getBoundingClientRect()
-
-		setTransform(prev => imageKeyTransform(action, prev, { width: rect.width, height: rect.height }, natural))
-	})
-
-	// The viewer's keys for its layer (the preview overlay, which keeps focus while an image shows), ahead of the
-	// overlay's own pager: captured at the document, before the overlay's handler sees the arrows.
-	useEffect(() => {
-		const listener = (event: KeyboardEvent): void => {
-			onViewerKey.current(event)
-		}
-
-		document.addEventListener("keydown", listener, true)
-
-		return () => {
-			document.removeEventListener("keydown", listener, true)
-		}
-	}, [onViewerKey])
-
-	function handlePointerDown(event: ReactPointerEvent<HTMLImageElement>): void {
-		if (transform.scale <= 1) {
-			return
-		}
-
-		event.currentTarget.setPointerCapture(event.pointerId)
-		dragOrigin.current = { x: transform.x, y: transform.y, pointerX: event.clientX, pointerY: event.clientY }
-	}
-
-	function handlePointerMove(event: ReactPointerEvent<HTMLImageElement>): void {
-		const origin = dragOrigin.current
-		const container = containerRef.current
-
-		if (!origin || !container) {
-			return
-		}
-
-		const rect = container.getBoundingClientRect()
-		const delta = { x: event.clientX - origin.pointerX, y: event.clientY - origin.pointerY }
-
-		setTransform(prev => ({
-			...prev,
-			...dragPan({ x: origin.x, y: origin.y }, delta, prev.scale, { width: rect.width, height: rect.height }, natural)
-		}))
-	}
-
-	function handlePointerUp(event: ReactPointerEvent<HTMLImageElement>): void {
-		if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-			event.currentTarget.releasePointerCapture(event.pointerId)
-		}
-
-		dragOrigin.current = null
-	}
-
-	return (
-		<div
-			ref={containerRef}
-			className="flex size-full items-center justify-center overflow-hidden"
-		>
-			<img
-				ref={element => {
-					setImage(element)
-
-					if (imageRef !== undefined) {
-						imageRef.current = element
-					}
-				}}
-				src={url}
-				alt={alt}
-				draggable={false}
-				onError={
-					onError === undefined
-						? undefined
-						: event => {
-								onError(event.currentTarget)
-							}
-				}
-				onLoad={event => {
-					setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
-				}}
-				onDoubleClick={() => {
-					setTransform(prev => doubleClickZoom(prev))
-				}}
-				onPointerDown={handlePointerDown}
-				onPointerMove={handlePointerMove}
-				onPointerUp={handlePointerUp}
-				onPointerCancel={handlePointerUp}
-				className={`max-h-full max-w-full touch-none object-contain select-none ${transform.scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-				style={{ transform: `translate(${String(transform.x)}px, ${String(transform.y)}px) scale(${String(transform.scale)})` }}
-			/>
-		</div>
-	)
 }
 
 // Keyed by the buffer itself: a revisited slot gets the same cached Uint8Array back from
@@ -290,27 +106,19 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 
 // HEIC/HEIF decoded by libheif (needsImageTransform, or a native decode that failed): downloads the whole file like
 // StreamablePreview's buffered path, then hands the bytes to TransformedImageBytes for the decode+re-encode step before
-// anything renders. Bytes already held decode at any size; otherwise nothing above the held-image cap is loaded whole,
-// and `tooLarge` says why (a native picture admitted at any size may land here once its decode failed).
+// anything renders. Nothing above the held-image cap is loaded whole, and `tooLarge` says why (a native picture
+// admitted at any size may land here once its decode failed).
 function TransformedImage({ item, alt, tooLarge }: { item: DriveItem; alt: string; tooLarge: PreviewKey }) {
-	const { t } = useTranslation("preview")
-	const cap = heldImageCap(item, useDeviceProfile())
-	const held = getPreviewBytes(usePreviewCacheScope(), item.data.uuid) !== undefined
-
-	if (!held && cap !== null && item.data.size > cap) {
-		return (
-			<PreviewUnsupportedState
-				item={item}
-				message={t(tooLarge)}
-			/>
-		)
-	}
-
 	return (
-		<TransformedImageLoad
+		<HeldImageGate
 			item={item}
-			alt={alt}
-		/>
+			tooLarge={tooLarge}
+		>
+			<TransformedImageLoad
+				item={item}
+				alt={alt}
+			/>
+		</HeldImageGate>
 	)
 }
 
@@ -426,18 +234,39 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 	)
 }
 
-// How an image is shown: as the browser decodes it (streamed, or from its buffered fallback), decoded by libheif
-// first, or decoded by libheif after the browser failed to decode the whole file.
-type ImageRoute = "native" | "transform" | "undecodable"
+// How an image is shown: as the browser decodes it (streamed, or from its buffered fallback), decoded by our own code
+// first, or decoded by our own code after the browser failed to decode the whole file.
+type ImageRoute = "native" | "decoded" | "undecodable"
 
 function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
-	return needsImageTransform(item, profile) ? "transform" : "native"
+	return needsImageTransform(item, profile) ? "decoded" : "native"
 }
 
-// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs — a HEIC/HEIF this
-// browser does not decode never reaches the streamed branch (mediaType.ts excludes it too, defense-in-depth), every
-// other image extension is unaffected. A HEIC/HEIF opened before the boot probe answered waits for its answer (a
-// decode of a few hundred bytes) rather than take the libheif route an unknown answer reads as. The route is then
+// The decoded route: the format's own decoder.
+function DecodedRoute({ item, alt, route }: { item: DriveItem; alt: string; route: Exclude<ImageRoute, "native"> }) {
+	if (imageDecodeFor(item) === "qoi") {
+		return (
+			<DecodedImage
+				item={item}
+				alt={alt}
+				format="qoi"
+			/>
+		)
+	}
+
+	return (
+		<TransformedImage
+			item={item}
+			alt={alt}
+			tooLarge={route === "undecodable" ? "previewImageNotDisplayable" : "previewTooLargeToShowHere"}
+		/>
+	)
+}
+
+// Top-level dispatch: needsImageTransform short-circuits before StreamablePreview's own useState runs — an image this
+// browser does not decode itself never reaches the streamed branch (mediaType.ts excludes it too, defense-in-depth),
+// every other image extension is unaffected. One opened before the boot probe answered waits for its answer (a
+// decode of a few hundred bytes) rather than take the decoded route an unknown answer reads as. The route is then
 // picked once per file: a probe that refines the device profile while it is open changes the next open, never this one
 // (which would drop the decoded picture, its zoom, and download it again).
 export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
@@ -466,21 +295,23 @@ export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 
 	if (current !== "native") {
 		return (
-			<TransformedImage
+			<DecodedRoute
 				item={item}
 				alt={alt}
-				tooLarge={current === "undecodable" ? "previewImageNotDisplayable" : "previewTooLargeToShowHere"}
+				route={current}
 			/>
 		)
 	}
 
+	const decode = imageDecodeFor(item)
+
 	return (
 		<StreamablePreview
 			item={item}
-			// A HEIC/HEIF the browser received whole and could not decode goes to libheif, on the bytes already held where
-			// they are.
+			// A format with a decoder of our own that the browser received whole and could not decode goes to that decoder,
+			// on the bytes already held where they are.
 			onDecodeFailure={
-				isHeicName(item)
+				decode !== null && decode !== "native"
 					? () => {
 							setRoute({ uuid, route: "undecodable" })
 						}

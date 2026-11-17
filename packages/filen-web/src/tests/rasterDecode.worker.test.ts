@@ -20,6 +20,7 @@ import type { RasterDecodeWorkerApi } from "@/features/preview/workers/rasterDec
 async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Comlink.Remote<RasterDecodeWorkerApi>; close: () => void }> {
 	vi.resetModules()
 	const { runHeicDecodeRgba, runHeicTransform } = await import("@/features/preview/lib/rasterCodecs/heic")
+	const { decodeRaster } = await import("@/features/preview/lib/rasterCodecs/display")
 
 	const { port1, port2 } = new MessageChannel()
 	port1.start()
@@ -27,7 +28,10 @@ async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Com
 
 	const api: RasterDecodeWorkerApi = {
 		transform: bytes => runHeicTransform(bytes, deps),
-		decodeRgba: bytes => runHeicDecodeRgba(bytes, deps)
+		decodeRgba: (format, bytes, maxPixels) =>
+			format === "heic" ? runHeicDecodeRgba(bytes, deps) : decodeRaster(format, bytes, maxPixels),
+		// createImageBitmap is the browser's: the display path is covered where it runs (the e2e legs).
+		display: () => Promise.reject(new Error("no bitmaps in node"))
 	}
 
 	Comlink.expose(api, port1)

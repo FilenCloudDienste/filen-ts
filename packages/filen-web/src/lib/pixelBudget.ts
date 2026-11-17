@@ -21,6 +21,15 @@ const THUMBNAIL_BYTES_PER_PIXEL = 4
 const EDIT_PIXELS = 50_000_000
 const EDIT_PIXELS_APPLE_MOBILE = 16_000_000
 
+// The long side an image our own code decodes is first shown at (its full resolution is a click away): what a large
+// screen shows of it at fit, without the decoded frame's whole cost on the GPU.
+const DISPLAY_LONG_SIDE_DESKTOP = 4096
+const DISPLAY_LONG_SIDE_MOBILE = 2048
+
+export function displayLongSide(profile: DeviceProfile): number {
+	return profile.mobile ? DISPLAY_LONG_SIDE_MOBILE : DISPLAY_LONG_SIDE_DESKTOP
+}
+
 export function workerDecodeBytes(profile: DeviceProfile): number {
 	return profile.mobile ? WORKER_DECODE_BYTES_MOBILE : WORKER_DECODE_BYTES_DESKTOP
 }

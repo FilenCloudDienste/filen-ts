@@ -1,20 +1,26 @@
 import { PDF_STAMP_MAX_BYTES } from "@filen/office/dom/pdfedit"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
-import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
-import { decodeHeicRgba } from "@/features/preview/lib/rasterDecode"
+import { extensionOf, itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { IMAGE_FORMATS, type ImageDecode } from "@/features/preview/lib/imageFormat"
+import { decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
+import { deviceProfile } from "@/lib/deviceProfile"
+import { workerDecodePixels } from "@/lib/pixelBudget"
 
 // A picture for an image stamp, as the editor takes it: PNG or JPEG bytes no wider or taller than STAMP_MAX_SIDE and
-// within the engine's size limit. A PNG or JPEG that already fits goes in as it is; HEIC is decoded off the main
-// thread (heic worker) and every other picture the browser decodes; those are drawn into a PNG, scaled down to fit.
+// within the engine's size limit. A PNG or JPEG that already fits goes in as it is; HEIC and QOI are decoded off the
+// main thread (the raster decode pool) and every other picture the browser decodes; those are drawn into a PNG, scaled
+// down to fit.
 
 export const STAMP_MAX_SIDE = 2048
 
+// The image formats a stamp is made from: the browser's own, and those the raster decode pool decodes.
+const STAMP_DECODES: ReadonlySet<ImageDecode> = new Set(["native", "heic", "qoi"])
+
 // A drive file the picture picker offers: what the previews show as a picture, HEIC included.
 export function isStampPicture(item: DriveItem): boolean {
-	const extension = itemTypeExtension(item)
+	const format = IMAGE_FORMATS.get(itemTypeExtension(item))
 
-	return previewCategoryForExtension(extension) === "image" || HEIC_EXTENSIONS.has(extension)
+	return format !== undefined && STAMP_DECODES.has(format.decode)
 }
 
 export interface PdfStampImage {
@@ -61,8 +67,14 @@ async function drawn(source: CanvasImageSource, width: number, height: number): 
 }
 
 async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage> {
-	if (HEIC_EXTENSIONS.has(extensionOf(name))) {
-		const decoded = await decodeHeicRgba(bytes)
+	const decode = IMAGE_FORMATS.get(extensionOf(name))?.decode
+
+	if (decode === "heic" || decode === "qoi") {
+		const maxPixels =
+			decode === "heic"
+				? Number.POSITIVE_INFINITY
+				: workerDecodePixels(deviceProfile(), bytes.byteLength, RASTER_BYTES_PER_PIXEL[decode])
+		const decoded = await decodeRasterRgba(decode, bytes, maxPixels)
 		const bitmap = await createImageBitmap(new ImageData(decoded.data, decoded.width, decoded.height))
 
 		try {
@@ -84,7 +96,7 @@ async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage>
 	}
 }
 
-// The picture `bytes` (named `name`, whose extension tells HEIC) ready to stamp; rejects when it can't be read or is
+// The picture `bytes` (named `name`, whose extension tells a format the pool decodes) ready to stamp; rejects when it can't be read or is
 // still too large.
 export async function prepareStampImage(bytes: Uint8Array, name: string): Promise<PdfStampImage> {
 	const image = await prepared(bytes, name)

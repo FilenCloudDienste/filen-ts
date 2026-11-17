@@ -1,0 +1,12 @@
+// "preview" namespace, image viewer — images decoded by our own code: the reduced view and the states it can end in.
+// Spread into preview.ts; same catalog rules.
+export const previewImageView = {
+	/** Image preview — chip over an image shown below its own resolution; {{width}}×{{height}} is its real size in pixels */
+	previewImageReduced: "Reduced · {{width}}×{{height}}",
+	/** Image preview — button in that chip that shows the image at its own resolution */
+	previewImageShowFull: "Full res ▸",
+	/** Image preview — an image with more pixels than this device can decode */
+	previewImageTooLarge: "This image is too large to display on this device.",
+	/** Image preview — an image whose data could not be decoded (damaged or not what its name says) */
+	previewImageDecodeFailed: "This image couldn't be read."
+} as const

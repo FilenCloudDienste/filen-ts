@@ -85,6 +85,8 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
 const LEGACY_IMAGE_TIER = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif", "heic", "heif", "hif"]
 const JPEG_ALIASES = ["jfif", "jpe", "pjpeg", "pjp"]
+// Formats our own decoders show, added after the policy table.
+const DECODED_SINCE = ["qoi"]
 const LEGACY_AUDIO_TIER = [
 	"mp3",
 	"m4a",
@@ -330,8 +332,10 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 	})
 
 	it("keeps the image and audio tiers, now read from IMAGE_FORMATS and AUDIO_FORMATS", () => {
-		// Plus the JPEG aliases, added after the policy table.
-		expect([...IMAGE_FORMATS.keys()].filter(extension => !JPEG_ALIASES.includes(extension))).toEqual(LEGACY_IMAGE_TIER)
+		// Plus the JPEG aliases and our own decoders' formats, added after the policy table.
+		expect(
+			[...IMAGE_FORMATS.keys()].filter(extension => !JPEG_ALIASES.includes(extension) && !DECODED_SINCE.includes(extension))
+		).toEqual(LEGACY_IMAGE_TIER)
 		expect([...AUDIO_FORMATS.keys()]).toEqual(LEGACY_AUDIO_TIER)
 		expect([...HEIC_EXTENSIONS]).toEqual([...LEGACY_HEIC])
 

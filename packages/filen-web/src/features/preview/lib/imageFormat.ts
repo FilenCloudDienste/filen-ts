@@ -2,9 +2,9 @@ import type { DeviceProfile } from "@/lib/deviceProfile"
 import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
-// route), or decoded from its whole bytes first ("heic", in libheif). The image tier of the preview's category table
-// is this table's keys.
-export type ImageDecode = "native" | "heic"
+// route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi").
+// The image tier of the preview's category table is this table's keys.
+export type ImageDecode = "native" | "heic" | "qoi"
 
 export interface ImageFormat {
 	decode: ImageDecode
@@ -12,12 +12,18 @@ export interface ImageFormat {
 	editable: boolean
 	// Largest file the preview opens, ahead of the image category's own limit; null from a function for none.
 	cap?: bigint | ((profile: DeviceProfile) => bigint | null)
+	// Shown in Photos; absent for the image category's own answer (yes).
+	photo?: boolean
 }
+
+const MIB = 1024n * 1024n
 
 const NATIVE_EDITABLE: ImageFormat = { decode: "native", editable: true }
 // HEIC/HEIF. "hif" is Fujifilm's extension for the same container, written 10-bit 4:2:2; libheif decodes high-bit-depth
 // HEVC and hands back 8-bit RGBA like any other HEIC.
 const HEIC: ImageFormat = { decode: "heic", editable: true }
+// Held whole and decoded in the raster decode pool.
+const QOI: ImageFormat = { decode: "qoi", editable: true, cap: 256n * MIB }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -38,7 +44,8 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["avif", NATIVE_EDITABLE],
 	["heic", HEIC],
 	["heif", HEIC],
-	["hif", HEIC]
+	["hif", HEIC],
+	["qoi", QOI]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.
@@ -54,7 +61,14 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 			return true
 		case "heic":
 			return profile.heicNative === "yes"
+		case "qoi":
+			return false
 	}
+}
+
+// Whether a format counts as a photo (Photos lists it).
+export function isPhotoFormat(format: ImageFormat): boolean {
+	return format.photo ?? true
 }
 
 // The probe whose answer picks the format's route while it is still unknown: a viewer waits on it rather than take the

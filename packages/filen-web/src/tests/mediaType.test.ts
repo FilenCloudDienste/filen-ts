@@ -3,6 +3,7 @@ import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { EXTENSION_TIERS, RAW_IMAGE_EXTENSIONS, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType, inlineTypeForExtension, isRescuable } from "@/features/preview/lib/mediaType"
+import { IMAGE_FORMATS, streamsNatively } from "@/features/preview/lib/imageFormat"
 import { AUDIO_FORMATS } from "@filen/shared"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { testUuid } from "@/tests/support/uuid"
@@ -124,6 +125,12 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"), { ...native, heicNative: "unknown" })).toBeNull()
 	})
 
+	it("never serves an image only our own decoders show, whatever type it stored", () => {
+		expect(allowedMediaContentType(fileNamed("render.qoi", "image/x-qoi"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("render.qoi", "image/png"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("render.qoi", undefined))).toBeNull()
+	})
+
 	it("never serves an SVG by a type it did not store", () => {
 		expect(allowedMediaContentType(fileNamed("logo.svg", "image/svg+xml"))).toBe("image/svg+xml")
 		expect(allowedMediaContentType(fileNamed("logo.svg", undefined))).toBeNull()
@@ -137,13 +144,21 @@ describe("allowedMediaContentType", () => {
 	})
 
 	it("gives every image, video and audio extension a type the allowlist serves, unless it is never rescued", () => {
+		// Every probe answered yes: an image no browser streams (one only our own decoders show) is never served inline.
+		const everyDecoder = { ...deviceProfile(), heicNative: "yes", jxlNative: "yes" } as const
 		const media = EXTENSION_TIERS.flatMap(([extensions]) => [...extensions]).filter(extension => {
 			const category = previewCategoryForExtension(extension)
+			const format = IMAGE_FORMATS.get(extension)
 
-			return category === "image" || category === "video" || category === "audio"
+			return (
+				(category === "image" && format !== undefined && streamsNatively(format, everyDecoder)) ||
+				category === "video" ||
+				category === "audio"
+			)
 		})
 
 		expect(media).toEqual(expect.arrayContaining(["pjp", "heic", "heif", "hif"]))
+		expect(media).not.toContain("qoi")
 
 		for (const extension of media) {
 			const served = inlineTypeForExtension(extension)
