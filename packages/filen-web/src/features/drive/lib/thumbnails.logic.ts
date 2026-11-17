@@ -10,7 +10,8 @@ import { itemTypeExtension, needsContentSniff, previewType } from "@/features/dr
 // XL), drawn by the browser itself in a worker of its own. "psd" is a Photoshop file's embedded thumbnail (its 1036
 // resource, a JPEG), read by range and handed to the SDK. "illustrator" is an `.ai` no read has settled yet: its head
 // read tells whether a PDF is inside, whose first page is its thumbnail.
-export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "psd" | "illustrator" | "none"
+// "eps" is an EPS file's preview picture: its TIFF section handed to the SDK, or its EPSI preview decoded in the pool.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "raster" | "psd" | "illustrator" | "eps" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
 // roughly the same size. The video and pdf generators use it for both dimensions (a square fit), the
@@ -132,6 +133,7 @@ const RASTER_THUMBNAIL_EXTENSIONS: ReadonlySet<string> = new Set(["jxl"])
 //   5. jxl                       -> raster (client-side: the browser's own decoder, where it has one)
 //      psd, psb                  -> psd    (the embedded thumbnail, decoded by the SDK)
 //      ai, unread                -> illustrator (its head read, then the pdf generator)
+//      eps, epsf                 -> eps    (its preview picture, read by range)
 //   6. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
 //   7. everything else           -> none
 //
@@ -169,6 +171,10 @@ export function thumbnailCategory(item: DriveItem, verdict?: FileVerdict): Thumb
 
 	if (ext === "psd" || ext === "psb") {
 		return "psd"
+	}
+
+	if (ext === "eps" || ext === "epsf") {
+		return "eps"
 	}
 
 	if (needsContentSniff(item, verdict) === "pdfCompatible") {

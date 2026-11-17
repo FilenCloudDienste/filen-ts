@@ -141,6 +141,11 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed("logo.ai", { canMakeThumbnail: false }), "notPdfCompatible")).toBe("none")
 	})
 
+	it("routes an EPS file to its preview picture", () => {
+		expect(thumbnailCategory(fileNamed("figure.eps", { canMakeThumbnail: false }))).toBe("eps")
+		expect(thumbnailCategory(fileNamed("figure.epsf", { canMakeThumbnail: true }))).toBe("eps")
+	})
+
 	it("routes a JPEG XL to the browser's own decoder, whatever the SDK says", () => {
 		expect(thumbnailCategory(fileNamed("photo.jxl", { canMakeThumbnail: false }))).toBe("raster")
 		expect(thumbnailCategory(fileNamed("photo.JXL", { canMakeThumbnail: true }))).toBe("raster")

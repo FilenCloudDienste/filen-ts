@@ -18,6 +18,7 @@ import { StreamablePreview } from "@/features/preview/components/streamablePrevi
 import { BlobImage, ZoomableImage } from "@/features/preview/components/zoomableImage"
 import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/components/decodedImage"
 import { MupdfImage } from "@/features/preview/components/mupdfImage"
+import { EpsImage } from "@/features/preview/components/epsImage"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 
 export interface ImageViewerProps {
@@ -252,6 +253,15 @@ function DecodedRoute({
 				alt={alt}
 				format={mupdf}
 				pageSourceRef={pageSourceRef}
+			/>
+		)
+	}
+
+	if (decode === "eps") {
+		return (
+			<EpsImage
+				item={item}
+				alt={alt}
 			/>
 		)
 	}

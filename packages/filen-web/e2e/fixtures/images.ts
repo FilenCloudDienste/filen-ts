@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib"
 import { encodeQoi, qoiTestPixels } from "@/tests/support/qoiBytes"
 import { bigTiffHeader, encodeTiff } from "@/tests/support/tiffBytes"
 import { encodePsd } from "@/tests/support/psdBytes"
+import { dosEps, epsiEps, plainEps } from "@/tests/support/epsBytes"
 import { JPEG_BYTES, PDF_BYTES } from "../helpers/fixtureBytes"
 import { JXL_PROBE_BASE64 } from "@/lib/imageProbeFixtures"
 import { buildZip } from "../helpers/archiveFixtures"
@@ -14,6 +15,8 @@ export const QOI_SIZE = { width: 96, height: 64 } as const
 export const TIFF_PAGE = { width: 120, height: 80 } as const
 
 export const PSD_SIZE = { width: 90, height: 60 } as const
+
+export const EPSI_WIDTH = 16
 
 const POSTSCRIPT_AI = "%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator(R) 8.0\n%%BoundingBox: 0 0 100 100\n%%EndComments\n"
 // Taller than a view, so stepping pages scrolls the column.
@@ -45,7 +48,8 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		"images-tiff": ["img-single.tif", "img-multipage.tiff", "img-big.tif"],
 		"images-archive": ["img-entries.zip"],
 		"images-psd": ["img-flat.psd", "img-noflat.psd", "img-large.psb"],
-		"images-ai": ["img-pdfcompat.ai", "img-postscript.ai"]
+		"images-ai": ["img-pdfcompat.ai", "img-postscript.ai"],
+		"images-eps": ["img-dos.eps", "img-epsi.eps", "img-plain.eps"]
 	},
 	() => ({
 		"img-sample.qoi": { buffer: qoiSample(), mimeType: "image/x-qoi" },
@@ -95,6 +99,19 @@ export const IMAGE_SCENARIOS = scenarioModule(
 		// Saved PDF-compatible: a PDF inside. Without it, PostScript only.
 		"img-pdfcompat.ai": { buffer: PDF_BYTES, mimeType: "application/illustrator" },
 		"img-postscript.ai": { buffer: Buffer.from(POSTSCRIPT_AI, "latin1"), mimeType: "application/illustrator" },
+		"img-dos.eps": { buffer: Buffer.from(dosEps(tiffSample())), mimeType: "application/postscript" },
+		// A 16 × 8 checkerboard of 1-bit samples.
+		"img-epsi.eps": {
+			buffer: Buffer.from(
+				epsiEps(
+					EPSI_WIDTH,
+					1,
+					Array.from({ length: 8 }, (_, row) => (row % 2 === 0 ? "AAAA" : "5555"))
+				)
+			),
+			mimeType: "application/postscript"
+		},
+		"img-plain.eps": { buffer: Buffer.from(plainEps()), mimeType: "application/postscript" },
 		"img-entries.zip": {
 			buffer: buildZip([
 				{ name: IMAGE_ENTRIES.qoi, data: qoiSample() },

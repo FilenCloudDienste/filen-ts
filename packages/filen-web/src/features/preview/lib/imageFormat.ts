@@ -4,9 +4,10 @@ import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 // How each image extension is shown: by the browser itself ("native", streamed through the service worker's inline
 // route), or decoded from its whole bytes first by our own code in the raster decode pool ("heic" in libheif, "qoi",
 // "jxl" in libjxl), inflated first ("svgz", then shown as the SVG it is), or read by the MuPDF read role ("mupdf", a
-// TIFF's pages, a Photoshop file's composite). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
+// TIFF's pages, a Photoshop file's composite), or shown by the preview an EPS file carries ("eps": its TIFF section in
+// the read role, its EPSI hex in the pool; PostScript itself is never run). HEIC and JPEG XL stream like a native image where a probe found the browser decodes them. The image
 // tier of the preview's category table is this table's keys.
-export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz" | "mupdf"
+export type ImageDecode = "native" | "heic" | "qoi" | "jxl" | "svgz" | "mupdf" | "eps"
 
 export interface ImageFormat {
 	decode: ImageDecode
@@ -40,6 +41,8 @@ const TIFF: ImageFormat = { decode: "mupdf", mupdf: "tiff", editable: true, cap:
 // its header (the engine reads version 1 only), so it never edits.
 const PSD: ImageFormat = { decode: "mupdf", mupdf: "psd", editable: true, cap: MUPDF_CAP, photo: false }
 const PSB: ImageFormat = { decode: "mupdf", mupdf: "psd", editable: false, cap: MUPDF_CAP, photo: false }
+// Only its head and its preview section are read.
+const EPS: ImageFormat = { decode: "eps", editable: false, photo: false }
 
 export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, ImageFormat>([
 	["jpg", NATIVE_EDITABLE],
@@ -67,7 +70,9 @@ export const IMAGE_FORMATS: ReadonlyMap<string, ImageFormat> = new Map<string, I
 	["tif", TIFF],
 	["tiff", TIFF],
 	["psd", PSD],
-	["psb", PSB]
+	["psb", PSB],
+	["eps", EPS],
+	["epsf", EPS]
 ])
 
 // The extensions whose bytes are a HEIF container, by name.
@@ -88,6 +93,7 @@ export function streamsNatively(format: ImageFormat, profile: DeviceProfile): bo
 		case "qoi":
 		case "svgz":
 		case "mupdf":
+		case "eps":
 			return false
 	}
 }

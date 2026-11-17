@@ -229,6 +229,7 @@ import {
 	generateRasterThumb,
 	generatePsdThumb,
 	generateIllustratorThumb,
+	generateEpsThumb,
 	rasterizeSvgThumb,
 	resetDriveKeyframes,
 	warmUploadThumbnail
@@ -237,6 +238,8 @@ import { frameHints, probeRecords } from "@/features/videos/lib/records"
 import { rangeReads } from "@/lib/media/rangeReads"
 import { testUuid } from "@/tests/support/uuid"
 import { encodePsd } from "@/tests/support/psdBytes"
+import { dosEps, plainEps } from "@/tests/support/epsBytes"
+import { encodeTiff } from "@/tests/support/tiffBytes"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
 // side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
@@ -313,7 +316,7 @@ beforeEach(() => {
 
 describe("registration", () => {
 	// The old image and heic arms are gone, both folded into the single sdk arm.
-	it("registers sdk/video/pdf/svg/raster/psd/illustrator generators exactly once, at import", () => {
+	it("registers every generator exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
 			["sdk", generateSdkThumb],
 			["video", generateVideoThumb],
@@ -321,7 +324,8 @@ describe("registration", () => {
 			["svg", generateSvgThumb],
 			["raster", generateRasterThumb],
 			["psd", generatePsdThumb],
-			["illustrator", generateIllustratorThumb]
+			["illustrator", generateIllustratorThumb],
+			["eps", generateEpsThumb]
 		])
 	})
 })
@@ -785,6 +789,43 @@ function jxlHead30Bit(heightMinusOne: number): number[] {
 
 	return [...out, 0, 0]
 }
+
+describe("generateEpsThumb", () => {
+	function epsItem(bytes: Uint8Array): BaseFileItem {
+		readFileBytesRangeMock.mockImplementation((_file, start, end) => Promise.resolve(bytes.slice(start, end)))
+
+		return itemAsBaseFile(narrowItem(namedFile("figure.eps", "application/postscript", { size: BigInt(bytes.length) })))
+	}
+
+	beforeEach(() => {
+		readFileBytesRangeMock.mockReset()
+		makeSdkThumbnailFromFileMock.mockReset()
+		makeSdkThumbnailFromFileMock.mockResolvedValue({
+			type: "thumbnail",
+			bytes: new Uint8Array([5]),
+			width: 1,
+			height: 1,
+			fromEmbeddedPreview: false
+		})
+	})
+
+	it("hands a DOS EPS's TIFF section to the SDK", async () => {
+		const tiff = encodeTiff([{ width: 4, height: 2, rgb: [1, 2, 3] }])
+
+		await expect(generateEpsThumb(epsItem(dosEps(tiff)), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([5]) })
+
+		const handed = makeSdkThumbnailFromFileMock.mock.calls[0]?.[0]
+
+		expect(handed?.type).toBe("image/tiff")
+		expect(new Uint8Array((await handed?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(tiff)
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("has none for plain PostScript", async () => {
+		await expect(generateEpsThumb(epsItem(plainEps()), live())).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+		expect(makeSdkThumbnailFromFileMock).not.toHaveBeenCalled()
+	})
+})
 
 describe("generateIllustratorThumb", () => {
 	it("has none for PostScript alone, after its head read", async () => {

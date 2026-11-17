@@ -76,5 +76,6 @@ describe("fileIconKey for the image formats", () => {
 
 		expect(fileIconKey("art.psd")).toBe("psd")
 		expect(fileIconKey("art.psb")).toBe("psd")
+		expect(fileIconKey("figure.eps")).toBe("psd")
 	})
 })

@@ -66,6 +66,7 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("logo.svg"))).toBe(true)
 		expect(isPhotoItem(fileNamed("art.psd"))).toBe(false)
 		expect(isPhotoItem(fileNamed("art.psb"))).toBe(false)
+		expect(isPhotoItem(fileNamed("figure.eps"))).toBe(false)
 	})
 
 	// A camera RAW is a photo by any user's reckoning, and the grid tile is thumbnail-driven — the SDK

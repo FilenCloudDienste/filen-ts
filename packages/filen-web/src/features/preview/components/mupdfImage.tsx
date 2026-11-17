@@ -47,6 +47,8 @@ export interface MupdfImageProps {
 	format: MupdfImageFormat
 	// Holds the page shown while it is mounted, for the image editor to draw from the engine that holds the file.
 	pageSourceRef?: RefObject<ImagePageSlot | null> | undefined
+	// Bytes to read instead of the item's own (an EPS file's TIFF preview section).
+	source?: ByteOrigin | undefined
 }
 
 export function MupdfImage(props: MupdfImageProps) {
@@ -143,9 +145,10 @@ async function openMupdfImage(
 	return { status: "open", reader: await openMupdfReader({ origin, access, scope, format, maxImagePixels, signal }) }
 }
 
-function MupdfDocument({ item, alt, format, pageSourceRef }: MupdfImageProps) {
+export function MupdfDocument({ item, alt, format, pageSourceRef, source }: MupdfImageProps) {
 	const { t } = useTranslation("preview")
-	const origin = usePreviewOrigin(item)
+	const own = usePreviewOrigin(item)
+	const origin = source ?? own
 	const access = usePreviewAccessMode()
 	const scope = usePreviewCacheScope()
 	const profile = useDeviceProfile()

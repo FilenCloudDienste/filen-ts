@@ -19,6 +19,8 @@ export const previewImageView = {
 	previewPsbUnsupported: "Large Document Format (.psb) files can't be previewed.",
 	/** Image preview — a Photoshop file saved without the flattened image the preview shows */
 	previewPsdNoComposite: "This Photoshop file has no flattened image to show.",
+	/** Image preview — an EPS file without an embedded preview picture (PostScript is never run to draw one) */
+	previewEpsNoPreview: "This EPS file has no preview to show.",
 	/** Image editing header — beside the save button when the image has several pages: the copy holds the page shown */
 	previewImageSaveCopyPage: "Current page only"
 } as const

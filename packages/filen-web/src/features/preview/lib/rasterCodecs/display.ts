@@ -1,5 +1,6 @@
 import { decodeJxl } from "@/features/preview/lib/rasterCodecs/jxl"
 import { decodeQoi } from "@/features/preview/lib/rasterCodecs/qoi"
+import { decodeEpsi } from "@/features/preview/lib/rasterCodecs/epsi"
 import type { DecodedRaster, DisplayRasterFormat } from "@/features/preview/lib/rasterCodecs/raster"
 
 // The raster decode pool's display path: our own decoders' RGBA turned into a bitmap the page draws as it is, scaled
@@ -14,7 +15,8 @@ export interface DisplayedRaster {
 
 const DECODERS: Readonly<Record<DisplayRasterFormat, (bytes: Uint8Array, maxPixels: number) => DecodedRaster | Promise<DecodedRaster>>> = {
 	qoi: decodeQoi,
-	jxl: decodeJxl
+	jxl: decodeJxl,
+	epsi: decodeEpsi
 }
 
 // The whole image as RGBA; `maxPixels` refuses a header naming more before anything is allocated.

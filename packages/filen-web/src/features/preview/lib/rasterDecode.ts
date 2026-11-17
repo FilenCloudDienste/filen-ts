@@ -134,7 +134,9 @@ export async function decodeHeicRgba(bytes: Uint8Array, signal?: AbortSignal): P
 // out of it and the bitmap.
 export const RASTER_BYTES_PER_PIXEL: Readonly<Record<DisplayRasterFormat, number>> = {
 	qoi: 8,
-	jxl: 70
+	jxl: 70,
+	// Its grey RGBA, then the bitmap.
+	epsi: 8
 }
 
 // The whole image as RGBA, decoded off the main thread from a private copy of `bytes`; `maxPixels` refuses a larger

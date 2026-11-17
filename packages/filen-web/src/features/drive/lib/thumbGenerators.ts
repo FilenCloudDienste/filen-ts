@@ -71,6 +71,9 @@ import { gunzipSvg } from "@/features/preview/lib/svgz"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { sniffJxlUpright } from "@/features/preview/lib/imageSniff/jxl"
 import { sniffPsd } from "@/features/preview/lib/imageSniff/psd"
+import { epsPreview } from "@/features/preview/lib/epsPreview"
+import { displayRaster } from "@/features/preview/lib/rasterDecode"
+import { isRasterBudgetError } from "@/features/preview/lib/rasterCodecs/raster"
 import { supportsNativeImage } from "@/lib/nativeImageSupport"
 import { thumbnail } from "@/lib/pixelBudget"
 
@@ -1053,6 +1056,62 @@ export const generateIllustratorThumb: ThumbGenerator = async (item, signal) => 
 	return verdict === "pdfCompatible" ? await generatePdfThumb(item, signal) : { type: "unavailable", reason: "unsupported" }
 }
 
+// An EPS file's preview picture, read by range: a DOS EPS's TIFF section (within the size the SDK's from-file path
+// decodes whole) handed to the SDK, an EPSI preview decoded in the raster decode pool straight to the tile's size. One
+// with neither has none: its PostScript is never run.
+export const generateEpsThumb: ThumbGenerator = async (item, signal) => {
+	const size = Number(item.data.size)
+
+	try {
+		const preview = await epsPreview(
+			{ size, read: (offset, length, stop) => readFileRange(item, offset, Math.min(size, offset + length), stop ?? signal) },
+			signal,
+			Number(THUMB_WARM_SIZE_GATE)
+		)
+
+		switch (preview.kind) {
+			case "tiff":
+				return asGenerationResult(
+					await sdkApi.makeSdkThumbnailFromFile(
+						new File([preview.bytes as Uint8Array<ArrayBuffer>], "preview.tif", { type: "image/tiff" }),
+						THUMB_MAX_DIM,
+						THUMB_SDK_MAX_HEIGHT,
+						THUMB_SDK_LOSSY_QUALITY
+					)
+				)
+			case "epsi": {
+				const { bitmap } = await displayRaster("epsi", preview.bytes, {
+					maxPixels: thumbnail(),
+					maxLongSide: THUMB_MAX_DIM,
+					signal
+				})
+				const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+
+				canvas.getContext("2d")?.drawImage(bitmap, 0, 0)
+				bitmap.close()
+
+				return { type: "bytes", bytes: new Uint8Array(await (await encodeCanvasThumb(canvas)).arrayBuffer()) }
+			}
+			case "none":
+				return { type: "unavailable", reason: "unsupported" }
+			case "tooLarge":
+				return { type: "unavailable", reason: "overBudget" }
+			case "unreadable":
+				return { type: "unavailable", reason: "corrupt" }
+		}
+	} catch (e) {
+		if (isRasterBudgetError(e)) {
+			return { type: "unavailable", reason: "overBudget" }
+		}
+
+		if (!signal.aborted) {
+			log.warn("thumb-generators", "generateEpsThumb failed", item.data.uuid, e)
+		}
+
+		return { type: "failed" }
+	}
+}
+
 // One pdf.js worker shared by every PDF thumbnail, instead of one spun up and torn down per file.
 // Handed to pdf.js as the host's own (openPdf's "shared" worker), so a task's destroy() ends only its own document
 // and never the worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
@@ -1300,3 +1359,4 @@ registerThumbGenerator("svg", generateSvgThumb)
 registerThumbGenerator("raster", generateRasterThumb)
 registerThumbGenerator("psd", generatePsdThumb)
 registerThumbGenerator("illustrator", generateIllustratorThumb)
+registerThumbGenerator("eps", generateEpsThumb)

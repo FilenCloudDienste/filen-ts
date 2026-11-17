@@ -74,7 +74,18 @@ type Shown =
 	| { readonly status: "failed" }
 	| { readonly status: "shown"; readonly bitmap: ImageBitmap; readonly width: number; readonly height: number }
 
-function DecodedImageBytes({ item, bytes, alt, format }: { item: DriveItem; bytes: Uint8Array; alt: string; format: DisplayRasterFormat }) {
+// One whose bytes are in hand (an EPS file's preview section).
+export function DecodedImageBytes({
+	item,
+	bytes,
+	alt,
+	format
+}: {
+	item: DriveItem
+	bytes: Uint8Array
+	alt: string
+	format: DisplayRasterFormat
+}) {
 	const { t } = useTranslation("preview")
 	const profile = useDeviceProfile()
 	const header = rasterHeader(format, bytes)

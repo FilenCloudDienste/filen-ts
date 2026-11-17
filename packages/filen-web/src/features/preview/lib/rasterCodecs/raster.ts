@@ -8,8 +8,8 @@ export interface DecodedRaster {
 }
 
 // The formats the pool decodes itself: HEIC (libheif), QOI (in-house), JPEG XL (libjxl, where the browser has no
-// decoder of its own).
-export type RasterFormat = "heic" | "qoi" | "jxl"
+// decoder of its own), an EPS file's EPSI preview (in-house).
+export type RasterFormat = "heic" | "qoi" | "jxl" | "epsi"
 
 // The formats it decodes for display, as a bitmap: HEIC is shown from its JPEG re-encode instead.
 export type DisplayRasterFormat = Exclude<RasterFormat, "heic">

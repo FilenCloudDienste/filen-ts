@@ -8,7 +8,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { PDF_BYTES } from "./helpers/fixtureBytes"
-import { IMAGE_ENTRIES, PSD_SIZE, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
+import { EPSI_WIDTH, IMAGE_ENTRIES, PSD_SIZE, QOI_SIZE, TIFF_PAGE, jxlSample, qoiSample, tiffSample } from "./fixtures/images"
 import { preview } from "@/locales/en/preview"
 
 // Images only the app's own decoders show (QOI, JPEG XL where the browser has no decoder, gzipped SVG, TIFF): decoded
@@ -455,6 +455,39 @@ test("an Illustrator file saved PDF-compatible opens in the PDF viewer, view onl
 		await expect(page.getByRole("menuitem", { name: menuItemName("Open") })).toHaveCount(0, { timeout: 2_000 })
 	}).toPass({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByRole("menuitem", { name: menuItemName("Open as text") })).toBeVisible()
+	await page.keyboard.press("Escape")
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+})
+
+test("an EPS file is shown by its preview picture, never by running its PostScript", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const foreign = trackForeignRequests(context, { strictPreview: false })
+	const [DOS, EPSI, PLAIN] = FIXTURE_FILES["images-eps"]
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "images-eps")
+
+	// A DOS EPS's TIFF section, in the read role; an EPSI preview, decoded in the pool: both drawn on a canvas.
+	for (const [name, width] of [
+		[DOS, TIFF_PAGE.width],
+		[EPSI, EPSI_WIDTH]
+	] as const) {
+		await itemRow(listbox, name).dblclick()
+
+		const shown = picture(page, name)
+
+		await expect(shown, name).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		expect(await tagOf(shown), name).toBe("CANVAS")
+		await expect(shown, name).toHaveAttribute("width", String(width))
+		await page.keyboard.press("Escape")
+		await expect(shown).toHaveCount(0)
+	}
+
+	await itemRow(listbox, PLAIN).dblclick()
+	await expect(page.getByText(preview.previewEpsNoPreview, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await page.keyboard.press("Escape")
 
 	expect(cspViolations).toEqual([])
