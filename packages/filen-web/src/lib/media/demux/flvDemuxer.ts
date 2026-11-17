@@ -161,12 +161,19 @@ function videoTrack(data: Uint8Array, meta: FlvMetaData | null): DemuxTrack {
 	}
 }
 
+// PCM's sample format: the flags' size bit says 8-bit (unsigned) or 16-bit (little-endian: SoundFormat 3 says so,
+// and 0, "platform endian", was written by little-endian machines).
+function pcmFormat(flags: number): AudioCodec {
+	return (flags & 0x02) === 0 ? "pcm-u8" : "pcm-s16"
+}
+
 function audioTrack(data: Uint8Array): DemuxTrack {
 	const probed = flvAudioTag(data)
-	const codec = probed.codec === null ? null : (AUDIO_CODECS[probed.codec] ?? null)
+	const codec = probed.codec === "pcm" ? pcmFormat(data[0] ?? 0) : probed.codec === null ? null : (AUDIO_CODECS[probed.codec] ?? null)
 	const channels = probed.ch ?? 2
 	const sampleRate = probed.rate ?? 44100
 	const description = codec === "aac" && data[1] === 0 ? data.subarray(2) : null
+	const configCodec = codec === "mp3" || codec === "pcm-u8" || codec === "pcm-s16" ? codec : probed.codecString
 
 	return {
 		type: "audio",
@@ -179,10 +186,10 @@ function audioTrack(data: Uint8Array): DemuxTrack {
 		channels,
 		sampleRate,
 		decoderConfig:
-			codec === null || probed.codecString === null
+			codec === null || configCodec === null
 				? null
 				: {
-						codec: codec === "mp3" ? "mp3" : probed.codecString,
+						codec: configCodec,
 						numberOfChannels: channels,
 						sampleRate,
 						...(description === null ? {} : { description })
@@ -213,7 +220,9 @@ function tagPacket(bytes: Uint8Array, at: number, unit: number, tracks: Map<numb
 		}
 
 		const header = track.codec === "mp3" ? mpegAudioHeader(bytes, dataAt + 1) : null
-		const samples = track.codec === "aac" ? 1024 : (header?.samples ?? 1152)
+		const pcmBytes = track.codec === "pcm-s16" ? 2 : track.codec === "pcm-u8" ? 1 : 0
+		const samples =
+			pcmBytes > 0 ? (size - skip) / (pcmBytes * track.channels) : track.codec === "aac" ? 1024 : (header?.samples ?? 1152)
 
 		return {
 			track: AUDIO_TRACK,
@@ -285,8 +294,11 @@ async function openFlv(input: Input): Promise<ContainerReader> {
 		tracks.set(VIDEO_TRACK, videoTrack(head.video, head.meta))
 	}
 
-	if (head.audio !== null) {
-		tracks.set(AUDIO_TRACK, audioTrack(head.audio))
+	// Only sound this cuts into packets is listed: a track that never yields one would be searched for to the end.
+	const audio = head.audio === null ? null : audioTrack(head.audio)
+
+	if (audio?.type === "audio" && audio.codec !== null) {
+		tracks.set(AUDIO_TRACK, audio)
 	}
 
 	const [first, second] = head.videoTimes

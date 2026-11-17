@@ -170,6 +170,8 @@ describe("waveProbedCodec", () => {
 		expect(waveProbedCodec("adpcm", waveFormat(0x0011, 1, 22_050, 11_100, 512, 4, [0xf9, 0x01]), null, null)?.codec).toBe(
 			"adpcm_ima_wav"
 		)
+		// ADPCM with no WAVEFORMATEX to say which (Flash's own, in FLV): no decoder here reads it.
+		expect(waveProbedCodec("adpcm", null, 22_050, 1)).toBeNull()
 	})
 
 	it("names the decoders that need no format, from the walk's rate and channels, and nothing else", () => {

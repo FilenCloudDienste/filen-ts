@@ -225,6 +225,35 @@ describe("FLV demuxer", () => {
 		expect(reads.reduce((sum, [start, end]) => sum + end - start, 0)).toBeLessThan(bytes.length / 4)
 	})
 
+	it("plays PCM sound, and lists no track for sound it cannot cut into packets", async () => {
+		// Audio-only FLVs: 10 tags of 1764 bytes of 16-bit stereo PCM at 44.1 kHz (10 ms each), or Flash ADPCM.
+		const audioOnly = (flags: number): Uint8Array =>
+			Uint8Array.from([
+				...text("FLV"),
+				1,
+				0x04,
+				...be(9, 4),
+				0,
+				0,
+				0,
+				0,
+				...Array.from({ length: 10 }, (_, i) => tag(8, i * 10, [flags, ...new Array<number>(1764).fill(i)])).flat()
+			])
+		const pcm = new Input({ formats: [FLV], source: new BufferSource(audioOnly(0x3f)) })
+		const track = defined(await pcm.getPrimaryAudioTrack())
+		const packets = await all(new EncodedPacketSink(track))
+
+		expect(await track.getCodec()).toBe("pcm-s16")
+		expect(await track.getNumberOfChannels()).toBe(2)
+		expect(packets).toHaveLength(10)
+		expect(packets[3]?.duration).toBeCloseTo(0.01, 6)
+		expect(packets[3]?.data[0]).toBe(3)
+
+		const adpcm = new Input({ formats: [FLV], source: new BufferSource(audioOnly(0x1f)) })
+
+		expect(await adpcm.getPrimaryAudioTrack()).toBeNull()
+	})
+
 	it("survives truncated and hostile files", async () => {
 		const bytes = flv(30, 16, true)
 

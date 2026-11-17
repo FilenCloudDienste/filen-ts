@@ -203,6 +203,13 @@ describe("probeVideo — FLV", () => {
 		expect((await probe(file))?.video).toMatchObject({ codec: "h263", codecString: null })
 	})
 
+	it("names PCM, and leaves Flash's own ADPCM unnamed: it is not the WAV ADPCM decoded here", async () => {
+		const sound = (flags: number): Uint8Array => concat(text("FLV"), [1, 0x04, ...be(9, 4), 0, 0, 0, 0], flvTag(8, 0, [flags, 0, 0]))
+
+		expect((await probe(sound(0x3f)))?.audio[0]).toMatchObject({ codec: "pcm", ch: 2, rate: 44100 })
+		expect((await probe(sound(0x1f)))?.audio[0]?.codec).toBeNull()
+	})
+
 	it("survives hostile metadata", async () => {
 		const file = flv(true)
 

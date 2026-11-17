@@ -519,7 +519,8 @@ export interface ProbedCodec {
 }
 
 // The FFmpeg decoder for a walked codec its WAVEFORMATEX (`format`) holds the rest of: WMA by version, ADPCM by
-// flavour, with the format's block size, bit rate and extra bytes. Null for a codec FFmpeg does not decode here.
+// flavour (Microsoft or IMA only), with the format's block size, bit rate and extra bytes. Null for a codec FFmpeg
+// does not decode here.
 export function waveProbedCodec(
 	codec: string,
 	format: Uint8Array | null,
@@ -545,7 +546,9 @@ export function waveProbedCodec(
 				: codec === "adpcm"
 					? tag === 0x0011
 						? "adpcm_ima_wav"
-						: "adpcm_ms"
+						: tag === 0x0002
+							? "adpcm_ms"
+							: "unknown"
 					: codec
 		]
 
