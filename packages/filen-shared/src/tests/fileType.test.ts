@@ -104,7 +104,8 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["application/x-fictionbook+xml", "fb2"],
 	["image/jxl", "jxl"],
 	["image/x-qoi", "qoi"],
-	["application/illustrator", "ai"]
+	["application/illustrator", "ai"],
+	["image/vnd.adobe.photoshop", "psd"]
 ]
 
 // The MIME type → extension map as it was written by hand before TYPE_ROWS: the derived one must equal it.
@@ -266,6 +267,12 @@ describe("mimeForExtension", () => {
 		expect(mimeForExtension("svgz")).toBe("image/svg+xml")
 		expect(extensionForMime("image/svg+xml")).toBe("svg")
 		expect(extensionForMime("image/tiff")).toBe("tiff")
+		expect(mimeForExtension("psd")).toBe("image/vnd.adobe.photoshop")
+		expect(mimeForExtension("psb")).toBe("image/vnd.adobe.photoshop")
+		expect(mimeForExtension("eps")).toBe("application/postscript")
+		// An extensionless upload stored as a Photoshop file reads as one; PostScript stays generic.
+		expect(extensionForMime("image/vnd.adobe.photoshop")).toBe("psd")
+		expect(extensionForMime("application/postscript")).toBeNull()
 	})
 
 	it("serves an extension as its canonical type, never an alias", () => {

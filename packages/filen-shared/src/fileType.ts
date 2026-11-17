@@ -68,6 +68,9 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	// Gzipped SVG: served (and reversed) as the SVG it inflates to.
 	["image/svg+xml", "svgz", "fromExt"],
 	["application/illustrator", "ai", "both"],
+	["image/vnd.adobe.photoshop", "psd", "both"],
+	["image/vnd.adobe.photoshop", "psb", "fromExt"],
+	["application/postscript", "eps", "fromExt"],
 	["video/mp4", "mp4", "both"],
 	["video/webm", "webm", "both"],
 	["video/quicktime", "mov", "both"],
