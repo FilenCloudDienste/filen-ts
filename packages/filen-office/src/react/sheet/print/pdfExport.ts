@@ -235,7 +235,7 @@ class SheetPdfExport {
 
 		const activeLayout = await this.session.layout(first.sheet)
 		const base = new SheetGridModel({
-			session: this.session,
+			source: this.session,
 			info: {
 				kind: request.kind,
 				sheets: request.summaries,
@@ -425,7 +425,7 @@ class SheetPdfExport {
 		}
 
 		const model = new SheetGridModel({
-			session: this.session,
+			source: this.session,
 			info: {
 				kind: this.request.kind,
 				sheets: this.request.summaries,

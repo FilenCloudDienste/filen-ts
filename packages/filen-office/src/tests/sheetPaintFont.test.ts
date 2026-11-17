@@ -47,7 +47,7 @@ async function paintTwice(body: string): Promise<string[]> {
 
 	if (result.kind !== "opened") throw new Error(result.kind)
 
-	const model = new SheetGridModel({ session: result.session, info: result.info })
+	const model = new SheetGridModel({ source: result.session, edit: result.session, info: result.info })
 	const sheet = result.info.activeSheet
 
 	model.need(sheet, [0, 0])

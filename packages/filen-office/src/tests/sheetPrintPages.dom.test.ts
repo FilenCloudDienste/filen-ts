@@ -149,7 +149,7 @@ async function openModel(bytes: Uint8Array): Promise<SheetGridModel> {
 	// Features reading parts beside the sheet (drawings, notes) land in a few turns.
 	for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
 
-	return new SheetGridModel({ session, info })
+	return new SheetGridModel({ source: session, edit: session, info })
 }
 
 async function printed(count: number, setup: SheetPageSetup = SETUP) {

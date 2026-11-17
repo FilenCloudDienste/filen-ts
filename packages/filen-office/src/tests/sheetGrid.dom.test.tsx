@@ -2,7 +2,7 @@
 import { act, createRef, useEffect, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetSessionApi } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import {
 	DEFAULT_THEME,
@@ -61,6 +61,8 @@ async function settle(): Promise<void> {
 
 interface Mounted {
 	readonly model: SheetGridModel
+	// What edits go through.
+	readonly session: SheetSessionApi
 	readonly handle: SheetGridHandle
 	readonly root: Root
 	readonly scroller: HTMLElement
@@ -74,7 +76,7 @@ async function mount(bytes = buildFixture(BASIC)): Promise<Mounted> {
 
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
-	const model = new SheetGridModel({ session: opened.session, info: opened.info })
+	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 	const container = document.createElement("div")
 	const ref = createRef<SheetGridHandle>()
 	const root = createRoot(container)
@@ -106,7 +108,7 @@ async function mount(bytes = buildFixture(BASIC)): Promise<Mounted> {
 	await settle()
 	paint()
 
-	return { model, handle, root, scroller, cells, paint }
+	return { model, session: opened.session, handle, root, scroller, cells, paint }
 }
 
 function key(target: Element, init: KeyboardEventInit & { keyCode?: number }): void {
@@ -465,7 +467,7 @@ describe("SheetGrid", () => {
 
 		if (opened.kind !== "opened") throw new Error(opened.kind)
 
-		const model = new SheetGridModel({ session: opened.session, info: opened.info })
+		const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 		const container = document.createElement("div")
 		const ref = createRef<SheetGridHandle>()
 		const root = createRoot(container)
@@ -525,7 +527,7 @@ describe("SheetGrid", () => {
 
 		if (opened.kind !== "opened") throw new Error(opened.kind)
 
-		const model = new SheetGridModel({ session: opened.session, info: opened.info })
+		const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 		const container = document.createElement("div")
 		const ref = createRef<SheetGridHandle>()
 		const root = createRoot(container)
@@ -596,8 +598,8 @@ describe("SheetGrid", () => {
 	})
 
 	it("resizes and autofits into the app's size layer when the file is view-only", async () => {
-		const { scroller, model, handle, root } = await mount()
-		const command = vi.spyOn(model.session, "command")
+		const { scroller, model, session, handle, root } = await mount()
+		const command = vi.spyOn(session, "command")
 		let kept: SheetGridKeptSizes = { cols: new Map(), rows: new Map() }
 		const updates: unknown[] = []
 		const layer = (): SheetGridSizes => ({

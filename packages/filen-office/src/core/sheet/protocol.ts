@@ -843,8 +843,9 @@ export interface SheetSessionSettings {
 	readonly clock?: () => number
 }
 
-// An open workbook. Every method that answers does so asynchronously, on both hosts.
-export interface SheetSessionApi {
+// What a grid reads from: tiles, layouts and queries. A read-only source (a database's tables) implements only this;
+// one that refuses a query rejects it.
+export interface SheetReadSource {
 	// Tiles of one sheet, by tile row and column pairs. The host holds them as the client's from now on (changes
 	// patch them) until `release`.
 	tiles(sheet: SheetId, coordinates: Uint32Array): Promise<{ readonly tiles: readonly SheetTile[]; readonly styles?: SheetStyleAppend }>
@@ -852,17 +853,25 @@ export interface SheetSessionApi {
 	release(keys: Float64Array): void
 	// A sheet's layout; parses the sheet first when it is not ready.
 	layout(sheet: SheetId): Promise<SheetLayout>
-	command(command: SheetCommand): Promise<SheetCommandResult>
-	undo(): Promise<SheetCommandResult>
-	redo(): Promise<SheetCommandResult>
 	query<Q extends SheetQueryName>(
 		name: Q,
 		request: SheetQueryRequest<Q>,
 		options?: { readonly signal?: SheetAbortSignal }
 	): Promise<SheetQueryResult<Q>>
+}
+
+// What a grid edits through.
+export interface SheetEditApi {
+	command(command: SheetCommand): Promise<SheetCommandResult>
+	undo(): Promise<SheetCommandResult>
+	redo(): Promise<SheetCommandResult>
 	// The user set out to edit: the gate proves the file (once), then the formula engine is built while the
 	// first entry is typed. Answers the verdict.
 	intent(): Promise<SheetWritability>
+}
+
+// An open workbook. Every method that answers does so asynchronously, on both hosts.
+export interface SheetSessionApi extends SheetReadSource, SheetEditApi {
 	// The app will not edit this file: the proof is skipped and what only saving needs is let go.
 	viewOnly(): void
 	configure(settings: SheetSessionSettings): void

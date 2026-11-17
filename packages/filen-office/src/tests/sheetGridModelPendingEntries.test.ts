@@ -9,7 +9,7 @@ import { BASIC, buildFixture, openFixture } from "./sheetSessionFixtures"
 describe("entries waiting for their check", () => {
 	it("keep showing a later entry of the same cell when an earlier one's check drops it", async () => {
 		const { session, info } = await openFixture(buildFixture(BASIC))
-		const model = new SheetGridModel({ session, info })
+		const model = new SheetGridModel({ source: session, edit: session, info })
 		const sheet = info.activeSheet
 		const answers: ((verdict: "commit" | "discard") => void)[] = []
 

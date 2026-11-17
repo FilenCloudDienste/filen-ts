@@ -11,7 +11,7 @@ import { BASIC, buildFixture, openFixture } from "./sheetSessionFixtures"
 async function opened(): Promise<{ model: SheetGridModel; session: SheetSessionApi; sheet: number }> {
 	const { session, info } = await openFixture(buildFixture(BASIC))
 
-	return { model: new SheetGridModel({ session, info }), session, sheet: info.activeSheet }
+	return { model: new SheetGridModel({ source: session, edit: session, info }), session, sheet: info.activeSheet }
 }
 
 function range(startRow: number, startCol: number, endRow: number, endCol: number): SheetRange {

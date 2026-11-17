@@ -18,7 +18,7 @@ const HIDDEN =
 
 async function opened(body = HIDDEN): Promise<{ model: SheetGridModel; view: GridView; layout: SheetLayout; sheet: number }> {
 	const { session, info } = await openFixture(buildFixture({ sheets: [{ name: "S", body }] }))
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 	const sheet = info.activeSheet
 
 	model.need(sheet, [0, 0])

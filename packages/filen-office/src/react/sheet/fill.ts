@@ -1,4 +1,4 @@
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange, type SheetSessionApi } from "../../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange, type SheetReadSource } from "../../core/sheet/protocol"
 import { shownIndex, type GridAxis } from "./axis"
 import type { GridPoint } from "./selection"
 
@@ -58,7 +58,7 @@ export function fillLeft(source: SheetRange, target: SheetRange): SheetRange | n
 // Where a double-click on the handle fills down to: the last row of the run of data in the column left of the
 // selection (else right of it) that starts on the row below the selection; null when there is none. A lone filled
 // cell there is the run: Ctrl+Down from it would go past the blank cells under it to the next block.
-export async function fillDownTo(session: SheetSessionApi, sheet: SheetId, source: SheetRange, rows: GridAxis): Promise<number | null> {
+export async function fillDownTo(session: SheetReadSource, sheet: SheetId, source: SheetRange, rows: GridAxis): Promise<number | null> {
 	if (source.endRow >= SHEET_MAX_ROWS - 1) return null
 
 	const below = source.endRow + 1

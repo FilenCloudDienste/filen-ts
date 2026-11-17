@@ -20,7 +20,8 @@ import {
 	type SheetRange,
 	type SheetRefusal,
 	type SheetRenderStyle,
-	type SheetSessionApi,
+	type SheetEditApi,
+	type SheetReadSource,
 	type SheetStyleAppend,
 	type SheetSummary,
 	type SheetTile,
@@ -166,7 +167,9 @@ const TEXT_KINDS: ReadonlySet<SheetFileKind> = new Set(["csv", "tsv", "tab"])
 export type SheetGridRefusalHandler = (refusal: SheetRefusal, command: SheetCommand | "undo" | "redo") => void
 
 export interface SheetGridModelOptions {
-	readonly session: SheetSessionApi
+	readonly source: SheetReadSource
+	// What edits go through; without it the grid only reads (commands, undo and redo are refused as read-only).
+	readonly edit?: SheetEditApi
 	readonly info: SheetWorkbookInfo
 }
 
@@ -241,7 +244,9 @@ function sameActive(a: GridActiveCell, b: GridActiveCell): boolean {
 }
 
 export class SheetGridModel {
-	readonly session: SheetSessionApi
+	// What the grid reads from.
+	readonly session: SheetReadSource
+	private readonly edit: SheetEditApi | null
 	readonly tiles = new TileCache()
 	readonly date1904: boolean
 	readonly kind: SheetFileKind
@@ -301,9 +306,10 @@ export class SheetGridModel {
 	private readonly fitter = new RowFitter(this)
 
 	constructor(options: SheetGridModelOptions) {
-		const { session, info } = options
+		const { source, info } = options
 
-		this.session = session
+		this.session = source
+		this.edit = options.edit ?? null
 		this.date1904 = info.date1904
 		this.kind = info.kind
 		this.appendStyles(info.styles)
@@ -950,7 +956,7 @@ export class SheetGridModel {
 	// The user set out to edit: the session proves the file (once) and builds its formula engine.
 	// Never rejects: a session that cannot answer leaves the writability as it was.
 	intent(): Promise<SheetWritability> {
-		this.intention ??= this.session.intent().then(
+		this.intention ??= (this.edit === null ? Promise.resolve(this.snapshot.writability) : this.edit.intent()).then(
 			writability => {
 				if (writability !== this.snapshot.writability) this.update({ writability })
 
@@ -1222,10 +1228,15 @@ export class SheetGridModel {
 
 	// --- Commands ---
 
+	// A grid without an edit API refuses every change as read-only.
+	private refused(): Promise<SheetCommandResult> {
+		return Promise.resolve({ ok: false, refusal: { reason: "readOnly" }, state: this.snapshot.state })
+	}
+
 	// Runs a command and applies its change. `report`: a refusal goes to onRefusal.
 	async command(command: SheetCommand, report = true): Promise<SheetCommandResult> {
 		const moves = this.moves
-		const result = await this.session.command(command)
+		const result = await (this.edit?.command(command) ?? this.refused())
 		// Changes before this answer arrived before it: a newer version is this command's step.
 		const before = this.snapshot.state.version
 
@@ -1270,7 +1281,7 @@ export class SheetGridModel {
 
 	async undo(): Promise<SheetCommandResult> {
 		const moves = this.moves
-		const result = await this.session.undo()
+		const result = await (this.edit?.undo() ?? this.refused())
 
 		this.settle(result, "undo", moves)
 
@@ -1288,7 +1299,7 @@ export class SheetGridModel {
 
 	async redo(): Promise<SheetCommandResult> {
 		const moves = this.moves
-		const result = await this.session.redo()
+		const result = await (this.edit?.redo() ?? this.refused())
 
 		this.settle(result, "redo", moves)
 

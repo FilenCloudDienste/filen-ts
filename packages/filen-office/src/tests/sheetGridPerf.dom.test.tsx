@@ -78,7 +78,7 @@ describe.skipIf(!PERF)("grid budgets at 1M cells", () => {
 
 			if (opened.kind !== "opened") throw new Error(opened.kind)
 
-			const model = new SheetGridModel({ session: opened.session, info: opened.info })
+			const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 			const ref = createRef<SheetGridHandle>()
 			const container = document.createElement("div")
 			const root = createRoot(container)

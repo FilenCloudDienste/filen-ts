@@ -25,7 +25,7 @@ describe("a printed chartsheet", () => {
 
 		if (settings?.chart === undefined) throw new Error("no chart")
 
-		const model = new SheetGridModel({ session, info })
+		const model = new SheetGridModel({ source: session, edit: session, info })
 		const job = await layOutPrint(
 			model,
 			[{ sheet: graph.id, name: "Graph", setup: settings.setup, ranges: [], used: null, chart: settings.chart }],

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import type { SheetRange, SheetSelectionStats } from "@filen/office/core/sheet"
 import type { SheetGridModel } from "@filen/office/react/sheet"
-import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
+import { openGrid, workbook, sessionOf } from "@/tests/sheetMenusFixtures"
 import { GridHarness } from "@/tests/sheetMenusHarness"
 import { circularStatus, LatestQuery, singleCell, statusSummary } from "@/features/spreadsheet/components/sheetStatusBar.logic"
 
@@ -124,7 +124,7 @@ describe("the status bar", () => {
 				{grid => (
 					<SheetStatusBar
 						grid={grid}
-						session={model.session}
+						session={sessionOf(model)}
 						cellless={false}
 					/>
 				)}
@@ -171,7 +171,7 @@ describe("the status bar's circular references", () => {
 				{grid => (
 					<SheetStatusBar
 						grid={grid}
-						session={model.session}
+						session={sessionOf(model)}
 						cellless={false}
 					/>
 				)}
@@ -179,7 +179,7 @@ describe("the status bar's circular references", () => {
 		)
 
 		await act(async () => {
-			await model.session.command({
+			await sessionOf(model).command({
 				type: "cells.set",
 				sheet,
 				cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(1), inputs: ["=B1+A1"] }
@@ -195,7 +195,7 @@ describe("the status bar's circular references", () => {
 		expect(screen.getByText("previewSheetCircularStatusElsewhere=undefined")).toBeTruthy()
 
 		await act(async () => {
-			await model.session.command({
+			await sessionOf(model).command({
 				type: "cells.set",
 				sheet,
 				cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(1), inputs: ["=A1"] }

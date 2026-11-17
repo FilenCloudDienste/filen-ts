@@ -7,7 +7,7 @@ import { SheetGridModel, type SheetGridSnapshot } from "./model"
 // need (sheet tabs, the formula bar, undo state) through useSheetGrid.
 
 export function createSheetGrid(opened: SheetOpened): SheetGridModel {
-	return new SheetGridModel({ session: opened.session, info: opened.info })
+	return new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 }
 
 export interface SheetGridState extends SheetGridSnapshot {

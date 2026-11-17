@@ -180,7 +180,7 @@ describe.skipIf(UNO === undefined || corpusFiles().length === 0)("printed pages 
 				}
 
 				// Our pages first: the fit-to sheets are exported on their own too.
-				const model = new SheetGridModel({ session: opened.session, info: opened.info })
+				const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 				const ourSheets: {
 					readonly name: string
 					readonly fit: boolean

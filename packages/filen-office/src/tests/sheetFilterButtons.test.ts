@@ -24,7 +24,7 @@ const BODY =
 
 async function grid(): Promise<{ model: SheetGridModel; layout: SheetLayout; sheet: number }> {
 	const { session, info } = await openFixture(buildFixture({ sheets: [{ name: "S", body: BODY }] }))
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 	const sheet = info.activeSheet
 
 	return { model, layout: (model.layout(sheet) ?? info.activeLayout) as SheetLayout, sheet }

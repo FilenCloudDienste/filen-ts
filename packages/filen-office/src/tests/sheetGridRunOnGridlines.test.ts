@@ -28,7 +28,7 @@ const STYLES =
 
 async function painted(measurer?: (canvas: RecordingCanvas) => TextMeasurer) {
 	const { session, info } = await openFixture(buildFixture({ sheets: [{ name: "S", body: BODY }], styles: STYLES }))
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 	const sheet = info.activeSheet
 
 	model.need(sheet, [0, 0])

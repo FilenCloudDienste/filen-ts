@@ -80,7 +80,7 @@ async function mount(fixture: Parameters<typeof buildFixture>[0] = BOOK, mac = f
 
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
-	const model = new SheetGridModel({ session: opened.session, info: opened.info })
+	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 	const refusals: SheetRefusal[] = []
 
 	target = model

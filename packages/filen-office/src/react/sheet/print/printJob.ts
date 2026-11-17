@@ -111,7 +111,7 @@ function pageModel(live: SheetGridModel, sheet: PrintJobSheet, tiles: readonly S
 		styles.push(sheet.setup.blackAndWhite ? blackAndWhite(live.style(index)) : live.style(index))
 
 	const model = new SheetGridModel({
-		session: live.session,
+		source: live.session,
 		info: {
 			kind: live.kind,
 			sheets: snapshot.sheets,

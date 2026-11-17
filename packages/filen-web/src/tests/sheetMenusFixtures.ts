@@ -1,7 +1,7 @@
 import { vi } from "vitest"
 import { writeXlsx } from "hucre/xlsx"
 import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { SheetEvent, SheetFileKind } from "@filen/office/core/sheet"
+import type { SheetEvent, SheetFileKind, SheetSessionApi } from "@filen/office/core/sheet"
 import { createSheetGrid, type SheetGridModel } from "@filen/office/react/sheet"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
 import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToolbar"
@@ -10,6 +10,19 @@ import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToo
 
 export async function workbook(sheets: readonly { name: string; rows: (string | number | null)[][] }[]): Promise<Uint8Array> {
 	return await writeXlsx({ sheets: sheets.map(sheet => ({ name: sheet.name, rows: sheet.rows })) })
+}
+
+// Each grid's session, which edits, saves and settings go through (the model reads through it only).
+const sessions = new WeakMap<SheetGridModel, SheetSessionApi>()
+
+export function sessionOf(model: SheetGridModel): SheetSessionApi {
+	const session = sessions.get(model)
+
+	if (session === undefined) {
+		throw new Error("no session for this grid")
+	}
+
+	return session
 }
 
 export async function openGrid(bytes: Uint8Array, kind: SheetFileKind): Promise<SheetGridModel> {
@@ -31,6 +44,7 @@ export async function openGrid(bytes: Uint8Array, kind: SheetFileKind): Promise<
 	const grid = createSheetGrid(opened)
 
 	model = grid
+	sessions.set(grid, opened.session)
 
 	for (const event of pending) {
 		grid.handleEvent(event)

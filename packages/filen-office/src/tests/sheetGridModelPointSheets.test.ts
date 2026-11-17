@@ -8,7 +8,7 @@ import { BASIC, buildFixture, openFixture } from "./sheetSessionFixtures"
 
 async function opened(): Promise<{ model: SheetGridModel; first: number; second: number }> {
 	const { session, info } = await openFixture(buildFixture(BASIC))
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 
 	return { model, first: info.activeSheet, second: model.getSnapshot().sheets[1]?.id as number }
 }

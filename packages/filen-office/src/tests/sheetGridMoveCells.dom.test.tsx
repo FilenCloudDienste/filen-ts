@@ -65,7 +65,7 @@ async function mount(props: Partial<SheetGridProps> = {}): Promise<Mounted> {
 
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
-	const model = new SheetGridModel({ session: opened.session, info: opened.info })
+	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 	const commands: SheetCommand[] = []
 	const command = model.command.bind(model)
 

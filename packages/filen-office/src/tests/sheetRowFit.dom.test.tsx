@@ -2,7 +2,7 @@
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_ROWS } from "../core/sheet/protocol"
+import { SHEET_MAX_ROWS, type SheetSessionApi } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { SheetGrid, SheetGridModel } from "../react/sheet/index"
 import { TextMeasurer } from "../react/sheet/paint/text"
@@ -55,6 +55,17 @@ const WRAP_STYLES = STYLES.replace('<cellXfs count="2">', '<cellXfs count="3">')
 	'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>'
 )
 
+// Each mounted model's session, which edits and saves go through.
+const sessions = new WeakMap<SheetGridModel, SheetSessionApi>()
+
+function sessionOf(model: SheetGridModel): SheetSessionApi {
+	const session = sessions.get(model)
+
+	if (session === undefined) throw new Error("no session")
+
+	return session
+}
+
 async function mount(): Promise<SheetGridModel> {
 	const opened = await inThreadSheetHost().open(
 		buildFixture({ sheets: [{ name: "One", body: BODY }], styles: WRAP_STYLES }),
@@ -64,7 +75,10 @@ async function mount(): Promise<SheetGridModel> {
 
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
-	const model = new SheetGridModel({ session: opened.session, info: opened.info })
+	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
+
+	sessions.set(model, opened.session)
+
 	const container = document.createElement("div")
 	const root = createRoot(container)
 
@@ -122,7 +136,7 @@ describe("rows fitted to wrapped text", () => {
 		})
 		await settle()
 		expect([height(model, 0), height(model, 2)]).toEqual([56, 40])
-		expect(parts(await savedBytes(model.session))["xl/worksheets/sheet1.xml"]).toContain('<row r="1" ht="42">')
+		expect(parts(await savedBytes(sessionOf(model)))["xl/worksheets/sheet1.xml"]).toContain('<row r="1" ht="42">')
 
 		await model.command({ type: "axis.resize", sheet, axis: "cols", indices: Uint32Array.of(0), sizes: Float32Array.of(120) })
 		await settle()
@@ -138,7 +152,7 @@ describe("rows fitted to wrapped text", () => {
 	it("fits wrap toggled on a whole column without a long task, the rows on screen only", async () => {
 		const model = await mount()
 		const sheet = model.getSnapshot().sheet
-		const command = vi.spyOn(model.session, "command")
+		const command = vi.spyOn(sessionOf(model), "command")
 		const started = performance.now()
 
 		await model.command({

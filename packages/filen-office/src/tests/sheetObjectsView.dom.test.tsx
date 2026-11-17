@@ -44,7 +44,7 @@ async function shown(
 
 	const { session, info } = opened
 
-	model = new SheetGridModel({ session, info })
+	model = new SheetGridModel({ source: session, edit: session, info })
 
 	// The drawing is read beside the sheet: its layout comes in an event.
 	for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))

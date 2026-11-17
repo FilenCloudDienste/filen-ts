@@ -7,7 +7,7 @@ import { CellFlag } from "@filen/office/core/sheet"
 import type { SheetGridHandle, SheetGridModel, SheetGridState, SheetShortcut } from "@filen/office/react/sheet"
 import type { SheetBodyExtension } from "@/features/spreadsheet/components/sheetExtension"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
-import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
+import { openGrid, workbook, sessionOf } from "@/tests/sheetMenusFixtures"
 import { GridHarness } from "@/tests/sheetMenusHarness"
 
 // The cards of notes, threads and links: an opened one is a dialog that takes focus, closes on Escape and once the
@@ -92,8 +92,8 @@ async function mount(canEdit: boolean): Promise<{ model: SheetGridModel; probe: 
 		"xlsx"
 	)
 
-	model.session.configure({ author: "Ann" })
-	expect((await model.session.command({ type: "note.set", sheet: 0, row: 1, col: 1, text: "Ann:\nfirst note" })).ok).toBe(true)
+	sessionOf(model).configure({ author: "Ann" })
+	expect((await sessionOf(model).command({ type: "note.set", sheet: 0, row: 1, col: 1, text: "Ann:\nfirst note" })).ok).toBe(true)
 
 	const probe: Probe = { shortcut: null, pointer: null }
 	const focus = vi.fn()

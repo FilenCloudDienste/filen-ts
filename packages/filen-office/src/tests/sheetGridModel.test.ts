@@ -16,7 +16,7 @@ async function settle(): Promise<void> {
 
 async function opened(fixture = buildFixture(BASIC)): Promise<{ model: SheetGridModel; session: SheetSessionApi; sheet: number }> {
 	const { session, info } = await openFixture(fixture)
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 
 	return { model, session, sheet: info.activeSheet }
 }
@@ -290,7 +290,7 @@ describe("sheet grid model", () => {
 
 		if (opened.kind !== "opened") throw new Error(opened.kind)
 
-		const model = new SheetGridModel({ session: opened.session, info: opened.info })
+		const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 		const sheet = opened.info.activeSheet
 		const command = vi.spyOn(opened.session, "command")
 		const follows: SheetGridShift[] = []

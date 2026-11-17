@@ -80,7 +80,7 @@ async function painted(
 	const { session, info } = await openFixture(
 		buildFixture({ sheets: [{ name: "S", body: BODY }], sharedStrings: SHARED, styles: STYLES })
 	)
-	const model = new SheetGridModel({ session, info })
+	const model = new SheetGridModel({ source: session, edit: session, info })
 	const sheet = info.activeSheet
 
 	model.need(sheet, [0, 0])
@@ -257,7 +257,7 @@ describe("grid painting", () => {
 				]
 			})
 		)
-		const model = new SheetGridModel({ session, info })
+		const model = new SheetGridModel({ source: session, edit: session, info })
 		const sheet = info.activeSheet
 
 		model.need(sheet, [0, 0])
@@ -327,7 +327,7 @@ describe("grid painting", () => {
 			'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
 		const body = '<sheetData><row r="2"><c r="B2" s="1"><v>1</v></c></row><row r="4"><c r="B4" s="2"><v>2</v></c></row></sheetData>'
 		const { session, info } = await openFixture(buildFixture({ sheets: [{ name: "S", body }], styles }))
-		const model = new SheetGridModel({ session, info })
+		const model = new SheetGridModel({ source: session, edit: session, info })
 		const sheet = info.activeSheet
 
 		model.need(sheet, [0, 0])

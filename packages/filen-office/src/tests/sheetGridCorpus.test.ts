@@ -91,7 +91,7 @@ describe.skipIf(!RUN || FILES.length === 0)("the grid over the corpus", () => {
 
 			tally.files++
 
-			const model = new SheetGridModel({ session: opened.session, info: opened.info })
+			const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
 
 			for (const summary of opened.info.sheets.filter(entry => entry.kind === "worksheet").slice(0, 3)) {
 				model.setSheet(summary.id)

@@ -3,6 +3,7 @@ import {
 	type SheetEvent,
 	type SheetOpenOptions,
 	type SheetOpened,
+	type SheetReadSource,
 	type SheetSessionApi,
 	type SheetTile
 } from "../core/sheet/protocol"
@@ -71,7 +72,7 @@ export function tileEntry(
 	return null
 }
 
-export async function firstTile(session: SheetSessionApi, sheet: number): Promise<SheetTile> {
+export async function firstTile(session: SheetReadSource, sheet: number): Promise<SheetTile> {
 	const { tiles } = await session.tiles(sheet, Uint32Array.of(0, 0))
 
 	return tiles[0] as SheetTile
