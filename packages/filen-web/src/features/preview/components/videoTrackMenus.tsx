@@ -116,10 +116,16 @@ export function TracksMenu({
 	const [open, setOpen] = useState(false)
 	const audio = useAudioOptions({ probe, nativeAudio, decision, audioIndex, size, open })
 	const hasSubtitles = subtitles.options.length > 0
+	const empty = audio.length === 0 && !hasSubtitles
+
+	// A menu whose options went while it was open closes with them, so whoever tracks it hears so.
+	if (empty && open) {
+		setOpen(false)
+	}
 
 	useClosesOnUnmount(open, onOpenChange)
 
-	if (audio.length === 0 && !hasSubtitles) {
+	if (empty) {
 		return null
 	}
 

@@ -8,7 +8,16 @@ import { ChaptersMenu, TracksMenu } from "@/features/preview/components/videoTra
 import type { PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
 
 // The "converted" note asks the browser's decoders, which jsdom has none of.
-vi.mock("@/lib/media/playback/useTranscodedTracks", () => ({ useTranscodedTracks: () => new Set([1]) }))
+// Whether the menu last asked them while open.
+const asked = vi.hoisted(() => ({ open: false }))
+
+vi.mock("@/lib/media/playback/useTranscodedTracks", () => ({
+	useTranscodedTracks: (_probe: unknown, _size: number, open: boolean) => {
+		asked.open = open
+
+		return new Set([1])
+	}
+}))
 
 function probeWith(audio: ReturnType<typeof audioTrack>[]): VideoProbe {
 	return {
@@ -158,6 +167,37 @@ describe("a menu that goes away while open", () => {
 		view.unmount()
 
 		expect(changes.at(-1)).toBe(false)
+	})
+
+	it("reports the tracks menu closed when its options go while it is open, though it stays mounted", async () => {
+		const changes: boolean[] = []
+		const menu = (probe: VideoProbe) =>
+			createElement(TracksMenu, {
+				subtitles: NO_SUBTITLES,
+				probe,
+				nativeAudio: null,
+				decision: null,
+				audioIndex: 0,
+				onAudio: () => undefined,
+				size: 0,
+				container: null,
+				onOpenChange: (open: boolean) => changes.push(open)
+			})
+		const view = render(menu(probeWith([audioTrack(1, "eng", 6), audioTrack(2, "deu", 2)])))
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "videos:playerAudio" }))
+			await Promise.resolve()
+		})
+		expect(changes.at(-1)).toBe(true)
+		expect(asked.open).toBe(true)
+
+		view.rerender(menu(probeWith([audioTrack(1, "eng", 6)])))
+
+		expect(screen.queryByRole("button")).toBeNull()
+		expect(changes.at(-1)).toBe(false)
+		// It no longer asks the decoders about tracks it does not show.
+		expect(asked.open).toBe(false)
 	})
 })
 
