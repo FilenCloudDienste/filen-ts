@@ -239,6 +239,9 @@ const OBJECT_TYPES: Readonly<Record<number, MediaCodec>> = {
 	0x66: "aac",
 	0x67: "aac",
 	0x68: "aac",
+	// MPEG-2 and MPEG-1 audio of any layer: the sample entry does not say which, so a layer II track is named MP3
+	// here. A direct start the browser fails on it moves playback to the ladder, whose remux worker reads the first
+	// frame's layer (mpegLayerCodec) and decodes it with FFmpeg's MP2; the probe is not asked again.
 	0x69: "mp3",
 	0x6b: "mp3",
 	0xa5: "ac3",
