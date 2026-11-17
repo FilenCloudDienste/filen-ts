@@ -13,6 +13,7 @@ import type { MetadataField, MetadataSectionData } from "@/features/preview/lib/
 import { readContactFile } from "@/features/preview/lib/textFamilyClient"
 import { useTextFamilyReading } from "@/features/preview/hooks/useTextFamilyReading"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { clampListboxIndex } from "@/features/drive/lib/listbox"
 
 function typed(t: TFunction<"preview">, label: string, value: ContactValue): string {
 	return value.types.length === 0 ? label : t("previewContactsTyped", { label, types: value.types.join(", ") })
@@ -138,7 +139,9 @@ function ContactList({ file, selected, onSelect }: { file: ContactFile; selected
 
 function Contacts({ file }: { file: ContactFile }) {
 	const { t } = useTranslation("preview")
-	const [selected, setSelected] = useState(0)
+	const [chosen, setSelected] = useState(0)
+	// A reading of fewer cards (the source edited down) keeps a card selected.
+	const selected = clampListboxIndex(chosen, file.contacts.length)
 	const contact = file.contacts[selected]
 
 	if (contact === undefined) {

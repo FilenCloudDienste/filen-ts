@@ -209,4 +209,30 @@ describe("ContactViewer", () => {
 		expect(await screen.findByRole("listbox", { name: "2 contacts" })).toBeTruthy()
 		expect(screen.getByText("About Ada")).toBeTruthy()
 	})
+
+	it("keeps a card selected when a new reading has fewer cards", async () => {
+		text.current = ["Ada", "Charles", "Grace"].map(name => `BEGIN:VCARD\r\nFN:${name}\r\nNOTE:About ${name}\r\nEND:VCARD`).join("\r\n")
+
+		const view = render(
+			<ContactViewer
+				item={itemNamed("people.vcf")}
+				alt="people.vcf"
+			/>,
+			{ wrapper }
+		)
+
+		fireEvent.click(await screen.findByRole("option", { name: /Grace/u }))
+		expect(screen.getByText("About Grace")).toBeTruthy()
+
+		text.current = ["Ada", "Charles"].map(name => `BEGIN:VCARD\r\nFN:${name}\r\nNOTE:About ${name}\r\nEND:VCARD`).join("\r\n")
+		view.rerender(
+			<ContactViewer
+				item={itemNamed("people.vcf")}
+				alt="people.vcf"
+			/>
+		)
+
+		expect(await screen.findByText("About Charles")).toBeTruthy()
+		expect(screen.queryByText("This file has no contacts.")).toBeNull()
+	})
 })
