@@ -80,6 +80,36 @@ describe("workerJob", () => {
 		expect(pool.created()).toBe(2)
 	})
 
+	// A slow download the job waits on is the page's time: only the job's own work counts against its budget.
+	it("does not count time the job waits on the page", async () => {
+		vi.useFakeTimers()
+
+		const pool = fakePool()
+		const result = workerJob(pool, "test", 1000, async (_, clock) => {
+			await vi.advanceTimersByTimeAsync(600)
+			clock.pause()
+			await vi.advanceTimersByTimeAsync(30_000)
+			clock.resume()
+			await vi.advanceTimersByTimeAsync(300)
+
+			return "read"
+		})
+
+		expect(await result).toBe("read")
+		expect(pool.created()).toBe(1)
+
+		const over = workerJob(pool, "test", 1000, async (_, clock) => {
+			await vi.advanceTimersByTimeAsync(600)
+			clock.pause()
+			clock.resume()
+			await vi.advanceTimersByTimeAsync(600)
+
+			return "late"
+		}).catch((e: unknown) => e)
+
+		expect(await over).toBeInstanceOf(WorkerJobTimeoutError)
+	})
+
 	it("passes a job's own failure through, and gives up after one retry", async () => {
 		const pool = fakePool()
 

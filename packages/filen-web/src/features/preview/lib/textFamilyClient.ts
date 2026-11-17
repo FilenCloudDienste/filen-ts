@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import TextFamilyWorker from "@/features/preview/workers/textFamily.worker.ts?worker"
 import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
-import { workerJob } from "@/features/preview/lib/workerJob"
+import { workerJob, type JobClock } from "@/features/preview/lib/workerJob"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 import type { CalendarFile } from "@filen/shared/calendarFile"
 import type { ContactFile } from "@filen/shared/contactFile"
@@ -19,8 +19,8 @@ const TEXT_FAMILY_JOB_BUDGET_MS = 20_000
 
 const textFamilyWorker = statelessWorker<TextFamilyWorkerApi>(() => new TextFamilyWorker(), TEXT_FAMILY_IDLE_MS, "text-family")
 
-function job<R>(run: (remote: WorkerHandle<TextFamilyWorkerApi>["remote"]) => Promise<R>): Promise<R> {
-	return workerJob(textFamilyWorker, "text-family", TEXT_FAMILY_JOB_BUDGET_MS, handle => run(handle.remote))
+function job<R>(run: (remote: WorkerHandle<TextFamilyWorkerApi>["remote"], clock: JobClock) => Promise<R>): Promise<R> {
+	return workerJob(textFamilyWorker, "text-family", TEXT_FAMILY_JOB_BUDGET_MS, (handle, clock) => run(handle.remote, clock))
 }
 
 export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading> {
@@ -49,12 +49,31 @@ export async function readContactFile(text: string): Promise<ContactFile> {
 
 // An executable's or disk image's headers, parsed in the worker; it asks the page for each range it reads, which
 // `source` answers (a copy is sent, never a view of the reader's memo).
+// The page's end of each channel is its own, closed once the job settles: a worker ended mid-job never releases it.
 export async function readBinaryHeaders(source: BinarySource, name: string, signal: AbortSignal): Promise<BinaryReading> {
-	const read = Comlink.proxy(async (offset: number, length: number): Promise<Uint8Array> => {
-		const copy = (await source.read(offset, length, signal)).slice()
+	const channels: MessageChannel[] = []
 
-		return Comlink.transfer(copy, [copy.buffer])
-	})
+	try {
+		return await job<BinaryReading>(async (remote, clock) => {
+			const channel = new MessageChannel()
 
-	return await job<BinaryReading>(async remote => await remote.binary(read, source.size, name))
+			channels.push(channel)
+			// A download is the page's time, not the parse's: the job's budget waits for it.
+			Comlink.expose(async (offset: number, length: number): Promise<Uint8Array> => {
+				clock.pause()
+
+				try {
+					const copy = (await source.read(offset, length, signal)).slice()
+
+					return Comlink.transfer(copy, [copy.buffer])
+				} finally {
+					clock.resume()
+				}
+			}, channel.port1)
+
+			return await remote.binary(Comlink.transfer(channel.port2, [channel.port2]), source.size, name)
+		})
+	} finally {
+		for (const channel of channels) channel.port1.close()
+	}
 }

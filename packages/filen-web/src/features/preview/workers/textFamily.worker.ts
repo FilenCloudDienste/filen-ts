@@ -43,14 +43,16 @@ const api = {
 	calendar: (text: string): CalendarFile => readCalendar(text),
 	// The text the page decoded, read as vCards.
 	contacts: (text: string): ContactFile => readContacts(text),
-	// An executable's or disk image's headers, read through the page's byte reader (`read`, a proxy the page answers with
-	// copies), and the signer its signature names (parsed with pkijs, which stays off the page; never verified).
-	binary: async (read: (offset: number, length: number) => Promise<Uint8Array>, size: number, name: string): Promise<BinaryReading> => {
+	// An executable's or disk image's headers, read through the page's byte reader over `port` (the page answers each
+	// range with a copy), and the signer its signature names (parsed with pkijs, which stays off the page; never verified).
+	binary: async (port: MessagePort, size: number, name: string): Promise<BinaryReading> => {
+		const read = Comlink.wrap<(offset: number, length: number) => Promise<Uint8Array>>(port)
+
 		try {
 			return await readBinaryReading({ size, read: (offset, length) => read(offset, length) }, name, cmsSigner)
 		} finally {
-			// What arrives is Comlink's proxy of the page's function: let the page drop it.
-			;(read as unknown as Comlink.Remote<typeof read>)[Comlink.releaseProxy]()
+			read[Comlink.releaseProxy]()
+			port.close()
 		}
 	}
 }
