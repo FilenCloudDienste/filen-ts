@@ -156,16 +156,16 @@ test("a TIFF is read by the MuPDF engine: one page as a picture, several in the 
 	await page.keyboard.press("Escape")
 	await expect(single).toHaveCount(0)
 
-	// Several pages: the page column with its page commands (no find: an image has no text); the next-page key walks
-	// to the last.
+	// Several pages: the page column with its page commands (no find: an image has no text). With the pages focused the
+	// next-page key steps to page 2, and the page commands' Next page to the last; the indicator follows the scroll.
 	await itemRow(listbox, TIFF_PAGES).dblclick()
 	await expect(page.getByText("Page 1 of 3", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByRole("button", { name: "Find in document" })).toHaveCount(0)
-
-	for (const shown of [2, 3]) {
-		await page.keyboard.press("n")
-		await expect(page.getByText(`Page ${String(shown)} of 3`, { exact: true })).toBeVisible({ timeout: 15_000 })
-	}
+	await page.getByRole("region", { name: `${TIFF_PAGES} — Page 1 of 3` }).click()
+	await page.keyboard.press("n")
+	await expect(page.getByText("Page 2 of 3", { exact: true })).toBeVisible({ timeout: 15_000 })
+	await page.getByRole("button", { name: "Next page" }).click()
+	await expect(page.getByText("Page 3 of 3", { exact: true })).toBeVisible({ timeout: 15_000 })
 
 	await page.keyboard.press("Escape")
 
@@ -555,7 +555,17 @@ async function expectNativeImage(page: Page, name: string): Promise<void> {
 
 const [HUGE, HUGE_PADDED] = FIXTURE_FILES["images-huge"]
 
-test("a 60 MP native image opens as the browser's own <img> on a desktop, with no request added", async ({ page, context }) => {
+// Chromium reports the service worker's requests to the context; Firefox and WebKit do not, so there the <img>'s own
+// stream is not seen and only a read from the page's SDK worker (a head read) would be.
+function streamedChunks(browserName: string, chunks: number): number {
+	return browserName === "chromium" ? chunks : 0
+}
+
+test("a 60 MP native image opens as the browser's own <img> on a desktop, with no request added", async ({
+	page,
+	context,
+	browserName
+}) => {
 	const egest = observeEgest(context)
 
 	await bootTo(page)
@@ -572,7 +582,7 @@ test("a 60 MP native image opens as the browser's own <img> on a desktop, with n
 		egest.reset()
 		await itemRow(listbox, name).dblclick()
 		await expectNativeImage(page, name)
-		expect(egest.requests(), name).toBe(chunks)
+		expect(egest.requests(), name).toBe(streamedChunks(browserName, chunks))
 		await page.keyboard.press("Escape")
 		await expect(picture(page, name)).toHaveCount(0)
 	}
@@ -584,7 +594,8 @@ const PHONE_USER_AGENT =
 
 test("on a phone, a native image past 50 MP is sized from its head and shown only when asked; a small file opens as before", async ({
 	page,
-	context
+	context,
+	browserName
 }) => {
 	await context.addInitScript(userAgent => {
 		Object.defineProperty(navigator, "userAgent", { get: () => userAgent })
@@ -598,10 +609,12 @@ test("on a phone, a native image past 50 MP is sized from its head and shown onl
 
 	await egestQuiet(egest)
 
-	// Over 1 MiB: its head is read first, and the browser is not handed it.
+	// Over 1 MiB: its head is read first (one chunk, by the page's SDK worker), and the browser is not handed it.
+	egest.reset()
 	await itemRow(listbox, HUGE_PADDED).dblclick()
 	await expect(page.getByText(preview.previewImageTooLarge, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(picture(page, HUGE_PADDED)).toHaveCount(0)
+	expect(egest.requests()).toBe(1)
 	await page.getByRole("button", { name: preview.previewImageOpenAnyway }).click()
 	await expectNativeImage(page, HUGE_PADDED)
 	await page.keyboard.press("Escape")
@@ -610,7 +623,7 @@ test("on a phone, a native image past 50 MP is sized from its head and shown onl
 	egest.reset()
 	await itemRow(listbox, HUGE).dblclick()
 	await expectNativeImage(page, HUGE)
-	expect(egest.requests()).toBe(1)
+	expect(egest.requests()).toBe(streamedChunks(browserName, 1))
 	await page.keyboard.press("Escape")
 })
 
