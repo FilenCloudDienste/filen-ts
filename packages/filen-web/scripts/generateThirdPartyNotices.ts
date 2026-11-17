@@ -410,14 +410,39 @@ function ffmpegDecoderList(configure: readonly string[]): string {
 	return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`
 }
 
+// The FFmpeg and libopenmpt modules share one Emscripten notice and one musl notice: both must be built by the same
+// Emscripten, with the same licence texts, or each needs notices of its own.
+function assertOneEmscripten(): void {
+	const ffmpeg = requireJson(FFMPEG_MANIFEST)
+	const libopenmpt = requireJson(LIBOPENMPT_MANIFEST)
+	const musl = (manifest: Record<string, unknown>, path: string): string =>
+		stringField(objectField(manifest, "emscripten", path), "musl", path)
+
+	if (stringField(ffmpeg, "emcc", FFMPEG_MANIFEST) !== stringField(libopenmpt, "emcc", LIBOPENMPT_MANIFEST)) {
+		throw new Error(`${LIBOPENMPT_MANIFEST} names another emcc than ${FFMPEG_MANIFEST}: give each module its own Emscripten notice`)
+	}
+
+	if (musl(ffmpeg, FFMPEG_MANIFEST) !== musl(libopenmpt, LIBOPENMPT_MANIFEST)) {
+		throw new Error(`${LIBOPENMPT_MANIFEST} names another musl than ${FFMPEG_MANIFEST}: give each module its own musl notice`)
+	}
+
+	for (const name of ["emscripten-LICENSE", "musl-COPYRIGHT"]) {
+		if (readFileSync(`${FFMPEG_DIR}/licenses/${name}`, "utf8") !== readFileSync(`${LIBOPENMPT_DIR}/licenses/${name}`, "utf8")) {
+			throw new Error(`${LIBOPENMPT_DIR}/licenses/${name} differs from ${FFMPEG_DIR}'s: give each module its own notice`)
+		}
+	}
+}
+
 function ffmpegModuleNotices(): Collected[] {
+	assertOneEmscripten()
+
 	const manifest = requireJson(FFMPEG_MANIFEST)
 	const ffmpeg = objectField(manifest, "ffmpeg", FFMPEG_MANIFEST)
 	const emscripten = objectField(manifest, "emscripten", FFMPEG_MANIFEST)
 	const sources = objectField(manifest, "sources", FFMPEG_MANIFEST)
 	const tag = stringField(ffmpeg, "tag", FFMPEG_MANIFEST)
 	const emcc = stringField(manifest, "emcc", FFMPEG_MANIFEST)
-	const linkedInto = `Statically linked into the FFmpeg decoders module (${FFMPEG_DIR}/decoders.worker.js) and the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.js), built with Emscripten ${emcc}.`
+	const linkedInto = `Statically linked into the FFmpeg decoders module (${FFMPEG_DIR}/decoders.worker.js) and the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.wasm), built with Emscripten ${emcc}.`
 	const sourceList = ["build-ffmpeg-decoders.sh", "emscripten.sh", "bridge.c", "decoder-worker.js"]
 		.map(name => `${CODECS_SOURCE}/${name} (SHA-256 ${stringField(sources, name, FFMPEG_MANIFEST)})`)
 		.join(", ")
@@ -567,7 +592,7 @@ function libopenmptNotices(): Collected[] {
 	const manifest = requireJson(LIBOPENMPT_MANIFEST)
 	const libopenmpt = objectField(manifest, "libopenmpt", LIBOPENMPT_MANIFEST)
 	const version = stringField(libopenmpt, "version", LIBOPENMPT_MANIFEST)
-	const linkedInto = `Statically linked into the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.js).`
+	const linkedInto = `Statically linked into the libopenmpt module (${LIBOPENMPT_DIR}/libopenmpt.wasm).`
 	const license = (name: string): string => readFileSync(`${LIBOPENMPT_DIR}/licenses/${name}`, "utf8")
 
 	return [
@@ -582,7 +607,7 @@ function libopenmptNotices(): Collected[] {
 				],
 				repository: "https://lib.openmpt.org/libopenmpt/",
 				terms: [
-					`Tracker module rendering, built to WebAssembly from the release tarball ${stringField(libopenmpt, "tarball", LIBOPENMPT_MANIFEST)} (SHA-256 ${stringField(libopenmpt, "sha256", LIBOPENMPT_MANIFEST)}) by packages/filen-web/scripts/codecs/build-libopenmpt.sh in the filen-ts repository (${FILEN_TS_REPOSITORY}).`,
+					`Tracker module rendering, built to WebAssembly from the release tarball ${stringField(libopenmpt, "tarball", LIBOPENMPT_MANIFEST)} (SHA-256 ${stringField(libopenmpt, "sha256", LIBOPENMPT_MANIFEST)}; its sources are those of the release tag ${stringField(libopenmpt, "tag", LIBOPENMPT_MANIFEST)}, commit ${stringField(libopenmpt, "commit", LIBOPENMPT_MANIFEST)}, in https://github.com/OpenMPT/openmpt) by packages/filen-web/scripts/codecs/build-libopenmpt.sh with libopenmpt-bridge.c in the filen-ts repository (${FILEN_TS_REPOSITORY}).`,
 					license("libopenmpt-LICENSE")
 				]
 			},
@@ -669,6 +694,34 @@ function soundFontNotice(): Collected {
  * license texts are the ones the package ships under licenses/ffmpeg and FFmpeg's, kept beside this script.
  */
 const AAC_ENCODER = "@mediabunny/aac-encoder"
+
+const STB_VORBIS = "stb-vorbis"
+
+// stb-vorbis (Apache-2.0, an npm package spessasynth_core decodes the SoundFont's Vorbis samples with) compiles
+// stb_vorbis.c into its WebAssembly decoder without shipping the source, whose own licence its README names: the
+// public-domain or MIT dedication at the end of stb_vorbis.c, as the copy libopenmpt bundles carries it.
+function stbVorbisNotice(installedNpm: InstalledNpmPackage[]): Collected {
+	const pkg = installedNpm.find(entry => entry.name === STB_VORBIS)
+
+	if (pkg === undefined) {
+		throw new Error(`the installed tree has no ${STB_VORBIS} — run \`pnpm install\` at the repo root`)
+	}
+
+	return vendoredNotice(
+		{
+			name: "stb_vorbis",
+			version: `as compiled into ${STB_VORBIS} ${pkg.version}`,
+			license: "MIT OR Unlicense",
+			copyright: ["Copyright (c) 2017 Sean Barrett"],
+			repository: "https://github.com/nothings/stb",
+			terms: [
+				`Ogg Vorbis decoding of the SoundFont's samples: stb_vorbis.c, compiled into the WebAssembly decoder of ${STB_VORBIS} ${pkg.version}, which spessasynth_core runs.`,
+				readFileSync(`${LIBOPENMPT_DIR}/licenses/stb_vorbis-LICENSE`, "utf8")
+			]
+		},
+		"vendored"
+	)
+}
 
 function aacEncoderNotices(installedNpm: InstalledNpmPackage[]): Collected[] {
 	const pkg = installedNpm.find(entry => entry.name === AAC_ENCODER)
@@ -2067,6 +2120,7 @@ const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
 const libopenmpt = libopenmptNotices()
 const soundFont = soundFontNotice()
+const stbVorbis = stbVorbisNotice(installed)
 const aacEncoder = aacEncoderNotices(installed)
 const threeDecoders = threeDecoderNotices(installed)
 const engine = wllamaEngineNotices()
@@ -2099,6 +2153,7 @@ const vendored = [
 	...ffmpeg,
 	...libopenmpt,
 	soundFont,
+	stbVorbis,
 	...aacEncoder,
 	...threeDecoders,
 	...engine,

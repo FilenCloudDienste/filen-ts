@@ -12,6 +12,7 @@ import {
 } from "@/features/settings/lib/thirdPartyNotices"
 import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 import ffmpegManifest from "@/vendor/ffmpeg-decoders/manifest.json"
+import libopenmptManifest from "@/vendor/libopenmpt/manifest.json"
 import wllamaManifest from "@/vendor/wllama/manifest.json"
 import officeFontsManifest from "@filen/office/assets/fonts/manifest.json"
 import spellcheckManifest from "@filen/spellcheck/dictionaries/manifest.json"
@@ -423,6 +424,32 @@ describe("third-party notices surface", () => {
 	it("returns null for an unknown name and for a known name at a wrong version", () => {
 		expect(findThirdPartyNotice("definitely-not-a-package", "1.0.0")).toBeNull()
 		expect(findThirdPartyNotice(sample?.name ?? "", "0.0.0-nope")).toBeNull()
+	})
+
+	it("names one Emscripten for the decoders and libopenmpt modules, whose shared notice covers both", () => {
+		expect(libopenmptManifest.emcc).toBe(ffmpegManifest.emcc)
+		expect(libopenmptManifest.emscripten.musl).toBe(ffmpegManifest.emscripten.musl)
+
+		for (const name of ["emscripten-LICENSE", "musl-COPYRIGHT"]) {
+			expect(readFileSync(new URL(`../vendor/libopenmpt/licenses/${name}`, import.meta.url), "utf8"), name).toBe(
+				readFileSync(new URL(`../vendor/ffmpeg-decoders/licenses/${name}`, import.meta.url), "utf8")
+			)
+		}
+	})
+
+	it("gives the stb_vorbis that stb-vorbis compiles in its own public-domain or MIT terms", () => {
+		const stbVorbis = installed.find(entry => entry.name === "stb-vorbis")
+		const notice = THIRD_PARTY_NOTICES.find(
+			entry =>
+				entry.ecosystem === "vendored" &&
+				entry.name === "stb_vorbis" &&
+				entry.version === `as compiled into stb-vorbis ${stbVorbis?.version ?? ""}`
+		)
+
+		expect(notice).toMatchObject({ license: "MIT OR Unlicense" })
+		expect(notice === undefined ? [] : thirdPartyLicenseTexts(notice)).toContain(
+			readFileSync(new URL("../vendor/libopenmpt/licenses/stb_vorbis-LICENSE", import.meta.url), "utf8")
+		)
 	})
 
 	it("resolves every license text of an entry to a string", () => {
