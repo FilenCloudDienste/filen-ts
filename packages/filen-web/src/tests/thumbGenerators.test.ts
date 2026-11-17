@@ -891,6 +891,14 @@ describe("generatePsdThumb", () => {
 		expect(downloadFileBytesMock).not.toHaveBeenCalled()
 	})
 
+	it("takes a Large Document Format file's embedded JPEG the same way", async () => {
+		const file = encodePsd(400, 300, { version: 2, thumbnail: { id: 1036, jpeg: JPEG } })
+
+		serve(file)
+
+		await expect(generatePsdThumb(psdItem(file.length), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
+	})
+
 	it("reads on to the resources' end when the thumbnail lies past the head", async () => {
 		const file = encodePsd(400, 300, { padding: 70_000, thumbnail: { id: 1036, jpeg: JPEG } })
 

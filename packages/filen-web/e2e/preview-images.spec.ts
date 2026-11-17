@@ -410,8 +410,9 @@ test("a Photoshop file shows its composite and its embedded thumbnail; without a
 
 	const { listbox, rows } = await openFixtureRows(page, "images-psd")
 
-	// The embedded JPEG thumbnail, through the SDK: the flattened file's tile swaps to it; the others have none.
+	// The embedded JPEG thumbnail, through the SDK: the flattened file's tile and the PSB's swap to it.
 	await expect(rows[0].locator("img")).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
+	await expect(rows[2].locator("img")).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
 
 	await itemRow(listbox, FLAT).dblclick()
 

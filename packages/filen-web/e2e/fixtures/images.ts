@@ -131,8 +131,11 @@ export const IMAGE_SCENARIOS = scenarioModule(
 			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { composite: false })),
 			mimeType: "image/vnd.adobe.photoshop"
 		},
+		// Not previewed, but its embedded thumbnail still makes a tile.
 		"img-large.psb": {
-			buffer: Buffer.from(encodePsd(PSD_SIZE.width, PSD_SIZE.height, { version: 2 })),
+			buffer: Buffer.from(
+				encodePsd(PSD_SIZE.width, PSD_SIZE.height, { version: 2, thumbnail: { id: 1036, jpeg: new Uint8Array(JPEG_BYTES) } })
+			),
 			mimeType: "image/vnd.adobe.photoshop"
 		},
 		// Saved PDF-compatible: a PDF inside. Without it, PostScript only.
