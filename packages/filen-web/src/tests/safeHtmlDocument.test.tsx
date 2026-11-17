@@ -26,8 +26,16 @@ vi.mock("@/features/preview/lib/safeHtmlFrame", async () => {
 })
 
 const { SafeHtmlDocument } = await import("@/features/preview/components/safeHtmlDocument")
-const { fillSafeHtml, interceptFrameLinks, linkPlace, nextAutoHeight, safeHtmlPrefix, SAFE_HTML_CSP, SAFE_HTML_MAX_CHARS } =
-	await vi.importActual<typeof import("@/features/preview/lib/safeHtmlFrame")>("@/features/preview/lib/safeHtmlFrame")
+const {
+	autoHeightSteps,
+	fillSafeHtml,
+	interceptFrameLinks,
+	linkPlace,
+	nextAutoHeight,
+	safeHtmlPrefix,
+	SAFE_HTML_CSP,
+	SAFE_HTML_MAX_CHARS
+} = await vi.importActual<typeof import("@/features/preview/lib/safeHtmlFrame")>("@/features/preview/lib/safeHtmlFrame")
 
 afterEach(() => {
 	cleanup()
@@ -240,5 +248,31 @@ describe("nextAutoHeight", () => {
 		expect(nextAutoHeight(600, { height: 5000, followsFrame: false }, 4000)).toBe(4000)
 		// min-height:120vh, or 100vh plus padding: held, it scrolls inside.
 		expect(nextAutoHeight(150, { height: 180, followsFrame: true }, 4000)).toBe(150)
+	})
+
+	// A media query on the frame's height: 1000px tall below 601px, 100px above. Held at the second height, for good.
+	it("holds a height that flips with the frame instead of following it forever", () => {
+		const step = autoHeightSteps(4000)
+		const flipping = (frame: number) => ({ height: frame <= 600 ? 1016 : 116, followsFrame: false })
+
+		let frame = 150
+		const given: number[] = []
+
+		for (let call = 0; call < 10; call++) {
+			const next = step(frame, flipping(frame))
+
+			given.push(next)
+			frame = next
+		}
+
+		expect(given).toEqual([1016, 116, 116, 116, 116, 116, 116, 116, 116, 116])
+	})
+
+	it("keeps following content that settles, growing and shrinking", () => {
+		const step = autoHeightSteps(4000)
+
+		expect([step(150, { height: 300, followsFrame: false }), step(300, { height: 420, followsFrame: false })]).toEqual([300, 420])
+		expect(step(420, { height: 420, followsFrame: false })).toBe(420)
+		expect(step(420, { height: 380, followsFrame: false })).toBe(380)
 	})
 })

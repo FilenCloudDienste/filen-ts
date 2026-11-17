@@ -7,8 +7,8 @@ import {
 	interceptFrameLinks,
 	linkPlace,
 	fillSafeHtml,
+	autoHeightSteps,
 	measureFrameContent,
-	nextAutoHeight,
 	safeHtmlPrefix,
 	SAFE_HTML_MAX_CHARS,
 	SAFE_HTML_SANDBOX
@@ -87,12 +87,13 @@ export function SafeHtmlDocument({ html, links, title, layout, paper }: SafeHtml
 
 		const frame = frameRef.current
 		const root = frameDocument.documentElement
+		const step = autoHeightSteps(AUTO_HEIGHT_MAX)
 		const observer = new ResizeObserver(() => {
 			if (frame === null) {
 				return
 			}
 
-			setHeight(nextAutoHeight(frame.offsetHeight, measureFrameContent(frame, root), AUTO_HEIGHT_MAX))
+			setHeight(step(frame.offsetHeight, measureFrameContent(frame, root)))
 		})
 
 		observer.observe(root)

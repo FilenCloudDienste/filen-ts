@@ -157,3 +157,34 @@ export function measureFrameContent(frame: HTMLIFrameElement, root: Element): { 
 export function nextAutoHeight(current: number, measured: { height: number; followsFrame: boolean }, cap: number): number {
 	return measured.followsFrame ? current : Math.min(Math.ceil(measured.height), cap)
 }
+
+// Heights a frame was recently given, to tell settling from flipping.
+const AUTO_HEIGHT_HISTORY = 4
+
+// nextAutoHeight over one document's life, held for good once it would go back to a height it was given recently
+// (content that flips with the frame's height across a media query, A, B, A…): the frame keeps its height and the
+// document scrolls inside.
+export function autoHeightSteps(cap: number): (current: number, measured: { height: number; followsFrame: boolean }) => number {
+	const given: number[] = []
+	let held: number | null = null
+
+	return (current, measured) => {
+		if (held !== null) {
+			return held
+		}
+
+		const next = nextAutoHeight(current, measured, cap)
+
+		if (next !== current && given.includes(next)) {
+			held = current
+
+			return current
+		}
+
+		given.push(next)
+
+		if (given.length > AUTO_HEIGHT_HISTORY) given.shift()
+
+		return next
+	}
+}
