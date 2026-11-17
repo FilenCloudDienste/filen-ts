@@ -434,6 +434,14 @@ describe("getPreviewType — stored mime", () => {
 		expect(fileTypeExtension("extension.crx")).toBe("crx")
 	})
 
+	// Before = after: a font type names an extension this platform's tables lack.
+	it("keeps an extensionless font unknown, with no type extension", () => {
+		for (const mime of ["font/ttf", "font/otf", "font/woff", "font/woff2", "application/font-woff", "application/x-font-ttf"]) {
+			expect(getPreviewType("download", mime), mime).toBe("unknown")
+			expect(fileTypeExtension("download", mime), mime).toBe("")
+		}
+	})
+
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).
 	it("keeps .jfif, .jpe, .pjpeg and .pjp as before", () => {
 		expect(getPreviewType("photo.jfif")).toBe("unknown")

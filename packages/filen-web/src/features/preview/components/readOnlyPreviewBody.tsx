@@ -7,6 +7,7 @@ import { DocxViewer } from "@/features/preview/components/docxViewer"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { FontViewer } from "@/features/preview/components/fontViewer"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
 import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
 
@@ -77,6 +78,8 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 					alt={alt}
 				/>
 			)
+		case "font":
+			return <FontViewer item={item} />
 		// A public link's: anonPreviewability admits rawImage, its embedded preview read through the anon
 		// worker method by the provider around this. An archive's entry never asks for one.
 		case "rawImage":

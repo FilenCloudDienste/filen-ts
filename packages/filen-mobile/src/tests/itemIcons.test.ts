@@ -403,6 +403,13 @@ describe("resolveFileIconKey", () => {
 		expect(resolveFileIconKey(name)).toBe("other")
 	})
 
+	// Before = after: font types name extensions this platform's tables lack.
+	it("keeps an extensionless font the generic icon", () => {
+		for (const mime of ["font/ttf", "font/woff2"]) {
+			expect(resolveFileIconKey("download", mime), mime).toBe("other")
+		}
+	})
+
 	it("keeps a known extension's icon whatever the mime says", () => {
 		expect(resolveFileIconKey("photo.jpg", "video/mp4")).toBe("image")
 		expect(resolveFileIconKey("main.rs", "text/plain")).toBe("code")

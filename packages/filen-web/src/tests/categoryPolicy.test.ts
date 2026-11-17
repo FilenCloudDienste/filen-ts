@@ -22,6 +22,7 @@ import {
 	PREVIEW_MAX_BYTES,
 	SPREADSHEET_MAX_BYTES,
 	TEXT_MAX_BYTES,
+	FONT_MAX_BYTES,
 	type PreviewCategory,
 	type StreamedCategory
 } from "@/features/drive/lib/preview.logic"
@@ -76,6 +77,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	markdown: "drivePreviewKindMarkdown",
 	archive: "drivePreviewKindArchive",
 	iwork: "drivePreviewKindIwork",
+	font: "drivePreviewKindFont",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -259,7 +261,9 @@ const NAMES = [
 const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
-const CATEGORIES = Object.keys(CATEGORY_POLICY) as PreviewCategory[]
+// Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font"])
+const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
 describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
@@ -472,5 +476,35 @@ describe("profile caps", () => {
 		expect(canPreviewWith(big, notNative)).toBe(false)
 		expect(needsImageTransform(big, native)).toBe(false)
 		expect(needsImageTransform(big, notNative)).toBe(true)
+	})
+})
+
+describe("added category rows", () => {
+	it.each(["face.ttf", "face.otf", "face.woff", "face.woff2"])(
+		"%s opens as a font up to 64 MiB, on the drive, a link and in an archive",
+		name => {
+			expect(previewType(fileNamed(name, 1024n))).toBe("font")
+			expect(canPreview(fileNamed(name, FONT_MAX_BYTES))).toBe(true)
+			expect(canPreview(fileNamed(name, FONT_MAX_BYTES + 1n))).toBe(false)
+			expect(anonPreviewability(fileNamed(name, FONT_MAX_BYTES))).toBe("previewable")
+			expect(anonPreviewability(fileNamed(name, FONT_MAX_BYTES + 1n))).toBe("too-large")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(FONT_MAX_BYTES) }]), 0)).toBe(true)
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(FONT_MAX_BYTES) + 1 }]), 0)).toBe(false)
+		}
+	)
+
+	it("reads an extensionless font by its stored type", () => {
+		expect(previewType(fileNamed("face", 1024n, "font/woff2"))).toBe("font")
+		expect(previewType(fileNamed("face", 1024n, "application/x-font-ttf"))).toBe("font")
+	})
+
+	it("gives a font the kind label and keeps it out of Photos, the assistant and text", () => {
+		const policy = CATEGORY_POLICY.font
+
+		expect(previewKindLabelKey("font")).toBe("drivePreviewKindFont")
+		expect(isPhotoCategory("font")).toBe(false)
+		expect(isTextCategory("font")).toBe(false)
+		expect(policy.assistantKind).toBeNull()
+		expect(policy.pager).toBe(true)
 	})
 })

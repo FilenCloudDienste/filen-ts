@@ -41,6 +41,7 @@ export type PreviewCategory =
 	| "markdown"
 	| "archive"
 	| "iwork"
+	| "font"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -53,6 +54,8 @@ export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 // Text viewers hold the file as a string (UTF-16, twice its bytes) plus the editor's own document model,
 // and real text files are far smaller, so text, code, markdown and open-as-text stop lower still.
 export const TEXT_MAX_BYTES = 33_554_432n // 32 MiB
+// A font is held whole twice (the cache for its FontFace, the face's own copy); real ones stay far below.
+export const FONT_MAX_BYTES = 67_108_864n // 64 MiB
 
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
@@ -323,6 +326,20 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindIwork",
 		assistantKind: null
 	},
+	font: {
+		streamed: false,
+		ranged: false,
+		bufferCap: FONT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindFont",
+		assistantKind: null
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -387,6 +404,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// Decks, templates and shows, macro-enabled or not (macros never run), OpenDocument presentations, and PowerPoint
 	// 97–2003 files (viewed). A `.pot` is a 97–2003 template until a read of its signature says it is text (gettext).
 	[PRESENTATION_EXTENSIONS, "presentation"],
+	[["ttf", "otf", "woff", "woff2"], "font"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// Subtitles, calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
 	[["txt", "log", ...SUBTITLE_FILE_EXTENSIONS, "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
