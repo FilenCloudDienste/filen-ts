@@ -52,7 +52,14 @@ vi.mock("@/features/drive/lib/thumbnails", () => ({
 	withGenerationSlot: withGenerationSlotMock
 }))
 
-const { downloadFileBytesMock, cancelPreviewDownloadIfEarlyMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMock } = vi.hoisted(() => ({
+const {
+	downloadFileBytesMock,
+	cancelPreviewDownloadIfEarlyMock,
+	makeSdkThumbnailMock,
+	makeSdkThumbnailFromFileMock,
+	readFileBytesRangeMock
+} = vi.hoisted(() => ({
+	readFileBytesRangeMock: vi.fn<(file: unknown, start: number, end: number, token: string) => Promise<Uint8Array>>(),
 	downloadFileBytesMock: vi.fn<(file: unknown, token: string) => Promise<Uint8Array>>(),
 	cancelPreviewDownloadIfEarlyMock: vi.fn<(token: string, maxFraction: number) => void>(),
 	makeSdkThumbnailMock:
@@ -66,7 +73,9 @@ vi.mock("@/lib/sdk/client", () => ({
 		downloadFileBytes: downloadFileBytesMock,
 		cancelPreviewDownloadIfEarly: cancelPreviewDownloadIfEarlyMock,
 		makeSdkThumbnail: makeSdkThumbnailMock,
-		makeSdkThumbnailFromFile: makeSdkThumbnailFromFileMock
+		makeSdkThumbnailFromFile: makeSdkThumbnailFromFileMock,
+		readFileBytesRange: readFileBytesRangeMock,
+		cancelPreviewDownload: vi.fn()
 	}
 }))
 
@@ -745,6 +754,29 @@ describe("generateSvgThumb", () => {
 	})
 })
 
+// A SizeHeader after the signature: not small, height selector 3 (30 bits), ratio 3 (4:3).
+function jxlHead30Bit(heightMinusOne: number): number[] {
+	const fields: [number, number][] = [
+		[0, 1],
+		[3, 2],
+		[heightMinusOne, 30],
+		[3, 3]
+	]
+	const out: number[] = []
+	let position = 0
+
+	for (const [value, bits] of fields) {
+		for (let i = 0; i < bits; i++) {
+			const byte = position >> 3
+
+			out[byte] = (out[byte] ?? 0) | ((Math.floor(value / 2 ** i) % 2) << (position & 7))
+			position++
+		}
+	}
+
+	return [...out, 0, 0]
+}
+
 describe("generateRasterThumb", () => {
 	// A bare JPEG XL codestream of 1000 × 750 (13-bit height, 4:3).
 	const JXL_1000 = Uint8Array.from([0xff, 0x0a, 0x6a, 0x17, 0x03, 0x00])
@@ -776,7 +808,28 @@ describe("generateRasterThumb", () => {
 		thumbnailRasterMock.mockResolvedValue(new Uint8Array([9]))
 
 		await expect(generateRasterThumb(jxlItem(), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([9]) })
-		expect(thumbnailRasterMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/jxl", { width: 1000, height: 750 }, THUMB_MAX_DIM)
+		expect(thumbnailRasterMock).toHaveBeenCalledWith(
+			expect.any(Uint8Array),
+			"image/jxl",
+			{ width: 1000, height: 750 },
+			THUMB_MAX_DIM,
+			expect.any(AbortSignal)
+		)
+		// A file this small is its own head.
+		expect(readFileBytesRangeMock).not.toHaveBeenCalled()
+	})
+
+	it("refuses a larger file whose header is over the budget from its head, never reading it whole", async () => {
+		supportsNativeImageMock.mockResolvedValue(true)
+		// 30 000 × 22 500 (30-bit height, 4:3), in a 10 MiB file.
+		readFileBytesRangeMock.mockResolvedValue(Uint8Array.from([0xff, 0x0a, ...jxlHead30Bit(22_499)]))
+
+		await expect(generateRasterThumb(jxlItem(10n * BigInt(MIB)), live())).resolves.toEqual({
+			type: "unavailable",
+			reason: "overBudget"
+		})
+		expect(readFileBytesRangeMock.mock.calls[0]?.slice(1, 3)).toEqual([0, 64 * 1024])
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
 	})
 
 	it("draws a JPEG XL turned by its orientation at its upright size", async () => {
@@ -787,7 +840,13 @@ describe("generateRasterThumb", () => {
 
 		await generateRasterThumb(jxlItem(8n), live())
 
-		expect(thumbnailRasterMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/jxl", { width: 750, height: 1000 }, THUMB_MAX_DIM)
+		expect(thumbnailRasterMock).toHaveBeenCalledWith(
+			expect.any(Uint8Array),
+			"image/jxl",
+			{ width: 750, height: 1000 },
+			THUMB_MAX_DIM,
+			expect.any(AbortSignal)
+		)
 	})
 
 	it("settles bytes that are no JPEG XL, or that the browser cannot decode, as corrupt", async () => {

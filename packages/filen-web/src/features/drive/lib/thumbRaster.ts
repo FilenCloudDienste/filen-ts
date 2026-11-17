@@ -13,15 +13,19 @@ const worker = statelessWorker<ThumbRasterWorkerApi>(() => new ThumbRasterWorker
 const one = new Semaphore(1)
 
 // A `width`×`height` image of `type` drawn into a thumbnail no larger than `maxDim` a side. `bytes` is transferred.
+// One that `signal` stopped while waiting its turn is not drawn.
 export async function thumbnailRaster(
 	bytes: Uint8Array,
 	type: string,
 	size: { width: number; height: number },
-	maxDim: number
+	maxDim: number,
+	signal?: AbortSignal
 ): Promise<Uint8Array> {
 	await one.acquire()
 
 	try {
+		signal?.throwIfAborted()
+
 		return await worker.use(({ remote }) =>
 			remote.thumbnail(Comlink.transfer(bytes, [bytes.buffer]), type, size.width, size.height, maxDim)
 		)

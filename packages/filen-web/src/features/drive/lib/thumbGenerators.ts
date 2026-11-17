@@ -879,6 +879,33 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 	return await svgThumbOf(bytes, itemTypeExtension(item) === "svgz")
 }
 
+// What a raster thumbnail reads of a larger file before deciding to read it whole: every header sits within it.
+const RASTER_THUMB_HEAD_BYTES = 64 * 1024
+
+// The first `length` bytes of the file (or the bytes a preview already holds), stopped when `signal` aborts.
+async function readHeadBytes(item: BaseFileItem, length: number, signal: AbortSignal): Promise<Uint8Array> {
+	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
+
+	if (held !== undefined) {
+		return held.subarray(0, length)
+	}
+
+	signal.throwIfAborted()
+
+	const token = crypto.randomUUID()
+	const stop = (): void => {
+		void sdkApi.cancelPreviewDownload(token)
+	}
+
+	signal.addEventListener("abort", stop, { once: true })
+
+	try {
+		return await runOp(sdkApi.readFileBytesRange(narrowToAnyFile(item), 0, length, token))
+	} finally {
+		signal.removeEventListener("abort", stop)
+	}
+}
+
 // A decode error from the browser's own decoder (createImageBitmap): a verdict about the bytes.
 function isUndecodable(e: unknown): boolean {
 	return e instanceof Error && (e.name === "InvalidStateError" || e.name === "EncodingError")
@@ -897,20 +924,30 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 		return { type: "unavailable", reason: "overBudget" }
 	}
 
+	const size = Number(item.data.size)
 	let bytes: Uint8Array
+	let header: { width: number; height: number } | null
 
 	try {
+		// Its header first, from a head read: one past the budget costs that, not the whole file. A small file's head is
+		// the file.
+		const head = size <= RASTER_THUMB_HEAD_BYTES ? null : await readHeadBytes(item, RASTER_THUMB_HEAD_BYTES, signal)
+		const headed = head === null ? null : sniffJxlUpright(head, size)
+
+		if (headed !== null && headed.width * headed.height > thumbnail()) {
+			return { type: "unavailable", reason: "overBudget" }
+		}
+
 		bytes = await downloadWholeFile(item, signal)
+		// Upright: the browser turns it by its orientation before scaling it to the tile.
+		header = headed ?? sniffJxlUpright(bytes, bytes.length)
 	} catch (e) {
 		if (!signal.aborted) {
-			log.warn("thumb-generators", "generateRasterThumb: download failed", item.data.uuid, e)
+			log.warn("thumb-generators", "generateRasterThumb: read failed", item.data.uuid, e)
 		}
 
 		return { type: "failed" }
 	}
-
-	// Upright: the browser turns it by its orientation before scaling it to the tile.
-	const header = sniffJxlUpright(bytes, bytes.length)
 
 	if (header === null) {
 		return { type: "unavailable", reason: "corrupt" }
@@ -921,7 +958,7 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 	}
 
 	try {
-		return { type: "bytes", bytes: await thumbnailRaster(bytes, "image/jxl", header, THUMB_MAX_DIM) }
+		return { type: "bytes", bytes: await thumbnailRaster(bytes, "image/jxl", header, THUMB_MAX_DIM, signal) }
 	} catch (e) {
 		if (isUndecodable(e)) {
 			return { type: "unavailable", reason: "corrupt" }
