@@ -265,7 +265,9 @@ describe("verdictChangesKind", () => {
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
 		expect(
-			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ai", "ogg", "webm", "txt", ""].map(extension => sniffForExtension(extension))
+			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ai", "sub", "ogg", "webm", "txt", ""].map(extension =>
+				sniffForExtension(extension)
+			)
 		).toEqual([
 			"transportStream",
 			"transportStream",
@@ -275,6 +277,7 @@ describe("content sniffs", () => {
 			"iworkPackage",
 			"sqlite",
 			"pdfCompatible",
+			"vobsub",
 			null,
 			null,
 			null,
@@ -291,7 +294,8 @@ describe("content sniffs", () => {
 			iworkPackage: ["iworkPackage", "notIworkPackage"],
 			sqlite: ["sqlite", "notSqlite"],
 			pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
-			wavefront: ["wavefront", "notWavefront"]
+			wavefront: ["wavefront", "notWavefront"],
+			vobsub: ["vobsub", "notVobsub"]
 		})
 	})
 
@@ -304,6 +308,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("db")).toEqual([null, "sqlite", null])
 		expect(sniffCandidates("ai")).toEqual([null, "pdf", null])
 		expect(sniffCandidates("obj")).toEqual(["obj", "obj", null])
+		expect(sniffCandidates("sub")).toEqual(["sub", null, "sub"])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 
@@ -427,5 +432,25 @@ describe("resolveFileKind for a well-known file name", () => {
 			extension: "sh",
 			source: "extension"
 		})
+	})
+
+	// An app whose table knows none of an extension a read settles (mobile's) resolves it exactly as it did before the
+	// read existed, whatever its MIME type or media verdict.
+	it.each(["sub"])("leaves .%s as before on a table without it", extension => {
+		const without = (candidate: string) => (candidate === extension ? null : kindOf(candidate))
+		const before: AmbiguityTable = new Map()
+
+		for (const mime of [null, "text/plain", "application/octet-stream", "video/mpeg", "audio/mpeg", "text/x-unknown"]) {
+			for (const verdict of [null, "video", "audio", "transportStream"] as const) {
+				const input = { name: `file.${extension}`, mime, size: 4096, verdict }
+				const now = resolveFileKind(input, without)
+				const then = resolveFileKind(input, without, before)
+
+				expect({ kind: now.kind, extension: now.extension }).toEqual({ kind: then.kind, extension: then.extension })
+				expect(verdictChangesKind(input, verdict ?? "video", without)).toBe(
+					verdictChangesKind(input, verdict ?? "video", without, before)
+				)
+			}
+		}
 	})
 })

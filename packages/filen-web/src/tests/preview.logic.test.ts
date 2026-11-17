@@ -350,7 +350,11 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("blob7.bin", { mime: "application/vnd.ms-excel" }))).toBe("spreadsheet")
 	})
 
-	it.each(["srt", "vtt", "ass", "ssa", "smi", "sami", "ics", "ifb", "ical", "vcf", "vcard", "eml"])("%s -> text", ext => {
+	it.each(["srt", "vtt", "ass", "ssa", "smi", "sami", "sub"])("%s -> subtitle", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("subtitle")
+	})
+
+	it.each(["ics", "ifb", "ical", "vcf", "vcard", "eml"])("%s -> text", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("text")
 	})
 
@@ -389,7 +393,7 @@ describe("previewType — extension category map", () => {
 		}
 	})
 
-	it("reads a subtitle, calendar, contact or message type as text without an extension", () => {
+	it("reads a subtitle, calendar, contact or message type by its type without an extension", () => {
 		for (const [mime, extension] of [
 			["text/vtt", "vtt"],
 			["application/x-subrip", "srt"],
@@ -402,7 +406,9 @@ describe("previewType — extension category map", () => {
 			const item = fileNamed("download", { mime })
 
 			expect(itemTypeExtension(item), mime).toBe(extension)
-			expect(previewType(item), mime).toBe(extension === "mbox" ? "code" : "text")
+			expect(previewType(item), mime).toBe(
+				extension === "mbox" ? "code" : extension === "vtt" || extension === "srt" ? "subtitle" : "text"
+			)
 		}
 	})
 

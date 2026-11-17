@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
 import { readTorrent, torrentHashes, torrentMagnet, TorrentError, type TorrentHashes, type TorrentInfo } from "@filen/shared/torrent"
+import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
 // plain data, keeping nothing (a stateless worker, textFamilyClient.ts).
@@ -26,6 +27,13 @@ const api = {
 		const hashes = await torrentHashes(bytes, info, (algorithm, data) => crypto.subtle.digest(algorithm, data))
 
 		return { status: "ok", info, hashes, magnet: torrentMagnet(info, hashes) }
+	},
+	// The text the page already decoded (in the encoding it shows), parsed by its extension's format: cue times as
+	// transferred arrays, cue text as plain text.
+	subtitles: (text: string, extension: string): SubtitleReading => {
+		const reading = readSubtitleText(text, extension)
+
+		return reading.status === "ok" ? Comlink.transfer(reading, [reading.starts.buffer, reading.ends.buffer]) : reading
 	}
 }
 

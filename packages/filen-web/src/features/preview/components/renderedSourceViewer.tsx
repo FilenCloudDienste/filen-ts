@@ -3,7 +3,12 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { TextBuffer, TextFile } from "@/features/preview/lib/textFile"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
-import { MarkdownRenderedBar, type MarkdownBar, type MarkdownMode } from "@/features/preview/components/codeCommandBar"
+import {
+	MarkdownRenderedBar,
+	type MarkdownBar,
+	type MarkdownMode,
+	type RenderedViewLabels
+} from "@/features/preview/components/codeCommandBar"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
@@ -28,6 +33,8 @@ export interface RenderedSourceViewerProps {
 	// Source's grammar (codeMirrorLanguageFor), and whether its bar offers markdown formatting.
 	tag: string
 	formatting: boolean
+	// The switch's names.
+	labels: RenderedViewLabels
 	// Same optional props TextViewer accepts — forwarded to the source-mode editor only. The
 	// rendered arm is never an editing surface.
 	editable?: boolean
@@ -53,6 +60,7 @@ export function RenderedSourceViewer({
 	renderer,
 	tag,
 	formatting,
+	labels,
 	editable,
 	onDirtyChange,
 	contentRef,
@@ -145,6 +153,7 @@ export function RenderedSourceViewer({
 	const { file, writable, encoding } = text
 	const bar: MarkdownBar = {
 		mode,
+		labels,
 		formatting,
 		locked: dirty,
 		switchRef: toggleRef,

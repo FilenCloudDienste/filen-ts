@@ -92,6 +92,7 @@ import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
+import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
@@ -2743,8 +2744,8 @@ interface PreviewBodyProps {
 // pdf/docx each own their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
-// case's TextViewer, and the "markdown" case's own source-mode editor — every other category
-// ignores them.
+// case's TextViewer, and the "markdown" and "subtitle" cases' own source-mode editors — every other
+// category ignores them.
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
@@ -2916,6 +2917,19 @@ function PreviewBody({
 		case "markdown":
 			return (
 				<MarkdownViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					onTextState={onTextState}
+					readAs={readAs}
+					contentRef={contentRef}
+				/>
+			)
+		case "subtitle":
+			return (
+				<SubtitleViewer
 					item={item}
 					alt={alt}
 					editable={editable}

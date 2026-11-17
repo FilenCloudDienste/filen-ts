@@ -10,6 +10,7 @@ import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
+import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
@@ -86,6 +87,13 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 		case "markdown":
 			return (
 				<MarkdownViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "subtitle":
+			return (
+				<SubtitleViewer
 					item={item}
 					alt={alt}
 				/>

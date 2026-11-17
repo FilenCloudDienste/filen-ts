@@ -43,7 +43,7 @@ const ITEM = narrowItem({
 } satisfies File)
 
 describe("RenderedSourceViewer", () => {
-	it("renders through its renderer and shows the same text as source, without markdown formatting", async () => {
+	it("renders through its renderer under its own names and shows the same text as source, without markdown formatting", async () => {
 		const renderer = vi.fn(({ bytes, file }: { bytes: Uint8Array; file: { text: string } }) => (
 			<p data-testid="rendered">{`${String(bytes.byteLength)}:${file.text}`}</p>
 		))
@@ -55,12 +55,14 @@ describe("RenderedSourceViewer", () => {
 				renderer={renderer}
 				tag=""
 				formatting={false}
+				labels={{ view: "Diagram view", rendered: "Diagram" }}
 				editable
 			/>,
 			{ wrapper: queryClientWrapper(createTestQueryClient()) }
 		)
 
 		expect(screen.getByTestId("rendered").textContent).toBe("15:graph TD; A-->B")
+		expect(screen.getByRole("button", { name: "Diagram" }).getAttribute("aria-pressed")).toBe("true")
 
 		fireEvent.click(screen.getByRole("button", { name: "Source" }))
 

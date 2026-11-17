@@ -47,6 +47,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notPdfCompatible":
 		case "wavefront":
 		case "notWavefront":
+		case "vobsub":
+		case "notVobsub":
 			return false
 	}
 }

@@ -199,11 +199,13 @@ export type MarkdownMode = "rendered" | "source"
 // holds them); the switch says why in its tooltip.
 function MarkdownModeSwitch({
 	mode,
+	labels,
 	locked,
 	onMode,
 	switchRef
 }: {
 	mode: MarkdownMode
+	labels: RenderedViewLabels
 	locked: boolean
 	onMode: (mode: MarkdownMode) => void
 	// The button that switches away from `mode`, focused after a keyboard switch from the editor.
@@ -225,7 +227,7 @@ function MarkdownModeSwitch({
 									ref={active ? undefined : switchRef}
 									variant="ghost"
 									size="sm"
-									aria-label={t(option === "rendered" ? "previewCommandBarRendered" : "previewCommandBarSource")}
+									aria-label={option === "rendered" ? labels.rendered : t("previewCommandBarSource")}
 									aria-pressed={active}
 									disabled={disabled}
 									// aria-disabled rather than disabled: the hint below must stay reachable by hover.
@@ -245,13 +247,13 @@ function MarkdownModeSwitch({
 									{option === "rendered" ? <EyeIcon /> : <CodeIcon />}
 									{/* Icons only on a phone. */}
 									<span className="text-xs max-sm:hidden">
-										{t(option === "rendered" ? "previewCommandBarRendered" : "previewCommandBarSource")}
+										{option === "rendered" ? labels.rendered : t("previewCommandBarSource")}
 									</span>
 								</Button>
 							}
 						/>
 						<TooltipContent>
-							{locked ? t("previewMarkdownToggleDirtyHint") : t("previewCommandBarMarkdownView")}
+							{locked ? t("previewMarkdownToggleDirtyHint") : labels.view}
 							{locked ? null : <Kbd action="editor.togglePreview" />}
 						</TooltipContent>
 					</Tooltip>
@@ -261,8 +263,15 @@ function MarkdownModeSwitch({
 	)
 }
 
+// What the rendered view's switch is called: its group ("Markdown view") and its rendered option ("Rendered").
+export interface RenderedViewLabels {
+	readonly view: string
+	readonly rendered: string
+}
+
 export interface MarkdownBar {
 	readonly mode: MarkdownMode
+	readonly labels: RenderedViewLabels
 	// The source is markdown: its bar offers formatting.
 	readonly formatting: boolean
 	// Unsaved edits: the switch is locked.
@@ -271,16 +280,17 @@ export interface MarkdownBar {
 	readonly switchRef?: RefObject<HTMLButtonElement | null>
 }
 
-function markdownGroup(markdown: MarkdownBar, label: string, phone: boolean): RibbonGroup {
+function markdownGroup(markdown: MarkdownBar, phone: boolean): RibbonGroup {
 	return {
 		id: "markdownView",
-		label,
+		label: markdown.labels.view,
 		icon: EyeIcon,
 		width: phone ? 2 * BAR_BUTTON : 170,
 		priority: Infinity,
 		content: (
 			<MarkdownModeSwitch
 				mode={markdown.mode}
+				labels={markdown.labels}
 				locked={markdown.locked}
 				onMode={markdown.onMode}
 				switchRef={markdown.switchRef}
@@ -308,7 +318,7 @@ export function MarkdownRenderedBar({ markdown, onDownload }: { markdown: Markdo
 		<OfficeCommandBar
 			label={t("previewOfficeRibbonCommands")}
 			file={<DownloadFile onDownload={onDownload} />}
-			groups={[markdownGroup(markdown, t("previewCommandBarMarkdownView"), phone)]}
+			groups={[markdownGroup(markdown, phone)]}
 		/>
 	)
 }
@@ -364,7 +374,7 @@ export function CodeCommandBar({
 	const groups: RibbonGroup[] = []
 
 	if (markdown !== null) {
-		groups.push(markdownGroup(markdown, t("previewCommandBarMarkdownView"), phone))
+		groups.push(markdownGroup(markdown, phone))
 	}
 
 	if (editable) {

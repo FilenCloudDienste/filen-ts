@@ -47,6 +47,7 @@ import { previewTextEncoding } from "@/locales/en/previewText/encoding"
 import { previewTextMarkdown } from "@/locales/en/previewText/markdown"
 import { previewTextHtml } from "@/locales/en/previewText/html"
 import { previewTextTorrent } from "@/locales/en/previewText/torrent"
+import { previewTextSubtitles } from "@/locales/en/previewText/subtitles"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -891,5 +892,6 @@ export const preview = {
 	...previewTextEncoding,
 	...previewTextMarkdown,
 	...previewTextHtml,
-	...previewTextTorrent
+	...previewTextTorrent,
+	...previewTextSubtitles
 } as const

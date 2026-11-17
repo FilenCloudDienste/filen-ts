@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import TextFamilyWorker from "@/features/preview/workers/textFamily.worker.ts?worker"
 import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 import { statelessWorker } from "@/lib/workers/ownedWorker"
+import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 export type { TorrentReading } from "@/features/preview/workers/textFamily.worker"
 
@@ -14,4 +15,9 @@ export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading
 	const copy = bytes.slice()
 
 	return await textFamilyWorker.use<TorrentReading>(({ remote }) => remote.torrent(Comlink.transfer(copy, [copy.buffer])))
+}
+
+// A subtitle file's cues, from the text the page decoded; the worker transfers the times back.
+export async function readSubtitleCues(text: string, extension: string): Promise<SubtitleReading> {
+	return await textFamilyWorker.use<SubtitleReading>(({ remote }) => remote.subtitles(text, extension))
 }

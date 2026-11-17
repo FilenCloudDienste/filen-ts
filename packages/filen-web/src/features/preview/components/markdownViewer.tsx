@@ -1,4 +1,5 @@
 import type { RefObject } from "react"
+import { useTranslation } from "react-i18next"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
@@ -31,6 +32,8 @@ function renderMarkdown(source: RenderedSource, alt: string) {
 // A markdown file: rendered (math, images that are not loaded), with its source a toggle away.
 // No parameter defaults: the React Compiler skips a component that has them.
 export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: MarkdownViewerProps) {
+	const { t } = useTranslation("preview")
+
 	return (
 		<RenderedSourceViewer
 			item={item}
@@ -38,6 +41,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 			renderer={source => renderMarkdown(source, alt)}
 			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 			formatting
+			labels={{ view: t("previewCommandBarMarkdownView"), rendered: t("previewCommandBarRendered") }}
 			{...(editable === undefined ? {} : { editable })}
 			{...(onDirtyChange === undefined ? {} : { onDirtyChange })}
 			{...(contentRef === undefined ? {} : { contentRef })}

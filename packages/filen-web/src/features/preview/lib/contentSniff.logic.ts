@@ -52,6 +52,13 @@ export function hasPdfHeader(head: Uint8Array): boolean {
 // A Wavefront model is text from its first byte; a compiled object file is not.
 export const WAVEFRONT_HEAD_BYTES = 8192
 
+// A VobSub `.sub` is an MPEG program stream: it begins with a pack header.
+const MPEG_PACK_HEADER = [0x00, 0x00, 0x01, 0xba] as const
+
+export function isMpegPackHead(head: Uint8Array): boolean {
+	return head.length >= MPEG_PACK_HEADER.length && MPEG_PACK_HEADER.every((byte, index) => head[index] === byte)
+}
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
@@ -85,6 +92,11 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: WAVEFRONT_HEAD_BYTES,
 		decide: head => (looksLikeText(head) ? "wavefront" : "notWavefront")
+	},
+	vobsub: {
+		mode: "head",
+		headBytes: MPEG_PACK_HEADER.length,
+		decide: head => (isMpegPackHead(head) ? "vobsub" : "notVobsub")
 	}
 }
 

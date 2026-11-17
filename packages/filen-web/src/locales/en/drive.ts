@@ -679,6 +679,8 @@ export const drive = {
 	drivePreviewKindModel3d: "3D model",
 	/** Info panel — Kind row value: a BitTorrent metadata file (.torrent) */
 	drivePreviewKindTorrent: "Torrent",
+	/** Info dialog "Kind" value — a subtitle file */
+	drivePreviewKindSubtitle: "Subtitles",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

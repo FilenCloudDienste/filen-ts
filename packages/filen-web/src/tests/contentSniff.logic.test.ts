@@ -17,7 +17,14 @@ import {
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { canOpenEntry, entryAwaitsSniff } from "@/features/archive/lib/entryAccess.logic"
-import { EXTENSIONLESS_SNIFF, gateRunsSniffer, isVirtualDiskHead, isZipHead, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
+import {
+	EXTENSIONLESS_SNIFF,
+	gateRunsSniffer,
+	isMpegPackHead,
+	isVirtualDiskHead,
+	isZipHead,
+	SNIFFERS
+} from "@/features/preview/lib/contentSniff.logic"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { legacyUnprobedTransportStream, legacyUnsniffedTemplate } from "@/tests/support/legacySniff"
 import { storeOf } from "@/tests/support/archiveEntries"
@@ -104,6 +111,21 @@ describe("needsContentSniff", () => {
 		recordFileKindVerdict(disk.data.uuid, "virtualDisk")
 		expect(canPreview(disk)).toBe(false)
 		expect(needsContentSniff(fileNamed("alu.vhdl", 3_000n), null)).toBeNull()
+	})
+
+	// MicroDVD text or VobSub images: a subtitle until its head says it is an MPEG program stream, which nothing previews.
+	it("reads a .sub's head before opening it as subtitles", () => {
+		const sub = fileNamed("movie.sub", 3_000n)
+
+		expect(needsContentSniff(sub, null)).toBe("vobsub")
+		expect(previewType(sub, null)).toBe("subtitle")
+		expect(needsContentSniff(sub, "notVobsub")).toBeNull()
+		expect(previewType(sub, "notVobsub")).toBe("subtitle")
+		expect(needsContentSniff(sub, "vobsub")).toBeNull()
+		expect(previewType(sub, "vobsub")).toBe("other")
+		// The other subtitle formats need no read.
+		expect(needsContentSniff(fileNamed("movie.srt", 3_000n), null)).toBeNull()
+		expect(previewType(fileNamed("movie.srt", 3_000n), null)).toBe("subtitle")
 	})
 
 	// A Keynote package or a key file: no kind until its head says it is a zip, which opens as an iWork document.
@@ -292,6 +314,24 @@ describe("SNIFFERS", () => {
 		if (sniffer.mode === "head") {
 			expect(sniffer.decide(model, model.length)).toBe("wavefront")
 			expect(sniffer.decide(elf, elf.length)).toBe("notWavefront")
+		}
+	})
+
+	it("finds VobSub by the MPEG pack header, from its first 4 bytes", () => {
+		const sniffer = SNIFFERS.vobsub
+		const pack = Uint8Array.from([0x00, 0x00, 0x01, 0xba, 0x44])
+		const microDvd = new TextEncoder().encode("{0}{25}Hello")
+
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(4)
+		expect(isMpegPackHead(pack)).toBe(true)
+		expect(isMpegPackHead(microDvd)).toBe(false)
+		expect(isMpegPackHead(pack.subarray(0, 3))).toBe(false)
+		// A video elementary stream's sequence header is no pack.
+		expect(isMpegPackHead(Uint8Array.from([0x00, 0x00, 0x01, 0xb3]))).toBe(false)
+
+		if (sniffer.mode === "head") {
+			expect(sniffer.decide(pack, 5)).toBe("vobsub")
+			expect(sniffer.decide(microDvd, microDvd.length)).toBe("notVobsub")
 		}
 	})
 

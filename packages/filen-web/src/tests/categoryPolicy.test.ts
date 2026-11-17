@@ -85,6 +85,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	geo: "drivePreviewKindGeo",
 	model3d: "drivePreviewKindModel3d",
 	torrent: "drivePreviewKindTorrent",
+	subtitle: "drivePreviewKindSubtitle",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -271,7 +272,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent", "subtitle"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -603,5 +604,26 @@ describe("the torrent row", () => {
 		expect(previewKindLabelKey("torrent")).toBe("drivePreviewKindTorrent")
 		expect(isPhotoCategory("torrent")).toBe(false)
 		expect(isTextCategory("torrent")).toBe(false)
+	})
+})
+
+describe("the subtitle row", () => {
+	// Text before it had a viewer of its own, so every answer is still text's: cap, entry, link, saves, assistant.
+	it("opens subtitles wherever text opens, up to the text cap, and saves them as text", () => {
+		for (const name of ["movie.srt", "movie.vtt", "movie.ass", "movie.ssa", "movie.smi", "movie.sami", "movie.sub"]) {
+			const item = fileNamed(name, 1024n)
+
+			expect(previewType(item), name).toBe("subtitle")
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES)), name).toBe(true)
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(false)
+			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES)), name).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
+		}
+
+		expect(previewType(fileNamed("captions", 1024n, "text/vtt"))).toBe("subtitle")
+		expect(previewKindLabelKey("subtitle")).toBe("drivePreviewKindSubtitle")
+		expect(isTextCategory("subtitle")).toBe(true)
+		expect(CATEGORY_POLICY.subtitle).toMatchObject({ textFamily: true, editsAsText: true, assistantKind: "document", pager: true })
+		expect(isPhotoCategory("subtitle")).toBe(false)
 	})
 })
