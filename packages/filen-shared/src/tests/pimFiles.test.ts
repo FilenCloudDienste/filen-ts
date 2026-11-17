@@ -81,6 +81,19 @@ describe("readCalendar", () => {
 		expect(calendar.entries[2]).toMatchObject({ start: { utc: true, tzid: null }, durationSeconds: 5400 })
 	})
 
+	it("refuses offsets no zone can have", () => {
+		expect(["+9999", "+2400", "+0160", "+010060", "-0000", "+1401", "-1500"].map(parseUtcOffset)).toEqual([
+			null,
+			null,
+			null,
+			null,
+			null,
+			null,
+			null
+		])
+		expect([parseUtcOffset("+1400"), parseUtcOffset("+0000"), parseUtcOffset("-1200")]).toEqual([50_400, 0, -43_200])
+	})
+
 	it("reads UTC offsets with and without seconds", () => {
 		expect([
 			parseUtcOffset("+0100"),

@@ -87,6 +87,7 @@ const MAX_RULE_PARTS = 64
 const MAX_ZONES = 64
 const MAX_OBSERVANCES = 64
 const MAX_ZONE_DATES = 64
+const MAX_UTC_OFFSET = 14 * 3600
 
 const TIME = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/
 
@@ -308,6 +309,8 @@ function apply(entry: Draft, line: ContentLine): void {
 }
 
 // A UTC offset, ±HHMM[SS], in seconds; null for none.
+// Hours 00-23, minutes and seconds 00-59, "-0000" refused (RFC 5545 §3.3.14), and no further from UTC than any zone
+// has been (±14:00): anything else is no offset.
 export function parseUtcOffset(value: string): number | null {
 	const match = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(value.trim())
 
@@ -315,7 +318,14 @@ export function parseUtcOffset(value: string): number | null {
 		return null
 	}
 
-	const seconds = Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4] ?? 0)
+	const hours = Number(match[2])
+	const minutes = Number(match[3])
+	const secs = Number(match[4] ?? 0)
+	const seconds = hours * 3600 + minutes * 60 + secs
+
+	if (hours > 23 || minutes > 59 || secs > 59 || seconds > MAX_UTC_OFFSET || (match[1] === "-" && seconds === 0)) {
+		return null
+	}
 
 	return match[1] === "-" ? -seconds : seconds
 }
