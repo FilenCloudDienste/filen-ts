@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { AUDIO_FORMATS, SUBTITLE_FILE_EXTENSIONS, TRACKER_COLLISIONS, ZIP_PACKAGE_EXTENSIONS } from "@filen/shared"
+import {
+	AUDIO_FORMATS,
+	resolveFileKind,
+	SUBTITLE_FILE_EXTENSIONS,
+	TRACKER_COLLISIONS,
+	TRACKER_SNIFFED,
+	ZIP_PACKAGE_EXTENSIONS
+} from "@filen/shared"
 import { subtitleFormat } from "@filen/shared/videos"
 
 // The tracker rows, which filen-web's tests keep equal to what its libopenmpt build reads.
@@ -60,6 +67,21 @@ describe("AUDIO_FORMATS", () => {
 		])
 		expect(TRACKERS.some(extension => TRACKER_COLLISIONS.has(extension))).toBe(false)
 		expect(TRACKERS).toContain("mod")
+	})
+
+	it("claims a tracker extension other formats share only once a read of its head says it is a module", () => {
+		const audio = (extension: string): string | null => (AUDIO_FORMATS.has(extension) ? "audio" : null)
+
+		expect([...TRACKER_SNIFFED].every(extension => TRACKERS.includes(extension))).toBe(true)
+		expect(TRACKER_SNIFFED).toContain("stp")
+		expect(TRACKER_SNIFFED).toContain("amf")
+
+		for (const extension of TRACKER_SNIFFED) {
+			expect(resolveFileKind({ name: `file.${extension}` }, audio).kind, extension).toBeNull()
+			expect(resolveFileKind({ name: `file.${extension}`, verdict: "trackerModule" }, audio).kind, extension).toBe("audio")
+		}
+
+		expect(resolveFileKind({ name: "song.xm" }, audio).kind).toBe("audio")
 	})
 })
 

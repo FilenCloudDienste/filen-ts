@@ -42,6 +42,13 @@ const probe = vi.hoisted(() => ({
 
 vi.mock("@/features/preview/lib/transportStreamProbe", () => probe)
 
+// libopenmpt's probe, which runs in the remux worker.
+const remux = vi.hoisted(() => ({
+	probeTrackerModuleInWorker: vi.fn((head: Uint8Array, _size: number) => Promise.resolve(head[0] === 0x49))
+}))
+
+vi.mock("@/lib/media/remuxClient", () => remux)
+
 // A head read stands in for the template reads, which run in their viewers.
 const decide = vi.fn((head: Uint8Array, _size: number) => (head[0] === 7 ? "wordBinary" : "notWordBinary"))
 
@@ -158,5 +165,23 @@ describe("runContentSniff, other reads", () => {
 		await expect(runContentSniff("presentationTemplate", fileOrigin(10), "t1", options())).rejects.toThrow()
 		await expect(runContentSniff("transportStream", bytesOrigin(new Blob([]), "a/b"), "t1", options())).rejects.toThrow()
 		expect(probe.probeTransportStream).not.toHaveBeenCalled()
+	})
+})
+
+describe("runContentSniff, head probes", () => {
+	it("hands libopenmpt's probe the head it asks for and the file's size, and names its verdict", async () => {
+		const mptm = new Uint8Array(4096).fill(0x49)
+
+		await expect(runContentSniff("trackerModule", bytesOrigin(new Blob([mptm]), "parent/song"), "t1", options())).resolves.toBe(
+			"trackerModule"
+		)
+		expect(remux.probeTrackerModuleInWorker).toHaveBeenCalledWith(expect.any(Uint8Array), 4096)
+		expect(remux.probeTrackerModuleInWorker.mock.calls[0]?.[0]).toHaveLength(2048)
+
+		// A STEP model is no module; a file shorter than the head is probed whole.
+		await expect(
+			runContentSniff("trackerModule", bytesOrigin(new Blob(["HEADER;FILE;"]), "parent/part"), "t2", options())
+		).resolves.toBe("notTrackerModule")
+		expect(remux.probeTrackerModuleInWorker.mock.calls[1]?.[0]).toHaveLength(12)
 	})
 })

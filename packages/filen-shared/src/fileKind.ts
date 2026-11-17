@@ -1,4 +1,5 @@
 import { extensionStart } from "./fileExtensions"
+import { TRACKER_SNIFFED } from "./fileFamilies"
 import { extensionForExactFileName, extensionForFileName, extensionForMime } from "./fileType"
 import { MIN_TRANSPORT_STREAM_BYTES } from "./videos/transportStream"
 
@@ -34,8 +35,8 @@ export type ContentVerdict = "transportStream" | "notTransportStream" | "video" 
 // of a `.vhd`: a Virtual Hard Disk or not; of a `.key`: a Keynote package (a zip) or not; of a `.db`: a SQLite
 // database or not; of an `.ai`: a PDF inside or not; of a `.obj`: a Wavefront model (text) or not; of a `.sub`: a
 // VobSub (an MPEG program stream) or text; of a `.vcf`: a vCard or other text (a genomics Variant Call Format file);
-// of a `.mod`: an MPEG program stream (a pack header) or not, a tracker module then. Kept apart from the media verdicts
-// the apps persist.
+// of a `.mod`: an MPEG program stream (a pack header) or not, a tracker module then; of an extension libopenmpt shares
+// with other formats (TRACKER_SNIFFED): a tracker module or not. Kept apart from the media verdicts the apps persist.
 export type DocumentVerdict =
 	| "wordBinary"
 	| "notWordBinary"
@@ -57,6 +58,8 @@ export type DocumentVerdict =
 	| "notVcard"
 	| "mpegPs"
 	| "notMpegPs"
+	| "trackerModule"
+	| "notTrackerModule"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -73,6 +76,7 @@ export type FileVerdict = ContentVerdict | DocumentVerdict
 //   vobsub                sub     vobsub / notVobsub
 //   vcard                 vcf     vcard / notVcard
 //   mpegPs                mod     mpegPs / notMpegPs
+//   trackerModule         stp amf ... (TRACKER_SNIFFED)  trackerModule / notTrackerModule
 // Reserved, added with their readers: executable (no extension).
 export type SniffId =
 	| "transportStream"
@@ -86,6 +90,7 @@ export type SniffId =
 	| "vobsub"
 	| "vcard"
 	| "mpegPs"
+	| "trackerModule"
 
 // Each read's verdicts: what it found, what it did not.
 export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
@@ -99,7 +104,8 @@ export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdi
 	wavefront: ["wavefront", "notWavefront"],
 	vobsub: ["vobsub", "notVobsub"],
 	vcard: ["vcard", "notVcard"],
-	mpegPs: ["mpegPs", "notMpegPs"]
+	mpegPs: ["mpegPs", "notMpegPs"],
+	trackerModule: ["trackerModule", "notTrackerModule"]
 }
 
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
@@ -152,6 +158,8 @@ export interface Ambiguity {
 	notVcard?: string | null
 	mpegPs?: string | null
 	notMpegPs?: string | null
+	trackerModule?: string | null
+	notTrackerModule?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it; "audioOnly": toward audio, never toward video (an `.ogg` some uploaders type
@@ -211,7 +219,12 @@ const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	["vcf", { fallback: "vcf", vcard: "vcf", notVcard: "txt", mimeHint: true, sniff: "vcard" }],
 	// A tracker module, unless its head is an MPEG program stream's pack header: some camcorders wrote their video as
 	// `.mod`. Browsers type both by the extension alone.
-	["mod", { fallback: "mod", mpegPs: "mpg", notMpegPs: "mod", mimeHint: false, sniff: "mpegPs" }]
+	["mod", { fallback: "mod", mpegPs: "mpg", notMpegPs: "mod", mimeHint: false, sniff: "mpegPs" }],
+	// A tracker module only when libopenmpt's probe of its head says so; nothing else, until then.
+	...[...TRACKER_SNIFFED].map((extension): [string, Ambiguity] => [
+		extension,
+		{ fallback: null, trackerModule: extension, notTrackerModule: null, mimeHint: false, sniff: "trackerModule" }
+	])
 ])
 
 function lowerName(name: string): string {
@@ -294,6 +307,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.mpegPs
 		case "notMpegPs":
 			return ambiguity.notMpegPs
+		case "trackerModule":
+			return ambiguity.trackerModule
+		case "notTrackerModule":
+			return ambiguity.notTrackerModule
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

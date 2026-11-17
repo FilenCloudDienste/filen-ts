@@ -53,6 +53,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notVcard":
 		case "mpegPs":
 		case "notMpegPs":
+		case "trackerModule":
+		case "notTrackerModule":
 			return false
 	}
 }

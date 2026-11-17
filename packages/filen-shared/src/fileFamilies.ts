@@ -23,6 +23,36 @@ const TRACKER: AudioFormat = { synth: "module", cap: SYNTH_CAPS.module }
 // content read tells an MPEG program stream from a module.
 export const TRACKER_COLLISIONS: ReadonlySet<string> = new Set(["ppm", "mdl", "mus", "imf", "sfx", "far", "xmf"])
 
+// Extensions libopenmpt reads that files of other kinds commonly carry too: a STEP or AMF model, a debug-symbol bundle,
+// a DBM database, an ACE comic archive, a terrain or surface model, a polynomial texture map, a Family Tree Maker
+// file, an SELinux file context, a server-side include, and other programs' own data. Such a file is a tracker module
+// only once a read of its head says so (fileKind's trackerModule read); until then it has no kind.
+export const TRACKER_SNIFFED: ReadonlySet<string> = new Set([
+	"amf",
+	"ams",
+	"cba",
+	"dbm",
+	"dmf",
+	"dsm",
+	"dsym",
+	"dtm",
+	"etx",
+	"fc",
+	"fmt",
+	"fst",
+	"ftm",
+	"ice",
+	"ims",
+	"med",
+	"mms",
+	"psm",
+	"ptm",
+	"stm",
+	"stp",
+	"tcb",
+	"wow"
+])
+
 // Every audio extension the apps play, one row each.
 export const AUDIO_FORMATS: ReadonlyMap<string, AudioFormat> = new Map<string, AudioFormat>([
 	["mp3", {}],

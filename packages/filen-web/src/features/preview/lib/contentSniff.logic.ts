@@ -3,6 +3,7 @@ import type { FileVerdict, SniffId } from "@filen/shared"
 import { looksLikeText } from "@filen/shared/textEncoding"
 import { startsVcard } from "@filen/shared/contactFile"
 import { SQLITE_HEADER, isSqliteHeader } from "@/features/preview/lib/sqliteBrowse.logic"
+import { SYNTH_HEAD_BYTES } from "@/lib/media/remuxTypes"
 
 // How each content read (@filen/shared's SniffId) runs. Pure, for the gates (preview.logic.ts); the reads themselves are
 // contentSniff.ts's.
@@ -10,6 +11,8 @@ import { SQLITE_HEADER, isSqliteHeader } from "@/features/preview/lib/sqliteBrow
 export type Sniffer =
 	// Decided on the page from the file's first `headBytes` (at most one block).
 	| { readonly mode: "head"; readonly headBytes: number; decide(head: Uint8Array, size: number): FileVerdict }
+	// Decided off the page, by a probe of the file's first `headBytes` (contentSniff.ts's HEAD_PROBES).
+	| { readonly mode: "headProbe"; readonly headBytes: number }
 	// Decided by a probe the player opening on it reuses: a drive or link file's only.
 	| { readonly mode: "probe" }
 	// Decided by the read the fallback viewer makes anyway, which records the verdict itself.
@@ -126,7 +129,9 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: MPEG_PACK_HEADER.length,
 		decide: head => (isMpegPackHead(head) ? "mpegPs" : "notMpegPs")
-	}
+	},
+	// libopenmpt's own probe of the head it asks for, run in the remux worker.
+	trackerModule: { mode: "headProbe", headBytes: SYNTH_HEAD_BYTES }
 }
 
 // A head sniffer reads no more than this.
@@ -149,6 +154,7 @@ export type SniffOriginKind = "file" | "linkedFile" | "entry" | "bytes"
 export function gateRunsSniffer(sniffer: Sniffer, origin: SniffOriginKind): boolean {
 	switch (sniffer.mode) {
 		case "head":
+		case "headProbe":
 			return true
 		case "probe":
 			return origin === "file" || origin === "linkedFile"

@@ -7,6 +7,7 @@ import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
 import { MAX_SNIFF_HEAD_BYTES, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { probeTransportStream } from "@/features/preview/lib/transportStreamProbe"
+import { probeTrackerModuleInWorker } from "@/lib/media/remuxClient"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 export interface ContentSniffOptions {
@@ -21,6 +22,23 @@ type Probe = (file: AnyFile, access: PreviewAccessMode, signal: AbortSignal) => 
 // The probe behind each probe-mode read: whether the file is what the read looks for, null when it could not be read.
 const PROBES: Readonly<Partial<Record<SniffId, Probe>>> = {
 	transportStream: probeTransportStream
+}
+
+// The probe behind each head-probe read: whether a file of `size` bytes with this head is what the read looks for.
+const HEAD_PROBES: Readonly<Partial<Record<SniffId, (head: Uint8Array, size: number) => Promise<boolean>>>> = {
+	trackerModule: probeTrackerModuleInWorker
+}
+
+async function headProbed(id: SniffId, bytes: Uint8Array, size: number): Promise<FileVerdict> {
+	const probe = HEAD_PROBES[id]
+
+	if (probe === undefined) {
+		throw new Error(`no ${id} head probe`)
+	}
+
+	const [yes, no] = SNIFF_VERDICTS[id]
+
+	return (await probe(bytes, size)) ? yes : no
 }
 
 async function probed(id: SniffId, origin: ByteOrigin, signal: AbortSignal): Promise<FileVerdict> {
@@ -91,5 +109,11 @@ export async function runContentSniff(id: SniffId, origin: ByteOrigin, token: st
 			return await probed(id, origin, options.signal)
 		case "head":
 			return sniffer.decide(await head(origin, Math.min(sniffer.headBytes, MAX_SNIFF_HEAD_BYTES), token, options), originSize(origin))
+		case "headProbe":
+			return await headProbed(
+				id,
+				await head(origin, Math.min(sniffer.headBytes, MAX_SNIFF_HEAD_BYTES, originSize(origin)), token, options),
+				originSize(origin)
+			)
 	}
 }

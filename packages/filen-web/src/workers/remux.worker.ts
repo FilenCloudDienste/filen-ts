@@ -17,7 +17,7 @@ import {
 	type WindowPermits
 } from "@/lib/media/remuxTypes"
 import { RemuxEngine } from "@/workers/remux/engine"
-import { playbackAudioInput, type SynthHint } from "@/workers/remux/synthAudioInput"
+import { playbackAudioInput, synthFor, type SynthHint } from "@/workers/remux/synthAudioInput"
 import { analyzeEdges } from "@/workers/remux/edges"
 import { PcmStream } from "@/workers/remux/pcmStream"
 import { WAV_CONTENT_TYPE } from "@/workers/remux/wav.logic"
@@ -153,6 +153,11 @@ const api = {
 		} finally {
 			permits[Comlink.releaseProxy]?.()
 		}
+	},
+	// Whether a file of `size` bytes whose first bytes are `head` is a tracker module: libopenmpt's probe, run in the
+	// module synthesizer.
+	isTrackerModule(head: Uint8Array, size: number): Promise<boolean> {
+		return synthFor("module").reads(head, size)
 	},
 	// Ends a stream openPcm opened, whether or not its reader ever closed the port (a registration the service
 	// worker refused leaves nobody reading it).

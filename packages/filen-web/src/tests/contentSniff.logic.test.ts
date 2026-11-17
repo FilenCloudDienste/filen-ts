@@ -269,6 +269,18 @@ describe("SNIFFERS", () => {
 		expect(gateRunsSniffer(SNIFFERS.presentationTemplate, "entry")).toBe(false)
 	})
 
+	it("probes a shared tracker extension's head, libopenmpt's 2 KiB, in front of its viewer from any origin", () => {
+		const sniffer = SNIFFERS.trackerModule
+
+		expect(sniffer.mode === "headProbe" && sniffer.headBytes).toBe(2048)
+		expect(["file", "linkedFile", "entry", "bytes"].map(origin => gateRunsSniffer(sniffer, origin as "file"))).toEqual([
+			true,
+			true,
+			true,
+			true
+		])
+	})
+
 	it("reads a .vhd's first 512 bytes in front of its viewer, from any origin", () => {
 		const sniffer = SNIFFERS.virtualDisk
 

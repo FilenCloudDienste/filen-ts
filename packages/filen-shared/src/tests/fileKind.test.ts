@@ -38,7 +38,9 @@ const KINDS: Readonly<Record<string, string>> = {
 	vhd: "code",
 	key: "iwork",
 	sqlite: "sqlite",
-	pdf: "pdf"
+	pdf: "pdf",
+	stp: "audio",
+	med: "audio"
 }
 
 function kindOf(extension: string): string | null {
@@ -60,6 +62,13 @@ type Row = [
 ]
 
 const ROWS: Row[] = [
+	// A tracker extension other formats carry too: no kind until libopenmpt's probe of its head says it is a module, and
+	// no MIME type stands in for that read.
+	["bracket.stp", "application/step", MIB, null, null, "stp", "default", true, true],
+	["bracket.stp", "audio/x-mod", MIB, null, null, "stp", "default", true, true],
+	["song.stp", null, MIB, "trackerModule", "audio", "stp", "sniff", true, false],
+	["bracket.stp", null, MIB, "notTrackerModule", null, "stp", "sniff", true, false],
+	["song.med", null, MIB, "trackerModule", "audio", "med", "sniff", true, false],
 	// TypeScript uploads as video/mp2t: the MIME type never makes a .ts a video.
 	["index.ts", "video/mp2t", 4_000, null, "code", "ts", "default", true, false],
 	["bundle.ts", "video/mp2t", 4 * MIB, null, "code", "ts", "default", true, true],
@@ -320,7 +329,8 @@ describe("content sniffs", () => {
 			wavefront: ["wavefront", "notWavefront"],
 			vobsub: ["vobsub", "notVobsub"],
 			vcard: ["vcard", "notVcard"],
-			mpegPs: ["mpegPs", "notMpegPs"]
+			mpegPs: ["mpegPs", "notMpegPs"],
+			trackerModule: ["trackerModule", "notTrackerModule"]
 		})
 	})
 
@@ -337,6 +347,10 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("vcf")).toEqual(["vcf", "vcf", "txt"])
 		// A `.mod` is a tracker module unless its head is an MPEG program stream's.
 		expect(sniffCandidates("mod")).toEqual(["mod", "mpg", "mod"])
+		// One libopenmpt shares with another format is a module only when its probe says so.
+		expect(sniffCandidates("stp")).toEqual([null, "stp", null])
+		expect(sniffForExtension("amf")).toBe("trackerModule")
+		expect(sniffForExtension("xm")).toBeNull()
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 

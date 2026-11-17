@@ -64,6 +64,16 @@ export function holdRemuxWorker(): Promise<RemuxWorkerHold> {
 	})
 }
 
+// Whether a file of `size` bytes whose first bytes are `head` is a tracker module, by libopenmpt's probe in the remux
+// worker; the worker idles out after as usual.
+export function probeTrackerModuleInWorker(head: Uint8Array, size: number): Promise<boolean> {
+	return remuxWorker.use(handle => {
+		watchLife(handle)
+
+		return handle.remote.isTrackerModule(head, size)
+	})
+}
+
 // The encoders an export can use, asked in the remux worker (which runs mediabunny's checks); the worker idles out
 // after as usual.
 export function probeEncodersInWorker(): Promise<EncodeCapabilities> {
