@@ -33,7 +33,8 @@ export type ContentVerdict = "transportStream" | "notTransportStream" | "video" 
 // What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not;
 // of a `.vhd`: a Virtual Hard Disk or not; of a `.key`: a Keynote package (a zip) or not; of a `.db`: a SQLite
 // database or not; of an `.ai`: a PDF inside or not; of a `.obj`: a Wavefront model (text) or not; of a `.sub`: a
-// VobSub (an MPEG program stream) or text. Kept apart from the media verdicts the apps persist.
+// VobSub (an MPEG program stream) or text; of a `.vcf`: a vCard or other text (a genomics Variant Call Format file).
+// Kept apart from the media verdicts the apps persist.
 export type DocumentVerdict =
 	| "wordBinary"
 	| "notWordBinary"
@@ -51,6 +52,8 @@ export type DocumentVerdict =
 	| "notWavefront"
 	| "vobsub"
 	| "notVobsub"
+	| "vcard"
+	| "notVcard"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -65,7 +68,8 @@ export type FileVerdict = ContentVerdict | DocumentVerdict
 //   pdfCompatible         ai      pdfCompatible / notPdfCompatible
 //   wavefront             obj     wavefront / notWavefront
 //   vobsub                sub     vobsub / notVobsub
-// Reserved, added with their readers: vcard (vcf), mpegPs (mod), executable (no extension).
+//   vcard                 vcf     vcard / notVcard
+// Reserved, added with their readers: mpegPs (mod), executable (no extension).
 export type SniffId =
 	| "transportStream"
 	| "wordTemplate"
@@ -76,6 +80,7 @@ export type SniffId =
 	| "pdfCompatible"
 	| "wavefront"
 	| "vobsub"
+	| "vcard"
 
 // Each read's verdicts: what it found, what it did not.
 export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdict, notFound: FileVerdict]>> = {
@@ -87,7 +92,8 @@ export const SNIFF_VERDICTS: Readonly<Record<SniffId, readonly [found: FileVerdi
 	sqlite: ["sqlite", "notSqlite"],
 	pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
 	wavefront: ["wavefront", "notWavefront"],
-	vobsub: ["vobsub", "notVobsub"]
+	vobsub: ["vobsub", "notVobsub"],
+	vcard: ["vcard", "notVcard"]
 }
 
 export type FileKindSource = "extension" | "sniff" | "mime" | "name" | "default"
@@ -136,6 +142,8 @@ export interface Ambiguity {
 	notWavefront?: string | null
 	vobsub?: string | null
 	notVobsub?: string | null
+	vcard?: string | null
+	notVcard?: string | null
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
@@ -188,7 +196,10 @@ const AMBIGUOUS: AmbiguityTable = new Map<string, Ambiguity>([
 	["obj", { fallback: "obj", wavefront: "obj", notWavefront: null, mimeHint: true, sniff: "wavefront" }],
 	// MicroDVD text unless its head is an MPEG pack header (VobSub images, which no viewer reads). Its MIME type reads as
 	// for an unknown extension, as it did before the read existed.
-	["sub", { fallback: "sub", vobsub: null, notVobsub: "sub", mimeHint: true, sniff: "vobsub" }]
+	["sub", { fallback: "sub", vobsub: null, notVobsub: "sub", mimeHint: true, sniff: "vobsub" }],
+	// A vCard unless its first line says otherwise (a Variant Call Format file, plain text). As for `.sub`, its MIME type
+	// reads as for an unknown extension.
+	["vcf", { fallback: "vcf", vcard: "vcf", notVcard: "txt", mimeHint: true, sniff: "vcard" }]
 ])
 
 function lowerName(name: string): string {
@@ -263,6 +274,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.vobsub
 		case "notVobsub":
 			return ambiguity.notVobsub
+		case "vcard":
+			return ambiguity.vcard
+		case "notVcard":
+			return ambiguity.notVcard
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

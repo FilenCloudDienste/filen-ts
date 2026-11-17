@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
 import { readTorrent, torrentHashes, torrentMagnet, TorrentError, type TorrentHashes, type TorrentInfo } from "@filen/shared/torrent"
+import { readCalendar, type CalendarFile } from "@filen/shared/calendarFile"
+import { readContacts, type ContactFile } from "@filen/shared/contactFile"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
@@ -34,7 +36,11 @@ const api = {
 		const reading = readSubtitleText(text, extension)
 
 		return reading.status === "ok" ? Comlink.transfer(reading, [reading.starts.buffer, reading.ends.buffer]) : reading
-	}
+	},
+	// The text the page decoded, read as iCalendar: its events and to-dos.
+	calendar: (text: string): CalendarFile => readCalendar(text),
+	// The text the page decoded, read as vCards.
+	contacts: (text: string): ContactFile => readContacts(text)
 }
 
 export type TextFamilyWorkerApi = typeof api

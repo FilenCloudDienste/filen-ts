@@ -681,6 +681,10 @@ export const drive = {
 	drivePreviewKindTorrent: "Torrent",
 	/** Info dialog "Kind" value — a subtitle file */
 	drivePreviewKindSubtitle: "Subtitles",
+	/** Info dialog "Kind" value — a calendar file (ics) */
+	drivePreviewKindCalendar: "Calendar",
+	/** Info dialog "Kind" value — a contact file (vcf) */
+	drivePreviewKindContact: "Contacts",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

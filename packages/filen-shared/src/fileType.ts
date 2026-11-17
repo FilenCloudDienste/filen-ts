@@ -157,6 +157,7 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["text/calendar", "ics", "both"],
 	["text/vcard", "vcf", "both"],
 	["text/x-vcard", "vcf", "toExt"],
+	["text/directory", "vcf", "toExt"],
 	["message/rfc822", "eml", "both"],
 	["application/mbox", "mbox", "both"],
 	["application/json", "json", "both"],

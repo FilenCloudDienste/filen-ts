@@ -265,7 +265,7 @@ describe("verdictChangesKind", () => {
 describe("content sniffs", () => {
 	it("names the read for each extension one settles, and none for another", () => {
 		expect(
-			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ai", "sub", "ogg", "webm", "txt", ""].map(extension =>
+			["ts", "mts", "dot", "pot", "vhd", "key", "db", "ai", "sub", "vcf", "ogg", "webm", "txt", ""].map(extension =>
 				sniffForExtension(extension)
 			)
 		).toEqual([
@@ -278,6 +278,7 @@ describe("content sniffs", () => {
 			"sqlite",
 			"pdfCompatible",
 			"vobsub",
+			"vcard",
 			null,
 			null,
 			null,
@@ -295,7 +296,8 @@ describe("content sniffs", () => {
 			sqlite: ["sqlite", "notSqlite"],
 			pdfCompatible: ["pdfCompatible", "notPdfCompatible"],
 			wavefront: ["wavefront", "notWavefront"],
-			vobsub: ["vobsub", "notVobsub"]
+			vobsub: ["vobsub", "notVobsub"],
+			vcard: ["vcard", "notVcard"]
 		})
 	})
 
@@ -309,6 +311,7 @@ describe("content sniffs", () => {
 		expect(sniffCandidates("ai")).toEqual([null, "pdf", null])
 		expect(sniffCandidates("obj")).toEqual(["obj", "obj", null])
 		expect(sniffCandidates("sub")).toEqual(["sub", null, "sub"])
+		expect(sniffCandidates("vcf")).toEqual(["vcf", "vcf", "txt"])
 		expect(sniffCandidates("webm")).toEqual([])
 	})
 
@@ -436,7 +439,17 @@ describe("resolveFileKind for a well-known file name", () => {
 
 	// An app whose table knows none of an extension a read settles (mobile's) resolves it exactly as it did before the
 	// read existed, whatever its MIME type or media verdict.
-	it.each(["sub"])("leaves .%s as before on a table without it", extension => {
+	// text/directory reads as a vCard's extension; a table without one still reads the file as plain text.
+	it("reads text/directory as plain text on a table without vCards", () => {
+		const withoutVcf = (extension: string) => (extension === "vcf" ? null : kindOf(extension))
+
+		expect(resolveFileKind({ name: "card", mime: "text/directory" }, withoutVcf)).toMatchObject({ kind: "text", extension: "txt" })
+		const withVcf = (extension: string) => (extension === "vcf" ? "contact" : kindOf(extension))
+
+		expect(resolveFileKind({ name: "card", mime: "text/directory" }, withVcf)).toMatchObject({ kind: "contact", extension: "vcf" })
+	})
+
+	it.each(["sub", "vcf"])("leaves .%s as before on a table without it", extension => {
 		const without = (candidate: string) => (candidate === extension ? null : kindOf(candidate))
 		const before: AmbiguityTable = new Map()
 

@@ -24,7 +24,7 @@ function FieldValue({ field, renderValue }: { field: MetadataField; renderValue:
 		return custom
 	}
 
-	return <span className={field.mono === true ? "font-mono text-xs break-all" : "break-words"}>{field.value}</span>
+	return <span className={field.mono === true ? "font-mono text-xs break-all" : "break-words whitespace-pre-line"}>{field.value}</span>
 }
 
 function FieldRow({ field, renderValue }: { field: MetadataField; renderValue: MetadataValueRenderer | undefined }) {

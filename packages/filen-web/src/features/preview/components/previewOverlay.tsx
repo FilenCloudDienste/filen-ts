@@ -93,6 +93,8 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
+import { CalendarViewer } from "@/features/preview/components/calendarViewer"
+import { ContactViewer } from "@/features/preview/components/contactViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
@@ -2744,8 +2746,8 @@ interface PreviewBodyProps {
 // pdf/docx each own their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
-// case's TextViewer, and the "markdown" and "subtitle" cases' own source-mode editors — every other
-// category ignores them.
+// case's TextViewer, and the source-mode editors of the "markdown", "subtitle", "calendar" and "contact" cases —
+// every other category ignores them.
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
@@ -2930,6 +2932,32 @@ function PreviewBody({
 		case "subtitle":
 			return (
 				<SubtitleViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					onTextState={onTextState}
+					readAs={readAs}
+					contentRef={contentRef}
+				/>
+			)
+		case "calendar":
+			return (
+				<CalendarViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					onTextState={onTextState}
+					readAs={readAs}
+					contentRef={contentRef}
+				/>
+			)
+		case "contact":
+			return (
+				<ContactViewer
 					item={item}
 					alt={alt}
 					editable={editable}

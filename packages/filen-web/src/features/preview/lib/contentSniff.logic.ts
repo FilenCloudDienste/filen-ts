@@ -1,6 +1,7 @@
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { FileVerdict, SniffId } from "@filen/shared"
 import { looksLikeText } from "@filen/shared/textEncoding"
+import { startsVcard } from "@filen/shared/contactFile"
 import { SQLITE_HEADER, isSqliteHeader } from "@/features/preview/lib/sqliteBrowse.logic"
 
 // How each content read (@filen/shared's SniffId) runs. Pure, for the gates (preview.logic.ts); the reads themselves are
@@ -59,6 +60,23 @@ export function isMpegPackHead(head: Uint8Array): boolean {
 	return head.length >= MPEG_PACK_HEADER.length && MPEG_PACK_HEADER.every((byte, index) => head[index] === byte)
 }
 
+// A vCard's first line opens one; leading blank lines and a byte order mark may come first. UTF-16 and marked UTF-8 are
+// read as such, anything else as Latin-1 (BEGIN:VCARD is ASCII).
+const VCARD_HEAD_BYTES = 1024
+
+export function isVcardHead(head: Uint8Array): boolean {
+	const label =
+		head[0] === 0xff && head[1] === 0xfe
+			? "utf-16le"
+			: head[0] === 0xfe && head[1] === 0xff
+				? "utf-16be"
+				: head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf
+					? "utf-8"
+					: "latin1"
+
+	return startsVcard(new TextDecoder(label).decode(head))
+}
+
 export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 	// The container probe the video player's ladder reads next (transportStreamProbe.ts).
 	transportStream: { mode: "probe" },
@@ -97,6 +115,11 @@ export const SNIFFERS: Readonly<Record<SniffId, Sniffer>> = {
 		mode: "head",
 		headBytes: MPEG_PACK_HEADER.length,
 		decide: head => (isMpegPackHead(head) ? "vobsub" : "notVobsub")
+	},
+	vcard: {
+		mode: "head",
+		headBytes: VCARD_HEAD_BYTES,
+		decide: head => (isVcardHead(head) ? "vcard" : "notVcard")
 	}
 }
 

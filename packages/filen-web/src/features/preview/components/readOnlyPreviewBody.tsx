@@ -11,6 +11,8 @@ import { TextViewer } from "@/features/preview/components/textViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
+import { CalendarViewer } from "@/features/preview/components/calendarViewer"
+import { ContactViewer } from "@/features/preview/components/contactViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
@@ -94,6 +96,20 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 		case "subtitle":
 			return (
 				<SubtitleViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "calendar":
+			return (
+				<CalendarViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "contact":
+			return (
+				<ContactViewer
 					item={item}
 					alt={alt}
 				/>

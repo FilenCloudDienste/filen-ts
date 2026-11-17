@@ -77,6 +77,7 @@ const MIME_TYPES_ADDED: readonly (readonly [string, string])[] = [
 	["text/calendar", "ics"],
 	["text/vcard", "vcf"],
 	["text/x-vcard", "vcf"],
+	["text/directory", "vcf"],
 	["message/rfc822", "eml"],
 	["application/mbox", "mbox"],
 	["application/zip", "zip"],

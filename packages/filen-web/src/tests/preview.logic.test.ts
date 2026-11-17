@@ -354,7 +354,15 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("subtitle")
 	})
 
-	it.each(["ics", "ifb", "ical", "vcf", "vcard", "eml"])("%s -> text", ext => {
+	it.each(["ics", "ifb", "ical"])("%s -> calendar", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("calendar")
+	})
+
+	it.each(["vcf", "vcard"])("%s -> contact", ext => {
+		expect(previewType(fileNamed(`file.${ext}`))).toBe("contact")
+	})
+
+	it.each(["eml"])("%s -> text", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("text")
 	})
 
@@ -406,9 +414,9 @@ describe("previewType — extension category map", () => {
 			const item = fileNamed("download", { mime })
 
 			expect(itemTypeExtension(item), mime).toBe(extension)
-			expect(previewType(item), mime).toBe(
-				extension === "mbox" ? "code" : extension === "vtt" || extension === "srt" ? "subtitle" : "text"
-			)
+			const category: Record<string, string> = { mbox: "code", vtt: "subtitle", srt: "subtitle", ics: "calendar", vcf: "contact" }
+
+			expect(previewType(item), mime).toBe(category[extension] ?? "text")
 		}
 	})
 

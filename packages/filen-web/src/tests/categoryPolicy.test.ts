@@ -86,6 +86,8 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	model3d: "drivePreviewKindModel3d",
 	torrent: "drivePreviewKindTorrent",
 	subtitle: "drivePreviewKindSubtitle",
+	calendar: "drivePreviewKindCalendar",
+	contact: "drivePreviewKindContact",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -272,7 +274,7 @@ const CAPS = [TEXT_MAX_BYTES, SPREADSHEET_MAX_BYTES, PREVIEW_MAX_BYTES]
 const PDF_CEILINGS = [2048n * MIB, 8192n * MIB]
 const SIZES = [0n, ...[...CAPS, ...PDF_CEILINGS].flatMap(cap => [cap - 1n, cap, cap + 1n]), 50n * 1024n * MIB]
 // Categories that joined after the table, each pinned by its own row test below rather than by the legacy gates.
-const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent", "subtitle"])
+const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set(["font", "sqlite", "ebook", "geo", "model3d", "torrent", "subtitle", "calendar", "contact"])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
 
@@ -604,6 +606,32 @@ describe("the torrent row", () => {
 		expect(previewKindLabelKey("torrent")).toBe("drivePreviewKindTorrent")
 		expect(isPhotoCategory("torrent")).toBe(false)
 		expect(isTextCategory("torrent")).toBe(false)
+	})
+})
+
+describe("the calendar and contact rows", () => {
+	// Text before they had viewers of their own, so every answer is still text's.
+	it.each([
+		["calendar", ["team.ics", "team.ical", "busy.ifb"]],
+		["contact", ["people.vcf", "people.vcard"]]
+	] as const)("opens %s files wherever text opens, up to the text cap, and saves them as text", (category, names) => {
+		for (const name of names) {
+			expect(previewType(fileNamed(name, 1024n)), name).toBe(category)
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES)), name).toBe(true)
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(false)
+			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES)), name).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
+		}
+
+		expect(isTextCategory(category)).toBe(true)
+		expect(CATEGORY_POLICY[category]).toMatchObject({ textFamily: true, editsAsText: true, assistantKind: "document", pager: true })
+	})
+
+	it("reads calendar and vCard types without an extension", () => {
+		expect(previewType(fileNamed("invite", 1024n, "text/calendar"))).toBe("calendar")
+		expect(previewType(fileNamed("card", 1024n, "text/directory"))).toBe("contact")
+		expect(previewKindLabelKey("calendar")).toBe("drivePreviewKindCalendar")
+		expect(previewKindLabelKey("contact")).toBe("drivePreviewKindContact")
 	})
 })
 

@@ -50,6 +50,8 @@ export type PreviewCategory =
 	| "model3d"
 	| "torrent"
 	| "subtitle"
+	| "calendar"
+	| "contact"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -452,6 +454,36 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindSubtitle",
 		assistantKind: "document"
 	},
+	// An agenda read in the text-family worker, its source a toggle away.
+	calendar: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindCalendar",
+		assistantKind: "document"
+	},
+	// Contact cards read in the text-family worker, their source a toggle away.
+	contact: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindContact",
+		assistantKind: "document"
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -530,8 +562,11 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["md", "markdown", "mkd"], "markdown"],
 	// A `.sub` is MicroDVD text until a read of its head finds VobSub images (no kind).
 	[[...SUBTITLE_FILE_EXTENSIONS, "sub"], "subtitle"],
-	// Calendars, contacts and e-mail read as plain text until a viewer of their own takes them.
-	[["txt", "log", "ics", "ifb", "ical", "vcf", "vcard", "eml"], "text"],
+	[["ics", "ical", "ifb"], "calendar"],
+	// A `.vcf` is a vCard until a read of its first line finds other text (a Variant Call Format file).
+	[["vcf", "vcard"], "contact"],
+	// E-mail reads as plain text until a viewer of its own takes it.
+	[["txt", "log", "eml"], "text"],
 	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],
 	// A `.key` is one only once a read of its head found a zip (resolveFileKind gives it no kind until then).
 	[IWORK_EXTENSIONS, "iwork"],

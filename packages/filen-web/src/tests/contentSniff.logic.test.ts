@@ -21,6 +21,7 @@ import {
 	EXTENSIONLESS_SNIFF,
 	gateRunsSniffer,
 	isMpegPackHead,
+	isVcardHead,
 	isVirtualDiskHead,
 	isZipHead,
 	SNIFFERS
@@ -126,6 +127,19 @@ describe("needsContentSniff", () => {
 		// The other subtitle formats need no read.
 		expect(needsContentSniff(fileNamed("movie.srt", 3_000n), null)).toBeNull()
 		expect(previewType(fileNamed("movie.srt", 3_000n), null)).toBe("subtitle")
+	})
+
+	// A vCard or a genomics Variant Call Format file: contacts until its first line says otherwise, then plain text.
+	it("reads a .vcf's head before opening it as contacts", () => {
+		const vcf = fileNamed("people.vcf", 3_000n)
+
+		expect(needsContentSniff(vcf, null)).toBe("vcard")
+		expect(previewType(vcf, null)).toBe("contact")
+		expect(previewType(vcf, "vcard")).toBe("contact")
+		expect(previewType(vcf, "notVcard")).toBe("text")
+		expect(needsContentSniff(vcf, "notVcard")).toBeNull()
+		expect(needsContentSniff(fileNamed("people.vcard", 3_000n), null)).toBeNull()
+		expect(previewType(fileNamed("people.vcard", 3_000n), null)).toBe("contact")
 	})
 
 	// A Keynote package or a key file: no kind until its head says it is a zip, which opens as an iWork document.
@@ -332,6 +346,33 @@ describe("SNIFFERS", () => {
 		if (sniffer.mode === "head") {
 			expect(sniffer.decide(pack, 5)).toBe("vobsub")
 			expect(sniffer.decide(microDvd, microDvd.length)).toBe("notVobsub")
+		}
+	})
+
+	it("finds a vCard by its first line, in UTF-8 or UTF-16, after blank lines", () => {
+		const sniffer = SNIFFERS.vcard
+		const encode = (text: string) => new TextEncoder().encode(text)
+		const utf16 = (text: string, littleEndian: boolean) => {
+			const bytes = new Uint8Array(2 + text.length * 2)
+			const view = new DataView(bytes.buffer)
+
+			view.setUint16(0, 0xfeff, littleEndian)
+
+			for (let index = 0; index < text.length; index++) view.setUint16(2 + index * 2, text.charCodeAt(index), littleEndian)
+
+			return bytes
+		}
+
+		expect(sniffer.mode === "head" && sniffer.headBytes).toBe(1024)
+		expect(isVcardHead(encode("\ufeffBEGIN:VCARD\r\nVERSION:3.0"))).toBe(true)
+		expect(isVcardHead(encode("\r\n\r\nbegin:vcard\n"))).toBe(true)
+		expect(isVcardHead(utf16("BEGIN:VCARD\r\n", true))).toBe(true)
+		expect(isVcardHead(utf16("BEGIN:VCARD\r\n", false))).toBe(true)
+		expect(isVcardHead(encode("##fileformat=VCFv4.2\n"))).toBe(false)
+
+		if (sniffer.mode === "head") {
+			expect(sniffer.decide(encode("BEGIN:VCARD\n"), 12)).toBe("vcard")
+			expect(sniffer.decide(encode("##fileformat=VCFv4.2\n"), 21)).toBe("notVcard")
 		}
 	})
 

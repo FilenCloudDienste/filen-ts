@@ -49,6 +49,8 @@ function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
 		case "notWavefront":
 		case "vobsub":
 		case "notVobsub":
+		case "vcard":
+		case "notVcard":
 			return false
 	}
 }

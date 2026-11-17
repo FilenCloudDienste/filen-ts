@@ -3,6 +3,8 @@ import TextFamilyWorker from "@/features/preview/workers/textFamily.worker.ts?wo
 import type { TextFamilyWorkerApi, TorrentReading } from "@/features/preview/workers/textFamily.worker"
 import { statelessWorker } from "@/lib/workers/ownedWorker"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
+import type { CalendarFile } from "@filen/shared/calendarFile"
+import type { ContactFile } from "@filen/shared/contactFile"
 
 export type { TorrentReading } from "@/features/preview/workers/textFamily.worker"
 
@@ -20,4 +22,14 @@ export async function readTorrentFile(bytes: Uint8Array): Promise<TorrentReading
 // A subtitle file's cues, from the text the page decoded; the worker transfers the times back.
 export async function readSubtitleCues(text: string, extension: string): Promise<SubtitleReading> {
 	return await textFamilyWorker.use<SubtitleReading>(({ remote }) => remote.subtitles(text, extension))
+}
+
+// A calendar file's events and to-dos, from the text the page decoded.
+export async function readCalendarFile(text: string): Promise<CalendarFile> {
+	return await textFamilyWorker.use<CalendarFile>(({ remote }) => remote.calendar(text))
+}
+
+// A contact file's cards, from the text the page decoded.
+export async function readContactFile(text: string): Promise<ContactFile> {
+	return await textFamilyWorker.use<ContactFile>(({ remote }) => remote.contacts(text))
 }
