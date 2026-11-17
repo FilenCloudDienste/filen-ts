@@ -1,6 +1,8 @@
 import { ADTS, CustomSource, FLAC, Input, MATROSKA, MP3, MP4, MPEG_TS, OGG, QTFF, WAVE, WEBM, type InputFormat } from "mediabunny"
 import { BLOCK_BYTES } from "@filen/shared/videos"
+import { AVI } from "@/lib/media/demux/aviDemuxer"
 import { FLV } from "@/lib/media/demux/flvDemuxer"
+import { registerBlockCache } from "@/lib/media/demux/inputCache"
 import { BlockCache, MAX_RUN_BLOCKS, type BlockCacheOptions } from "@/lib/media/blockCache"
 import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
 import { SourceReadError } from "@/lib/media/remuxTypes"
@@ -11,7 +13,7 @@ export const BLOCK_INPUT_FORMATS: readonly InputFormat[] = [MATROSKA, WEBM, MP4,
 
 // What playback reads (the remux engine, the decoded-audio route): the above, and the containers the app demuxes
 // itself (demux/), which the editor and the waveform never read.
-export const PLAYBACK_INPUT_FORMATS: readonly InputFormat[] = [...BLOCK_INPUT_FORMATS, FLV]
+export const PLAYBACK_INPUT_FORMATS: readonly InputFormat[] = [...BLOCK_INPUT_FORMATS, FLV, AVI]
 
 // Reads longer than this reach the demuxer as a stream of blocks rather than one assembled buffer.
 const STREAM_READ_BYTES = 2 * BLOCK_BYTES
@@ -74,6 +76,8 @@ export function openBlockInput(port: MessagePort, size: number, profile: BlockIn
 			maxCacheSize: 0
 		})
 	})
+
+	registerBlockCache(input, cache)
 
 	let closed = false
 

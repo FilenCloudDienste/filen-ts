@@ -393,6 +393,8 @@ describe("getPreviewType — stored mime", () => {
 		expect(getPreviewType("song.ogg", "video/ogg")).toBe("audio")
 		expect(getPreviewType("song.oga", "video/ogg")).toBe("audio")
 		expect(getPreviewType("film", "video/ogg")).toBe("unknown")
+		expect(getPreviewType("film", "video/x-msvideo")).toBe("unknown")
+		expect(getPreviewType("film", "video/x-flv")).toBe("unknown")
 	})
 
 	it("reads any other text/* mime as plain text", () => {

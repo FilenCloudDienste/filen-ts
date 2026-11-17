@@ -62,8 +62,8 @@ export const VIDEO_CONTAINERS: ReadonlyMap<string, VideoContainer> = new Map<str
 	["m2ts", container("ts")],
 	// Plays only where the browser plays Ogg from a plain src; nothing remuxes it.
 	["ogv", container("ogg", { editorReads: false, photo: false, keyframes: false })],
-	["avi", demuxed("avi", "unsupportedVideo", false)],
-	["divx", demuxed("avi", undefined, false)],
+	["avi", demuxed("avi", "video", true)],
+	["divx", demuxed("avi", undefined, true)],
 	["flv", demuxed("flv", "video", true)],
 	// Adobe's MP4: mediabunny and the MP4 walker read it; outside Photos (R26) and the editor.
 	["f4v", { drive: true, transportStream: false, editorReads: false, photo: false, probe: "mp4", keyframes: true }],

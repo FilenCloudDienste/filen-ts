@@ -85,6 +85,8 @@ export const TYPE_ROWS: readonly TypeRow[] = [
 	["video/3gpp2", "3g2", "both"],
 	["video/ogg", "ogv", "both"],
 	["video/x-flv", "flv", "both"],
+	["video/x-msvideo", "avi", "both"],
+	["video/x-msvideo", "divx", "fromExt"],
 	// Adobe's MP4.
 	["video/mp4", "f4v", "fromExt"],
 	["audio/mpeg", "mp3", "both"],

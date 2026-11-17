@@ -43,6 +43,26 @@ export function pesStart(payload: Uint8Array): { pts: number | null; data: numbe
 	return { pts: ((payload[7] ?? 0) & 0x80) !== 0 && data >= 14 ? pesTimestamp(payload, 9) : null, data }
 }
 
+// The first NAL unit in Annex B `data` whose header byte `accept`s, header byte included and up to the next start
+// code; null when none is there.
+export function annexBNal(data: Uint8Array, accept: (header: number) => boolean): Uint8Array | null {
+	for (let at = 0; at + 3 < data.length; at++) {
+		if (data[at] !== 0 || data[at + 1] !== 0 || data[at + 2] !== 1 || !accept(data[at + 3] ?? 0)) {
+			continue
+		}
+
+		let end = at + 4
+
+		while (end + 2 < data.length && !(data[end] === 0 && data[end + 1] === 0 && (data[end + 2] ?? 2) <= 1)) {
+			end++
+		}
+
+		return data.subarray(at + 3, end + 2 < data.length ? end : data.length)
+	}
+
+	return null
+}
+
 export function readBits(bytes: Uint8Array, position: number, count: number): number {
 	let value = 0
 

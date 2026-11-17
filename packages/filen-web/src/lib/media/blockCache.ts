@@ -188,6 +188,22 @@ export class BlockCache {
 		})
 	}
 
+	// Bytes [start, end) read straight from the file, past the cache: what is resident stays resident and nothing
+	// read here is kept. For a one-off pass over a large stretch (an AVI's idx1) that would otherwise evict the blocks
+	// playback is using. Counted in stats; called off by abort() and by `signal`.
+	public async readThrough(start: number, end: number, signal?: AbortSignal): Promise<Uint8Array> {
+		this.span(start, end)
+
+		const controller = this.controller
+		const combined = signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal])
+		const bytes = await this.readRange(start, end, combined)
+
+		this.stats.rangeReads++
+		this.stats.bytesRead += bytes.length
+
+		return bytes
+	}
+
 	// Calls off every download in flight; readers waiting on them reject with BlockAbortError. Resident
 	// blocks stay, and the read-ahead pattern starts over.
 	public abort(): void {

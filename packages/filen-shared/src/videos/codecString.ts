@@ -10,7 +10,8 @@ function dec(value: number, digits: number): string {
 }
 
 // MSB-first bit reader over a byte array; null once a read would run past the end.
-class BitReader {
+// Reads big-endian bit fields and Exp-Golomb codes; reads past the end give null.
+export class BitReader {
 	private position = 0
 	private readonly bytes: Uint8Array
 
@@ -448,7 +449,22 @@ export interface SpsPicture {
 	transfer: number | null
 }
 
-export type AvcSps = SpsPicture & Pick<AvcConfig, "profile" | "compatibility" | "level">
+// What decoding a slice header's picture order count takes from the SPS (H.264 7.4.2.1.1).
+export interface AvcPocParams {
+	log2MaxFrameNum: number
+	pocType: 0 | 1 | 2
+	// pic_order_cnt_type 0.
+	log2MaxPocLsb: number
+	// pic_order_cnt_type 1.
+	deltaPicOrderAlwaysZero: boolean
+	offsetForNonRefPic: number
+	offsetForTopToBottomField: number
+	offsetsForRefFrame: number[]
+	frameMbsOnly: boolean
+	separateColourPlane: boolean
+}
+
+export type AvcSps = SpsPicture & Pick<AvcConfig, "profile" | "compatibility" | "level"> & { poc: AvcPocParams }
 
 export type HevcSps = SpsPicture & Omit<HevcConfig, "bitDepth">
 
@@ -595,6 +611,7 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 	// ChromaArrayType: chroma_format_idc, or 0 for 4:4:4 coded as three separate colour planes.
 	let chroma = 1
 	let bitDepth = 8
+	let separateColourPlane = false
 
 	if (AVC_HIGH_PROFILES.has(profile)) {
 		const chromaFormat = bits.ue() ?? -1
@@ -603,7 +620,8 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 			return null
 		}
 
-		chroma = chromaFormat === 3 && bits.read(1) === 1 ? 0 : chromaFormat
+		separateColourPlane = chromaFormat === 3 && bits.read(1) === 1
+		chroma = separateColourPlane ? 0 : chromaFormat
 
 		const luma = bits.ue()
 
@@ -624,16 +642,28 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 		}
 	}
 
-	bits.ue()
-
+	const log2MaxFrameNum = (bits.ue() ?? -1) + 4
 	const pocType = bits.ue()
+	let log2MaxPocLsb = 4
+	let deltaPicOrderAlwaysZero = false
+	let offsetForNonRefPic = 0
+	let offsetForTopToBottomField = 0
+	const offsetsForRefFrame: number[] = []
+
+	if (log2MaxFrameNum < 4 || log2MaxFrameNum > 16) {
+		return null
+	}
 
 	if (pocType === 0) {
-		bits.ue()
+		log2MaxPocLsb = (bits.ue() ?? -1) + 4
+
+		if (log2MaxPocLsb < 4 || log2MaxPocLsb > 16) {
+			return null
+		}
 	} else if (pocType === 1) {
-		bits.read(1)
-		bits.se()
-		bits.se()
+		deltaPicOrderAlwaysZero = bits.read(1) === 1
+		offsetForNonRefPic = bits.se() ?? 0
+		offsetForTopToBottomField = bits.se() ?? 0
 
 		const cycle = bits.ue()
 
@@ -642,7 +672,7 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 		}
 
 		for (let i = 0; i < cycle; i++) {
-			bits.se()
+			offsetsForRefFrame.push(bits.se() ?? 0)
 		}
 	} else if (pocType !== 2) {
 		return null
@@ -686,7 +716,26 @@ export function parseAvcSps(nal: Uint8Array): AvcSps | null {
 
 	const vui = bits.read(1) === 1 ? readVui(bits) : { par: 1, transfer: null }
 
-	return { profile, compatibility, level, width: size[0], height: size[1], bitDepth, ...vui }
+	return {
+		profile,
+		compatibility,
+		level,
+		width: size[0],
+		height: size[1],
+		bitDepth,
+		...vui,
+		poc: {
+			log2MaxFrameNum,
+			pocType,
+			log2MaxPocLsb,
+			deltaPicOrderAlwaysZero,
+			offsetForNonRefPic,
+			offsetForTopToBottomField,
+			offsetsForRefFrame,
+			frameMbsOnly: frameMbsOnly === 1,
+			separateColourPlane
+		}
+	}
 }
 
 function skipHevcScalingListData(bits: BitReader): boolean {

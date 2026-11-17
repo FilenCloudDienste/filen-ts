@@ -104,7 +104,7 @@ const DIRECT_BASE: Readonly<Record<string, string>> = {
 	ogg: "video/ogg"
 }
 
-const REMUX_CONTAINERS: ReadonlySet<string> = new Set(["mkv", "webm", "mp4", "m4v", "mov", "ts", "flv"])
+const REMUX_CONTAINERS: ReadonlySet<string> = new Set(["mkv", "webm", "mp4", "m4v", "mov", "ts", "flv", "avi"])
 
 // WebCodecs-decodable by name (Mediabunny's vocabulary); PCM variants (pcm-s16, pcm-f32be, ...), u-law and a-law are handled in code.
 const WEBCODECS_AUDIO_DECODERS: ReadonlySet<string> = new Set(["aac", "mp3", "opus", "flac", "vorbis"])
