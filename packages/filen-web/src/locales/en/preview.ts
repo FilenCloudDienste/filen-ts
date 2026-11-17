@@ -602,8 +602,8 @@ export const preview = {
 	previewMediaCannotStream: "This file can't be streamed here.",
 	/** Video player — chapters menu button and its heading */
 	previewMediaChapters: "Chapters",
-	/** Video player — chapters menu: a chapter without a title */
-	previewMediaChapterNumber: "Chapter {{number}}",
+	/** Video player — audio menu: a track this browser plays converted (its tooltip says how) */
+	previewMediaAudioConverted: "Converted",
 	/** Video player — subtitles menu button and its heading */
 	previewMediaSubtitles: "Subtitles",
 	/** Video player — subtitles menu: no subtitles */

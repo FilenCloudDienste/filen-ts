@@ -222,6 +222,10 @@ export const common = {
 	// ── Media controls (shared by every player) ──────────────────────────────
 	/** Seek slider — spoken position; {{current}} and {{total}} are clock times such as 1:05 */
 	mediaTimeOf: "{{current}} of {{total}}",
+	/** Media seek slider — the position, in a chapter; and a chapter's name, untitled and titled */
+	mediaTimeOfInChapter: "{{current}} of {{total}}, {{chapter}}",
+	mediaChapter: "Chapter {{number}}",
+	mediaChapterTitled: "Chapter {{number}}: {{title}}",
 	/** Volume slider — spoken level; {{percent}} is 0-100 */
 	mediaVolumePercent: "{{percent}}%",
 

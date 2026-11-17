@@ -78,12 +78,12 @@ describe("the preview player's track menus", () => {
 
 		render(tracksMenu(probe, index => picked.push(index)))
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "videos:playerTracks" }))
+			fireEvent.click(screen.getByRole("button", { name: "videos:playerAudio" }))
 			await Promise.resolve()
 		})
 
 		expect(await screen.findByText("English 5.1")).toBeTruthy()
-		expect(await screen.findByText(/playerAudioTranscoded/)).toBeTruthy()
+		expect(await screen.findByText("previewMediaAudioConverted")).toBeTruthy()
 		fireEvent.click(await screen.findByText("German playerChannelsStereo"))
 		expect(picked).toEqual([1])
 	})
@@ -106,7 +106,9 @@ describe("the preview player's track menus", () => {
 		})
 
 		expect(await screen.findByText("Opening")).toBeTruthy()
-		expect(await screen.findByText("previewMediaChapterNumber")).toBeTruthy()
+		expect(await screen.findByText("common:mediaChapter")).toBeTruthy()
+		// A radio list, the chapter playing (the first: no element, so time 0) checked.
+		expect((await screen.findAllByRole("menuitemradio")).map(item => item.getAttribute("aria-checked"))).toEqual(["true", "false"])
 		expect(await screen.findByText("10:00")).toBeTruthy()
 	})
 })
@@ -130,5 +132,50 @@ describe("the scrubber's chapter marks", () => {
 		const ticks = [...container.querySelectorAll<HTMLElement>(".bg-background\\/80")].map(element => element.style.left)
 
 		expect(ticks).toEqual(["25%", "75%"])
+	})
+})
+
+describe("a menu that goes away while open", () => {
+	it("reports itself closed, so the controls it held shown can hide", async () => {
+		const changes: boolean[] = []
+		const chapters = [
+			{ start: 0, title: "Opening" },
+			{ start: 600, title: null }
+		]
+		const view = render(
+			createElement(ChaptersMenu, {
+				chapters,
+				media: null,
+				container: null,
+				onOpenChange: open => changes.push(open)
+			})
+		)
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "previewMediaChapters" }))
+			await Promise.resolve()
+		})
+		view.unmount()
+
+		expect(changes.at(-1)).toBe(false)
+	})
+})
+
+describe("the scrubber's chapter names", () => {
+	it("says the chapter in its accessible value, numbering untitled ones", () => {
+		render(
+			createElement(MediaScrubber, {
+				value: 700,
+				duration: 1200,
+				label: "Seek",
+				onSeek: () => undefined,
+				markers: [
+					{ start: 0, title: "Opening" },
+					{ start: 600, title: null }
+				]
+			})
+		)
+
+		expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("mediaTimeOfInChapter")
 	})
 })

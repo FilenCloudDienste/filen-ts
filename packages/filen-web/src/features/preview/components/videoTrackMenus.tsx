@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CaptionsIcon, ListIcon } from "lucide-react"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
@@ -7,8 +7,6 @@ import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
@@ -119,11 +117,19 @@ export function TracksMenu({
 	const audio = useAudioOptions({ probe, nativeAudio, decision, audioIndex, size, open })
 	const hasSubtitles = subtitles.options.length > 0
 
+	useClosesOnUnmount(open, onOpenChange)
+
 	if (audio.length === 0 && !hasSubtitles) {
 		return null
 	}
 
-	const label = audio.length > 0 ? t("videos:playerTracks") : t("previewMediaSubtitles")
+	// Named by what it holds.
+	const label =
+		audio.length > 0 && hasSubtitles
+			? t("videos:playerTracks")
+			: audio.length > 0
+				? t("videos:playerAudio")
+				: t("previewMediaSubtitles")
 
 	return (
 		<DropdownMenu
@@ -160,22 +166,27 @@ export function TracksMenu({
 							onAudio(Number(next))
 						}}
 					>
-						<DropdownMenuLabel>{t("videos:playerAudio")}</DropdownMenuLabel>
+						<DropdownMenuLabel className={SECTION_LABEL_CLASS}>{t("videos:playerAudio")}</DropdownMenuLabel>
 						{audio.map((option, index) => (
 							<DropdownMenuRadioItem
 								key={index}
 								value={String(index)}
 							>
-								<span className="flex min-w-0 flex-col">
+								<span className="flex min-w-0 flex-1 flex-col">
 									<span className="truncate">{option.label}</span>
-									{option.detail === null && !option.converted ? null : (
-										<span className="truncate text-xs text-muted-foreground">
-											{[option.detail, option.converted ? t("videos:playerAudioTranscoded") : null]
-												.filter(part => part !== null)
-												.join(" · ")}
-										</span>
+									{option.detail === null ? null : (
+										<span className="truncate text-xs text-muted-foreground">{option.detail}</span>
 									)}
 								</span>
+								{option.converted ? (
+									<span
+										title={t("videos:playerAudioTranscoded")}
+										className="shrink-0 text-xs text-muted-foreground"
+									>
+										<span aria-hidden="true">◆ </span>
+										{t("previewMediaAudioConverted")}
+									</span>
+								) : null}
 							</DropdownMenuRadioItem>
 						))}
 					</DropdownMenuRadioGroup>
@@ -188,7 +199,7 @@ export function TracksMenu({
 							subtitles.select(next)
 						}}
 					>
-						<DropdownMenuLabel>{t("previewMediaSubtitles")}</DropdownMenuLabel>
+						<DropdownMenuLabel className={SECTION_LABEL_CLASS}>{t("previewMediaSubtitles")}</DropdownMenuLabel>
 						<DropdownMenuRadioItem value="off">{t("previewMediaSubtitlesOff")}</DropdownMenuRadioItem>
 						{subtitles.options.map(option => (
 							<DropdownMenuRadioItem
@@ -222,9 +233,17 @@ export function ChaptersMenu({
 	onOpenChange: (open: boolean) => void
 }) {
 	const { t } = useTranslation("preview")
+	const [open, setOpen] = useState(false)
+
+	useClosesOnUnmount(open, onOpenChange)
 
 	return (
-		<DropdownMenu onOpenChange={onOpenChange}>
+		<DropdownMenu
+			onOpenChange={next => {
+				setOpen(next)
+				onOpenChange(next)
+			}}
+		>
 			<DropdownMenuTrigger
 				render={
 					<Button
@@ -245,38 +264,65 @@ export function ChaptersMenu({
 					"max-h-[min(28rem,var(--available-height))] w-auto max-w-80 min-w-44 before:backdrop-saturate-100"
 				)}
 			>
-				<DropdownMenuGroup>
-					<DropdownMenuLabel>{t("previewMediaChapters")}</DropdownMenuLabel>
-					<ChapterItems
-						chapters={chapters}
-						media={media}
-					/>
-				</DropdownMenuGroup>
+				<ChapterItems
+					chapters={chapters}
+					media={media}
+				/>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	)
 }
 
-// Mounted only while the menu is open, so the playhead re-renders nothing otherwise.
+// Mounted only while the menu is open, so the playhead re-renders nothing otherwise. A radio list: the chapter playing
+// is the checked one.
 function ChapterItems({ chapters, media }: { chapters: readonly StageChapter[]; media: HTMLMediaElement | null }) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "common"])
 	const current = chapterAt(chapters, useMediaCurrentTime(media))
 
-	return chapters.map((chapter, index) => (
-		<DropdownMenuItem
-			key={chapter.start}
-			aria-current={chapter === current ? "true" : undefined}
-			className={cn("gap-3", chapter === current && "font-medium")}
-			onClick={() => {
-				if (media !== null) {
+	return (
+		<DropdownMenuRadioGroup
+			value={current === null ? "" : String(chapters.indexOf(current))}
+			onValueChange={(next: string) => {
+				const chapter = chapters[Number(next)]
+
+				if (media !== null && chapter !== undefined) {
 					seekMedia(media, chapter.start)
 				}
 			}}
 		>
-			<span className="min-w-0 flex-1 truncate">
-				{chapter.title !== null && chapter.title.length > 0 ? chapter.title : t("previewMediaChapterNumber", { number: index + 1 })}
-			</span>
-			<span className="text-xs text-muted-foreground tabular-nums">{formatSecondsToMediaClock(chapter.start)}</span>
-		</DropdownMenuItem>
-	))
+			<DropdownMenuLabel className={SECTION_LABEL_CLASS}>{t("previewMediaChapters")}</DropdownMenuLabel>
+			{chapters.map((chapter, index) => (
+				<DropdownMenuRadioItem
+					key={index}
+					value={String(index)}
+					className="gap-3"
+				>
+					<span className="w-5 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{index + 1}</span>
+					<span className="min-w-0 flex-1 truncate">
+						{chapter.title !== null && chapter.title.length > 0
+							? chapter.title
+							: t("common:mediaChapter", { number: index + 1 })}
+					</span>
+					<span className="text-xs text-muted-foreground tabular-nums">{formatSecondsToMediaClock(chapter.start)}</span>
+				</DropdownMenuRadioItem>
+			))}
+		</DropdownMenuRadioGroup>
+	)
+}
+
+// The section headings of the mock: AUDIO, SUBTITLES, CHAPTERS.
+const SECTION_LABEL_CLASS = "text-[11px] font-medium tracking-wide uppercase"
+
+// A menu that goes away while open (its tracks or chapters went with a new probe) still reports itself closed, so the
+// controls it held shown can hide again.
+function useClosesOnUnmount(open: boolean, onOpenChange: (open: boolean) => void): void {
+	useEffect(() => {
+		if (!open) {
+			return
+		}
+
+		return () => {
+			onOpenChange(false)
+		}
+	}, [open, onOpenChange])
 }

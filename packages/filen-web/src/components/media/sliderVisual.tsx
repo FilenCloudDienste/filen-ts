@@ -40,9 +40,9 @@ export function SliderVisual({
 					className="absolute inset-y-0 left-0 bg-primary"
 					style={{ width: `${String(percent)}%` }}
 				/>
-				{ticks?.map(tick => (
+				{ticks?.map((tick, index) => (
 					<div
-						key={tick}
+						key={index}
 						className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background/80"
 						style={{ left: `${String(tick)}%` }}
 					/>

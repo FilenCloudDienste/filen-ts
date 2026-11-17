@@ -38,6 +38,14 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 	const shown = dragTime ?? Math.min(value, duration)
 	const tipTime = tooltip === false ? null : (dragTime ?? hoverTime)
 	const tipChapter = tipTime === null || markers === undefined ? null : chapterAt(markers, tipTime)
+	const shownChapter = markers === undefined ? null : chapterAt(markers, shown)
+	const chapterName = (chapter: StageChapter): string => {
+		const number = (markers?.indexOf(chapter) ?? 0) + 1
+
+		return chapter.title !== null && chapter.title.length > 0
+			? t("mediaChapterTitled", { number, title: chapter.title })
+			: t("mediaChapter", { number })
+	}
 	// Ticks inside the rail only: one at either end would only thicken its edge.
 	const ticks =
 		markers === undefined || disabled
@@ -132,10 +140,18 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 				value={shown}
 				disabled={disabled}
 				aria-label={label}
-				aria-valuetext={t("mediaTimeOf", {
-					current: formatSecondsToMediaClock(shown),
-					total: formatSecondsToMediaClock(Math.max(duration, 0))
-				})}
+				aria-valuetext={
+					shownChapter === null
+						? t("mediaTimeOf", {
+								current: formatSecondsToMediaClock(shown),
+								total: formatSecondsToMediaClock(Math.max(duration, 0))
+							})
+						: t("mediaTimeOfInChapter", {
+								current: formatSecondsToMediaClock(shown),
+								total: formatSecondsToMediaClock(Math.max(duration, 0)),
+								chapter: chapterName(shownChapter)
+							})
+				}
 				className="peer pointer-events-none absolute inset-0 size-full appearance-none opacity-0"
 				onKeyDown={handleKeyDown}
 				onChange={handleChange}
@@ -157,8 +173,10 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 					style={{ left: `${String(percentOf(tipTime, duration))}%` }}
 				>
 					{formatSecondsToMediaClock(tipTime)}
-					{tipChapter?.title === null || tipChapter?.title === undefined || tipChapter.title.length === 0 ? null : (
-						<span className="ml-1 inline-block max-w-48 truncate align-bottom text-muted-foreground">· {tipChapter.title}</span>
+					{tipChapter === null ? null : (
+						<span className="ml-1 inline-block max-w-48 truncate align-bottom text-muted-foreground">
+							· {chapterName(tipChapter)}
+						</span>
 					)}
 				</div>
 			) : null}
