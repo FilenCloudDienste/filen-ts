@@ -24,8 +24,10 @@ export interface NestedWorkerOptions {
 	// The error what waits on a worker that failed rejects with.
 	toLostError?: (message: string) => Error
 	// The worker posts `started` as it takes each request up: a request's deadline then counts from there, not the time
-	// it waited behind others on the same thread.
+	// it waited behind others on the same thread. Meanwhile a worker that says nothing at all for `silenceMs` while a
+	// request waits to be taken up (its script never loaded, a thread stuck in a request without a deadline) is dropped.
 	acknowledges?: boolean
+	silenceMs?: number
 }
 
 interface Pending {
@@ -34,7 +36,10 @@ interface Pending {
 	reject: (error: Error) => void
 	timer: ReturnType<typeof setTimeout> | null
 	timeoutMs: number | undefined
+	started: boolean
 }
+
+const DEFAULT_SILENCE_MS = 30_000
 
 export class NestedWorker<Request extends object, Response extends NestedResponse> {
 	private worker: Worker | null = null
@@ -46,6 +51,8 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 	private readonly retired = new Set<Worker>()
 	private readonly ended = new WeakSet<Worker>()
 	private readonly pending = new Map<number, Pending>()
+	// Per acknowledging worker with a request not yet taken up: dropped when it stays silent this long.
+	private readonly silence = new Map<Worker, ReturnType<typeof setTimeout>>()
 	private readonly spawn: () => Worker
 	private readonly options: NestedWorkerOptions
 
@@ -156,7 +163,14 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		const id = this.nextId++
 
 		return new Promise((resolve, reject) => {
-			const entry: Pending = { worker, resolve: resolve as (response: unknown) => void, reject, timer: null, timeoutMs }
+			const entry: Pending = {
+				worker,
+				resolve: resolve as (response: unknown) => void,
+				reject,
+				timer: null,
+				timeoutMs,
+				started: false
+			}
 
 			if (this.options.acknowledges !== true) {
 				this.arm(entry)
@@ -164,7 +178,36 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 
 			this.pending.set(id, entry)
 			worker.postMessage({ id, ...request }, transfer)
+
+			if (this.options.acknowledges === true && !this.silence.has(worker)) {
+				this.listen(worker)
+			}
 		})
+	}
+
+	// Drops `worker` if it says nothing for the silence deadline while a request of it waits to be taken up; heard from,
+	// it is listened for again while one still does.
+	private listen(worker: Worker): void {
+		const previous = this.silence.get(worker)
+
+		if (previous !== undefined) {
+			clearTimeout(previous)
+			this.silence.delete(worker)
+		}
+
+		if (![...this.pending.values()].some(entry => entry.worker === worker && !entry.started)) {
+			return
+		}
+
+		const silenceMs = this.options.silenceMs ?? DEFAULT_SILENCE_MS
+
+		this.silence.set(
+			worker,
+			setTimeout(() => {
+				this.silence.delete(worker)
+				this.end(worker, this.lost(`the ${this.options.name} worker said nothing for ${String(silenceMs)} ms`))
+			}, silenceMs)
+		)
 	}
 
 	// Starts `entry`'s deadline, if it has one.
@@ -199,12 +242,18 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 			}
 
 			if (response.started === true) {
+				waiting.started = true
 				this.arm(waiting)
+				this.listen(worker)
 
 				return
 			}
 
 			this.pending.delete(response.id)
+
+			if (this.options.acknowledges === true) {
+				this.listen(worker)
+			}
 
 			if (waiting.timer !== null) {
 				clearTimeout(waiting.timer)
@@ -262,6 +311,13 @@ export class NestedWorker<Request extends object, Response extends NestedRespons
 		}
 
 		worker.terminate()
+
+		const silent = this.silence.get(worker)
+
+		if (silent !== undefined) {
+			clearTimeout(silent)
+			this.silence.delete(worker)
+		}
 
 		for (const [id, entry] of [...this.pending]) {
 			if (entry.worker === worker) {

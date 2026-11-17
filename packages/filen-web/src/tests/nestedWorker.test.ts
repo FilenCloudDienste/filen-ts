@@ -157,6 +157,41 @@ describe("NestedWorker", () => {
 		expect(spawned[0]?.terminated).toBe(true)
 	})
 
+	it("drops an acknowledging worker that says nothing while a request waits, as one whose script never loaded", async () => {
+		vi.useFakeTimers()
+
+		const { helper, spawned } = nested(0, undefined, undefined, true)
+		const worker = helper.acquire()
+		const unload = helper.request(worker, { type: "unload" })
+
+		vi.advanceTimersByTime(29_999)
+		expect(spawned[0]?.terminated).toBe(false)
+		vi.advanceTimersByTime(1)
+		await expect(unload).rejects.toThrow("said nothing")
+		expect(spawned[0]?.terminated).toBe(true)
+	})
+
+	it("listens again whenever an acknowledging worker is heard from, while requests still wait", async () => {
+		vi.useFakeTimers()
+
+		const { helper, spawned } = nested(0, undefined, undefined, true)
+		const worker = helper.acquire()
+		const open = helper.request(worker, { type: "open" }, [], 60_000)
+		const queued = helper.request(worker, { type: "render" }, [], 2_000)
+
+		vi.advanceTimersByTime(20_000)
+		spawned[0]?.answer({ id: 0, started: true })
+		// The open runs 25 s; the render waits, the worker heard from 25 s before its answer.
+		vi.advanceTimersByTime(25_000)
+		spawned[0]?.answer({ id: 0 })
+		await expect(open).resolves.toMatchObject({ id: 0 })
+		spawned[0]?.answer({ id: 1, started: true })
+		spawned[0]?.answer({ id: 1 })
+		await expect(queued).resolves.toMatchObject({ id: 1 })
+		vi.advanceTimersByTime(60_000)
+		expect(spawned[0]?.terminated).toBe(false)
+	})
+
 	it("clears a deadline once its answer came", async () => {
 		vi.useFakeTimers()
 
