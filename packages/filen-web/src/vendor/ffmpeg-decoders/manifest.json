@@ -7,7 +7,7 @@
 		"configure": ["--target-os=none", "--arch=x86_32", "--enable-cross-compile", "--disable-asm", "--disable-inline-asm", "--disable-x86asm", "--disable-programs", "--disable-doc", "--disable-debug", "--disable-network", "--disable-autodetect", "--disable-pthreads", "--disable-runtime-cpudetect", "--disable-all", "--disable-everything", "--enable-small", "--enable-avcodec", "--enable-decoder=ac3,eac3,dca,truehd,mlp,alac,flac"],
 		"cflags": ["-Oz", "-flto", "-msimd128", "-DNDEBUG", "-ffile-prefix-map=<ffmpeg source>=ffmpeg"]
 	},
-	"emcc": "6.0.12-git",
+	"emcc": "7.0.0-git",
 	"emscripten": {
 		"musl": "1.2.6",
 		"licenses": {
@@ -17,14 +17,14 @@
 	},
 	"link": ["-Oz", "-flto", "-msimd128", "-DNDEBUG", "-ffile-prefix-map=<ffmpeg source>=ffmpeg", "-ffile-prefix-map=<scripts/codecs>=codecs", "-sMODULARIZE=1", "-sEXPORT_NAME=createFfmpegDecoders", "-sENVIRONMENT=worker", "-sSINGLE_FILE=1", "-sSINGLE_FILE_BINARY_ENCODE=0", "-sDYNAMIC_EXECUTION=0", "-sALLOW_MEMORY_GROWTH=1", "-sFILESYSTEM=0", "-sMALLOC=emmalloc", "-sSUPPORT_LONGJMP=0", "-sINCOMING_MODULE_JS_API=[]", "-sEXPORTED_RUNTIME_METHODS=HEAPU8", "-sEXPORTED_FUNCTIONS=_decoder_log_level,_decoder_extradata,_decoder_open,_decoder_packet,_decoder_send,_decoder_drain,_decoder_receive,_decoder_reset,_decoder_format,_decoder_channels,_decoder_channel_mask,_decoder_sample_rate,_decoder_frames,_decoder_plane,_decoder_timestamp,_decoder_close"],
 	"sources": {
-		"build-ffmpeg-decoders.sh": "551617e7078e2b26bb211518ce3190656065f99323aac4ba4f2499fbc1eaf9fe",
+		"build-ffmpeg-decoders.sh": "2ae40cf24b7fa6f90c83c7e40d09e0f6a59233c1b511b6224df3ac9340511dae",
 		"bridge.c": "a278ab43ea008035db1ff804c4df277ec412dbcc5dfdda12cd076185fe91fbea",
 		"decoder-worker.js": "5900f8791e5e7ef252c26540d2316717f38eec98dcca939c10f1c7b8317df348"
 	},
 	"output": {
 		"decoders.worker.js": {
-			"bytes": 808616,
-			"sha256": "6a59994a468e05b91594fac540e12077fe2b65c7bda017e8f2305e9afc9d1a6a"
+			"bytes": 806633,
+			"sha256": "e63f0e9da8e1c49ef8406d91d71dacddd5ca147933a3e521f106bc0b74b2add4"
 		}
 	}
 }

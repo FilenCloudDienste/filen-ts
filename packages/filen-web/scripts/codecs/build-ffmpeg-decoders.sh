@@ -26,7 +26,7 @@ FFMPEG_URL="https://ffmpeg.org/releases/${FFMPEG_TARBALL}"
 # Of the tarball as signed by the FFmpeg release key FCF986EA15E6E293A5644F10B4322F04D67658D8.
 FFMPEG_SHA256="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
 # Exactly as `emcc --version` prints it: a release and a -git build of it are different compilers.
-EMCC_VERSION="6.0.12-git"
+EMCC_VERSION="7.0.0-git"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE="$(cd "${HERE}/../.." && pwd)"
