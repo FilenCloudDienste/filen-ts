@@ -33,6 +33,10 @@ Document engines and editors shared by the Filen apps. `pnpm run lint`, `pnpm ru
 
 - `@filen/office/core/code` maps a lowercased file extension to a code language (234 extensions, 123 languages; DOM-free, Hermes-safe). `@filen/office/dom/code` holds the CodeMirror pieces: `codeLanguageSupport` (every grammar, each built on first use), `codeTheme` (chrome and syntax colours as `--fo-code-*` variables; light falls back to CodeMirror's default style, `codeSyntaxVariables("dark")` is One Dark), `codeEditorSetup`, `codeKeymap`/`openReplacePanel`, and `mountCodeCompare`. `@filen/office/react/code` is the headless `<CodeEditor>`. The CodeMirror packages, `@lezer/highlight` and `@replit/codemirror-lang-{nix,solidity,svelte}` are optional peer dependencies (MIT); an app that uses these entry points adds them as its own dependencies, dedupes the stateful ones, and adds their notices.
 
+## Mail
+
+- `@filen/office/core/msg` reads Outlook message files (`.msg`, [MS-OXMSG]) on `core/cfb`: `readMsg` gives the subject, sender, recipients, date, the HTML body (PidTagHtml, or the HTML a `\fromhtml1` RTF body encapsulates) or the text (PidTagBody, or the RTF body's), and the attachments as bytes, an embedded message as a `.msg` file of its own. `decompressRtf` is LZFu ([MS-OXRTFCP]); `rtfBody` the de-encapsulation and text. Bounds: the file size cap (64 MiB by default) bounds every stream and the RTF output; property streams are read up to 1 MiB, display strings up to 4 KiB; more than 1000 attachments, or storages nested past 64 levels, read as `tooLarge`; past 200 recipients are counted; RTF groups past 512 levels are skipped. `@filen/office/testing/msg` builds message files for tests and fixtures.
+
 ## Presentations
 
 - Formats: PresentationML (`.pptx`, `.pptm`, `.potx`, `.potm`, `.ppsx`, `.ppsm`) and ODF (`.odp`, `.otp`) are read and saved in their own format; PowerPoint 97–2003 (`.ppt`, `.pps`, `.pot`) is read through the pptx it converts to and saves as a new file. Encrypted packages open with a password; rights-managed files are refused.

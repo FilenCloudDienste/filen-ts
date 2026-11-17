@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { readEmail } from "@/features/preview/lib/emailReading"
+import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message read for its viewer: display headers, bodies, attachments as Blobs, a forwarded message as an attachment;
-// past the nesting, part or size bounds it is "tooLarge".
+// past the nesting, part or size bounds it is "tooLarge". An Outlook message (.msg) reads into the same model.
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text)
 const CRLF = (lines: string[]): string => lines.join("\r\n")
@@ -110,5 +111,29 @@ describe("readEmail", () => {
 
 		expect(await readEmail(encode(CRLF(nested)))).toEqual({ status: "tooLarge" })
 		expect(await readEmail(encode(CRLF(parts)))).toEqual({ status: "tooLarge" })
+	})
+
+	it("reads an Outlook message into the same model, its embedded message a .msg attachment, with no source view", async () => {
+		const reading = await readEmail((await outlookMessage()) as Uint8Array<ArrayBuffer>)
+
+		expect(reading).toMatchObject({
+			status: "ok",
+			subject: "Status report",
+			from: "Anna Berg <anna@example.com>",
+			to: ["Bob <bob@example.com>"],
+			html: "<p>All green</p>",
+			hasSource: false
+		})
+
+		if (reading.status !== "ok") return
+
+		expect(reading.attachments.map(attachment => [attachment.name, attachment.mimeType, attachment.inline])).toEqual([
+			["Earlier thread.msg", "application/vnd.ms-outlook", false]
+		])
+		expect(await readEmail(new Uint8Array((await reading.attachments[0]?.blob.arrayBuffer()) ?? new ArrayBuffer(0)))).toMatchObject({
+			status: "ok",
+			subject: "Earlier thread",
+			text: "Inner text"
+		})
 	})
 })

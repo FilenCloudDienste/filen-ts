@@ -8,11 +8,12 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import { readEmail } from "@/features/preview/lib/emailReading"
+import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 
 // A message (E1): its headers, its HTML sanitized with its remote content counted and its inline pictures resolved,
 // its text and source; attachments listed (inline pictures not), opened in place and back.
 
-const { message } = vi.hoisted(() => ({ message: { current: "" } }))
+const { message } = vi.hoisted((): { message: { current: string | Uint8Array } } => ({ message: { current: "" } }))
 
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
@@ -34,7 +35,11 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", async () => {
 		// The message's own bytes; an attachment (a provided origin) reads through the real hook.
 		usePreviewBytes: (item: { data: { uuid: string } }) =>
 			item.data.uuid === "mail-0000-0000-0000-000000000000"
-				? { status: "success", bytes: new TextEncoder().encode(message.current), refetch: vi.fn() }
+				? {
+						status: "success",
+						bytes: typeof message.current === "string" ? new TextEncoder().encode(message.current) : message.current,
+						refetch: vi.fn()
+					}
 				: actual.usePreviewBytes(item as never)
 	}
 })
@@ -157,5 +162,21 @@ describe("EmailViewer", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "+1 more" }))
 
 		expect(screen.getByText("a@x.io, b@x.io, c@x.io")).toBeTruthy()
+	})
+
+	it("shows an Outlook message without a source view, and opens its embedded message as a message", async () => {
+		message.current = await outlookMessage()
+		render(<EmailViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByRole("heading", { name: "Status report" })).toBeTruthy()
+		expect(screen.getByText("Anna Berg <anna@example.com>")).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Source" })).toBeNull()
+		expect((await screen.findByTestId("html-body")).getAttribute("data-html")).toContain("All green")
+		expect(screen.getByText("Earlier thread.msg")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Open" }))
+
+		expect(await screen.findByRole("heading", { name: "Earlier thread" })).toBeTruthy()
+		expect(screen.getByText("Inner text")).toBeTruthy()
 	})
 })

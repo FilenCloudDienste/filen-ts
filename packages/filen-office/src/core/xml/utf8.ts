@@ -186,3 +186,21 @@ export function transcodeUtf16(bytes: Uint8Array, start: number, littleEndian: b
 
 	return out.slice(0, o)
 }
+
+// Whether the bytes read as UTF-8 by their lead and continuation bytes (no C0, C1 or F5..FF lead).
+export function isUtf8(bytes: Uint8Array): boolean {
+	for (let i = 0; i < bytes.length;) {
+		const b0 = bytes[i] ?? 0
+		const size = b0 < 0x80 ? 1 : b0 >= 0xc2 && b0 <= 0xdf ? 2 : b0 >= 0xe0 && b0 <= 0xef ? 3 : b0 >= 0xf0 && b0 <= 0xf4 ? 4 : 0
+
+		if (size === 0 || i + size > bytes.length) return false
+
+		for (let k = 1; k < size; k++) {
+			if (((bytes[i + k] ?? 0) & 0xc0) !== 0x80) return false
+		}
+
+		i += size
+	}
+
+	return true
+}

@@ -367,7 +367,7 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("contact")
 	})
 
-	it.each(["eml"])("%s -> email", ext => {
+	it.each(["eml", "msg"])("%s -> email", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("email")
 	})
 

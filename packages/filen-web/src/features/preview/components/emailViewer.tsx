@@ -236,12 +236,37 @@ function attachmentItem(item: DriveItem, index: number, attachment: EmailAttachm
 	return embeddedFileItem(`${item.data.uuid}#att${String(index)}`, attachment.name, attachment.size, Number.NaN)
 }
 
-function ViewSwitch({ view, onView, hasHtml, hasText }: { view: View; onView: (view: View) => void; hasHtml: boolean; hasText: boolean }) {
+// A forwarded or embedded message, which opens as a message one level deeper.
+function isMessageAttachment(attachment: EmailAttachment): boolean {
+	const name = attachment.name.toLowerCase()
+
+	return (
+		attachment.mimeType === "message/rfc822" ||
+		attachment.mimeType === "application/vnd.ms-outlook" ||
+		name.endsWith(".eml") ||
+		name.endsWith(".msg")
+	)
+}
+
+function ViewSwitch({
+	view,
+	onView,
+	hasHtml,
+	hasText,
+	hasSource
+}: {
+	view: View
+	onView: (view: View) => void
+	hasHtml: boolean
+	hasText: boolean
+	hasSource: boolean
+}) {
 	const { t } = useTranslation("preview")
 	const options: { view: View; label: string; enabled: boolean }[] = [
 		{ view: "html", label: t("previewEmailViewHtml"), enabled: hasHtml },
 		{ view: "text", label: t("previewEmailViewText"), enabled: hasText },
-		{ view: "source", label: t("previewEmailViewSource"), enabled: true }
+		// A binary file (.msg) has no source to show.
+		...(hasSource ? [{ view: "source" as const, label: t("previewEmailViewSource"), enabled: true }] : [])
 	]
 
 	return (
@@ -347,6 +372,7 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 						onView={setView}
 						hasHtml={hasHtml}
 						hasText={hasText}
+						hasSource={message.hasSource}
 					/>
 				</div>
 				<div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 text-sm">
@@ -371,7 +397,7 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 				) : null}
 			</header>
 			<div className="min-h-0 flex-1">
-				{view === "source" ? (
+				{view === "source" && message.hasSource ? (
 					<TextViewer
 						item={item}
 						alt={title}
@@ -398,7 +424,7 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 					<ul className="pb-2">
 						{listed.map(({ attachment, index }) => {
 							const nested = attachmentItem(item, index, attachment)
-							const forwarded = attachment.mimeType === "message/rfc822" || attachment.name.toLowerCase().endsWith(".eml")
+							const forwarded = isMessageAttachment(attachment)
 
 							return (
 								<AttachmentRow
@@ -450,7 +476,7 @@ function EmailView({ item, bytes }: { item: DriveItem; bytes: Uint8Array }) {
 }
 
 // An e-mail message (E1): subject, sender, date and recipients; its HTML body in a script-less frame with nothing remote
-// loaded and its links listed beside it, or its text, or its source (read-only); its attachments to open here (through
+// loaded and its links listed beside it, or its text, or (an .eml's) its source, read-only; its attachments to open here (through
 // NestedFileViewer, from the Blob the parse made), download or save to the drive.
 export function EmailViewer({ item }: { item: DriveItem }) {
 	const result = usePreviewBytes(item)

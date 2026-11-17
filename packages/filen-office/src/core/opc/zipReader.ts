@@ -1,6 +1,6 @@
 import { Inflate } from "fflate"
 import { sliceClock, type SliceClock, type Slicing } from "../slicing"
-import { decodeUtf8 } from "../xml/utf8"
+import { decodeUtf8, isUtf8 } from "../xml/utf8"
 import { crc32 } from "./crc32"
 import { ZipError } from "./errors"
 import { inflateInto, type InflateInput } from "./inflateIndex"
@@ -155,23 +155,6 @@ export function withoutExtraField(extra: Uint8Array, removeId: number): Uint8Arr
 	}
 
 	return out
-}
-
-function isUtf8(bytes: Uint8Array): boolean {
-	for (let i = 0; i < bytes.length;) {
-		const b0 = bytes[i] ?? 0
-		const size = b0 < 0x80 ? 1 : b0 >= 0xc2 && b0 <= 0xdf ? 2 : b0 >= 0xe0 && b0 <= 0xef ? 3 : b0 >= 0xf0 && b0 <= 0xf4 ? 4 : 0
-
-		if (size === 0 || i + size > bytes.length) return false
-
-		for (let k = 1; k < size; k++) {
-			if (((bytes[i + k] ?? 0) & 0xc0) !== 0x80) return false
-		}
-
-		i += size
-	}
-
-	return true
 }
 
 // Names flagged UTF-8 are UTF-8. Unflagged ones are CP437 by the format, but many writers store UTF-8

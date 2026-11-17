@@ -1,14 +1,18 @@
 import PostalMime, { type Address, type Email } from "postal-mime"
+import { isCompoundFile } from "@filen/office/core/cfb"
+import { readMsg, type MsgAddress, type MsgMessage } from "@filen/office/core/msg"
 import { withoutFormatControls } from "@filen/shared/formatControls"
 import { EMAIL_MAX_BYTES } from "@/features/preview/lib/emailLimits"
 
-// A message (.eml) read for its viewer, in the text-family worker: headers as display text, its HTML and text bodies,
+// A message (.eml, or Outlook's .msg) read for its viewer, in the text-family worker: headers as display text, its HTML and text bodies,
 // and its attachments as Blobs (outside the JS heap, shared with the page without a copy). Nothing it names is fetched.
 //
 // Hostile-input bounds: the file is at most EMAIL_MAX_BYTES (the category's cap), so no decoded part can be larger
 // (base64 and quoted-printable only shrink); MIME nesting stops at MAX_NESTING, parts at MAX_PARTS, headers at
 // postal-mime's 2 MiB; a forwarded message (message/rfc822) is never parsed inline, it is an attachment the viewer opens
-// as a message of its own. Past a bound the reading is "tooLarge".
+// as a message of its own. A .msg is read by @filen/office/core/msg, under its own bounds (sector chains, the
+// directory, property streams, attachments, the RTF body); an embedded message is a .msg attachment the same way.
+// Past a bound the reading is "tooLarge".
 
 const MAX_NESTING = 32
 const MAX_PARTS = 1000
@@ -38,6 +42,8 @@ export interface EmailMessage {
 	readonly html: string | null
 	readonly text: string | null
 	readonly attachments: readonly EmailAttachment[]
+	// Whether the file is text a Source view can show (a .msg is not).
+	readonly hasSource: boolean
 }
 
 export type EmailReading = ({ readonly status: "ok" } & EmailMessage) | { readonly status: "tooLarge" }
@@ -113,13 +119,55 @@ function readMessage(email: Email): EmailMessage {
 				contentId: id,
 				inline: id !== null && (attachment.disposition === "inline" || attachment.related === true)
 			}
-		})
+		}),
+		hasSource: true
+	}
+}
+
+function msgMailbox(entry: MsgAddress): string {
+	return mailbox(entry.name ?? "", entry.address ?? "")
+}
+
+function readMsgMessage(message: MsgMessage): EmailMessage {
+	const shown = (list: readonly MsgAddress[]): string[] => list.map(msgMailbox).filter(entry => entry !== "")
+	const from = message.from === null ? "" : msgMailbox(message.from)
+
+	return {
+		subject: display(message.subject),
+		from: from === "" ? null : from,
+		to: shown(message.to),
+		cc: shown(message.cc),
+		addressesOmitted: message.recipientsOmitted,
+		date: display(message.date),
+		html: message.html,
+		text: message.text,
+		attachments: message.attachments.map((attachment, index) => {
+			const mimeType = attachment.mimeType ?? "application/octet-stream"
+			const blob = new Blob([attachment.bytes as Uint8Array<ArrayBuffer>], { type: mimeType })
+			const id = contentId(attachment.contentId ?? undefined)
+
+			return {
+				name: display(attachment.name) ?? `attachment-${String(index + 1)}${attachment.message ? ".msg" : ""}`,
+				mimeType,
+				size: blob.size,
+				blob,
+				contentId: id,
+				inline: id !== null && attachment.inline
+			}
+		}),
+		hasSource: false
 	}
 }
 
 export async function readEmail(bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> {
 	if (bytes.length > EMAIL_MAX_BYTES) {
 		return { status: "tooLarge" }
+	}
+
+	if (isCompoundFile(bytes)) {
+		const reading = await readMsg(bytes, { maxSize: EMAIL_MAX_BYTES })
+
+		return reading.status === "ok" ? { status: "ok", ...readMsgMessage(reading.message) } : reading
 	}
 
 	try {

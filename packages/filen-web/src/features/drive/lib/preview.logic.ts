@@ -606,7 +606,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
 	[MODEL_FORMATS, "model3d"],
 	[["torrent"], "torrent"],
-	[["eml"], "email"],
+	[["eml", "msg"], "email"],
 	[["md", "markdown", "mkd"], "markdown"],
 	// A `.sub` is MicroDVD text until a read of its head finds VobSub images (no kind).
 	[[...SUBTITLE_FILE_EXTENSIONS, "sub"], "subtitle"],

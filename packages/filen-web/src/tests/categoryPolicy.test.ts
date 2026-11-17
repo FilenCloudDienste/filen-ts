@@ -641,6 +641,8 @@ describe("the email row", () => {
 		expect(previewType(fileNamed("forwarded", 1024n, "message/rfc822"))).toBe("email")
 		expect(canPreview(fileNamed("mail.eml", CAP))).toBe(true)
 		expect(canPreview(fileNamed("mail.eml", CAP + 1n))).toBe(false)
+		expect(previewType(fileNamed("outlook.msg", 1024n))).toBe("email")
+		expect(canPreview(fileNamed("outlook.msg", CAP + 1n))).toBe(false)
 		expect(anonPreviewability(fileNamed("mail.eml", CAP))).toBe("previewable")
 		expect(canOpenEntry(storeOf([{ path: "mail.eml", access: DIRECT, size: Number(CAP) }]), 0)).toBe(true)
 		expect(isTextCategory("email")).toBe(false)
