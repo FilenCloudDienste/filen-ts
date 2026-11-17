@@ -14,6 +14,7 @@
 		".": "./src/index.ts",
 		"./dom": "./src/dom/index.ts",
 		"./dom/cssLoads": "./src/dom/cssLoads.ts",
+		"./dom/emailSanitizer": "./src/dom/emailSanitizer.ts",
 		"./dom/formHardening": "./src/dom/formHardening.ts",
 		"./dom/formFieldNames": "./src/dom/formFieldNames.ts",
 		"./dom/scheduleIdle": "./src/dom/scheduleIdle.ts",

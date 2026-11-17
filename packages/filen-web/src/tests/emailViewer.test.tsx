@@ -36,6 +36,11 @@ const { message } = vi.hoisted((): { message: { current: string | Uint8Array } }
 
 // A small text cap, so bodies and files past it stay small here.
 vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
+// The sanitizer's HTML cap, as small: HTML past it is never sent to the page.
+vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
+	...(await importOriginal<typeof import("@filen/shared/dom/emailSanitizer")>()),
+	EMAIL_MAX_HTML_CHARS: 2048
+}))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),

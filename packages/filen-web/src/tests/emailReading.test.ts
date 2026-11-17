@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 // A small text cap, so bodies past it stay small here.
 vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
+// The sanitizer's HTML cap, as small: HTML past it is never sent to the page.
+vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
+	...(await importOriginal<typeof import("@filen/shared/dom/emailSanitizer")>()),
+	EMAIL_MAX_HTML_CHARS: 2048
+}))
 
 const { rasterImageType, readEmail } = await import("@/features/preview/lib/emailReading")
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
@@ -237,5 +242,13 @@ describe("readEmail", () => {
 		])
 
 		expect(padded.attachments[0]?.name).toBe("invoice.pdf .exe")
+	})
+
+	it("sends HTML up to the sanitizer's cap and none past it", async () => {
+		const html = (chars: number) =>
+			readEmail(encode(CRLF(["Subject: Html", "Content-Type: text/html", "", `<p>${"h".repeat(chars)}</p>`])))
+
+		expect(await html(1000)).toMatchObject({ status: "ok", htmlTooLarge: false })
+		expect(await html(3000)).toMatchObject({ status: "ok", html: null, htmlTooLarge: true })
 	})
 })

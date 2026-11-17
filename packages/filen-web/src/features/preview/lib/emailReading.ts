@@ -2,6 +2,7 @@ import PostalMime, { type Address, type Email } from "postal-mime"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import { readMsg, type MsgAddress, type MsgMessage } from "@filen/office/core/msg"
 import { withoutFormatControls } from "@filen/shared/formatControls"
+import { EMAIL_MAX_HTML_CHARS } from "@filen/shared/dom/emailSanitizer"
 import { EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
 
 // A message (.eml, or Outlook's .msg) read for its viewer, in the text-family worker: headers as display text, its HTML and text bodies,
@@ -44,7 +45,7 @@ export interface EmailMessage {
 	readonly fromIdnDomain: string | null
 	// ISO 8601, or the header as written when it does not parse; null for none.
 	readonly date: string | null
-	// Null past TEXT_CAP characters too (htmlTooLarge): cut HTML is not a document.
+	// Null past the sanitizer's cap (EMAIL_MAX_HTML_CHARS) too (htmlTooLarge): cut HTML is not a document.
 	readonly html: string | null
 	readonly htmlTooLarge: boolean
 	// Cut at TEXT_CAP characters (textTruncated): the page never holds more of a body than a text file's.
@@ -155,7 +156,8 @@ function contentId(value: string | undefined): string | null {
 }
 
 function bodies(html: string | null, text: string | null): Pick<EmailMessage, "html" | "htmlTooLarge" | "text" | "textTruncated"> {
-	const htmlTooLarge = html !== null && html.length > TEXT_CAP
+	// Past the sanitizer's own cap HTML is refused on the page anyway: not sent.
+	const htmlTooLarge = html !== null && html.length > EMAIL_MAX_HTML_CHARS
 	const textTruncated = text !== null && text.length > TEXT_CAP
 
 	return {
