@@ -496,6 +496,30 @@ describe("PdfPages", () => {
 		expect(scrolled.at(-1)).toBe(pageElement(1))
 	})
 
+	it("jumps to a page without a smooth scroll when the host asks for an instant one", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([]), fakePage([]), fakePage([])])
+
+		await mount(pdfjs, opened)
+		vi.stubGlobal("matchMedia", () => ({ matches: false }))
+
+		const behaviors: (ScrollBehavior | undefined)[] = []
+
+		vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+			this: Element,
+			options?: boolean | ScrollIntoViewOptions
+		) {
+			behaviors.push(typeof options === "object" ? options.behavior : undefined)
+		})
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.goto", page: 3 })
+		})
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.goto", page: 2, instant: true })
+		})
+		await settle()
+		expect(behaviors).toEqual(["smooth", "auto"])
+	})
+
 	it("zooms with Ctrl and the wheel, and leaves a plain wheel to scroll", async () => {
 		const { pdfjs, opened } = fakePdfJs([fakePage([])])
 

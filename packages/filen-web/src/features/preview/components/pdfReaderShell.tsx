@@ -121,8 +121,9 @@ export function PdfReaderShell({
 	const pageChanged = useEffectEvent((page: number) => {
 		onPageChange?.(page)
 	})
+	// A host restoring a position (a relayout's anchor): straight there, never smooth-scrolling through the pages between.
 	const goToHostPage = useEffectEvent((page: number) => {
-		viewer.dispatch({ type: "page.goto", page })
+		viewer.dispatch({ type: "page.goto", page, instant: true })
 	})
 	const goToKey = goTo?.key ?? null
 	const goToTarget = goTo?.page ?? null

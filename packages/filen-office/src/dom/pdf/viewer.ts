@@ -21,7 +21,14 @@ export type PdfViewerCommand =
 	| { readonly type: "page.last" }
 	// 1-based. `left` and `top` (PDF user space, a resolved destination's point) go to the view's top-left
 	// corner; without `top` the page's top does.
-	| { readonly type: "page.goto"; readonly page: number; readonly left?: number | null; readonly top?: number | null }
+	// `instant`: jump there without a smooth scroll (a host restoring a position, not a user's step).
+	| {
+			readonly type: "page.goto"
+			readonly page: number
+			readonly left?: number | null
+			readonly top?: number | null
+			readonly instant?: boolean
+	  }
 	| { readonly type: "zoom.in" }
 	| { readonly type: "zoom.out" }
 	// pdf.js scale (PDF_BASE_SCALE is 100 %).

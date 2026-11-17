@@ -416,7 +416,7 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 				goToPage(pageCount, false)
 				break
 			case "page.goto":
-				goToPage(command.page, true, command.left ?? null, command.top ?? null)
+				goToPage(command.page, command.instant !== true, command.left ?? null, command.top ?? null)
 				break
 			case "zoom.in":
 				anchorCentre()
