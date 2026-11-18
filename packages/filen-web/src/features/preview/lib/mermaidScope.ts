@@ -10,6 +10,21 @@ export const MERMAID_AUTO_RENDER_LIMIT = 50
 export class MermaidScope {
 	public readonly host = new MermaidHost()
 	private observer: CardObserver | null = null
+	// Each diagram's place among the document's, in the order they first render (a notebook's cells each have their own
+	// markdown, one scope): what the automatic-render limit counts.
+	private readonly ordinals = new Map<string, number>()
+
+	// The place of the diagram `key` names (a stable id), the same on every call.
+	public ordinalFor(key: string): number {
+		let ordinal = this.ordinals.get(key)
+
+		if (ordinal === undefined) {
+			ordinal = this.ordinals.size
+			this.ordinals.set(key, ordinal)
+		}
+
+		return ordinal
+	}
 
 	// Calls `listener` once, when `element` first comes near; returns the cancel.
 	public whenNear(element: Element, listener: () => void): () => void {
@@ -26,6 +41,7 @@ export class MermaidScope {
 	}
 
 	public release(): void {
+		this.ordinals.clear()
 		this.host.release()
 		this.observer?.disconnect()
 		this.observer = null

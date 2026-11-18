@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -33,8 +33,9 @@ const NOTEBOOK = JSON.stringify({
 	]
 })
 
-const { asked } = vi.hoisted(() => ({ asked: { current: [] as number[] } }))
+const { asked, notebook } = vi.hoisted(() => ({ asked: { current: [] as number[] }, notebook: { current: "" } }))
 
+vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light" }), resolveTheme: () => "light" }))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
@@ -42,7 +43,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvKeys: () => Promise.resolve([])
 }))
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: new TextEncoder().encode(NOTEBOOK), refetch: vi.fn() })
+	usePreviewBytes: () => ({ status: "success", bytes: new TextEncoder().encode(notebook.current), refetch: vi.fn() })
 }))
 vi.mock("@/features/preview/lib/textFamilyClient", () => ({
 	readNotebookFile: (text: string, maxPixels: number) => {
@@ -83,6 +84,10 @@ const ITEM = narrowItem({
 } satisfies File)
 
 describe("NotebookViewer", () => {
+	beforeEach(() => {
+		notebook.current = NOTEBOOK
+	})
+
 	it("shows the cells with their gutter, highlighted code and outputs, and the source a toggle away", async () => {
 		const { container } = render(
 			<NotebookViewer
@@ -97,12 +102,49 @@ describe("NotebookViewer", () => {
 		expect(screen.getByRole("heading", { name: "Analysis" })).toBeTruthy()
 		expect(screen.getByText("printed line")).toBeTruthy()
 		expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:https://app.example/figure")
-		// Highlighted: the keyword is a span of its own with the editor's class.
-		expect(screen.getByText("def").tagName).toBe("SPAN")
+		// Highlighted (near the viewport, on idle): the keyword is a span of its own with the editor's class.
+		expect((await screen.findByText("def")).tagName).toBe("SPAN")
 		expect(asked.current[0]).toBeGreaterThan(0)
 
 		fireEvent.click(screen.getByRole("button", { name: "Source" }))
 
 		expect(await screen.findByText(/"nbformat": 4|"nbformat":4/)).toBeTruthy()
+	})
+
+	it("counts its markdown cells' diagrams as one document's: the 51st waits to be asked", async () => {
+		globalThis.IntersectionObserver = class {
+			observe(): void {
+				return undefined
+			}
+
+			unobserve(): void {
+				return undefined
+			}
+
+			disconnect(): void {
+				return undefined
+			}
+		} as unknown as typeof IntersectionObserver
+		notebook.current = JSON.stringify({
+			nbformat: 4,
+			nbformat_minor: 5,
+			metadata: {},
+			cells: Array.from({ length: 51 }, (_, index) => ({
+				cell_type: "markdown",
+				metadata: {},
+				source: `\`\`\`mermaid\ngraph TD; A${String(index)}-->B\n\`\`\``
+			}))
+		})
+
+		render(
+			<NotebookViewer
+				item={ITEM}
+				alt="analysis.ipynb"
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		expect(await screen.findAllByRole("button", { name: "Render diagram" })).toHaveLength(1)
+		expect(document.querySelectorAll("iframe")).toHaveLength(0)
 	})
 })

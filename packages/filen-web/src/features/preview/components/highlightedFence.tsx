@@ -2,13 +2,12 @@ import { useContext, useEffect, useState, type ReactNode } from "react"
 import { codeLanguageIdFor, highlightCodeRuns, mountCodeHighlightStyle, type CodeRun } from "@filen/office/dom/code"
 import { scheduleIdle } from "@filen/shared/dom/scheduleIdle"
 import { useNearViewport } from "@/lib/useNearViewport"
-import { FenceBudgetContext } from "@/features/preview/lib/fenceBudget"
+import { FENCE_MAX_CHARS, FENCE_MAX_LINES, FenceBudgetContext } from "@/features/preview/lib/fenceBudget"
 
-// A markdown file's fenced code highlighted as the editor would: a fence is highlighted once it comes near the viewport,
-// one fence an idle task, and none past FENCE_MAX_LINES lines a document (or past the highlighter's own size cap): those
-// stay plain monospace.
+// Code highlighted as the editor would (a markdown file's fences, a notebook's cells): a block is highlighted once it
+// comes near the viewport, one block an idle task, and none past the document's budget (FENCE_MAX_LINES lines,
+// FENCE_MAX_CHARS characters) or the highlighter's own size cap: those stay plain monospace.
 
-const FENCE_MAX_LINES = 10_000
 const FENCE_MARGIN = 800
 
 // One fence an idle task, across documents.
@@ -57,7 +56,7 @@ function Runs({ runs }: { runs: readonly CodeRun[] }) {
 	)
 }
 
-// `language`: the fence's info word ("ts", "python"); `text` its content.
+// `language`: a language id or the fence's info word ("ts", "python"); `text` its content.
 export function HighlightedFence({ language, text, className }: { language: string; text: string; className: string }) {
 	const budget = useContext(FenceBudgetContext)
 	const [element, setElement] = useState<HTMLElement | null>(null)
@@ -73,13 +72,14 @@ export function HighlightedFence({ language, text, className }: { language: stri
 		return enqueue(() => {
 			const lines = text.split("\n").length
 
-			if (budget.lines + lines > FENCE_MAX_LINES) return
+			if (budget.lines + lines > FENCE_MAX_LINES || budget.chars + text.length > FENCE_MAX_CHARS) return
 
 			const highlighted = highlightCodeRuns(text, id)
 
 			if (highlighted === null) return
 
 			budget.lines += lines
+			budget.chars += text.length
 			mountCodeHighlightStyle(document)
 			setRuns(highlighted)
 		})

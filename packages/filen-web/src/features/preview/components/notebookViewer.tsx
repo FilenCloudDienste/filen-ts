@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { InfoIcon } from "lucide-react"
-import { codeLanguageIdFor, highlightCodeRuns, mountCodeHighlightStyle, type CodeRun } from "@filen/office/dom/code"
+import { codeLanguageIdFor } from "@filen/office/dom/code"
 import type { CodeLanguageId } from "@filen/office/core/code"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { RenderedSourceViewer, type RenderedSource } from "@/features/preview/components/renderedSourceViewer"
 import type { TextViewerProps } from "@/features/preview/components/textViewer"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { PreviewMarkdown } from "@/features/preview/components/previewMarkdown"
+import { HighlightedFence } from "@/features/preview/components/highlightedFence"
+import { FenceBudgetContext, newFenceBudget, type FenceBudget } from "@/features/preview/lib/fenceBudget"
+import { useMermaidScope } from "@/features/preview/hooks/useMermaidDiagram"
+import { MermaidScopeContext } from "@/features/preview/lib/mermaidScope"
 import { SafeHtmlDocument } from "@/features/preview/components/safeHtmlDocument"
 import { sanitizeEmailHtml } from "@/features/preview/lib/emailSanitizer"
 import { readNotebookFile } from "@/features/preview/lib/textFamilyClient"
@@ -23,8 +27,6 @@ import { cn } from "@filen/shared"
 
 // The browser decodes an <img> to RGBA8, and holds no other copy.
 const NOTEBOOK_IMAGE_BPP = 4
-// Highlighted lines a document: past them cells stay plain monospace.
-const HIGHLIGHT_MAX_LINES = 10_000
 // How near the viewport an HTML output mounts.
 const HTML_MOUNT_MARGIN = 1200
 
@@ -76,31 +78,25 @@ function useNotebookReading(text: string, fileBytes: number): ReadingState {
 	return state
 }
 
-function Runs({ runs }: { runs: readonly CodeRun[] }) {
-	return runs.map((run, index) =>
-		run.classes === "" ? (
-			run.text
-		) : (
-			<span
-				key={index}
-				className={run.classes}
-			>
-				{run.text}
-			</span>
-		)
-	)
-}
-
 function Truncated() {
 	const { t } = useTranslation("preview")
 
 	return <p className="text-xs text-muted-foreground italic">{t("previewNotebookTruncated")}</p>
 }
 
-function CodeSource({ source, runs }: { source: string; runs: readonly CodeRun[] | null }) {
+// A code cell's source, highlighted near the viewport on idle within the notebook's budget (as a markdown file's fences).
+function CodeSource({ source, language }: { source: string; language: CodeLanguageId | null }) {
 	return (
-		<pre className="fo-code-static overflow-x-auto rounded-md bg-muted/50 px-3 py-2 font-mono text-[13px] leading-5 select-text">
-			<code>{runs === null ? source : <Runs runs={runs} />}</code>
+		<pre className="overflow-x-auto rounded-md bg-muted/50 px-3 py-2 font-mono text-[13px] leading-5 select-text">
+			{language === null ? (
+				<code>{source}</code>
+			) : (
+				<HighlightedFence
+					language={language}
+					text={source}
+					className=""
+				/>
+			)}
 		</pre>
 	)
 }
@@ -199,12 +195,12 @@ function Output({ output, urls }: { output: NotebookOutput; urls: ReadonlyMap<Bl
 
 function Cell({
 	cell,
-	runs,
+	language,
 	urls,
 	alt
 }: {
 	cell: NotebookCell
-	runs: readonly CodeRun[] | null
+	language: CodeLanguageId | null
 	urls: ReadonlyMap<Blob, string>
 	alt: string
 }) {
@@ -232,7 +228,7 @@ function Cell({
 				) : (
 					<CodeSource
 						source={cell.source}
-						runs={runs}
+						language={language}
 					/>
 				)}
 				{cell.truncated ? <Truncated /> : null}
@@ -253,26 +249,13 @@ function Cell({
 	)
 }
 
-// Each code cell's runs, until HIGHLIGHT_MAX_LINES lines are highlighted; later cells stay plain.
-function highlightedRuns(cells: readonly NotebookCell[], language: CodeLanguageId | null): (readonly CodeRun[] | null)[] {
-	let lines = 0
-
-	return cells.map(cell => {
-		if (cell.kind !== "code" || language === null || lines >= HIGHLIGHT_MAX_LINES) return null
-
-		lines += cell.source.split("\n").length
-
-		return lines > HIGHLIGHT_MAX_LINES ? null : highlightCodeRuns(cell.source, language)
-	})
-}
-
 function NotebookView({ text, fileBytes, alt }: { text: string; fileBytes: number; alt: string }) {
 	const { t } = useTranslation("preview")
 	const state = useNotebookReading(text, fileBytes)
-
-	useEffect(() => {
-		mountCodeHighlightStyle(document)
-	}, [])
+	// One highlighting budget, one diagram frame and one count of diagrams for the whole notebook, its markdown cells
+	// and outputs included.
+	const [budget] = useState<FenceBudget>(newFenceBudget)
+	const scope = useMermaidScope()
 
 	if (state.status === "pending") {
 		return <PreviewLoading />
@@ -289,32 +272,35 @@ function NotebookView({ text, fileBytes, alt }: { text: string; fileBytes: numbe
 	}
 
 	const language = codeLanguageIdFor(reading.language ?? "") ?? codeLanguageIdFor(reading.extension ?? "")
-	const runs = highlightedRuns(reading.cells, language)
 
 	return (
-		<div
-			role="document"
-			aria-label={alt}
-			className="size-full overflow-auto px-4 py-4 select-text"
-		>
-			<div className="mx-auto flex max-w-5xl flex-col">
-				{reading.cellsSkipped > 0 ? (
-					<p className="flex items-center gap-1.5 pb-2 text-xs text-muted-foreground">
-						<InfoIcon className="size-3.5 shrink-0" />
-						{t("previewNotebookCellsSkipped", { count: reading.cellsSkipped })}
-					</p>
-				) : null}
-				{reading.cells.map((cell, index) => (
-					<Cell
-						key={index}
-						cell={cell}
-						runs={runs[index] ?? null}
-						urls={state.urls}
-						alt={alt}
-					/>
-				))}
-			</div>
-		</div>
+		<MermaidScopeContext value={scope}>
+			<FenceBudgetContext value={budget}>
+				<div
+					role="document"
+					aria-label={alt}
+					className="size-full overflow-auto px-4 py-4 select-text"
+				>
+					<div className="mx-auto flex max-w-5xl flex-col">
+						{reading.cellsSkipped > 0 ? (
+							<p className="flex items-center gap-1.5 pb-2 text-xs text-muted-foreground">
+								<InfoIcon className="size-3.5 shrink-0" />
+								{t("previewNotebookCellsSkipped", { count: reading.cellsSkipped })}
+							</p>
+						) : null}
+						{reading.cells.map((cell, index) => (
+							<Cell
+								key={index}
+								cell={cell}
+								language={language}
+								urls={state.urls}
+								alt={alt}
+							/>
+						))}
+					</div>
+				</div>
+			</FenceBudgetContext>
+		</MermaidScopeContext>
 	)
 }
 

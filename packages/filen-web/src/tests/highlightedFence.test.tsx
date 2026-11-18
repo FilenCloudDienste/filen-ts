@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
@@ -62,4 +62,30 @@ describe("PreviewMarkdown fences", () => {
 
 		expect(fences.map(code => code.querySelector("span") !== null)).toEqual([true, false])
 	})
+
+	it("leaves fences plain past the document's character budget", async () => {
+		// One long line a fence: lines stay few, characters run out after 17 fences of 60,000.
+		const fence = `\`\`\`python\nx = "${"a".repeat(60_000)}"\n\`\`\`\n\n`
+
+		render(
+			<PreviewMarkdown
+				text={fence.repeat(20)}
+				alt="doc"
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		await vi.waitFor(
+			() => {
+				expect(document.querySelectorAll("code.fo-code-static span").length).toBeGreaterThan(0)
+			},
+			{ timeout: 10_000 }
+		)
+		await new Promise(resolve => setTimeout(resolve, 500))
+
+		const highlighted = [...document.querySelectorAll("code.fo-code-static")].map(code => code.querySelector("span") !== null)
+
+		expect(highlighted.filter(Boolean)).toHaveLength(17)
+		expect(highlighted.slice(17)).toEqual([false, false, false])
+	}, 20_000)
 })

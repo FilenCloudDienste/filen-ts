@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react"
+import { useContext, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { MarkdownPre } from "@/features/preview/components/markdownRenderer"
@@ -114,13 +114,16 @@ function DiagramState({ state, source }: { state: Exclude<MermaidDiagramState, {
 	}
 }
 
-// A markdown fence, the document's `ordinal`th diagram. Without a scope (no diagram host above) it stays its source.
-export function MermaidFence({ source, ordinal }: { source: string; ordinal: number }) {
+// A markdown fence, the document's `ordinal`th diagram (its scope counts across a notebook's cells). Without a scope (no
+// diagram host above) it stays its source.
+export function MermaidFence({ source, ordinal: ownOrdinal }: { source: string; ordinal: number }) {
 	const { t } = useTranslation("preview")
 	const scope = useContext(MermaidScopeContext)
 	const [near, setNear] = useState(false)
 	const [asked, setAsked] = useState(false)
 	const ref = useRef<HTMLDivElement>(null)
+	const key = useId()
+	const ordinal = scope === null ? ownOrdinal : scope.ordinalFor(key)
 	const automatic = ordinal < MERMAID_AUTO_RENDER_LIMIT
 
 	useEffect(() => {

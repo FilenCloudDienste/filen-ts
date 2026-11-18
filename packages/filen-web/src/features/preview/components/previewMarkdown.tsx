@@ -1,10 +1,10 @@
-import { useState, type ReactNode } from "react"
+import { useContext, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { MarkdownComponents, MarkdownExtensions } from "@filen/office/react/markdown"
 import { MarkdownCode, MarkdownPre, MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { MathFormula } from "@/features/preview/components/mathFormula"
 import { HighlightedFence } from "@/features/preview/components/highlightedFence"
-import { FenceBudgetContext, type FenceBudget } from "@/features/preview/lib/fenceBudget"
+import { FenceBudgetContext, newFenceBudget, type FenceBudget } from "@/features/preview/lib/fenceBudget"
 import { previewMarkdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
 import { MermaidFence } from "@/features/preview/components/mermaidDiagram"
 import { useMermaidScope } from "@/features/preview/hooks/useMermaidDiagram"
@@ -91,9 +91,14 @@ function PreviewImage({ src, alt }: { src?: string | Blob | undefined; alt?: str
 const OVERRIDES: MarkdownComponents = { code: PreviewCode, pre: PreviewPre, img: PreviewImage }
 
 export function PreviewMarkdown({ text, alt }: { text: string; alt: string }) {
-	// The document's fence highlighting budget, kept for its life.
-	const [budget] = useState<FenceBudget>(() => ({ lines: 0 }))
-	const scope = useMermaidScope()
+	// The document's fence highlighting budget and diagram scope, kept for its life; a notebook's cells share their
+	// notebook's (one budget, one frame and one count of diagrams a document).
+	const outerBudget = useContext(FenceBudgetContext)
+	const outerScope = useContext(MermaidScopeContext)
+	const [ownBudget] = useState<FenceBudget>(newFenceBudget)
+	const ownScope = useMermaidScope()
+	const budget = outerBudget ?? ownBudget
+	const scope = outerScope ?? ownScope
 
 	return (
 		<MermaidScopeContext value={scope}>
