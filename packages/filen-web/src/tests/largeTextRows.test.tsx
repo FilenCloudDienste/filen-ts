@@ -20,9 +20,9 @@ function row(start: number, text: string): PagerRowView {
 
 const ROWS = Array.from({ length: 60 }, (_, index) => row(index * 200, `${"x".repeat(150)} needle ${String(index)}`))
 
-function reading(): TextPagerReading {
+function reading(rows: readonly PagerRowView[] = ROWS, column = 151): TextPagerReading {
 	const remote = {
-		locate: (): Promise<PagerRows> => Promise.resolve({ rows: ROWS, focus: 5, column: 151 }),
+		locate: (): Promise<PagerRows> => Promise.resolve({ rows, focus: 5, column }),
 		after: () => Promise.resolve([]),
 		before: () => Promise.resolve([])
 	}
@@ -96,5 +96,34 @@ describe("LargeTextRows", () => {
 		expect(scroller.scrollLeft).toBe(0)
 		expect(scroller.scrollTop).toBe(0)
 		expect(intoView).not.toHaveBeenCalled()
+	})
+
+	it("marks at most 200 matches a row and 2000 a screen, the active one always", async () => {
+		const long = Array.from({ length: 60 }, (_, index) => row(index * 5000, "a".repeat(4096)))
+
+		render(
+			<LargeTextRows
+				reading={reading(long, 4000)}
+				alt="big.log"
+				fontSize={13}
+				pattern={searchPattern("a", true)}
+				jump={{ seq: 1, offset: 5 * 5000 + 4000, before: 3, line: null, match: true }}
+				linesVersion={0}
+				position={positionStore()}
+			/>
+		)
+
+		const scroller = screen.getByRole("document", { name: "big.log" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const rows = [...scroller.querySelectorAll("[data-row]")]
+
+		expect(rows.length).toBeGreaterThan(10)
+		expect(rows.every(each => each.querySelectorAll("mark").length <= 201)).toBe(true)
+		expect(scroller.querySelectorAll("mark").length).toBeLessThanOrEqual(2001)
+		expect(scroller.querySelector("[data-active-match]")).not.toBeNull()
 	})
 })

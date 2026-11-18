@@ -49,33 +49,49 @@ const THUMB_PX = 32
 const MATCH_CLASS = "rounded-[2px] bg-[color-mix(in_oklab,#facc15_35%,transparent)] text-inherit"
 const ACTIVE_CLASS = "rounded-[2px] bg-[color-mix(in_oklab,#f97316_45%,transparent)] text-inherit"
 
-function RowText({ text, pattern, active }: { text: string; pattern: RegExp | null; active: number | null }): ReactNode {
+// Matches marked at most, in a row and on the screen: a one-character query on long rows would otherwise mark thousands.
+// The active match is always marked.
+const ROW_MARKS = 200
+const SCREEN_MARKS = 2000
+
+// A row's text with its matches marked, at most `limit` of them besides the active one; and how many were.
+function markedText(text: string, pattern: RegExp | null, active: number | null, limit: number): { parts: ReactNode; marks: number } {
 	if (pattern === null || text === "") {
-		return text
+		return { parts: text, marks: 0 }
 	}
 
 	const parts: ReactNode[] = []
 	let last = 0
+	let marks = 0
 
 	// matchAll runs on a copy of the pattern: the shared one is never touched.
 	for (const match of text.matchAll(pattern)) {
+		const isActive = match.index === active
+
+		if (!isActive && marks >= limit) {
+			if (active === null || active < match.index) break
+
+			continue
+		}
+
 		if (match.index > last) parts.push(text.slice(last, match.index))
 
 		parts.push(
 			<mark
 				key={match.index}
-				className={match.index === active ? ACTIVE_CLASS : MATCH_CLASS}
-				{...(match.index === active ? { "data-active-match": true } : {})}
+				className={isActive ? ACTIVE_CLASS : MATCH_CLASS}
+				{...(isActive ? { "data-active-match": true } : {})}
 			>
 				{match[0]}
 			</mark>
 		)
 		last = match.index + match[0].length
+		marks++
 	}
 
 	parts.push(text.slice(last))
 
-	return parts
+	return { parts, marks }
 }
 
 export function LargeTextRows({
@@ -410,6 +426,20 @@ export function LargeTextRows({
 	}
 
 	const rows = view.rows.slice(view.top, view.top + shown)
+	const texts: ReactNode[] = []
+	let marksLeft = SCREEN_MARKS
+
+	for (const row of rows) {
+		const marked = markedText(
+			row.text,
+			pattern,
+			view.active !== null && view.active.start === row.start ? view.active.column : null,
+			Math.min(ROW_MARKS, marksLeft)
+		)
+
+		marksLeft = Math.max(0, marksLeft - marked.marks)
+		texts.push(marked.parts)
+	}
 	const numbered = rows.reduce((widest, row) => Math.max(widest, row.line ?? 0), 0)
 	const gutter = `${String(Math.max(2, String(numbered).length + (numbered > 0 ? 1 : 0)))}ch`
 
@@ -432,7 +462,7 @@ export function LargeTextRows({
 					className="w-max min-w-full"
 					style={{ transform: `translateY(${String(-view.shift)}px)` }}
 				>
-					{rows.map(row => (
+					{rows.map((row, index) => (
 						<div
 							key={row.start}
 							data-row
@@ -454,13 +484,7 @@ export function LargeTextRows({
 									row.line
 								)}
 							</span>
-							<span className="pr-4 whitespace-pre">
-								<RowText
-									text={row.text}
-									pattern={pattern}
-									active={view.active !== null && view.active.start === row.start ? view.active.column : null}
-								/>
-							</span>
+							<span className="pr-4 whitespace-pre">{texts[index]}</span>
 						</div>
 					))}
 				</div>
