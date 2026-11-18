@@ -30,7 +30,7 @@ test.describe("RAR archives", () => {
 		expect(cspViolations).toEqual([])
 	})
 
-	test("a solid comic book's first page opens at once, a later one after its cost is confirmed", async ({ page }) => {
+	test("a solid comic book asks its cost once: the first page opens at once, the others after one confirm", async ({ page }) => {
 		await bootTo(page)
 
 		const { listbox } = await openFixtureRows(page, "archive-rar")
@@ -48,7 +48,16 @@ test.describe("RAR archives", () => {
 		const confirm = page.getByRole("alertdialog", { name: "Read part of the archive first?" })
 
 		await expect(confirm).toBeVisible()
+		await expect(confirm).toContainText("You won't be asked again while this archive is open.")
 		await confirm.getByRole("button", { name: "Open", exact: true }).click()
 		await expect(browser.overlay.getByText(rarComicPageText(3).split("\n")[0] ?? "", { exact: false }).first()).toBeVisible()
+
+		// Page on, and back to one before: neither asks again.
+		for (const turn of [4, 2]) {
+			await browser.overlay.getByRole("button", { name: "Back to the archive", exact: true }).click()
+			await browser.row(`page-0${String(turn)}.txt`).dblclick()
+			await expect(browser.overlay.getByText(rarComicPageText(turn).split("\n")[0] ?? "", { exact: false }).first()).toBeVisible()
+			await expect(confirm).toHaveCount(0)
+		}
 	})
 })

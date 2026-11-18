@@ -135,6 +135,17 @@ afterEach(() => {
 })
 
 describe("openListingSession", () => {
+	it("remembers an accepted solid cost for its own life only", () => {
+		const { deps } = harness()
+		const session = openListingSession(source("a.cbr", 10), deps)
+
+		expect(session.costAccepted()).toBe(false)
+		session.acceptCost()
+		expect(session.costAccepted()).toBe(true)
+		session.dispose()
+		expect(openListingSession(source("a.cbr", 10), deps).costAccepted()).toBe(false)
+	})
+
 	it("starts a zip's listing once it has been shown for 150 ms", async () => {
 		const { calls, call, deps } = harness()
 		const zip = source("a.zip", 5 * 1024 * MiB)

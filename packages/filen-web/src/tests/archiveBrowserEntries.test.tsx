@@ -153,8 +153,13 @@ const MiB = 1024 * 1024
 
 function fakeSession(store: EntryStore, password?: string): ListingSession & { acceptPassword: Mock<(password: string) => void> } {
 	const snapshot: ListingSnapshot = { phase: { type: "done", summary: SUMMARY }, store, version: 0, info: INFO }
+	let costAccepted = false
 
 	return {
+		costAccepted: () => costAccepted,
+		acceptCost: () => {
+			costAccepted = true
+		},
 		getSnapshot: () => snapshot,
 		subscribe: () => () => undefined,
 		start: vi.fn(),
@@ -316,13 +321,44 @@ describe("an archive entry on its own", () => {
 
 		const dialog = await screen.findByRole("alertdialog")
 
-		expect(dialog.textContent).toMatch(/about 2(\.0)? MiB of the archive is downloaded, and 5(\.0)? MiB/)
+		expect(dialog.textContent).toMatch(/downloads about 2(\.0)? MiB of it and unpacks 5(\.0)? MiB/)
+		expect(dialog.textContent).toContain("You won't be asked again while this archive is open.")
 		expect(loadEntryBytes).not.toHaveBeenCalled()
 
 		fireEvent.click(within(dialog).getByRole("button", { name: "Open" }))
 
 		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
 		expect(loadEntryBytes.mock.calls[0]?.[0]).toMatchObject({ params: { maxSolidSkip: 5 * MiB } })
+	})
+
+	it("asks once per listing session: a later solid entry opens unasked, still bounded by its own skip", async () => {
+		const solid = (skipped: number) =>
+			({
+				type: "solidBlock",
+				skippedBytes: BigInt(skipped),
+				estimatedPackedBytes: BigInt(skipped + MiB),
+				blockPackedBytes: BigInt(9 * MiB)
+			}) as const
+
+		show([
+			{ path: "a.md", size: 3, access: solid(MiB) },
+			{ path: "b.md", size: 3, access: solid(4 * MiB) }
+		])
+
+		fireEvent.doubleClick(row("a.md"))
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Open" }))
+		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
+
+		act(() => {
+			fireEvent.keyDown(screen.getByRole("button", { name: "Back to the archive" }), withCode({ key: "Escape" }))
+		})
+		fireEvent.doubleClick(row("b.md"))
+
+		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(loadEntryBytes.mock.calls.map(([request]) => (request as { params: { maxSolidSkip: number } }).params.maxSolidSkip)).toEqual(
+			[MiB, 4 * MiB]
+		)
 	})
 
 	it("asks an encrypted entry's password before saving, and gives the listing one that worked", async () => {

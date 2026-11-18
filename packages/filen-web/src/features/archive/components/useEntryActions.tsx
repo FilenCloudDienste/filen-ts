@@ -43,7 +43,7 @@ export interface ViewedEntryState extends EntryTarget {
 export interface EntryActions {
 	viewing: ViewedEntryState | null
 	closeViewer: () => void
-	// Opens or saves it, confirming a solid block entry's cost first.
+	// Opens or saves it, confirming a solid block entry's cost first, once per listing session.
 	request: (target: EntryTarget, intent: EntryIntent) => void
 	// A double-click or Enter on a file: opened when it previews, else saved; false when neither applies.
 	activate: (target: EntryTarget) => boolean
@@ -138,10 +138,11 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 			return
 		}
 
-		// Bytes already held cost nothing to show again.
+		// Bytes already held cost nothing to show again; once the session accepted a cost, its later entries are asked
+		// no more (each stays bounded by its own listed skip).
 		const held = intent === "open" && getPreviewBytes(cacheScope, entryKey(source.uuid, target.store.index(target.slot))) !== undefined
 
-		if (!held && needsCostConfirm(target.store, target.slot)) {
+		if (!held && session()?.costAccepted() !== true && needsCostConfirm(target.store, target.slot)) {
 			setCostAsk({ ...target, intent })
 
 			return
@@ -189,6 +190,7 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 				onConfirm={() => {
 					if (costAsk !== null) {
 						setCostAsk(null)
+						session()?.acceptCost()
 						run(costAsk, costAsk.intent)
 					}
 				}}

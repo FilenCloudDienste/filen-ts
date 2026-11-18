@@ -89,6 +89,10 @@ export interface ListingSession {
 	password: () => string | undefined
 	// One an entry's own preview or download proved right: later extracts and entries take it unasked.
 	acceptPassword: (password: string) => void
+	// The user accepted reading a solid block's earlier files to reach an entry: later entries of this session open
+	// unasked, each still bounded by its own listed skip.
+	costAccepted: () => boolean
+	acceptCost: () => void
 	// Where the browser is, "" the root: a cached listing reopens there.
 	rememberDirPath: (path: string) => void
 	restoredDirPath: () => string
@@ -216,6 +220,7 @@ export function openListingSession(
 	let run: Run | null = null
 	let pendingStart: AbortController | null = null
 	let disposed = false
+	let costAccepted = false
 	// The reader of the accepted password, which the browser's entries read through. Nothing is read until used.
 	let held: ArchiveReaderRef = deps.acquireReader(source.file, source.anon, accepted)
 
@@ -555,6 +560,12 @@ export function openListingSession(
 
 			if (summary !== null && !summary.verifying && (summary.password === "required" || summary.password === "wrong")) {
 				setPhase(withSummary(snapshot.phase, { ...summary, password: "right", verifyError: null }))
+			}
+		},
+		costAccepted: () => costAccepted,
+		acceptCost: () => {
+			if (!disposed) {
+				costAccepted = true
 			}
 		},
 		rememberDirPath: path => {

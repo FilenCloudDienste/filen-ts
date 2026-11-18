@@ -88,6 +88,8 @@ function sessionSpies() {
 		submitPassword: vi.fn<(password: string) => void>(),
 		acceptPassword: vi.fn<(password: string) => void>(),
 		rememberDirPath: vi.fn<(path: string) => void>(),
+		costAccepted: () => false,
+		acceptCost: vi.fn<() => void>(),
 		dispose: vi.fn<() => void>()
 	}
 }
