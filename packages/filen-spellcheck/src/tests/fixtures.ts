@@ -15,6 +15,9 @@ export function dictionariesBuilt(): boolean {
 
 export const TINY_AFF = "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\nREP 1\nREP f ph\nSFX S Y 1\nSFX S 0 s .\n"
 export const TINY_DIC = "5\nhello\nworld/S\ncafé\nphone\nspell/S\n"
+// A dictionary where the fast pass finds nothing for "spelign" and the n-gram pass finds "spelling".
+export const NGRAM_AFF = "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n"
+export const NGRAM_DIC = "2\nmonitor\nspelling\n"
 
 export const BASE = "https://app.test/"
 
@@ -91,8 +94,15 @@ export function tinyAssets(origin: FakeOrigin): SpellcheckAssets {
 	}
 }
 
+// Cache Storage calls that answer with a rejected promise (unavailable storage, quota exceeded).
+export interface CacheFailures {
+	readonly open?: "reject"
+	readonly match?: "reject"
+	readonly put?: "reject"
+}
+
 // A minimal Cache Storage (one cache per name, keyed by absolute URL).
-export function memoryCaches(): CacheStorage & { stored: Map<string, Map<string, Response>> } {
+export function memoryCaches(failures: CacheFailures = {}): CacheStorage & { stored: Map<string, Map<string, Response>> } {
 	const stored = new Map<string, Map<string, Response>>()
 	const cacheOf = (name: string): Cache => {
 		let entries = stored.get(name)
@@ -107,8 +117,11 @@ export function memoryCaches(): CacheStorage & { stored: Map<string, Map<string,
 			new URL(typeof request === "string" ? request : request instanceof URL ? request.href : request.url, BASE).href
 
 		return {
-			match: (request: RequestInfo | URL) => Promise.resolve(map.get(key(request))?.clone()),
+			match: (request: RequestInfo | URL) =>
+				failures.match === "reject" ? Promise.reject(new Error("match failed")) : Promise.resolve(map.get(key(request))?.clone()),
 			put: async (request: RequestInfo | URL, response: Response) => {
+				if (failures.put === "reject") throw new DOMException("Quota exceeded", "QuotaExceededError")
+
 				map.set(key(request), new Response(await response.arrayBuffer(), { headers: response.headers }))
 			},
 			keys: () => Promise.resolve([...map.keys()].map(url => new Request(url))),
@@ -118,7 +131,7 @@ export function memoryCaches(): CacheStorage & { stored: Map<string, Map<string,
 
 	return {
 		stored,
-		open: (name: string) => Promise.resolve(cacheOf(name))
+		open: (name: string) => (failures.open === "reject" ? Promise.reject(new Error("open failed")) : Promise.resolve(cacheOf(name)))
 	} as unknown as CacheStorage & { stored: Map<string, Map<string, Response>> }
 }
 
@@ -126,19 +139,24 @@ export function memoryCaches(): CacheStorage & { stored: Map<string, Map<string,
 export interface InThreadWorker extends SpellcheckPort {
 	readonly received: SpellcheckRequest[]
 	readonly terminated: boolean
+	// The worker dies on its own (a failed script, out of memory): nothing more is delivered either way and
+	// the host hears the error. terminated stays as the host left it.
+	crash(): void
 }
 
 export function inThreadWorker(options: SpellcheckWorkerOptions): InThreadWorker {
 	let toWorker: ((message: SpellcheckRequest) => void) | undefined
 	let toHost: ((message: SpellcheckResponse) => void) | undefined
+	let fail: (() => void) | undefined
 	let terminated = false
+	let crashed = false
 	const received: SpellcheckRequest[] = []
 
 	serveSpellcheckWorker(
 		{
 			post: message => {
 				setTimeout(() => {
-					if (!terminated) toHost?.(message)
+					if (!terminated && !crashed) toHost?.(message)
 				})
 			},
 			listen: onMessage => {
@@ -156,11 +174,16 @@ export function inThreadWorker(options: SpellcheckWorkerOptions): InThreadWorker
 		post: message => {
 			received.push(message)
 			setTimeout(() => {
-				if (!terminated) toWorker?.(message)
+				if (!terminated && !crashed) toWorker?.(message)
 			})
 		},
-		listen: onMessage => {
+		listen: (onMessage, onError) => {
 			toHost = onMessage
+			fail = onError
+		},
+		crash: () => {
+			crashed = true
+			fail?.()
 		},
 		terminate: () => {
 			terminated = true

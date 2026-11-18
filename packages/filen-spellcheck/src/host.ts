@@ -1,5 +1,12 @@
 import { dictionaryFor } from "./languages"
-import { WORD_SEPARATOR, type SpellcheckAssets, type SpellcheckPort, type SpellcheckRequest, type SpellcheckResponse } from "./protocol"
+import {
+	MAX_WORD_LENGTH,
+	WORD_SEPARATOR,
+	type SpellcheckAssets,
+	type SpellcheckPort,
+	type SpellcheckRequest,
+	type SpellcheckResponse
+} from "./protocol"
 
 // The page's side of spellchecking: verdicts cached per dictionary (a document repeats its words: about
 // 12k unique among 84k), checks batched to a worker that keeps the dictionaries loaded, and suggestions
@@ -36,8 +43,8 @@ const BATCH = 4096
 // Verdicts kept per dictionary; past this the cache starts over (a document rarely has more unique words).
 const MAX_VERDICTS = 200_000
 const MAX_SUGGESTION_ENTRIES = 64
-// Longer "words" (identifiers, encoded data) are not checked.
-export const MAX_WORD_LENGTH = 100
+
+export { MAX_WORD_LENGTH }
 
 export class SpellcheckAbortError extends Error {
 	constructor() {
@@ -64,14 +71,6 @@ class WorkerSlot {
 	constructor(host: SpellcheckHost, idleMs: number) {
 		this.host = host
 		this.idleMs = idleMs
-	}
-
-	get alive(): boolean {
-		return this.port !== undefined
-	}
-
-	get busy(): boolean {
-		return this.pending.size > 0
 	}
 
 	private open(): SpellcheckPort {
@@ -231,13 +230,14 @@ export class SpellcheckHost {
 		return id !== undefined && id in this.options.assets.dictionaries ? id : undefined
 	}
 
-	// The cached verdict for a word; undefined until checked.
+	// The cached verdict for a word; undefined until checked. Words are expected in NFC, the form the
+	// dictionaries and the user's dictionary hold.
 	known(dictionary: string, word: string): boolean | undefined {
 		return this.verdicts.get(dictionary)?.get(word)
 	}
 
 	// Checks the words without a cached verdict (known() answers for them afterwards). Rejects when the
-	// dictionary could not be loaded.
+	// dictionary could not be loaded. Words are expected in NFC (they are looked up as given).
 	async check(dictionary: string, words: Iterable<string>): Promise<void> {
 		if (this.disposed) return
 
@@ -356,19 +356,16 @@ export class SpellcheckHost {
 			})
 			const suggestions = response.type === "suggested" ? response.suggestions : []
 
-			if (generation === this.generation) {
-				if (this.suggestions.size >= MAX_SUGGESTION_ENTRIES) {
-					const oldest = this.suggestions.keys().next()
-
-					if (oldest.done !== true) this.suggestions.delete(oldest.value)
-				}
-
-				this.suggestions.set(key, suggestions)
-			}
+			if (generation === this.generation) this.remember(key, suggestions)
 
 			return suggestions
 		} catch (error) {
-			if (timedOut) return []
+			if (timedOut) {
+				// The same request would overrun again: its empty answer stands until the caches go.
+				if (generation === this.generation) this.remember(key, [])
+
+				return []
+			}
 
 			throw error
 		} finally {
@@ -377,6 +374,16 @@ export class SpellcheckHost {
 
 			if (this.running === running) this.running = undefined
 		}
+	}
+
+	private remember(key: string, suggestions: readonly string[]): void {
+		if (this.suggestions.size >= MAX_SUGGESTION_ENTRIES) {
+			const oldest = this.suggestions.keys().next()
+
+			if (oldest.done !== true) this.suggestions.delete(oldest.value)
+		}
+
+		this.suggestions.set(key, suggestions)
 	}
 
 	// The user's dictionary: accepted in every language. Additions reach the loaded dictionaries; a removal
@@ -395,6 +402,8 @@ export class SpellcheckHost {
 
 		this.userWords = next
 		this.generation++
+		// Checks still on their way are not waited on: their answers are not cached, so a re-check asks again.
+		this.inflight.clear()
 		this.suggestions.clear()
 
 		if (removed) {

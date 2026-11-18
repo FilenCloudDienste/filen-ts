@@ -37,7 +37,6 @@ export type SpellcheckRequest =
 	| { readonly type: "suggest"; readonly id: number; readonly dictionary: string; readonly word: string; readonly ngram: boolean }
 	// Adds words to every loaded dictionary.
 	| { readonly type: "add"; readonly words: readonly string[] }
-	| { readonly type: "unload"; readonly dictionary: string }
 
 export type SpellcheckResponse =
 	| { readonly type: "loaded"; readonly id: number }
@@ -61,3 +60,6 @@ export interface SpellcheckWorkerScope {
 
 // Word lists are joined with this; no word contains it.
 export const WORD_SEPARATOR = "\n"
+
+// Longer "words" (identifiers, encoded data) are not checked, nor taken as the user's.
+export const MAX_WORD_LENGTH = 100

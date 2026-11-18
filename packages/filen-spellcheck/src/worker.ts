@@ -236,15 +236,6 @@ export function serveSpellcheckWorker(scope: SpellcheckWorkerScope, options: Spe
 				}
 
 				return
-			case "unload": {
-				const dictionary = dictionaries.get(request.dictionary)
-
-				dictionaries.delete(request.dictionary)
-				void dictionary?.then(
-					loadedDictionary => loadedDictionary.dispose(),
-					() => undefined
-				)
-			}
 		}
 	}
 

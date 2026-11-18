@@ -1,3 +1,5 @@
+import { MAX_WORD_LENGTH } from "./protocol"
+
 // The user's dictionary as stored (end-to-end encrypted, as a file the apps sync): words the user added,
 // accepted in every language. Each word is a last-writer-wins register, so devices that edit offline merge
 // without losing an addition or resurrecting a removal; removals stay as tombstones (the list is small).
@@ -8,7 +10,7 @@
 
 export const USER_DICTIONARY_FILE_NAME = "user-dictionary.v1.json"
 export const USER_DICTIONARY_VERSION = 1
-export const MAX_USER_WORD_LENGTH = 100
+export const MAX_USER_WORD_LENGTH = MAX_WORD_LENGTH
 // A bound against a corrupted or hostile file, far above any real list.
 export const MAX_USER_WORDS = 50_000
 

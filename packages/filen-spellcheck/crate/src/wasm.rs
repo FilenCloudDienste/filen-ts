@@ -6,7 +6,7 @@
 
 #![allow(unsafe_code)]
 
-use crate::boundary::{Boundary, ERR_MEMORY};
+use crate::boundary::Boundary;
 use core::cell::RefCell;
 
 std::thread_local! {
@@ -65,10 +65,4 @@ pub extern "C" fn fs_suggest(id: u32, len: u32, ngram: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn fs_add(id: u32, len: u32) -> i32 {
     with(|boundary| boundary.add(id, len))
-}
-
-/// Bytes the scratch region holds (0 before the first `fs_buffer`); `ERR_MEMORY` never fits a real one.
-#[unsafe(no_mangle)]
-pub extern "C" fn fs_capacity() -> i32 {
-    with(|boundary| i32::try_from(boundary.capacity()).unwrap_or(ERR_MEMORY))
 }

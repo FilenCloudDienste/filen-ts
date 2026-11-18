@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { beforeAll, describe, expect, it } from "vitest"
 import { SpellEngine, type SpellDictionary } from "../engine"
 import { DICTIONARY_IDS } from "../languages"
-import { MANIFEST_URL, TINY_AFF, TINY_DIC, dictionariesBuilt, readDictionary, wasmBytes } from "./fixtures"
+import { MANIFEST_URL, NGRAM_AFF, NGRAM_DIC, TINY_AFF, TINY_DIC, dictionariesBuilt, readDictionary, wasmBytes } from "./fixtures"
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
 
@@ -31,17 +31,26 @@ describe("SpellEngine", () => {
 		const words = Array.from({ length: 5000 }, (_, i) => (i % 2 === 0 ? "café" : `wörd${String(i)}`))
 		const verdicts = tiny.check(words)
 
-		expect(verdicts.length).toBe(5000)
-		expect(verdicts[0]).toBe(1)
-		expect(verdicts[1]).toBe(0)
+		expect([...verdicts]).toEqual(words.map((_, i) => (i % 2 === 0 ? 1 : 0)))
 		expect([...tiny.check(["hello"])]).toEqual([1])
+	})
+
+	it("refuses a word list whose count does not match", () => {
+		expect(() => tiny.check(["a\nb"])).toThrow(/rejected a word list/)
 	})
 
 	it("suggests corrections, fast pass and n-gram pass", () => {
 		expect(tiny.suggest("helo", false)[0]).toBe("hello")
 		expect(tiny.suggest("fone", false)).toContain("phone")
 		expect(tiny.suggest("x\ny", false)).toEqual([])
-		expect(Array.isArray(tiny.suggest("wrold", true))).toBe(true)
+	})
+
+	it("runs the n-gram pass only when asked", () => {
+		const dictionary = engine.load(encode(NGRAM_AFF), encode(NGRAM_DIC))
+
+		expect(dictionary?.suggest("spelign", false)).toEqual([])
+		expect(dictionary?.suggest("spelign", true)).toContain("spelling")
+		dictionary?.dispose()
 	})
 
 	it("adds words with Hunspell's casing", () => {

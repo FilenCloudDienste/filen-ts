@@ -12,7 +12,7 @@ On-device spellchecking for the Filen apps: [spellbook](https://github.com/helix
 | `scripts/build-dictionaries.ts` | `pnpm run build:dictionaries [--offline]`: downloads the pinned upstream files (verified), builds the dictionaries into `.dictionaries/` (gitignored) and checks every output against the manifest; `--update` (maintainers) rewrites the manifest and notices. See `dictionaries/README.md`. |
 | `dictionaries/` | Committed: `manifest.json` (pinned sources, expected output sizes and SHA-256, licences, holders, modifications) and each dictionary's licence and readme files. The 49 MB of built `.aff`/`.dic` are never committed. |
 | `src/engine.ts` | The wasm module from JavaScript (platform-free). |
-| `src/worker.ts` | The worker side: loads dictionaries (fetch, gzip inflated straight into wasm memory, SHA-256 verified, Cache Storage), checks and suggests. |
+| `src/worker.ts` | The worker side: loads dictionaries (fetch, gzip inflated into a worker buffer and copied into the module in one step, SHA-256 verified on network reads, Cache Storage), checks and suggests. |
 | `src/host.ts` | The page side: verdict cache per dictionary, batched checks in one worker, suggestions in a second worker it terminates when a slow request is superseded or overruns; idle workers end (wasm memory never shrinks). |
 | `src/languages.ts` | Language tag (OOXML `w:lang`, BCP 47) to dictionary. |
 | `src/userDictionary.ts` | The synced user dictionary's format and merge (last-writer-wins per word). |

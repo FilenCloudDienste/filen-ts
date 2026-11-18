@@ -21,6 +21,14 @@ function setup(options: Partial<SpellcheckHostOptions> = {}) {
 }
 
 const checks = (worker: InThreadWorker | undefined) => worker?.received.filter(message => message.type === "check") ?? []
+const suggests = (worker: InThreadWorker | undefined) => worker?.received.filter(message => message.type === "suggest") ?? []
+
+// Yields macrotasks until `condition` holds.
+async function until(condition: () => boolean): Promise<void> {
+	for (let round = 0; round < 1000 && !condition(); round++) await new Promise(resolve => setTimeout(resolve, 0))
+
+	if (!condition()) throw new Error("condition not reached")
+}
 
 describe("SpellcheckHost", () => {
 	it("maps languages to the dictionaries it has", () => {
@@ -68,6 +76,21 @@ describe("SpellcheckHost", () => {
 		host.dispose()
 	})
 
+	it("treats words with a separator as correct without asking, and never takes them as the user's", async () => {
+		const { host, workers } = setup()
+		let changes = 0
+
+		host.subscribe(() => changes++)
+		await host.check("en_US", ["he\nllo"])
+		expect(host.known("en_US", "he\nllo")).toBe(true)
+		expect(await host.suggest("en_US", "a\nb")).toEqual([])
+		host.setUserWords(["a\nb"])
+		expect(changes).toBe(0)
+		expect(host.userWords.size).toBe(0)
+		expect(workers).toHaveLength(0)
+		host.dispose()
+	})
+
 	it("keeps dictionaries apart", async () => {
 		const { host } = setup()
 
@@ -77,27 +100,52 @@ describe("SpellcheckHost", () => {
 		host.dispose()
 	})
 
-	it("rejects checks for a dictionary that fails to load, backs off, and retries later", async () => {
+	it("rejects checks for a dictionary that fails to load, backs off doubling up to a cap, and starts over after a load", async () => {
 		let time = 0
 		const { host, origin, workers } = setup({ now: () => time })
 		const dic = [...origin.files.keys()].find(url => url.endsWith("/de.dic.gz")) ?? ""
 		const file = origin.files.get(dic)
 
-		origin.files.delete(dic)
-		await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
+		if (file === undefined) throw new Error("fixture")
 
-		if (file !== undefined) origin.files.set(dic, file)
-
-		// Within the back-off nothing is fetched again.
 		const loads = () => workers.flatMap(worker => worker.received).filter(message => message.type === "load").length
 
+		origin.files.delete(dic)
 		await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
 		expect(loads()).toBe(1)
 
-		time += 15_000
+		// Within each back-off nothing is fetched again; it starts at 15 s and doubles per failure up to 5 min.
+		for (const [index, delay] of [15_000, 30_000, 60_000, 120_000, 240_000, 300_000, 300_000].entries()) {
+			time += delay - 1
+			await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
+			expect(loads()).toBe(index + 1)
+
+			time += 1
+			await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
+			expect(loads()).toBe(index + 2)
+		}
+
+		origin.files.set(dic, file)
+		time += 300_000
 		await host.check("de_DE", ["Haus"])
 		expect(host.known("de_DE", "Haus")).toBe(true)
-		expect(loads()).toBe(2)
+		expect(loads()).toBe(9)
+
+		// A load forgets the failures: the next one backs off 15 s again.
+		host.open()()
+		origin.files.delete(dic)
+		await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
+		expect(loads()).toBe(10)
+
+		origin.files.set(dic, file)
+		time += 14_999
+		await expect(host.check("de_DE", ["Haus"])).rejects.toThrow(/404/)
+		expect(loads()).toBe(10)
+
+		time += 1
+		await host.check("de_DE", ["Haus"])
+		expect(host.known("de_DE", "Haus")).toBe(true)
+		expect(loads()).toBe(11)
 		host.dispose()
 	})
 
@@ -123,19 +171,28 @@ describe("SpellcheckHost", () => {
 		await expect(slow).rejects.toMatchObject({ name: "AbortError" })
 		expect(await fast).toContain("hello")
 		expect(workers[0]?.terminated).toBe(true)
+
+		// An abandoned request is not remembered: asking again asks the worker.
+		expect(suggests(workers[1])).toHaveLength(1)
+		expect(Array.isArray(await host.suggest("en_US", "wrold", { more: true }))).toBe(true)
+		expect(suggests(workers[1])).toHaveLength(2)
 		host.dispose()
 	})
 
-	it("answers [] when a suggestion request overruns", async () => {
+	it("answers [] when a suggestion request overruns, and remembers that", async () => {
 		const { host, workers } = setup({ suggestTimeoutMs: 0 })
 
 		expect(await host.suggest("en_US", "helo", { more: true })).toEqual([])
 		expect(workers[0]?.terminated).toBe(true)
+
+		// The same request would overrun again: no new worker, no new request.
+		expect(await host.suggest("en_US", "helo", { more: true })).toEqual([])
+		expect(workers).toHaveLength(1)
 		host.dispose()
 	})
 
 	it("stops on an abort signal", async () => {
-		const { host } = setup()
+		const { host, workers } = setup()
 		const controller = new AbortController()
 
 		controller.abort()
@@ -146,6 +203,12 @@ describe("SpellcheckHost", () => {
 
 		running.abort()
 		await expect(request).rejects.toMatchObject({ name: "AbortError" })
+
+		// An aborted request is not remembered.
+		const sent = workers.flatMap(worker => suggests(worker)).length
+
+		expect(Array.isArray(await host.suggest("en_US", "wrold", { more: true }))).toBe(true)
+		expect(workers.flatMap(worker => suggests(worker)).length).toBe(sent + 1)
 		host.dispose()
 	})
 
@@ -176,6 +239,78 @@ describe("SpellcheckHost", () => {
 
 		await host.check("en_US", ["zorp"])
 		expect(host.known("en_US", "zorp")).toBe(false)
+		expect(workers).toHaveLength(2)
+		host.dispose()
+	})
+
+	it("checks again a word added while its check was waited on", async () => {
+		const { host } = setup()
+		let recheck: Promise<void> | undefined
+
+		host.subscribe(() => {
+			recheck = host.check("en_US", ["zorp", "helo"])
+		})
+
+		const first = host.check("en_US", ["zorp", "helo"])
+
+		host.setUserWords(["zorp"])
+		await Promise.all([first, recheck])
+		expect(host.known("en_US", "zorp")).toBe(true)
+		expect(host.known("en_US", "helo")).toBe(false)
+		host.dispose()
+	})
+
+	it("does not cache an answer computed before the user's words changed", async () => {
+		const { host, workers } = setup()
+
+		await host.check("en_US", ["hello"])
+
+		const pending = host.check("en_US", ["zorp"])
+
+		// The check is on its way to the worker, ahead of the addition.
+		await until(() => checks(workers[0]).some(message => message.type === "check" && message.words === "zorp"))
+		host.setUserWords(["zorp"])
+		await pending
+		expect(host.known("en_US", "zorp")).toBeUndefined()
+
+		await host.check("en_US", ["zorp"])
+		expect(host.known("en_US", "zorp")).toBe(true)
+		expect(checks(workers[0])).toHaveLength(3)
+		host.dispose()
+	})
+
+	it("rejects what a crashed worker had pending and starts a new one", async () => {
+		const { host, workers } = setup()
+
+		await host.check("en_US", ["hello"])
+
+		const pending = host.check("en_US", ["helo"])
+
+		await until(() => checks(workers[0]).length === 2)
+		workers[0]?.crash()
+		await expect(pending).rejects.toThrow(/worker failed/)
+		expect(workers[0]?.terminated).toBe(true)
+
+		// Not a load failure: no back-off.
+		await host.check("en_US", ["helo"])
+		expect(host.known("en_US", "helo")).toBe(false)
+		expect(workers).toHaveLength(2)
+		host.dispose()
+	})
+
+	it("backs off a dictionary whose worker crashed while loading it", async () => {
+		let time = 0
+		const { host, workers } = setup({ now: () => time })
+		const pending = host.check("en_US", ["helo"])
+
+		workers[0]?.crash()
+		await expect(pending).rejects.toThrow(/worker failed/)
+		await expect(host.check("en_US", ["helo"])).rejects.toThrow(/worker failed/)
+		expect(workers).toHaveLength(1)
+
+		time += 15_000
+		await host.check("en_US", ["helo"])
+		expect(host.known("en_US", "helo")).toBe(false)
 		expect(workers).toHaveLength(2)
 		host.dispose()
 	})

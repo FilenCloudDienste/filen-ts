@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest"
 import type { SpellcheckRequest, SpellcheckResponse } from "../protocol"
 import { SPELLCHECK_CACHE, serveSpellcheckWorker } from "../worker"
-import { BASE, TINY_AFF, TINY_DIC, fakeOrigin, memoryCaches, serveText, tinyAssets } from "./fixtures"
+import {
+	BASE,
+	NGRAM_AFF,
+	NGRAM_DIC,
+	TINY_AFF,
+	TINY_DIC,
+	fakeOrigin,
+	memoryCaches,
+	serveText,
+	tinyAssets,
+	type CacheFailures
+} from "./fixtures"
 
 // Drives a worker directly: sends requests, collects responses by id.
 function harness(options: Parameters<typeof serveSpellcheckWorker>[1]) {
@@ -59,10 +70,25 @@ describe("serveSpellcheckWorker", () => {
 		expect(await ask({ type: "check", id: 4, dictionary: "en_US", words: "zorp", count: 1 })).toMatchObject({
 			verdicts: new Uint8Array([1])
 		})
+	})
 
-		send({ type: "unload", dictionary: "en_US" })
+	it("runs the n-gram pass when a suggestion asks for it", async () => {
+		const origin = fakeOrigin()
+		const assets = tinyAssets(origin)
+		const files = { aff: serveText(origin, "/ngram.aff.gz", NGRAM_AFF), dic: serveText(origin, "/ngram.dic.gz", NGRAM_DIC) }
+		const { send, ask } = harness({ fetch: origin.fetch, caches: undefined })
 
-		expect(await ask({ type: "check", id: 5, dictionary: "en_US", words: "hello", count: 1 })).toMatchObject({ type: "failed" })
+		send({ type: "init", wasm: assets.wasm, current: [] })
+		expect(await ask({ type: "load", id: 1, dictionary: "ngram", files, words: [] })).toEqual({ type: "loaded", id: 1 })
+		expect(await ask({ type: "suggest", id: 2, dictionary: "ngram", word: "spelign", ngram: false })).toEqual({
+			type: "suggested",
+			id: 2,
+			suggestions: []
+		})
+		expect(await ask({ type: "suggest", id: 3, dictionary: "ngram", word: "spelign", ngram: true })).toMatchObject({
+			type: "suggested",
+			suggestions: expect.arrayContaining(["spelling"])
+		})
 	})
 
 	it("caches verified downloads and serves the next load from the cache", async () => {
@@ -107,10 +133,45 @@ describe("serveSpellcheckWorker", () => {
 			message: expect.stringContaining("SHA-256")
 		})
 		expect(caches.stored.get(SPELLCHECK_CACHE)?.has(`${BASE}en.dic.gz`)).toBe(false)
-		expect(await ask({ type: "load", id: 2, dictionary: "en_US", files: short, words: [] })).toMatchObject({ type: "failed" })
+		expect(await ask({ type: "load", id: 2, dictionary: "en_US", files: short, words: [] })).toMatchObject({
+			type: "failed",
+			message: expect.stringContaining("expected")
+		})
+
+		// Declared smaller than served: the read stops at the declared size.
+		const long = { ...files, dic: { ...files.dic, bytes: files.dic.bytes - 1 } }
+
+		expect(await ask({ type: "load", id: 4, dictionary: "en_US", files: long, words: [] })).toMatchObject({
+			type: "failed",
+			message: expect.stringContaining("larger than")
+		})
+		expect(caches.stored.get(SPELLCHECK_CACHE)?.has(`${BASE}en.dic.gz`)).toBe(false)
 		// A failed load is forgotten: a correct one succeeds afterwards.
 		expect(await ask({ type: "load", id: 3, dictionary: "en_US", files, words: [] })).toEqual({ type: "loaded", id: 3 })
 	})
+
+	for (const failure of ["open", "match", "put"] as const) {
+		it(`loads and checks when Cache Storage rejects ${failure}`, async () => {
+			const origin = fakeOrigin()
+			const assets = tinyAssets(origin)
+			const files = assets.dictionaries["en_US"]
+			const failures: CacheFailures = { [failure]: "reject" }
+			const caches = memoryCaches(failures)
+
+			if (files === undefined) throw new Error("fixture")
+
+			const { send, ask } = harness({ fetch: origin.fetch, caches })
+
+			// A non-empty `current` makes the prune at init run through the same failure.
+			send({ type: "init", wasm: assets.wasm, current: [files.aff.url, files.dic.url] })
+			expect(await ask({ type: "load", id: 1, dictionary: "en_US", files, words: [] })).toEqual({ type: "loaded", id: 1 })
+			expect(await ask({ type: "check", id: 2, dictionary: "en_US", words: "hello\nhelo", count: 2 })).toMatchObject({
+				verdicts: new Uint8Array([1, 0])
+			})
+
+			if (failure === "put") expect(caches.stored.get(SPELLCHECK_CACHE)?.size ?? 0).toBe(0)
+		})
+	}
 
 	it("prunes cached files this build does not reference", async () => {
 		const origin = fakeOrigin()
