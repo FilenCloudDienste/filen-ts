@@ -92,17 +92,16 @@ vi.mock("@/features/preview/lib/encodingGuess", () => ({
 vi.mock("@/features/preview/workers/textPager.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: () => Promise.resolve() } }))
 vi.mock("@/features/preview/lib/origin/rangeSource", () => ({
-	openOriginRangeSource: () => {
+	openOriginPorts: () => {
 		state.opens++
 
-		return Promise.resolve({
+		return {
 			size: SIZE,
-			reader: {},
 			port: () => Promise.resolve(new MessageChannel().port1),
 			close: () => {
 				state.closes++
 			}
-		})
+		}
 	}
 }))
 

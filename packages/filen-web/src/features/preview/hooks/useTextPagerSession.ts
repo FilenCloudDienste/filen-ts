@@ -3,10 +3,9 @@ import * as Comlink from "comlink"
 import { legacyEncodingForLanguage } from "@filen/shared/textEncoding"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewAccessMode, usePreviewOrigin } from "@/features/preview/lib/accessMode"
-import { openOriginRangeSource, type OriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
+import { openOriginPorts } from "@/features/preview/lib/origin/rangeSource"
 import { guessLegacyEncoding } from "@/features/preview/lib/encodingGuess"
 import { originKey, originSize } from "@/lib/sdk/byteOrigin"
-import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { useOwnedWorker, type OwnedWorker } from "@/lib/workers/ownedWorker"
 import TextPagerWorker from "@/features/preview/workers/textPager.worker.ts?worker"
@@ -86,39 +85,27 @@ export function useTextPagerSession(item: DriveItem): TextPagerSession {
 		const token = crypto.randomUUID()
 		let live = true
 		const alive = (): boolean => live
-		let source: OriginRangeSource | null = null
+		// Ports only: the worker reads through the one it takes, and the page reads nothing itself.
+		const ports = openOriginPorts(latestOrigin(), token, { access })
 
-		void openOriginRangeSource(latestOrigin(), token, { access })
-			.then(async range => {
-				if (!live) {
-					range.close()
-
-					return
-				}
-
-				source = range
-
-				const port = await range.port()
+		void ports
+			.port()
+			.then(async port => {
 				const lost = Comlink.proxy(() => {
 					if (alive()) failOpen(new Error("range port lost"))
 				})
-				const value = await owned.run(remote => remote.open(Comlink.transfer(port, [port]), range.size, lost))
+				const value = await owned.run(remote => remote.open(Comlink.transfer(port, [port]), ports.size, lost))
 
 				if (alive()) setOpened({ generation, value })
 			})
 			.catch((error: unknown) => {
-				if (live) failOpen(error)
+				if (alive()) failOpen(error)
 			})
 
 		return () => {
 			live = false
-
-			// Ends every read still served on the port, and the port itself; before the source opened, the open.
-			if (source === null) {
-				void sdkApi.cancelPreviewDownload(token)
-			} else {
-				source.close()
-			}
+			// Ends every read still served on the port, the port itself and the token.
+			ports.close()
 		}
 	}, [owned, generation, access])
 

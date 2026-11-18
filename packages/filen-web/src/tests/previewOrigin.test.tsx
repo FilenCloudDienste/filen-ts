@@ -20,7 +20,7 @@ const { PreviewAccessModeProvider, PreviewByteOriginProvider, usePreviewOrigin, 
 	await import("@/features/preview/lib/accessMode")
 const { loadOriginBytes } = await import("@/features/preview/lib/origin/loadBytes")
 const { openByteReader } = await import("@/features/preview/lib/origin/byteReader")
-const { openOriginRangeSource } = await import("@/features/preview/lib/origin/rangeSource")
+const { openOriginPorts, openOriginRangeSource } = await import("@/features/preview/lib/origin/rangeSource")
 const { clearPreviewCache, getPreviewBytes, loadPreviewBytes, takePreviewBytes } = await import("@/features/preview/lib/previewCache")
 const { PREVIEW_MAX_BYTES } = await import("@/features/drive/lib/preview.logic")
 const { rangePortReader } = await import("@/lib/media/rangePort")
@@ -182,5 +182,30 @@ describe("bytes origin reads on the page", () => {
 		await lost
 		await expect(source.port()).rejects.toThrow("closed")
 		expect(cancelPreviewDownload).not.toHaveBeenCalled()
+	})
+
+	// A worker reading through a port of its own needs no reader on the page: none is opened until a port is asked for.
+	it("opens ports only when asked, and ends them all with close", async () => {
+		const ports = openOriginPorts(origin, "t2", { access: "authed" })
+		const signal = new AbortController().signal
+
+		expect(ports.size).toBe(8)
+
+		const reader = rangePortReader(await ports.port())
+		const lost = new Promise<void>(resolve => {
+			reader.onLost(resolve)
+		})
+
+		expect([...(await reader.readRange(0, 2, signal))]).toEqual([0, 1])
+		ports.close()
+		await lost
+		await expect(ports.port()).rejects.toThrow("closed")
+	})
+
+	it("cancels the token of an SDK-served origin's ports on close", () => {
+		const ports = openOriginPorts({ kind: "linkedFile", file }, "t3", { access: "anon" })
+
+		ports.close()
+		expect(cancelPreviewDownload).toHaveBeenCalledWith("t3")
 	})
 })
