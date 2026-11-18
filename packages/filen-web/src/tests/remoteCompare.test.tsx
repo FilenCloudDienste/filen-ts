@@ -32,7 +32,7 @@ vi.mock("@filen/encoding-detect", () => ({
 	EncodingDetector: {
 		instantiate: () =>
 			Promise.resolve({
-				guess: () => {
+				guess: (): string | null => {
 					guessed.current++
 
 					return "windows-1251"

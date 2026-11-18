@@ -3,12 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // The page's detector: loaded once on the first legacy file, asked only for bytes that are not Unicode, dropped on
 // sign-out and after a failed load (the language's codepage stands in then).
 
-const { asked, answer, disposers } = vi.hoisted(() => ({
-	asked: [] as { bytes: Uint8Array; last: boolean }[],
-	answer: { current: "windows-1251" },
-	// The sign-out registry: what is registered and not yet unregistered.
-	disposers: new Set<() => void>()
-}))
+const { asked, answer, disposers } = vi.hoisted(() => {
+	// The detector's name for what it is asked (null: no evidence).
+	const answer: { current: string | null } = { current: "windows-1251" }
+
+	return {
+		asked: [] as { bytes: Uint8Array; last: boolean }[],
+		answer,
+		// The sign-out registry: what is registered and not yet unregistered.
+		disposers: new Set<() => void>()
+	}
+})
 
 vi.mock("@filen/encoding-detect", () => ({
 	EncodingDetector: {
@@ -43,6 +48,7 @@ vi.mock("@/lib/workers/previewDisposers", () => ({
 
 const { guessLegacyEncoding, readTextFileDetected } = await import("@/features/preview/lib/encodingGuess")
 const { runPreviewDisposers } = await import("@/lib/workers/previewDisposers")
+const { log } = await import("@/lib/log")
 
 let compiled = 0
 let failNext = false
@@ -112,6 +118,20 @@ describe("the encoding detector on the page", () => {
 		answer.current = "gbk"
 
 		expect(await guessLegacyEncoding(Uint8Array.of(0xc4, 0xe3), true)).toBe("gb18030")
+		answer.current = "windows-1251"
+	})
+
+	it("has no guess when the detector finds no evidence, so the language's codepage stands", async () => {
+		const ascii = new TextEncoder().encode("plain")
+
+		answer.current = null
+		vi.mocked(log.error).mockClear()
+
+		expect(await guessLegacyEncoding(ascii, true)).toBeNull()
+		expect(await readTextFileDetected(Uint8Array.of(0xcf, 0xf0, 0xe8))).toMatchObject({ encoding: "windows-1252" })
+		// An answer, not a failure: nothing is logged and the detector stays loaded.
+		expect(log.error).not.toHaveBeenCalled()
+		expect(compiled).toBe(1)
 		answer.current = "windows-1251"
 	})
 

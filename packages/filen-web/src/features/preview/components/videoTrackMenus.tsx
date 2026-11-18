@@ -17,7 +17,7 @@ import { MEDIA_GLASS_TONE_CLASS } from "@/components/ui/surface"
 import { chapterAt, type StageChapter } from "@/components/media/video/stage.logic"
 import { useTranscodedTracks } from "@/lib/media/playback/useTranscodedTracks"
 import { seekMedia, useMediaCurrentTime } from "@/lib/media/useMediaState"
-import { audioTrackDetail, audioTrackName } from "@/features/videos/lib/player/trackLabels.logic"
+import { audioTrackDetail, audioTrackName, trackLanguageName } from "@/features/videos/lib/player/trackLabels.logic"
 import type { NativeAudioTrack } from "@/features/preview/lib/previewVideo"
 import { menuListsProbeAudio } from "@/features/preview/lib/audioTrackMenu.logic"
 import type { PreviewSubtitleOption, PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
@@ -30,8 +30,8 @@ type SubtitleLabelKey =
 	"previewMediaSubtitleUnknownLanguage" | "previewMediaSubtitleForced" | "previewMediaSubtitleSdh" | "previewMediaSubtitleEmbedded"
 
 // "English · Forced · Embedded": the language, the track's own title, then its flags.
-function subtitleLabel(option: PreviewSubtitleOption, t: (key: SubtitleLabelKey) => string): string {
-	const parts = [languageName(option.lang) ?? t("previewMediaSubtitleUnknownLanguage")]
+function subtitleLabel(option: PreviewSubtitleOption, uiLanguage: string, t: (key: SubtitleLabelKey) => string): string {
+	const parts = [trackLanguageName(option.lang, uiLanguage) ?? t("previewMediaSubtitleUnknownLanguage")]
 
 	if (option.title.length > 0) {
 		parts.push(option.title)
@@ -68,7 +68,7 @@ function useAudioOptions(params: {
 	size: number
 	open: boolean
 }): AudioOption[] {
-	const { t } = useTranslation("videos")
+	const { t, i18n } = useTranslation("videos")
 	const transcoded = useTranscodedTracks(params.probe, params.size, params.open)
 	const { probe, nativeAudio } = params
 
@@ -82,7 +82,9 @@ function useAudioOptions(params: {
 
 	if (nativeAudio !== null && nativeAudio.length >= 2) {
 		return nativeAudio.map((track, index) => ({
-			label: languageName(track.language) ?? (track.label.length > 0 ? track.label : t("playerTrackNumber", { number: index + 1 })),
+			label:
+				trackLanguageName(track.language, i18n.language) ??
+				(track.label.length > 0 ? track.label : t("playerTrackNumber", { number: index + 1 })),
 			detail: track.label.length > 0 && languageName(track.language) !== null ? track.label : null,
 			converted: false
 		}))
@@ -113,7 +115,7 @@ export function TracksMenu({
 	container: HTMLElement | null
 	onOpenChange: (open: boolean) => void
 }) {
-	const { t } = useTranslation(["preview", "videos"])
+	const { t, i18n } = useTranslation(["preview", "videos"])
 	const [open, setOpen] = useState(false)
 	const audio = useAudioOptions({ probe, nativeAudio, decision, audioIndex, size, open })
 	const hasSubtitles = subtitles.options.length > 0
@@ -215,8 +217,8 @@ export function TracksMenu({
 							>
 								<span className="truncate">
 									{subtitles.failed && option.id === subtitles.selected
-										? t("previewMediaSubtitleUnreadable", { name: subtitleLabel(option, key => t(key)) })
-										: subtitleLabel(option, key => t(key))}
+										? t("previewMediaSubtitleUnreadable", { name: subtitleLabel(option, i18n.language, key => t(key)) })
+										: subtitleLabel(option, i18n.language, key => t(key))}
 								</span>
 							</DropdownMenuRadioItem>
 						))}

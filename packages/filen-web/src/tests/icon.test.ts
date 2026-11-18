@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { fileIconKey } from "@/features/drive/lib/icon.logic"
+import { EXTENSION_TIERS, previewCategoryForExtension, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 
 // Full extension-routing coverage lives in @filen/shared's fileIcon.test.ts now — fileIconKey here is
 // a thin wrapper (icon.logic.ts) deriving `ext` via fileTypeExtension and delegating to the shared
@@ -79,5 +80,23 @@ describe("fileIconKey for the image formats", () => {
 		expect(fileIconKey("art.psd")).toBe("psd")
 		expect(fileIconKey("art.psb")).toBe("psd")
 		expect(fileIconKey("figure.eps")).toBe("psd")
+	})
+})
+
+// Every file this app opens as a document, spreadsheet or presentation shows a type glyph, never the generic one a user
+// reads as "cannot be opened".
+const OFFICE_CATEGORIES: ReadonlySet<PreviewCategory> = new Set<PreviewCategory>(["docx", "spreadsheet", "presentation"])
+
+const OFFICE_EXTENSIONS: readonly string[] = EXTENSION_TIERS.filter(([, category]) => OFFICE_CATEGORIES.has(category))
+	.flatMap(([extensions]) => [...extensions])
+	.filter(extension => {
+		const category = previewCategoryForExtension(extension)
+
+		return category !== null && OFFICE_CATEGORIES.has(category)
+	})
+
+describe("fileIconKey for the office formats", () => {
+	it.each(OFFICE_EXTENSIONS)("gives .%s a type glyph", extension => {
+		expect(fileIconKey(`file.${extension}`)).not.toBe("other")
 	})
 })

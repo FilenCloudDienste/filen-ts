@@ -62,7 +62,8 @@ export function usePreviewTextFile(
 	// read decodes the bytes once.
 	const forced = choice?.label ?? readAs
 	const unicode = bytes !== null && shown && forced === null ? readUnicodeTextFile(bytes) : null
-	// Not Unicode (and not shown anyway): the detector (lazily loaded wasm, the first MiB) picks the codepage first.
+	// Not Unicode (and not shown anyway): the detector (lazily loaded wasm, a MiB from the first non-ASCII byte) picks the
+	// codepage first.
 	const guessing = shown && !notText && forced === null && unicode === null && known === undefined
 	const read =
 		bytes === null || !shown

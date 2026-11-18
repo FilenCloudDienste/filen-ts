@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest"
 import { EditorState, Text } from "@codemirror/state"
+import i18n from "i18next"
+import { SUBTITLE_ENCODINGS, TEXT_ENCODINGS } from "@filen/shared/textEncoding"
 import {
 	detectLineEnding,
 	encodeTextFile,
+	encodingOptionLabel,
+	encodingShortName,
 	readTextFile,
 	readUnicodeTextFile,
 	utf8Format,
 	writeTextFile
 } from "@/features/preview/lib/textFile"
 import { otherLineBreaks } from "@/features/preview/lib/lineBreaks"
+import "@/lib/i18n"
 
 // Saving a text file changes only what was edited: its byte order mark and its line ending (which the editor does
 // not keep, splitting lines on any ending) come back on save.
@@ -135,5 +140,67 @@ describe("text file fidelity", () => {
 
 		expect(file.lineEnding).toBe("crlf")
 		expect(writeTextFile(EditorState.create({ doc: file.text }).doc, file, otherLineBreaks(file.text, "\r\n"))).toBe(original)
+	})
+})
+
+// Every encoding a text file may be read with, as the pickers name it in English: family, then technical name.
+const ENGLISH_OPTIONS: readonly [string, string][] = [
+	["utf-8", "Unicode (UTF-8)"],
+	["utf-16le", "Unicode (UTF-16 LE)"],
+	["utf-16be", "Unicode (UTF-16 BE)"],
+	["windows-1250", "Central European (Windows-1250)"],
+	["windows-1251", "Cyrillic (Windows-1251)"],
+	["windows-1252", "Western European (Windows-1252)"],
+	["windows-1253", "Greek (Windows-1253)"],
+	["windows-1254", "Turkish (Windows-1254)"],
+	["windows-1255", "Hebrew (Windows-1255)"],
+	["windows-1256", "Arabic (Windows-1256)"],
+	["windows-1257", "Baltic (Windows-1257)"],
+	["windows-1258", "Vietnamese (Windows-1258)"],
+	["windows-874", "Thai (Windows-874)"],
+	["koi8-r", "Cyrillic (KOI8-R)"],
+	["gb18030", "Chinese Simplified (GB18030)"],
+	["big5", "Chinese Traditional (Big5)"],
+	["shift_jis", "Japanese (Shift JIS)"],
+	["euc-jp", "Japanese (EUC-JP)"],
+	["euc-kr", "Korean (EUC-KR)"],
+	["koi8-u", "Cyrillic (KOI8-U)"],
+	["ibm866", "Cyrillic (IBM 866)"],
+	["iso-8859-2", "Central European (ISO 8859-2)"],
+	["iso-8859-4", "Baltic (ISO 8859-4)"],
+	["iso-8859-5", "Cyrillic (ISO 8859-5)"],
+	["iso-8859-6", "Arabic (ISO 8859-6)"],
+	["iso-8859-7", "Greek (ISO 8859-7)"],
+	["iso-8859-8", "Hebrew (ISO 8859-8)"],
+	["iso-8859-10", "Nordic (ISO 8859-10)"],
+	["iso-8859-13", "Baltic (ISO 8859-13)"],
+	["iso-8859-15", "Western European (ISO 8859-15)"],
+	["macintosh", "Western European (Mac OS Roman)"]
+]
+
+describe("encoding names", () => {
+	it("names every encoding by its technical name in the status", () => {
+		expect(TEXT_ENCODINGS.map(({ label }) => [label, encodingShortName(label)])).toEqual(
+			ENGLISH_OPTIONS.map(([label, option]) => [label, /\(([^)]+)\)$/.exec(option)?.[1]])
+		)
+		expect(encodingShortName("x-unknown")).toBe("X-UNKNOWN")
+	})
+
+	it("lists every encoding by family and technical name", () => {
+		const t = i18n.getFixedT("en", "preview")
+
+		expect(TEXT_ENCODINGS.map(entry => [entry.label, encodingOptionLabel(entry, t)])).toEqual(ENGLISH_OPTIONS)
+		expect(SUBTITLE_ENCODINGS.every(entry => TEXT_ENCODINGS.includes(entry))).toBe(true)
+	})
+
+	it("names the family in the UI language and keeps the technical name", () => {
+		i18n.addResource("xx", "preview", "previewTextEncodingFamilyCyrillic", "Kyrillisch")
+		i18n.addResource("xx", "preview", "previewTextEncodingOption", "{{name}} – {{family}}")
+
+		const cyrillic = TEXT_ENCODINGS.find(entry => entry.label === "windows-1251")
+
+		expect(cyrillic === undefined ? null : encodingOptionLabel(cyrillic, i18n.getFixedT("xx", "preview"))).toBe(
+			"Windows-1251 – Kyrillisch"
+		)
 	})
 })

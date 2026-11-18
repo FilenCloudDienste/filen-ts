@@ -79,7 +79,14 @@ export function SettingsTab({ pairId }: { pairId: string }) {
 
 			return found === undefined
 				? null
-				: { name: found.name, mode: found.mode, paused: found.paused, localRoot: found.localRoot, remoteRoot: found.remoteRoot }
+				: {
+						name: found.name,
+						mode: found.mode,
+						paused: found.paused,
+						phase: found.phase,
+						localRoot: found.localRoot,
+						remoteRoot: found.remoteRoot
+					}
 		})
 	)
 	const remoteName = useRemoteDirectoryName(pair?.remoteRoot ?? "")
@@ -92,6 +99,8 @@ export function SettingsTab({ pairId }: { pairId: string }) {
 	}
 
 	const currentMode = pair.mode
+	// A pair the shell is still preparing, waiting on or refusing starts and syncs only from its own round.
+	const shellOwned = pair.phase === "preparing" || pair.phase === "waitingForRoot" || pair.phase === "unsupported"
 
 	async function setMode(mode: DesktopSyncMode, backlog: DesktopSyncBacklog | null): Promise<void> {
 		setModePending(true)
@@ -152,13 +161,14 @@ export function SettingsTab({ pairId }: { pairId: string }) {
 					label={t("settingsPause")}
 					description={t("settingsPauseDescription")}
 					action={pair.paused ? t("settingsResumeAction") : t("settingsPauseAction")}
+					disabled={shellOwned}
 					run={() => runSyncAction(() => (pair.paused ? syncApi().resumePair(pairId) : syncApi().pausePair(pairId)))}
 				/>
 				<ActionRow
 					label={t("settingsSyncNow")}
 					description={t("settingsSyncNowDescription")}
 					action={t("settingsSyncNow")}
-					disabled={pair.paused}
+					disabled={pair.paused || shellOwned}
 					run={() => runSyncAction(() => syncApi().syncNow(pairId))}
 				/>
 			</SettingsGroup>

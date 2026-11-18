@@ -4,7 +4,6 @@ import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { CheckIcon, PlayIcon, RotateCcwIcon } from "lucide-react"
 import { formatSecondsToMediaClock } from "@filen/shared"
-import { languageName } from "@filen/shared/videos"
 import { log } from "@/lib/log"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { useTitleWatch } from "@/features/videos/hooks/useTitleWatch"
@@ -23,7 +22,7 @@ import {
 	type Slot
 } from "@/features/videos/lib/titleDetail.logic"
 import { subtitleTracksOf } from "@/features/videos/lib/player/subtitles.logic"
-import { channelLabel } from "@/features/videos/lib/player/trackLabels.logic"
+import { channelLabel, trackLanguageName } from "@/features/videos/lib/player/trackLabels.logic"
 import { useDetailProbeQuery, useLadderBadgesQuery, useNfoQuery, useStoredProbesQuery } from "@/features/videos/queries/detail"
 import { DetailHeader, ResumeBar, SlotFade } from "@/features/videos/components/detail/detailHeader"
 import { ExtrasShelf } from "@/features/videos/components/detail/extrasShelf"
@@ -128,7 +127,7 @@ export function MovieDetail({
 	onBack: () => void
 	onEdit: () => void
 }) {
-	const { t } = useTranslation("videos")
+	const { t, i18n } = useTranslation("videos")
 	const navigate = useNavigate()
 	const headingId = useId()
 	const extrasId = useId()
@@ -244,7 +243,10 @@ export function MovieDetail({
 			? []
 			: probe.audio.map((track, index) => ({
 					value: String(index),
-					label: [languageName(track.lang) ?? t("playerTrackNumber", { number: index + 1 }), channelLabel(track.ch, k => t(k))]
+					label: [
+						trackLanguageName(track.lang, i18n.language) ?? t("playerTrackNumber", { number: index + 1 }),
+						channelLabel(track.ch, k => t(k))
+					]
 						.filter(item => item !== null)
 						.join(" ")
 				}))
@@ -256,7 +258,7 @@ export function MovieDetail({
 			.map(track => ({
 				value: track.id,
 				label: [
-					languageName(track.lang) ?? t("subtitleUnknownLanguage"),
+					trackLanguageName(track.lang, i18n.language) ?? t("subtitleUnknownLanguage"),
 					track.forced ? t("subtitleForced") : null,
 					track.hi ? t("subtitleSdh") : null
 				]

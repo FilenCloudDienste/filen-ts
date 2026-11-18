@@ -56,7 +56,7 @@ import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { CODE_INDENTS, type CodeChrome, type CodeIndent } from "@/features/preview/lib/codeChrome"
 import { CODE_FONT_SIZES, setCodeViewSettings, type CodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import { TEXT_ENCODINGS, textEncodingLabel } from "@filen/shared/textEncoding"
-import { encodingShortName, type TextFileFormat } from "@/features/preview/lib/textFile"
+import { encodingOptionLabel, encodingShortName, type TextFileFormat } from "@/features/preview/lib/textFile"
 import type { TextEncodingControls } from "@/features/preview/hooks/usePreviewTextFile"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { Kbd } from "@/lib/keymap/kbd"
@@ -187,7 +187,7 @@ export function EncodingMenu({
 									value={option.label}
 									closeOnClick
 								>
-									{option.name}
+									{encodingOptionLabel(option, t)}
 								</DropdownMenuRadioItem>
 							))}
 						</DropdownMenuRadioGroup>

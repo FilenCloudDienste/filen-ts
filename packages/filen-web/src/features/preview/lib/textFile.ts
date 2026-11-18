@@ -1,4 +1,5 @@
 import type { Text } from "@codemirror/state"
+import type { TFunction } from "i18next"
 import {
 	decodeTextBytes,
 	decodeUnicodeText,
@@ -7,6 +8,8 @@ import {
 	TEXT_ENCODINGS,
 	type DecodedText,
 	type EncodedText,
+	type EncodingFamily,
+	type TextEncodingEntry,
 	type Unencodable
 } from "@filen/shared/textEncoding"
 import { joinLines, type LineBreaks } from "@/features/preview/lib/lineBreaks"
@@ -131,11 +134,33 @@ export function utf8Format(format: TextFileFormat): TextFileFormat {
 	return { encoding: "utf-8", bom: format.encoding === "utf-8" && format.bom, lineEnding: format.lineEnding }
 }
 
-const ENCODING_NAMES: ReadonlyMap<string, string> = new Map(
-	TEXT_ENCODINGS.map(encoding => [encoding.label, /\(([^)]+)\)$/.exec(encoding.name)?.[1] ?? encoding.label.toUpperCase()])
-)
+const ENCODING_NAMES: ReadonlyMap<string, string> = new Map(TEXT_ENCODINGS.map(encoding => [encoding.label, encoding.short]))
 
 // The encoding's short name ("Windows-1251", "UTF-16 LE"), as the status shows it.
 export function encodingShortName(label: string): string {
 	return ENCODING_NAMES.get(label) ?? label.toUpperCase()
+}
+
+const FAMILY_KEYS = {
+	unicode: "previewTextEncodingFamilyUnicode",
+	centralEuropean: "previewTextEncodingFamilyCentralEuropean",
+	cyrillic: "previewTextEncodingFamilyCyrillic",
+	westernEuropean: "previewTextEncodingFamilyWesternEuropean",
+	greek: "previewTextEncodingFamilyGreek",
+	turkish: "previewTextEncodingFamilyTurkish",
+	hebrew: "previewTextEncodingFamilyHebrew",
+	arabic: "previewTextEncodingFamilyArabic",
+	baltic: "previewTextEncodingFamilyBaltic",
+	vietnamese: "previewTextEncodingFamilyVietnamese",
+	thai: "previewTextEncodingFamilyThai",
+	chineseSimplified: "previewTextEncodingFamilyChineseSimplified",
+	chineseTraditional: "previewTextEncodingFamilyChineseTraditional",
+	japanese: "previewTextEncodingFamilyJapanese",
+	korean: "previewTextEncodingFamilyKorean",
+	nordic: "previewTextEncodingFamilyNordic"
+} as const satisfies Record<EncodingFamily, string>
+
+// An encoding as the pickers list it: its family in the UI language, then its technical name ("Cyrillic (Windows-1251)").
+export function encodingOptionLabel(entry: TextEncodingEntry, t: TFunction<"preview">): string {
+	return t("previewTextEncodingOption", { family: t(FAMILY_KEYS[entry.family]), name: entry.short })
 }

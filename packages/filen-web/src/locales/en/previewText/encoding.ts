@@ -9,6 +9,40 @@ export const previewTextEncoding = {
 	previewTextEncodingDetected: "Detected: {{encoding}}",
 	/** Text editor — encoding menu: submenu reading the file again with another encoding (disabled while there are unsaved edits) */
 	previewTextEncodingReopen: "Reopen with encoding",
+	/** Text editor encoding menu and video player subtitle-encoding select — an encoding: {{family}} is its script or region (e.g. "Cyrillic"), {{name}} its technical name, never translated (e.g. "Windows-1251") */
+	previewTextEncodingOption: "{{family}} ({{name}})",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyUnicode: "Unicode",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyCentralEuropean: "Central European",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyCyrillic: "Cyrillic",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyWesternEuropean: "Western European",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyGreek: "Greek",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyTurkish: "Turkish",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyHebrew: "Hebrew",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyArabic: "Arabic",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyBaltic: "Baltic",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyVietnamese: "Vietnamese",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyThai: "Thai",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyChineseSimplified: "Chinese Simplified",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyChineseTraditional: "Chinese Traditional",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyJapanese: "Japanese",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyKorean: "Korean",
+	/** Encoding family (the script or region an encoding is for), shown before the encoding's technical name */
+	previewTextEncodingFamilyNordic: "Nordic",
 	/** Text editor — encoding menu and the save-refused dialog: from now on, save the file as UTF-8 */
 	previewTextConvertToUtf8: "Convert to UTF-8",
 	/** Text editor — dialog title: a save was refused because the file's encoding cannot hold a typed character */

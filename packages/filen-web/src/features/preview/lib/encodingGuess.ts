@@ -20,14 +20,17 @@ function load(): NonNullable<typeof detector> {
 	return { loading, unregister }
 }
 
-// The legacy encoding (a TEXT_ENCODINGS label) the bytes most likely are, from their first MiB; ask only for bytes that
-// are not Unicode (readUnicodeTextFile gave null). `last`: the bytes are the whole file. null when the detector cannot
-// load (the next ask loads it again), so the caller keeps the language's codepage.
+// The legacy encoding (a TEXT_ENCODINGS label) the bytes most likely are, from up to a MiB around their first non-ASCII
+// byte; ask only for bytes that are not Unicode (readUnicodeTextFile gave null). `last`: the bytes are the whole file.
+// null when that holds no evidence (all ASCII) or the detector cannot load (the next ask loads it again), so the caller
+// keeps the language's codepage.
 export async function guessLegacyEncoding(bytes: Uint8Array, last: boolean): Promise<string | null> {
 	const pending = (detector ??= load())
 
 	try {
-		return textEncodingLabel((await pending.loading).guess(bytes, last))
+		const name = (await pending.loading).guess(bytes, last)
+
+		return name === null ? null : textEncodingLabel(name)
 	} catch (e) {
 		if (detector === pending) {
 			detector = null

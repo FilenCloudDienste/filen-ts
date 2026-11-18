@@ -1,8 +1,29 @@
-import type { TFunction } from "i18next"
-import { languageName, type ProbeAudio } from "@filen/shared/videos"
+import i18n, { type TFunction } from "i18next"
+import { languageName, normalizeLanguage, type ProbeAudio } from "@filen/shared/videos"
 import type { PlayerSubtitleTrack } from "@/features/videos/lib/player/subtitles.logic"
+import { languageDisplayNames } from "@/lib/i18n/languageNames"
 
 // Track names shared by the player's tracks menu, its track notices and the detail pages' selects.
+
+// A track's language code ("ger", "deu", "de") named in the UI language ("Deutsch" in German); the English name where
+// the platform names none, null when the code is unknown or undetermined.
+export function trackLanguageName(code: string | null | undefined, uiLanguage: string): string | null {
+	const tag = normalizeLanguage(code)
+
+	if (tag === null) {
+		return null
+	}
+
+	let name: string | undefined
+
+	try {
+		name = languageDisplayNames(uiLanguage)?.of(tag)
+	} catch {
+		name = undefined
+	}
+
+	return name === undefined || name === tag ? languageName(tag) : name
+}
 
 export function channelLabel(channels: number | null, t: (key: "playerChannelsMono" | "playerChannelsStereo") => string): string | null {
 	switch (channels) {
@@ -23,7 +44,10 @@ export function channelLabel(channels: number | null, t: (key: "playerChannelsMo
 
 // An audio track as the tracks menu names it: its language (else its number) and channels ("English 5.1").
 export function audioTrackName(track: Pick<ProbeAudio, "lang" | "ch">, index: number, t: TFunction<"videos">): string {
-	return [languageName(track.lang) ?? t("playerTrackNumber", { number: index + 1 }), channelLabel(track.ch, key => t(key))]
+	return [
+		trackLanguageName(track.lang, i18n.language) ?? t("playerTrackNumber", { number: index + 1 }),
+		channelLabel(track.ch, key => t(key))
+	]
 		.filter(part => part !== null)
 		.join(" ")
 }
@@ -54,7 +78,7 @@ export function audioTrackDetail(track: Pick<ProbeAudio, "commentary" | "name" |
 
 // A subtitle track as the tracks menu names it: its language, forced and SDH marked ("German · Forced").
 export function subtitleTrackName(track: Pick<PlayerSubtitleTrack, "lang" | "forced" | "hi">, t: TFunction<"videos">): string {
-	const parts = [languageName(track.lang) ?? t("subtitleUnknownLanguage")]
+	const parts = [trackLanguageName(track.lang, i18n.language) ?? t("subtitleUnknownLanguage")]
 
 	if (track.forced) {
 		parts.push(t("subtitleForced"))

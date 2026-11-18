@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { TracksPopover, type TrackOption } from "@/components/media/video/tracksPopover"
 import { useTranscodedTracks } from "@/lib/media/playback/useTranscodedTracks"
 import type { PlayerSubtitleTrack, SubtitleChoice } from "@/features/videos/lib/player/subtitles.logic"
+import { encodingOptionLabel } from "@/features/preview/lib/textFile"
 import { audioTrackDetail, audioTrackName, subtitleTrackName } from "@/features/videos/lib/player/trackLabels.logic"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 
@@ -48,6 +49,7 @@ export function PlayerTracks({
 	onOpenChange: (open: boolean) => void
 }) {
 	const { t } = useTranslation("videos")
+	const { t: tPreview } = useTranslation("preview")
 	const transcoded = useTranscodedTracks(probe, file?.size ?? 0, open)
 
 	function subtitleName(track: PlayerSubtitleTrack): string {
@@ -131,7 +133,7 @@ export function PlayerTracks({
 										key={entry.label}
 										value={entry.label}
 									>
-										{entry.name}
+										{encodingOptionLabel(entry, tPreview)}
 									</option>
 								))}
 							</select>
