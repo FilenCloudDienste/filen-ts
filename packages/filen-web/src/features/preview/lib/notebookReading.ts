@@ -7,8 +7,8 @@ import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 //
 // Hostile-input bounds: the text is at most the text cap (the category's); at most MAX_CELLS cells and MAX_OUTPUTS
 // outputs a cell (the rest counted); a source or a text output past MAX_TEXT_CHARS is cut (marked), an HTML or SVG
-// output past it is not shown; an image past `maxPixels` (what the device can decode beside the held file) is not made
-// a Blob. ANSI escapes are removed from streams and tracebacks. A cell or output of an unknown shape is skipped.
+// output past it is not shown; images past `maxPixels` together (what the device can decode beside the held file) are
+// not made Blobs. ANSI escapes are removed from streams and tracebacks. A cell or output of an unknown shape is skipped.
 
 export const MAX_CELLS = 10_000
 export const MAX_OUTPUTS = 200
@@ -95,6 +95,46 @@ function plain(value: string | readonly string[]): { readonly text: string; read
 	return capped(joined(value).replace(ANSI, ""))
 }
 
+function skipSpace(value: string, at: number): number {
+	let next = at
+
+	while (next < value.length && /\s/.test(value.charAt(next))) next++
+
+	return next
+}
+
+// Whether `value` is an SVG document: an XML declaration, comments and a doctype, then an <svg> root. One forward pass
+// (a pattern with a repeated comment group backtracks exponentially on a near miss).
+export function isSvgDocument(value: string): boolean {
+	let at = skipSpace(value, 0)
+
+	if (value.startsWith("<?xml", at)) {
+		const end = value.indexOf("?>", at)
+
+		if (end === -1) return false
+
+		at = skipSpace(value, end + 2)
+	}
+
+	while (value.startsWith("<!--", at)) {
+		const end = value.indexOf("-->", at + 4)
+
+		if (end === -1) return false
+
+		at = skipSpace(value, end + 3)
+	}
+
+	if (value.slice(at, at + 9).toUpperCase() === "<!DOCTYPE") {
+		const end = value.indexOf(">", at)
+
+		if (end === -1) return false
+
+		at = skipSpace(value, end + 1)
+	}
+
+	return /^<svg[\s>]/i.test(value.slice(at, at + 5))
+}
+
 function base64Bytes(value: string): Uint8Array<ArrayBuffer> | null {
 	try {
 		const binary = atob(value.replace(/\s+/g, ""))
@@ -108,7 +148,13 @@ function base64Bytes(value: string): Uint8Array<ArrayBuffer> | null {
 	}
 }
 
-function image(data: Readonly<Record<string, unknown>>, maxPixels: number): NotebookOutput | null {
+// The pixels a notebook's images may still take: one budget for the whole notebook, not each image (dozens of
+// near-cap images would each pass a per-image check).
+interface PixelBudget {
+	left: number
+}
+
+function image(data: Readonly<Record<string, unknown>>, pixels: PixelBudget): NotebookOutput | null {
 	for (const mime of RASTER) {
 		const value = data[mime]
 
@@ -121,7 +167,9 @@ function image(data: Readonly<Record<string, unknown>>, maxPixels: number): Note
 		const info = bytes === null ? null : sniffImage(bytes.subarray(0, 65_536), bytes.length)
 
 		if (bytes === null || info === null || !RASTER.some(raster => raster === info.mime)) return null
-		if (info.width * info.height > maxPixels) return { kind: "tooLarge" }
+		if (info.width * info.height > pixels.left) return { kind: "tooLarge" }
+
+		pixels.left -= info.width * info.height
 
 		return { kind: "image", blob: new Blob([bytes], { type: info.mime }), width: info.width, height: info.height }
 	}
@@ -130,8 +178,8 @@ function image(data: Readonly<Record<string, unknown>>, maxPixels: number): Note
 }
 
 // The richest output a viewer shows safely, in Jupyter's own order of preference.
-function displayData(data: Readonly<Record<string, unknown>>, maxPixels: number): NotebookOutput | null {
-	const raster = image(data, maxPixels)
+function displayData(data: Readonly<Record<string, unknown>>, pixels: PixelBudget): NotebookOutput | null {
+	const raster = image(data, pixels)
 
 	if (raster !== null) return raster
 
@@ -141,8 +189,7 @@ function displayData(data: Readonly<Record<string, unknown>>, maxPixels: number)
 		const value = joined(svg)
 
 		if (value.length > MAX_TEXT_CHARS) return { kind: "tooLarge" }
-		if (/^\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(value))
-			return { kind: "svg", svg: value }
+		if (isSvgDocument(value)) return { kind: "svg", svg: value }
 	}
 
 	const html = data["text/html"]
@@ -162,7 +209,7 @@ function displayData(data: Readonly<Record<string, unknown>>, maxPixels: number)
 	return text.allows(plainText) ? { kind: "text", ...plain(plainText) } : null
 }
 
-function output(value: unknown, maxPixels: number): NotebookOutput | null {
+function output(value: unknown, pixels: PixelBudget): NotebookOutput | null {
 	const shape = outputShape(value)
 
 	if (shape instanceof type.errors) return null
@@ -183,7 +230,7 @@ function output(value: unknown, maxPixels: number): NotebookOutput | null {
 		}
 		case "execute_result":
 		case "display_data":
-			return shape.data === undefined ? null : displayData(shape.data, maxPixels)
+			return shape.data === undefined ? null : displayData(shape.data, pixels)
 		default:
 			return null
 	}
@@ -209,6 +256,7 @@ export function readNotebook(json: string, maxPixels: number): NotebookReading {
 	}
 
 	const cells: NotebookCell[] = []
+	const pixels: PixelBudget = { left: maxPixels }
 	let cellsSkipped = 0
 
 	for (const value of notebook.cells) {
@@ -235,7 +283,7 @@ export function readNotebook(json: string, maxPixels: number): NotebookReading {
 		const outputs: NotebookOutput[] = []
 
 		for (const entry of all.slice(0, MAX_OUTPUTS)) {
-			const shown = output(entry, maxPixels)
+			const shown = output(entry, pixels)
 
 			if (shown !== null) outputs.push(shown)
 		}

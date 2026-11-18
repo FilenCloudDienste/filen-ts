@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MAX_CELLS, MAX_OUTPUTS, MAX_TEXT_CHARS, readNotebook } from "@/features/preview/lib/notebookReading"
+import { MAX_CELLS, MAX_OUTPUTS, MAX_TEXT_CHARS, isSvgDocument, readNotebook } from "@/features/preview/lib/notebookReading"
 
 // A notebook read for its viewer: cells and outputs in the shapes the viewer shows, images as Blobs typed by their bytes
 // and within the pixel budget, ANSI removed, and every bound past which the reading cuts, counts or refuses.
@@ -129,5 +129,25 @@ describe("readNotebook", () => {
 
 	it("falls back to the kernel's language", () => {
 		expect(readNotebook(notebook([], { kernelspec: { language: "R" } }), 0)).toMatchObject({ language: "R", extension: null })
+	})
+
+	it("gives the notebook's images one pixel budget between them", () => {
+		const outputs = Array.from({ length: 3 }, () => ({ output_type: "display_data", data: { "image/png": PNG } }))
+		const reading = readNotebook(notebook([code(outputs)]), 2)
+
+		expect(reading.status === "ok" && reading.cells[0]?.kind === "code" && reading.cells[0].outputs.map(output => output.kind)).toEqual(
+			["image", "image", "tooLarge"]
+		)
+	})
+
+	it("tells an SVG document by one forward pass, a near miss of many comments included", () => {
+		expect(isSvgDocument('<?xml version="1.0"?>\n<!-- a --><!-- b -->\n<!DOCTYPE svg>\n<svg xmlns="x"/>')).toBe(true)
+		expect(isSvgDocument("<svg>")).toBe(true)
+		expect(isSvgDocument("<script>1</script><svg>")).toBe(false)
+
+		const started = performance.now()
+
+		expect(isSvgDocument(`${"<!---->".repeat(100_000)}x`)).toBe(false)
+		expect(performance.now() - started).toBeLessThan(500)
 	})
 })
