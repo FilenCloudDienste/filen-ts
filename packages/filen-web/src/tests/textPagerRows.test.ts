@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import { BlockCache } from "@/lib/media/blockCache"
+import { visibleRows, wholeRows } from "@/features/preview/lib/textPager/viewport.logic"
 import {
 	boundaryAt,
 	LINE_SEARCH_BYTES,
 	locateRow,
 	pagerEncoding,
 	ROW_MAX_UNITS,
+	rowsAround,
 	rowsBefore,
 	rowsFrom,
 	type PagerEncoding,
@@ -207,6 +209,45 @@ describe("textPager rows", () => {
 		const end = await locateRow(source, encoding, size)
 
 		expect(end.start).toBeGreaterThan(size - ROW_MAX_UNITS - 1)
+	})
+
+	it("reads the last block for End, the one before only when the last row starts there, and nothing once cached", async () => {
+		// The viewer's view at 13 px text in a 720 px window, and its worker's cache (8 blocks, a read-ahead of 2).
+		const view = { rowHeight: 20, height: 640 }
+		const after = 2 * visibleRows(view)
+		const before = wholeRows(view) - 1
+
+		for (const [size, blocks] of [
+			[40 * BLOCK_BYTES, 1],
+			[40 * BLOCK_BYTES + 1000, 2]
+		] as const) {
+			const requests: number[] = []
+			const cache = new BlockCache(
+				size,
+				(start, end) => {
+					// Every block a range spans: one request each, as the SDK reads them.
+					for (let block = start / BLOCK_BYTES; block * BLOCK_BYTES < end; block++) requests.push(block)
+
+					return Promise.resolve(new Uint8Array(end - start).map((_, index) => 0x61 + ((start + index) % 26)))
+				},
+				{ capacity: 8, readAhead: 2 }
+			)
+			const source: PagerSource = { size, read: (start, end) => cache.read(start, end) }
+			const encoding = pagerEncoding("utf-8", await cache.read(0, BLOCK_BYTES))
+
+			await rowsAround(source, encoding, 0, 0, after)
+
+			const opened = requests.length
+			const end = await rowsAround(source, encoding, size, before, after)
+
+			expect(end.rows.at(-1)?.end).toBe(size)
+			expect(end.rows.length).toBeGreaterThan(before)
+			expect(requests.slice(opened).sort()).toEqual(blocks === 1 ? [39] : [39, 40])
+
+			await rowsAround(source, encoding, size, before, after)
+
+			expect(requests.length - opened).toBe(blocks)
+		}
 	})
 
 	it("anchors a multi-byte legacy jump after a byte no character continues", async () => {

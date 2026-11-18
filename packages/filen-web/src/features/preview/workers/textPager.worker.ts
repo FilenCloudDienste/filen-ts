@@ -8,8 +8,8 @@ import { isExecutableHead } from "@/features/preview/lib/binaryInfo/read"
 import { countLines, LineIndex } from "@/features/preview/lib/textPager/index.logic"
 import {
 	decodeSpan,
-	locateRow,
 	pagerEncoding,
+	rowsAround,
 	rowsBefore,
 	rowsFrom,
 	type PagerEncoding,
@@ -233,12 +233,10 @@ const api = {
 	// file ends first). `line`: the line `offset` is on, when known (a match's).
 	locate: async (offset: number, before: number, after: number, line: number | null): Promise<PagerRows> => {
 		const { source, encoding } = reading()
-		const located = await locateRow(source, encoding, offset)
-		const below = await rowsFrom(source, encoding, located.start, located.continuation, after, source.size)
-		const above = await rowsBefore(source, encoding, located.start, before + Math.max(0, after - below.length))
-		const column = offset > located.start ? decodeSpan(await source.read(located.start, offset), encoding).length : 0
+		const { rows, focus, start } = await rowsAround(source, encoding, offset, before, after)
+		const column = offset > start ? decodeSpan(await source.read(start, offset), encoding).length : 0
 
-		return { rows: await withLines([...above, ...below], above.length, line), focus: above.length, column }
+		return { rows: await withLines(rows, focus, line), focus, column }
 	},
 	// Up to `count` rows from the row boundary `start` on; `line`: that row's line, when known.
 	after: async (start: number, continuation: boolean, count: number, line: number | null): Promise<PagerRowView[]> => {

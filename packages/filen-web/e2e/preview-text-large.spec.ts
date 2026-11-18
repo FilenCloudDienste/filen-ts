@@ -78,6 +78,10 @@ test("text past the cap opens in the large text viewer, read in ranges", async (
 			await uploadDiskFiles(page, [flat, japanese], listbox)
 			await settleLeases(page)
 
+			// A window's height, not the listing's 8000 px: a screen of this file's 4 KiB rows is 1.5 MiB there, so opening
+			// it reads six blocks, some after the count below starts, and End's view and headroom span five.
+			await page.setViewportSize({ width: 1280, height: 720 })
+
 			const egest = observeEgest(context)
 			const dialog = previewOverlay(page)
 			const mod = await resolveModKey(page)

@@ -445,3 +445,27 @@ export async function rowsBefore(source: PagerSource, encoding: PagerEncoding, e
 
 	return stretches.reverse().flat().slice(-count)
 }
+
+export interface RowsAround {
+	readonly rows: readonly PagerRow[]
+	// The row holding the offset asked for, and where it starts.
+	readonly focus: number
+	readonly start: number
+}
+
+// The rows around the one holding `at`: up to `before` rows above it and `after` from it on, more above when the file
+// ends first. A jump's whole read: in a window-sized view, the block it lands in and the one before where the rows
+// above reach into it.
+export async function rowsAround(
+	source: PagerSource,
+	encoding: PagerEncoding,
+	at: number,
+	before: number,
+	after: number
+): Promise<RowsAround> {
+	const located = await locateRow(source, encoding, at)
+	const below = await rowsFrom(source, encoding, located.start, located.continuation, after, source.size)
+	const above = await rowsBefore(source, encoding, located.start, before + Math.max(0, after - below.length))
+
+	return { rows: [...above, ...below], focus: above.length, start: located.start }
+}
