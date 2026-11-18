@@ -9,7 +9,7 @@ import {
 	type SpellingChecker,
 	type SpellingMark
 } from "@filen/office/core/docx/spelling"
-import { ParagraphScanner, addressSpans } from "../core/docx/spelling/scan"
+import { ParagraphScanner, addressSpans, spellingQuery } from "../core/docx/spelling/scan"
 import { STYLES_PART, sessionOf } from "./docxEditFixtures"
 import { budget, cpuMs } from "./timing"
 import type { SyntheticDocx } from "./docxSynthetic"
@@ -309,6 +309,38 @@ describe("DocxSpelling", () => {
 
 		expect(checker.checked).toContain("don't")
 		expect(spelling.marks()).toEqual([])
+	})
+
+	it("looks words up in NFC, without changing words that need no normalising", () => {
+		expect(spellingQuery("Zoe\u0308")).toBe("Zo\u00eb")
+		expect(spellingQuery("cafe\u0301\u2019s")).toBe("caf\u00e9's")
+		expect(spellingQuery("don\u2019t")).toBe("don't")
+		expect(spellingQuery("hello")).toBe("hello")
+		expect(spellingQuery("Zo\u00eb")).toBe("Zo\u00eb")
+	})
+
+	it("checks a decomposed word in its precomposed form and marks it as typed", async () => {
+		const decomposed = "Zoe\u0308"
+		const session = await sessionOf({ body: para(run(`${decomposed} ${decomposed}x hello`)) })
+		const checker = new FakeChecker()
+		const clock = manualTimers()
+
+		checker.words["en"]?.add("Zo\u00eb")
+
+		const spelling = new DocxSpelling(session, checker, { now: clock.now, timers: clock.timers })
+
+		await clock.advance(0)
+		expect(checker.checked).toContain("Zo\u00eb")
+		expect(checker.checked).toContain("Zo\u00ebx")
+		expect(checker.checked.some(word => word.includes("\u0308"))).toBe(false)
+		// The accepted word is not marked; the other one keeps its raw text and offsets.
+		expect(marked(session, spelling.marks())).toEqual([`spelling:${decomposed}x`])
+
+		const from = find(session, `${decomposed}x`)
+		const issue = spelling.spellingAt(from)
+
+		expect(issue?.word).toBe(`${decomposed}x`)
+		expect([issue?.from, issue?.to]).toEqual([from, from + decomposed.length + 1])
 	})
 
 	it("honours w:hideSpellingErrors", async () => {

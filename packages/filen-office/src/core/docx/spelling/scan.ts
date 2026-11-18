@@ -27,11 +27,16 @@ const INVISIBLE = /[⁠­]/g
 export const MAX_WORD_LENGTH = 100
 
 const RIGHT_QUOTE = "\u2019"
+// Combining diacritical marks: text with them may be decomposed (NFD), while dictionaries and the user's
+// dictionary hold precomposed (NFC) words.
+const COMBINING_MARK = /[\u0300-\u036f]/
 
-// The form a word is looked up in: typographic apostrophes as ASCII ones, which every dictionary lists
-// (some also map U+2019 themselves, others do not).
+// The form a word is looked up in: NFC, with typographic apostrophes as ASCII ones, which every dictionary
+// lists (some also map U+2019 themselves, others do not). Only words with a combining mark are normalised.
 export function spellingQuery(word: string): string {
-	return word.includes(RIGHT_QUOTE) ? word.replaceAll(RIGHT_QUOTE, "'") : word
+	const composed = COMBINING_MARK.test(word) ? word.normalize("NFC") : word
+
+	return composed.includes(RIGHT_QUOTE) ? composed.replaceAll(RIGHT_QUOTE, "'") : composed
 }
 
 // Suggestions in the apostrophe style of the word they replace.
