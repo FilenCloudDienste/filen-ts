@@ -12,6 +12,12 @@ export type ResourceRequest =
 
 export const REFERENCE_SCHEME = "filen-ref:"
 
+// The page's own scheme and host: the web app's https origin, or the desktop app's `filen://app`, whose custom scheme
+// some engines give an opaque origin, so schemes and hosts are compared rather than `origin`.
+function sameOrigin(url: URL, base: URL): boolean {
+	return url.protocol === base.protocol && url.host === base.host
+}
+
 // `assets` are same-origin path prefixes ("/assets/three/"); anything else on any origin is external.
 export function classifyResourceUrl(raw: string, base: string, assets: readonly string[]): ResourceRequest {
 	if (raw.toLowerCase().startsWith(REFERENCE_SCHEME)) return { kind: "ref", path: raw.slice(REFERENCE_SCHEME.length).replace(/^\/+/, "") }
@@ -33,17 +39,10 @@ export function classifyResourceUrl(raw: string, base: string, assets: readonly 
 			return { kind: "data", href: url.href }
 		}
 
-		case "http:":
-		case "https:": {
-			const sameOrigin = url.origin === new URL(base).origin
-
-			return sameOrigin && assets.some(prefix => url.pathname.startsWith(prefix))
+		default: {
+			return sameOrigin(url, new URL(base)) && assets.some(prefix => url.pathname.startsWith(prefix))
 				? { kind: "asset", href: url.href }
 				: { kind: "external" }
-		}
-
-		default: {
-			return { kind: "external" }
 		}
 	}
 }

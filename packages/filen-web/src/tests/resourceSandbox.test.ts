@@ -20,6 +20,21 @@ describe("classifyResourceUrl", () => {
 		expect(classifyResourceUrl(url, BASE, ASSETS).kind).toBe(kind)
 	})
 
+	it.each([
+		// The 3D decoders and the CAD viewer's fonts, root-relative as the build writes them.
+		["/assets/three/draco.wasm", "asset"],
+		["filen://app/assets/three/draco.wasm", "asset"],
+		["/assets/office-fonts/arimo/Arimo-Regular.ttf-2096961b.gz", "asset"],
+		["/api/user", "external"],
+		["filen://other/assets/three/draco.wasm", "external"],
+		["https://app/assets/three/draco.wasm", "external"],
+		["filen-desktop://app/assets/three/draco.wasm", "external"]
+	])("on the desktop app's filen://app origin, %s -> %s", (url, kind) => {
+		const assets = [...ASSETS, "/assets/office-fonts/arimo/Arimo-Regular.ttf-2096961b.gz"]
+
+		expect(classifyResourceUrl(url, "filen://app/assets/dxf.worker.js", assets).kind).toBe(kind)
+	})
+
 	it("hands a reference's path over still encoded and without its leading slashes", () => {
 		expect(classifyResourceUrl("filen-ref:///sub%20dir/a.png", BASE, ASSETS)).toEqual({ kind: "ref", path: "sub%20dir/a.png" })
 	})
