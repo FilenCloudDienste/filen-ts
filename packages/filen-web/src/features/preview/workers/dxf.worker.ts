@@ -19,6 +19,7 @@ import {
 	DXF_MAX_RESTORES,
 	createDxfViewer,
 	dxfLayerList,
+	dxfMemoryGuard,
 	dxfLoadFailure,
 	loadDxf,
 	watchDxfMessages,
@@ -280,6 +281,15 @@ function onShell({ data }: MessageEvent<ShellToWorker>): void {
 	}
 }
 
+// The engine's measurement of this worker's memory, where it gives one (cross-origin isolated Chromium).
+function measureMemory(): (() => Promise<{ bytes: number }>) | null {
+	const measure: unknown = Reflect.get(performance, "measureUserAgentSpecificMemory")
+
+	if (typeof measure !== "function") return null
+
+	return async () => await (Reflect.apply(measure, performance, []) as Promise<{ bytes: number }>)
+}
+
 // One read of the drawing before it is parsed: its encoding, and the characters its drawn text holds.
 async function readText(source: Blob): Promise<DxfTextRead> {
 	const scan = new DxfTextScan(dxfDeclaredEncoding(new Uint8Array(await source.slice(0, DXF_HEADER_BYTES).arrayBuffer())))
@@ -319,7 +329,12 @@ const api = {
 			background: dark ? BACKGROUNDS.dark : BACKGROUNDS.light,
 			pointSize: 2 * pixelRatio,
 			encoding,
-			fontWork: () => Math.ceil(fontBytes / DXF_FONT_BYTES_PER_WORK)
+			fontWork: () => Math.ceil(fontBytes / DXF_FONT_BYTES_PER_WORK),
+			checkpoint: dxfMemoryGuard({
+				sourceBytes: source.size,
+				fontBytes: () => fontBytes,
+				measure: measureMemory()
+			})
 		})
 		const notices = watchDxfMessages(loaded)
 

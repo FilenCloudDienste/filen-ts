@@ -10,8 +10,10 @@ import {
 	DXF_FONT_PATH_PREFIX,
 	DXF_MAX_LAYER_LABEL,
 	DXF_MAX_LISTED_LAYERS,
+	DXF_MAX_WORKER_BYTES,
 	createDxfViewer,
 	dxfLayerList,
+	dxfMemoryGuard,
 	dxfLoadFailure,
 	loadDxf,
 	watchDxfMessages
@@ -197,7 +199,8 @@ async function open(text: string) {
 		background: new Color(0xffffff),
 		pointSize: 2,
 		encoding: encodingOf(text),
-		fontWork: () => 0
+		fontWork: () => 0,
+		checkpoint: dxfMemoryGuard({ sourceBytes: text.length, fontBytes: () => 0, measure: null })
 	})
 
 	return { renderer, ...(await finish(viewer)) }
@@ -453,14 +456,15 @@ describe("the scene budget", () => {
 		expect((await openWith(same, { maxWork: 1000 })).loaded).toBe("loaded")
 	})
 
-	it("charges an arc's segments once", async () => {
-		// 36 segments: 36 vertices and 72 indices, the entity, its visit and its batch.
+	it("charges an arc's segments once, an index at half a vertex", async () => {
+		// 36 segments: 36 vertices and 72 indices (36), the entity, its visit and its batch.
 		const circle = drawing([0, "CIRCLE", 8, "0", 10, 0, 20, 0, 30, 0, 40, 5])
+		const work = 36 + 36 + 1 + 1 + 64
 
 		serve(circle)
-		expect((await openWith(circle, { maxWork: 36 + 72 + 1 + 1 + 64 })).loaded).toBe("loaded")
+		expect((await openWith(circle, { maxWork: work })).loaded).toBe("loaded")
 		serve(circle)
-		expect((await openWith(circle, { maxWork: 36 + 72 + 1 + 1 + 64 - 1 })).loaded).toBe("tooComplex")
+		expect((await openWith(circle, { maxWork: work - 1 })).loaded).toBe("tooComplex")
 	})
 })
 
@@ -566,7 +570,7 @@ describe("one entity's work", () => {
 		expect(ms).toBeLessThan(5000)
 	}, 60_000)
 
-	it("skips a hatch past one entity's work before drawing it, and gives its charge back", async () => {
+	it("skips a hatch past one entity's work before drawing it, and keeps its charge", async () => {
 		// Dash steps that draw nothing: refused before they run.
 		const spaces = hatch(20_000, true)
 
@@ -578,7 +582,7 @@ describe("one entity's work", () => {
 		expect(result.notices.skipped).toBe(1)
 		expect(ms).toBeLessThan(2000)
 
-		// Two hatches each charged up to the entity limit, then skipped: refunded, the build stays within its budget.
+		// Two hatches each charged up to the entity limit, then skipped: what they did stays counted, past the budget.
 		const two = (entities: string): string => entities
 		const dashed = hatch(2, false).replace(/49\r\n0\.0001\r\n49\r\n-0\.0001/, "49\r\n0.5\r\n49\r\n-0.5")
 		const body = /0\r\nSECTION\r\n2\r\nENTITIES\r\n([\s\S]*)0\r\nENDSEC\r\n0\r\nEOF/.exec(dashed)?.[1] ?? ""
@@ -586,10 +590,9 @@ describe("one entity's work", () => {
 
 		serve(both)
 
-		const refunded = await openWith(both, { maxWork: 6000, maxEntityWork: 5000 })
+		const kept = await openWith(both, { maxWork: 6000, maxEntityWork: 5000 })
 
-		expect(refunded.loaded).toBe("loaded")
-		expect(refunded.notices.skipped).toBe(2)
+		expect(kept.loaded).toBe("tooComplex")
 	})
 
 	it("skips text whose layout would pass one entity's work before laying it out", async () => {
@@ -618,5 +621,169 @@ describe("dxfLayerList", () => {
 		expect(more).toBe(5)
 		expect(listed[0]).toEqual({ name: "L0", label: "x".repeat(DXF_MAX_LAYER_LABEL), color: "#ff0000", visible: true })
 		expect(listed[1]).toEqual({ name: "L1", label: "L1", color: "#00ff00", visible: false })
+	})
+})
+
+// A block fan: F0..F(levels-1), each inserting the next `fan` times; the last holds `leaf`.
+function fanOf(fan: number, levels: number, leaf: (string | number)[]): string {
+	let blocks: (string | number)[] = []
+
+	for (let level = 0; level < levels; level++) {
+		blocks.push(0, "BLOCK", 2, `F${String(level)}`, 10, 0, 20, 0, 30, 0)
+
+		if (level === levels - 1) blocks = blocks.concat(leaf)
+		else for (let index = 0; index < fan; index++) blocks.push(0, "INSERT", 2, `F${String(level + 1)}`, 10, index, 20, level, 30, 0)
+
+		blocks.push(0, "ENDBLK")
+	}
+
+	return drawing([0, "INSERT", 2, "F0", 10, 0, 20, 0, 30, 0], blocks)
+}
+
+// An LWPOLYLINE of `count` vertices, each bulged into a half circle (about 18 segments each).
+function bulged(count: number): (string | number)[] {
+	return [0, "LWPOLYLINE", 8, "0", 90, count, 70, 0].concat(Array.from({ length: count }, (_, index) => [10, index, 20, 0, 42, 1]).flat())
+}
+
+describe("what every entity allocates", () => {
+	it("refuses a bulged polyline before generating its arcs", async () => {
+		const text = drawing(bulged(100_000))
+
+		serve(text)
+
+		const { result, ms } = await timed(() => open(text))
+
+		expect(result.loaded).toBe("loaded")
+		expect(result.notices.skipped).toBe(1)
+		expect(ms).toBeLessThan(5000)
+	}, 30_000)
+
+	it("decomposes a refused entity once, keeping its charge, however many paths reach it", async () => {
+		const leaf = bulged(40_000)
+		const text = fanOf(8, 4, leaf)
+
+		serve(text)
+
+		const { result, ms } = await timed(() => open(text))
+
+		expect(result.loaded).toBe("loaded")
+		expect(result.notices.skipped).toBe(1)
+		expect(ms).toBeLessThan(5000)
+
+		// Its charge stays: a budget that holds the fan's visits but not the refused entity's work fails.
+		serve(text)
+		expect((await openWith(text, { maxWork: 100_000, maxEntityWork: 1_048_576 })).loaded).toBe("tooComplex")
+	}, 30_000)
+
+	it("meters laid-out glyphs, whatever entity lays them out", async () => {
+		// Under the per-character pre-check (48 each), over what the glyphs take.
+		for (const entity of [
+			[0, "MTEXT", 8, "0", 10, 0, 20, 0, 30, 0, 40, 2, 1, "@".repeat(20_000)],
+			[0, "ATTRIB", 8, "0", 10, 0, 20, 0, 30, 0, 40, 2, 2, "TAG", 1, "@".repeat(20_000)]
+		]) {
+			const text = drawing(entity)
+
+			serve(text)
+
+			const { result, ms } = await timed(() => open(text))
+
+			expect(result.notices.skipped).toBe(1)
+			expect(ms).toBeLessThan(5000)
+		}
+
+		const short = drawing([0, "ATTRIB", 8, "0", 10, 0, 20, 0, 30, 0, 40, 2, 2, "TAG", 1, "@@"])
+
+		serve(short)
+		expect((await open(short)).notices.skipped).toBe(0)
+	}, 30_000)
+
+	it("fills a solid region of up to 2000 vertices and outlines a larger one", async () => {
+		const solid = (vertices: number): string => {
+			const square = Array.from({ length: vertices }, (_, index) => {
+				const side = Math.floor((index * 4) / vertices)
+				const t = ((index * 4) % vertices) / vertices
+
+				return side === 0
+					? [10, t * 100, 20, 0]
+					: side === 1
+						? [10, 100, 20, t * 100]
+						: side === 2
+							? [10, 100 - t * 100, 20, 100]
+							: [10, 0, 20, 100 - t * 100]
+			}).flat()
+
+			return drawing(
+				[0, "HATCH", 8, "0", 10, 0, 20, 0, 30, 0, 2, "SOLID", 70, 1, 71, 0, 91, 1, 92, 3, 72, 0, 73, 1, 93, vertices].concat(
+					square,
+					[97, 0, 75, 0, 76, 1, 98, 0]
+				)
+			)
+		}
+
+		for (const [vertices, mesh] of [
+			[2000, true],
+			[2001, false]
+		] as const) {
+			const text = solid(vertices)
+
+			serve(text)
+
+			const { viewer, loaded } = await open(text)
+
+			expect(loaded).toBe("loaded")
+			expect(
+				viewer.GetScene().children.some(object => object.type === "Mesh"),
+				String(vertices)
+			).toBe(mesh)
+		}
+	})
+})
+
+describe("the memory guard", () => {
+	const source = { sourceBytes: 1024, fontBytes: () => 0, measure: null }
+
+	it("ends a build its estimate puts past the limit", async () => {
+		const guard = dxfMemoryGuard(source)
+
+		await expect(guard(1000)).resolves.toBeUndefined()
+		await expect(guard(DXF_MAX_WORKER_BYTES)).rejects.toThrow(/more memory/)
+	})
+
+	it("ends a build the engine measured past the limit, once the measurement arrived", async () => {
+		const guard = dxfMemoryGuard({ ...source, measure: () => Promise.resolve({ bytes: DXF_MAX_WORKER_BYTES + 1 }) })
+
+		await guard(0)
+		await expect(guard(0)).rejects.toThrow(/more memory/)
+		expect(dxfLoadFailure(await guard(0).catch((error: unknown) => error))).toBe("tooComplex")
+	})
+
+	it("is asked during the build, and ends it when it throws", async () => {
+		const text = drawing(
+			Array.from({ length: 10_000 }, (_, index) => [0, "LINE", 8, "0", 10, 0, 20, index, 30, 0, 11, 1, 21, index, 31, 0]).flat()
+		)
+		const seen: number[] = []
+
+		serve(text)
+		expect(
+			(
+				await openWith(text, {
+					checkpoint: work => {
+						seen.push(work)
+					}
+				})
+			).loaded
+		).toBe("loaded")
+		expect(seen.length).toBeGreaterThan(0)
+
+		serve(text)
+		expect(
+			(
+				await openWith(text, {
+					checkpoint: () => {
+						throw Object.assign(new Error("over"), { name: "DxfMemoryExceeded" })
+					}
+				})
+			).loaded
+		).toBe("tooComplex")
 	})
 })

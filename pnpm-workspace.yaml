@@ -125,14 +125,14 @@ patchedDependencies:
   # Passes cache_ram_mib and the context-checkpoint params to the self-built wasm (filen-web
   # scripts/wllama), capping a prompt cache that outgrew the heap. Drop once a wllama release exposes them.
   '@wllama/wllama@3.8.1': patches/@wllama__wllama@3.8.1.patch
-  # The DXF viewer builds untrusted drawings: the scene counts its work (entity visits, so blocks nested in blocks
-  # count once per path; generated vertices and indices; spline sampling; hatch lines and dash steps; each block
-  # instance's vertices; render batches; fonts) against `maxWork` and fails past it, and checks one entity's work against
-  # `maxEntityWork` before it generates anything (skipped, its charge given back). Angles are normalised without loops
-  # and refused past 1e9 rad, block nesting stops at 32, splines sample in O(degree^2) a point, solid fills over 10k
-  # vertices are drawn as outlines, and `releaseParsedDxf` lets the parsed tree go before the buffers are built.
-  # Unpatched, a few KB of nested INSERTs, one arc, ellipse, spline or hatch build without limit. The patch is
-  # MPL-2.0, as dxf-viewer is (its header says so). Re-author on every bump; propose upstream.
+  # The DXF viewer builds untrusted drawings, so the patched scene charges work where it allocates: what an entity
+  # generates (arc and bulge segments, spline samples, glyph shapes and laid-out glyphs, earcut input) is metered
+  # against `maxEntityWork` before it is made, and what it writes (vertices, indices at half a vertex), each entity
+  # visit, block instance, render batch, hatch line and dash step, and the fonts count against `maxWork`. A refused
+  # entity keeps its charge and is skipped on every later path. Angles are normalised without loops, block nesting stops
+  # at 32, solid fills over 2000 vertices are outlined, a `checkpoint` hook runs every 4096 entities, and
+  # `releaseParsedDxf` lets the parsed tree go before the buffers are built. The patch is MPL-2.0, as dxf-viewer is (its
+  # header says so). Re-author on every bump; propose upstream.
   dxf-viewer@1.0.51: patches/dxf-viewer@1.0.51.patch
   # Desktop updates: the AppImage is replaced only after the new one is moved into place (a failed mv deleted the
   # running app), and the Windows app quits only once elevate.exe started the installer (a declined UAC prompt

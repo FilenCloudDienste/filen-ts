@@ -182,7 +182,7 @@ patchedDependencies:
   '@react-native-menu/menu@2.0.0': 71967c075f3a5d9a5f2793f44c961ed8f60c0906049d431d5867750b78fc9110
   '@shopify/flash-list@2.3.3': 4b848b6ef2a088880fae7be52cdccf3b4eedaa31e193e609b471c4e2397bf815
   '@wllama/wllama@3.8.1': bac6c3dcc6089774f199f36f59a0579762a384be2acd80b97b9633c032a67737
-  dxf-viewer@1.0.51: b54286d448cf66136a30dd8b6f49a5154284ea992b0fcbf6a3ec0c6278c9cad9
+  dxf-viewer@1.0.51: cf74767ec40b7506ba75c87bf1cfe239e2d1511e15fe0119c53da07848674e3e
   electron-updater@6.8.11: 7ff45763ac88ff2ac4d30dd56bcaa8a6de3504c3c8c8f051238f40047381414b
   expo-audio@58.0.10: 09baaf725e6021d20e729e9c865b0734682b270ff71fda6c9a88e94a7a3e4248
   expo-background-task@58.0.11: f4cebd6197190c791b11d2ce4b83e7d9cfe27fd42afdf1359b1b2c83a4ea72ac
@@ -1198,7 +1198,7 @@ importers:
         version: 3.4.17
       dxf-viewer:
         specifier: 1.0.51
-        version: 1.0.51(patch_hash=b54286d448cf66136a30dd8b6f49a5154284ea992b0fcbf6a3ec0c6278c9cad9)
+        version: 1.0.51(patch_hash=cf74767ec40b7506ba75c87bf1cfe239e2d1511e15fe0119c53da07848674e3e)
       fflate:
         specifier: 0.8.3
         version: 0.8.3
@@ -17287,7 +17287,7 @@ snapshots:
     dependencies:
       readable-stream: 2.3.8
 
-  dxf-viewer@1.0.51(patch_hash=b54286d448cf66136a30dd8b6f49a5154284ea992b0fcbf6a3ec0c6278c9cad9):
+  dxf-viewer@1.0.51(patch_hash=cf74767ec40b7506ba75c87bf1cfe239e2d1511e15fe0119c53da07848674e3e):
     dependencies:
       '@types/three': 0.187.0
       earcut: 3.2.4
