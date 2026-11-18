@@ -2238,9 +2238,17 @@ const api = {
 			onEvent,
 			async (deliver, managedFuture) => {
 				const batcher = params.deliverEntries
-					? createListBatcher(batch => {
-							deliver({ type: "entries", batch })
-						})
+					? createListBatcher(
+							batch => {
+								deliver({ type: "entries", batch })
+							},
+							undefined,
+							() => {
+								const format = archiveReaders.format(readerId)
+
+								return format?.type === "tar" && format.codec === undefined
+							}
+						)
 					: null
 
 				try {

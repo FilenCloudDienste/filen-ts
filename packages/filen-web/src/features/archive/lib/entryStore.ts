@@ -23,6 +23,8 @@ export interface EntryStore {
 	readonly archiveUuid: string
 	// Bumped by every append.
 	readonly version: number
+	// A bare tar's: its `sequential` file members are read alone, by range (PackedEntryBatch.membersMapped).
+	readonly membersMapped: boolean
 	readonly entryCount: number
 	readonly dirCount: number
 	append: (batch: PackedEntryBatch) => void
@@ -131,6 +133,7 @@ export function createEntryStore(): EntryStore {
 	const aggEntryCounts: number[] = [0]
 	const pathToDir = new Map<string, number>([["", 0]])
 	let archiveUuid = ""
+	let membersMapped = false
 	let version = 0
 	let entryCount = 0
 	let maxIndex = -1
@@ -203,6 +206,10 @@ export function createEntryStore(): EntryStore {
 
 		if (archiveUuid === "") {
 			archiveUuid = batch.archive
+		}
+
+		if (batch.membersMapped === true) {
+			membersMapped = true
 		}
 
 		const parentCount = batch.parents.length
@@ -358,6 +365,9 @@ export function createEntryStore(): EntryStore {
 		},
 		get version() {
 			return version
+		},
+		get membersMapped() {
+			return membersMapped
 		},
 		get entryCount() {
 			return entryCount

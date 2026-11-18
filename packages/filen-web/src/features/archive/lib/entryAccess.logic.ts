@@ -29,10 +29,10 @@ import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 
 // What the browser can do with one listed entry on its own: open it in a viewer, or save it. The SDK reads
-// a zip's, 7z's or RAR's file and a compressed tar's member alone; a bare tar's member or a single compressed file
-// only front to back, so never.
+// a zip's, 7z's or RAR's file, a compressed tar's member and a bare tar's member alone (the last by range, from where
+// the listing found it); a single compressed file only front to back, so never.
 
-// The SDK reads it alone: a file an extraction creates, directly or from a solid block.
+// The SDK reads it alone: a file an extraction creates, directly, from a solid block, or a bare tar's member.
 export function canReadEntry(store: EntryStore, slot: number): boolean {
 	if (store.kind(slot) !== ENTRY_KIND.file || store.skip(slot) !== 0 || store.size(slot) < 0) {
 		return false
@@ -40,7 +40,9 @@ export function canReadEntry(store: EntryStore, slot: number): boolean {
 
 	const access = accessOfFlags(store.flags(slot))
 
-	return access === ENTRY_ACCESS.direct || access === ENTRY_ACCESS.solidBlock
+	return (
+		access === ENTRY_ACCESS.direct || access === ENTRY_ACCESS.solidBlock || (access === ENTRY_ACCESS.sequential && store.membersMapped)
+	)
 }
 
 // The viewer category its name reads as, or null for one the entry preview does not show (CATEGORY_POLICY's `entry`:

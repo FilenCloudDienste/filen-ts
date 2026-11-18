@@ -24,13 +24,27 @@ describe("comicPages", () => {
 		expect(comicPages(store).map(slot => store.name(slot))).toEqual(["a-cover.webp", "p1.png", "p2.jpg", "p10.jpg"])
 	})
 
-	it("leaves out a page the SDK cannot read alone", () => {
+	it("leaves out a page the SDK cannot read alone: a single compressed file's", () => {
 		const store = storeOf([
 			{ path: "p1.jpg", access: DIRECT },
 			{ path: "p2.jpg", access: { type: "sequential" } }
 		])
 
 		expect(comicPages(store).map(slot => store.name(slot))).toEqual(["p1.jpg"])
+	})
+
+	it("reads a bare tar's pages, which list as sequential and read by range (.cbt)", () => {
+		const store = storeOf(
+			[
+				{ path: "p2.jpg", access: { type: "sequential" } },
+				{ path: "p1.jpg", access: { type: "sequential" } }
+			],
+			undefined,
+			true
+		)
+
+		expect(store.membersMapped).toBe(true)
+		expect(comicPages(store).map(slot => store.name(slot))).toEqual(["p1.jpg", "p2.jpg"])
 	})
 
 	it("finds the largest solid block its pages lie in", () => {

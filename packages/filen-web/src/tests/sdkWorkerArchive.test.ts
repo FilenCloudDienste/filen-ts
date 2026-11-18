@@ -555,6 +555,40 @@ describe("sdk worker archives", () => {
 		await api.releaseJob("list")
 	})
 
+	it("marks a bare tar's batches as read by range, and no other archive's", async () => {
+		const formats = [
+			{ format: { type: "tar", codec: undefined }, mapped: true },
+			{ format: { type: "tar", codec: "gzip" }, mapped: false },
+			{ format: { type: "zip" }, mapped: false }
+		]
+
+		fakeClient.listArchive.mockImplementation(params => {
+			params.onEntriesBatch?.([{ ...ENTRY, access: { type: "sequential" } }])
+
+			return Promise.resolve(LIST_REPORT)
+		})
+
+		for (const [i, { format, mapped }] of formats.entries()) {
+			fakeClient.openArchiveReader.mockImplementationOnce((_params, password) =>
+				Promise.resolve({
+					format,
+					list: (params: ListArchiveParams & Signals) => fakeClient.listArchive(params, password),
+					close: vi.fn(),
+					free: vi.fn()
+				})
+			)
+
+			const onEvent = vi.fn<(event: ListJobEvent) => void>()
+
+			await listThroughReader(`tar-${String(i)}`, { deliverEntries: true, keepReportEntries: false }, undefined, onEvent)
+
+			const [event] = onEvent.mock.calls.map(([e]) => e)
+
+			expect(event?.type === "entries" ? event.batch.membersMapped : null).toBe(mapped)
+			await api.releaseJob(`tar-${String(i)}`)
+		}
+	})
+
 	it("lists without entries when none are wanted, and keeps the report's on request", async () => {
 		const onEvent = vi.fn<(event: ListJobEvent) => void>()
 

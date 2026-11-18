@@ -100,6 +100,9 @@ export interface PackedEntryBatch {
 	stored: PackedStoredPath[]
 	// A solid block entry's costs, per position (0 for any other entry); null when the batch holds none.
 	solid: PackedSolidCosts | null
+	// The archive is a bare tar: its file members list as `sequential`, yet the reader reads each alone, by range
+	// (EntryByteAccess `mapped`), once its listing found where they lie.
+	membersMapped?: boolean
 }
 
 export interface PackedSolidCosts {

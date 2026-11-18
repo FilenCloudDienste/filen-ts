@@ -49,11 +49,16 @@ export function archiveEntry(spec: EntrySpec | string, fallbackIndex = 0): Archi
 	}
 }
 
-export function packEntries(specs: readonly (EntrySpec | string)[], flushAt?: number): PackedEntryBatch[] {
+// `membersMapped`: a bare tar's listing (PackedEntryBatch.membersMapped).
+export function packEntries(specs: readonly (EntrySpec | string)[], flushAt?: number, membersMapped = false): PackedEntryBatch[] {
 	const batches: PackedEntryBatch[] = []
-	const batcher = createListBatcher(batch => {
-		batches.push(batch)
-	}, flushAt)
+	const batcher = createListBatcher(
+		batch => {
+			batches.push(batch)
+		},
+		flushAt,
+		() => membersMapped
+	)
 
 	batcher.push(specs.map((spec, i) => archiveEntry(spec, i)))
 	batcher.flush()
@@ -61,10 +66,10 @@ export function packEntries(specs: readonly (EntrySpec | string)[], flushAt?: nu
 	return batches
 }
 
-export function storeOf(specs: readonly (EntrySpec | string)[], flushAt?: number): EntryStore {
+export function storeOf(specs: readonly (EntrySpec | string)[], flushAt?: number, membersMapped = false): EntryStore {
 	const store = createEntryStore()
 
-	for (const batch of packEntries(specs, flushAt)) {
+	for (const batch of packEntries(specs, flushAt, membersMapped)) {
 		store.append(batch)
 	}
 

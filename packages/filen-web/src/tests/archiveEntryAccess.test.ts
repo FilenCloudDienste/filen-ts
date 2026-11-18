@@ -43,6 +43,8 @@ describe("entry access", () => {
 		expect(canReadEntry(only({ path: "a.txt", access: DIRECT }), 0)).toBe(true)
 		expect(canReadEntry(only({ path: "a.txt", access: SOLID_LATER }), 0)).toBe(true)
 		expect(canReadEntry(only({ path: "a.txt", access: SEQUENTIAL }), 0)).toBe(false)
+		// A bare tar's member: read by range from where its listing found it.
+		expect(canReadEntry(storeOf([{ path: "a.txt", access: SEQUENTIAL, size: 3 }], undefined, true), 0)).toBe(true)
 		expect(canReadEntry(only({ path: "a.txt" }), 0)).toBe(false)
 		expect(canReadEntry(only({ path: "a.txt", access: DIRECT, skip: "unsafePath" }), 0)).toBe(false)
 		expect(canReadEntry(only({ path: "l", kind: { type: "hardlink", target: "a", targetId: undefined }, access: DIRECT }), 0)).toBe(

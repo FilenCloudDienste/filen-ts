@@ -2,6 +2,7 @@ import type {
 	AnyFile,
 	ArchiveEntry,
 	ArchiveEntryId,
+	ArchiveFormat,
 	ArchiveReader,
 	EntryByteAccess,
 	EntryDownloadPhase,
@@ -108,6 +109,8 @@ export interface ArchiveReaders {
 	register: (id: string, archive: AnyFile, anon: boolean, password: string | undefined) => void
 	has: (id: string) => boolean
 	anon: (id: string) => boolean | undefined
+	// What the reader's archive is, once it opened.
+	format: (id: string) => ArchiveFormat | undefined
 	// Never throws: a reader that a call still borrows is freed once the call settles.
 	close: (id: string) => void
 	// Sign-out and an account switch: every reader goes.
@@ -567,6 +570,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		},
 		has: id => records.get(id)?.closed === false,
 		anon: id => records.get(id)?.anon,
+		format: id => records.get(id)?.opened?.reader.format,
 		close: id => {
 			const record = records.get(id)
 
