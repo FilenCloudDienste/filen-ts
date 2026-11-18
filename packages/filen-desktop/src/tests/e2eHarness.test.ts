@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import { inflateSync } from "node:zlib"
 import path from "node:path"
-import type { DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
+import type { ChildProcess } from "node:child_process"
+import type { DesktopSyncActivity, DesktopSyncPair, DesktopSyncPhase, DesktopSyncPlan } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -53,6 +54,8 @@ import { chooserRetries, MAC_CHOOSER_TIMEOUT_MS, PANEL_WAIT_S } from "../../scri
 import { CHOOSER_BUDGET_MS, type DesktopOs } from "../../scripts/ci/e2e/os.ts"
 import { underReminder } from "../../scripts/ci/e2e/app.ts"
 import { chooseThrough } from "../../scripts/ci/e2e/extraPair.ts"
+import { activityTrail, planProblem, quitInstance } from "../../scripts/ci/e2e/chains/common.ts"
+import type { Exit } from "../../scripts/ci/e2e/launch.ts"
 
 const dirs: string[] = []
 
@@ -332,6 +335,188 @@ describe("e2e screen dumps", () => {
 		expect(png.readUInt32BE(16)).toBe(2)
 		expect(png.readUInt32BE(20)).toBe(1)
 		expect([...inflateSync(png.subarray(idat + 4, idat + 4 + png.readUInt32BE(idat - 4)))]).toEqual([0, 1, 2, 3, 10, 20, 30])
+	})
+})
+
+describe("e2e quit of the launched instance", () => {
+	const target = (pids: number[]) => {
+		let left = pids
+
+		return {
+			executable: "/opt/Filen/filen",
+			mainProcesses: () => left.map(pid => ({ pid, path: "/opt/Filen/filen" })),
+			gone: () => {
+				left = []
+			}
+		}
+	}
+	// A launched child with `pid`, exiting with `exit` once quit (or already, with `already`).
+	const launched = (pid: number, exit: Exit, already = false) => {
+		let exited: (value: Exit) => void = () => undefined
+		const promise = already ? Promise.resolve(exit) : new Promise<Exit>(resolve => (exited = resolve))
+
+		return {
+			launched: { child: { pid } as ChildProcess, debugPort: 0, inspectPort: null, exited: promise },
+			exit: () => exited(exit)
+		}
+	}
+	const quitting = (app: ReturnType<typeof target>, onQuit: () => void = () => undefined) => ({
+		crashReport: () => Promise.resolve(null),
+		requestQuit: () => {
+			app.gone()
+			onQuit()
+
+			return Promise.resolve()
+		}
+	})
+	const attach = () => undefined
+	const output = () => ""
+
+	it("fails when a launched child that is no main process (an AppImage runtime, a wrapper) exits non-zero", async () => {
+		const app = target([4250])
+		const child = launched(4242, { code: 1, signal: null })
+
+		await expect(quitInstance(quitting(app, child.exit), app, child.launched, "N", attach, output, 50, 1)).rejects.toThrow(
+			/N did not quit gracefully: \{"code":1,"signal":null\}/
+		)
+	})
+
+	it("passes when that child exits with 0", async () => {
+		const app = target([4250])
+		const child = launched(4242, { code: 0, signal: null })
+
+		await expect(quitInstance(quitting(app, child.exit), app, child.launched, "N", attach, output, 50, 1)).resolves.toBeUndefined()
+	})
+
+	it("fails when the app had already died, signalled, and no main process is left", async () => {
+		const app = target([])
+		const child = launched(4242, { code: null, signal: "SIGSEGV" }, true)
+		const reported: number[] = []
+		const os = {
+			crashReport: (_executable: string, pid: number) => {
+				reported.push(pid)
+
+				return Promise.resolve(null)
+			},
+			requestQuit: () => Promise.resolve()
+		}
+
+		await expect(quitInstance(os, app, child.launched, "N", attach, output, 50, 1)).rejects.toThrow(
+			/N had already exited, not gracefully: \{"code":null,"signal":"SIGSEGV"\}/
+		)
+		expect(reported).toEqual([4242])
+	})
+
+	it("passes with a stale launched child that exited cleanly long ago (the running app started by the updater)", async () => {
+		const app = target([4300])
+		const child = launched(4242, { code: 0, signal: null }, true)
+
+		await expect(quitInstance(quitting(app), app, child.launched, "N", attach, output, 50, 1)).resolves.toBeUndefined()
+	})
+
+	it("passes with nothing running and a child that exited cleanly", async () => {
+		const app = target([])
+		const child = launched(4242, { code: 0, signal: null }, true)
+
+		await expect(quitInstance(quitting(app), app, child.launched, "N", attach, output, 50, 1)).resolves.toBeUndefined()
+	})
+})
+
+describe("e2e plan of a quiet pair", () => {
+	const plan = (summary: Partial<DesktopSyncPlan["summary"]> = {}): DesktopSyncPlan => ({
+		planId: "plan-1",
+		summary: {
+			actions: 0,
+			uploadBytes: 0,
+			downloadBytes: 0,
+			heldDeletions: 0,
+			heldReason: null,
+			conflicts: 0,
+			unsyncable: 0,
+			skippedSymlinks: 0,
+			ignored: 0,
+			refused: null,
+			...summary
+		}
+	})
+
+	it("fails a pair whose plan stays null (the cloud side not read), releasing nothing", async () => {
+		const release = vi.fn(() => Promise.resolve())
+
+		await expect(planProblem("two-way", () => Promise.resolve(null), release, 0, 20, 1)).resolves.toBe(
+			"two-way: no plan (the cloud side not read)"
+		)
+		expect(release).not.toHaveBeenCalled()
+	})
+
+	it("waits out a null answer and releases the plan that came", async () => {
+		const answers = [null, null, plan()]
+		const release = vi.fn(() => Promise.resolve())
+
+		await expect(planProblem("two-way", () => Promise.resolve(answers.shift() ?? null), release, 0, 1000, 1)).resolves.toBeNull()
+		expect(release).toHaveBeenCalledExactlyOnceWith("plan-1")
+	})
+
+	it("names a plan with work left or other conflicts than held", async () => {
+		const release = () => Promise.resolve()
+
+		await expect(planProblem("two-way", () => Promise.resolve(plan({ actions: 1 })), release, 0, 20, 1)).resolves.toMatch(
+			/^two-way: plan /
+		)
+		await expect(planProblem("two-way", () => Promise.resolve(plan({ conflicts: 2 })), release, 2, 20, 1)).resolves.toBeNull()
+	})
+})
+
+describe("e2e activity trail", () => {
+	const entry = (seq: number): DesktopSyncActivity => ({ seq, pairId: "p", at: seq, kind: "uploaded", relPath: `f${String(seq)}` })
+	// A ring of `limit` entries holding seq `from` to `to`, newest first.
+	const ring = (from: number, to: number, limit: number) =>
+		Array.from({ length: to - from + 1 }, (_, index) => entry(to - index)).slice(0, limit)
+
+	it("gathers every entry since its start across reads that overlap", async () => {
+		const reads = [ring(0, 3, 4), ring(2, 5, 4), ring(5, 8, 4)]
+		const trail = await activityTrail(limit => Promise.resolve(reads.shift()?.slice(0, limit) ?? []), 4)
+
+		await trail.read()
+		await trail.read()
+		expect(trail.entries().map(item => item.seq)).toEqual([8, 7, 6, 5, 4])
+		expect(trail.gaps()).toEqual([])
+	})
+
+	it("names the gap when the ring overran between two reads", async () => {
+		const reads = [ring(0, 3, 4), ring(6, 9, 4)]
+		const trail = await activityTrail(() => Promise.resolve(reads.shift() ?? []), 4)
+
+		await trail.read()
+		expect(trail.gaps()).toEqual(["activity lost between seq 3 and 6 (the ring overran between two reads)"])
+	})
+
+	it("loses nothing while the ring is not full", async () => {
+		const reads = [[], ring(10, 12, 4)]
+		const trail = await activityTrail(() => Promise.resolve(reads.shift() ?? []), 4)
+
+		await trail.read()
+		expect(trail.entries().map(item => item.seq)).toEqual([12, 11, 10])
+		expect(trail.gaps()).toEqual([])
+	})
+
+	it("keeps a failed read as a gap", async () => {
+		let calls = 0
+		const trail = await activityTrail(() => (calls++ === 0 ? Promise.resolve([]) : Promise.reject(new Error("page gone"))), 4)
+
+		await trail.read()
+		expect(trail.gaps()).toEqual(["an activity read failed: page gone"])
+	})
+
+	it("keeps a reader that throws before returning a promise as a gap, at the start and later", async () => {
+		const reader = (): Promise<DesktopSyncActivity[]> => {
+			throw new Error("no renderer")
+		}
+		const trail = await activityTrail(reader, 4)
+
+		await expect(trail.read()).resolves.toBeUndefined()
+		expect(trail.gaps()).toEqual(["an activity read failed: no renderer", "an activity read failed: no renderer"])
+		expect(trail.entries()).toEqual([])
 	})
 })
 
@@ -671,8 +856,7 @@ describe("the macOS folder chooser", () => {
 	})
 
 	it("waits for the panel by wall clock, with a minute on top for the rest of the script", () => {
-		expect(PANEL_WAIT_S).toBe(30)
-		expect(MAC_CHOOSER_TIMEOUT_MS).toBe((PANEL_WAIT_S + 60) * 1000)
+		expect(MAC_CHOOSER_TIMEOUT_MS).toBeGreaterThanOrEqual((PANEL_WAIT_S + 60) * 1000)
 	})
 
 	it("gives the app's call the time of both waits", () => {

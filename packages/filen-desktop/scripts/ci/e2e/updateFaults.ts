@@ -18,7 +18,7 @@ import type { Platform, Target } from "../targets.ts"
 import { createFindings, type Findings } from "./findings.ts"
 import { feedFor, processesAt, START_TIMEOUT_MS, TEST_FEED_ENV, TEST_FEED_LOG } from "./update.ts"
 
-// The update fault launch (plan D5, proving the updater fixes F1-F4): before the real update, N-1 runs once against
+// The update fault launch (proving the updater fixes F1-F4): before the real update, N-1 runs once against
 // its own feed server, which fails each of its checks in another way, keyed on the manifest request's ordinal. N-1 is
 // built from the same commit, so it checks every TEST_UPDATE_CHECK_INTERVAL_MS under a test feed.
 //

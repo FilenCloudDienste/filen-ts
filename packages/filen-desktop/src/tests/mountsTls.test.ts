@@ -1,4 +1,4 @@
-import { generateKeyPairSync, X509Certificate } from "node:crypto"
+import { createPrivateKey, generateKeyPairSync, X509Certificate } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -107,6 +107,18 @@ describe("ensureCertificate", () => {
 		const remade = await ensureCertificate(dir, "s3", [], NOW)
 
 		expect(remade.fingerprint).not.toBe(seeded.fingerprint)
+	})
+
+	it("concurrent calls for one protocol make one pair", async () => {
+		const [first, second] = await Promise.all([
+			ensureCertificate(dir, "webdav", ["10.0.0.5"], NOW),
+			ensureCertificate(dir, "webdav", ["10.0.0.5"], NOW)
+		])
+		const cert = await load(first.cert)
+
+		expect(second.fingerprint).toBe(first.fingerprint)
+		expect(cert.fingerprint256).toBe(first.fingerprint)
+		expect(cert.checkPrivateKey(createPrivateKey(await readFile(first.key)))).toBe(true)
 	})
 
 	it("names no wildcard address", () => {

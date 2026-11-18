@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -96,6 +97,7 @@ async function setup(
 	const confirmSignOut = vi.fn(() => Promise.resolve(options.confirm ?? true))
 	const mountsDir = path.join(directory, "mounts", "1")
 	const fuse: { status: DesktopFuseStatus } = { status: { state: "missing", installable: options.install !== undefined } }
+	const log = { info: vi.fn(), warn: vi.fn() }
 	const service = createMountsService({
 		supervisor,
 		platform: options.platform ?? "linux",
@@ -126,7 +128,7 @@ async function setup(
 		legacy: options.legacy ?? { prepare: () => Promise.resolve(), drain: () => Promise.resolve() },
 		statusChanged: vi.fn(),
 		now: () => clock,
-		log: { info: vi.fn(), warn: vi.fn() }
+		log
 	})
 	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
 	const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => void>()
@@ -167,6 +169,7 @@ async function setup(
 		fuse,
 		sent,
 		mountsDir,
+		log,
 		ops,
 		argsOf: (op: MountsOp) => callMounts.mock.calls.filter(([name]) => name === op).map(([, args]) => args),
 		advance: (ms: number) => {
@@ -185,6 +188,11 @@ async function setup(
 		// Lets the apply a change queued run.
 		settled: () => new Promise(resolve => setImmediate(resolve))
 	}
+}
+
+// Long enough for an apply that was not held back to create its state directory, which an absence check then sees.
+function idle(): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, 100))
 }
 
 async function mountPoint(): Promise<string> {
@@ -351,6 +359,33 @@ describe("registerMountsIpc", () => {
 		expect(await invoke("setServe", "http", { enabled: true, port: 8081 })).toEqual({ ok: true, value: null })
 	})
 
+	it("two servers enabled at once on one port: one is refused", async () => {
+		const { invoke, store } = await setup()
+		const results = await Promise.all([
+			invoke("setServe", "webdav", { enabled: true, port: 8080 }),
+			invoke("setServe", "http", { enabled: true, port: 8080 })
+		])
+
+		expect(results).toEqual([
+			{ ok: true, value: null },
+			{ ok: false, error: { code: "portInUse" } }
+		])
+		expect(store.get().serves.http?.enabled ?? false).toBe(false)
+	})
+
+	it("a drive change made while another is checked keeps both", async () => {
+		const { invoke, tokens, store } = await setup()
+		const dir = await mountPoint()
+		const chosen = invoke("setDrive", { mountPointId: tokens.issue(dir) })
+		const readOnly = invoke("setDrive", { readOnly: true })
+
+		expect(await Promise.all([chosen, readOnly])).toEqual([
+			{ ok: true, value: null },
+			{ ok: true, value: null }
+		])
+		expect(store.get().drive).toMatchObject({ mountPoint: dir, readOnly: true })
+	})
+
 	it("an enabled server gets its credentials and certificate before the host is told", async () => {
 		const { invoke, argsOf, credentials, service } = await setup()
 
@@ -429,8 +464,12 @@ describe("registerMountsIpc", () => {
 			ok: true,
 			value: null
 		})
-		await context.settled()
+		await vi.waitFor(() => {
+			expect(context.log.warn).toHaveBeenCalledWith("mounts: no rclone in this build")
+		})
+		await idle()
 		expect(context.ops()).toEqual([])
+		expect(existsSync(path.join(context.mountsDir, "state"))).toBe(false)
 		expect(await context.service.overview()).toMatchObject({
 			available: false,
 			drive: { enabled: true, state: "error", error: { code: "binaryInvalid" } }
@@ -551,6 +590,8 @@ describe("signing out", () => {
 			},
 			answers: {
 				mountsApply: () => {
+					// Asserted here, not after a wait: the apply would be parked on its mkdir either way.
+					expect(order).toContain("prepared")
 					order.push("mountsApply")
 
 					return DRIVE_RUNNING
@@ -573,8 +614,10 @@ describe("signing out", () => {
 			}
 		})
 
-		await context.settled()
+		await idle()
 		expect(order).toEqual(["prepare"])
+		// Creating the state directory is the apply's first side effect.
+		expect(existsSync(path.join(context.mountsDir, "state"))).toBe(false)
 		release()
 		await vi.waitFor(() => {
 			expect(order).toEqual(["prepare", "prepared", "mountsApply", "drain"])

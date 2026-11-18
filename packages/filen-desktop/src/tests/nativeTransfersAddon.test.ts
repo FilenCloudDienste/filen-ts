@@ -60,7 +60,7 @@ function load(): { addon: Addon; client: object } | { skipped: string } {
 const loaded = load()
 const skipped = "skipped" in loaded ? loaded.skipped : null
 
-// The D3 wasm fixtures: the shapes the page sends.
+// The wasm fixtures: the shapes the page sends.
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "filen-shared", "src", "tests", "fixtures", "sdkShapes", "wasm")
 
 function wasmFixture(name: string): unknown {
@@ -287,7 +287,7 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 			"uploadFile(params: FileBuilderParamsOptionalName, filePath: string, callback: JsFileUploadCallback | undefined, managedFuture: ManagedFuture,",
 			"downloadDirRecursively(dirPath: string, callback: JsDirDownloadCallback, target: AnyDirWithContext, managedFuture: ManagedFuture,",
 			"uploadDirRecursively(dirPath: string, callback: JsDirUploadCallback, target: Dir, managedFuture: ManagedFuture,",
-			"listDirRecursiveWithPaths(dir: AnyDirWithContext, listDirProgressCallback: DirContentDownloadProgressCallback | undefined, scanErrorCallback: DirContentDownloadErrorCallback,",
+			"listDirRecursiveWithPaths(dir: AnyDirWithContext, listDirProgressCallback: DirContentDownloadProgressCallback | undefined, scanErrorCallback: DirContentDownloadErrorCallback, asyncOpts_?: { signal: AbortSignal }",
 			"createDir(parent: AnyNormalDir, name: string,",
 			"root(): Root"
 		]) {
@@ -397,11 +397,17 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 
 	const electron = (createRequire(import.meta.url)("electron") as string | undefined) ?? ""
 	const headless = process.platform === "linux" && process.env["DISPLAY"] === undefined && process.env["WAYLAND_DISPLAY"] === undefined
+	const unavailable = !existsSync(electron) ? "no Electron binary" : headless ? "no display" : null
 
-	// The host runs the addon in a utilityProcess, inside Electron's V8 memory cage: bytes cross there too.
-	it.skipIf(!existsSync(electron) || headless)(
+	// The host runs the addon in a utilityProcess, inside Electron's V8 memory cage: bytes cross there too. CI runs it
+	// on Linux under Xvfb and on macOS, so there a missing binary or display is a failure, never a skip.
+	it.skipIf(unavailable !== null && process.env["CI"] !== "true")(
 		"converts and cancels in an Electron utilityProcess",
 		async () => {
+			if (unavailable !== null) {
+				expect.fail(`the utilityProcess case cannot run: ${unavailable}`)
+			}
+
 			const main = path.join(directory, "main.mjs")
 			const child = path.join(directory, "child.mjs")
 			const input = path.join(directory, "input.json")

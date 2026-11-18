@@ -181,6 +181,8 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 	private let onWrite: Callback
 	private let onCancel: Callback
 	private let onEnded: Callback
+	// What Finder's alert says when a write fails, in the UI language.
+	let failureMessage: String
 	private let lock = NSLock()
 	private var ended = false
 	private var released = false
@@ -190,10 +192,11 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 	private var settled: [Bool]
 	private var unsettled: Int
 
-	init(items: Int, onWrite: Callback, onCancel: Callback, onEnded: Callback) {
+	init(items: Int, onWrite: Callback, onCancel: Callback, onEnded: Callback, failureMessage: String) {
 		self.onWrite = onWrite
 		self.onCancel = onCancel
 		self.onEnded = onEnded
+		self.failureMessage = failureMessage
 		settled = Array(repeating: false, count: items)
 		unsettled = items
 		super.init()
@@ -296,7 +299,7 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 	// On promiseQueue. Returns at once; the completion runs when JS fulfils the ticket.
 	func filePromiseProvider(_ provider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping (Error?) -> Void) {
 		guard let provider = provider as? PromiseProvider, url.isFileURL, opened() else {
-			completionHandler(writeError("unavailable"))
+			completionHandler(writeError("unavailable", message: failureMessage))
 
 			return
 		}
@@ -360,13 +363,19 @@ private struct ActiveDrag {
 
 // MARK: Tickets
 
-// What a write completes with: "cancelled" as the user's cancel, so Finder shows no alert for it.
-private func writeError(_ code: String) -> Error {
+// Finder's alert text when begin is given none (an older main).
+private let defaultFailureMessage = "Filen could not download this item."
+// The page's shell strings are at most 512 characters: 4 UTF-8 bytes each at most.
+private let maxFailureMessageBytes = 2048
+
+// What a write completes with: "cancelled" as the user's cancel, so Finder shows no alert for it. Finder's alert shows
+// `message`; the code stays in the error for diagnostics.
+private func writeError(_ code: String, message: String) -> Error {
 	guard code != "cancelled" else {
 		return CocoaError(.userCancelled)
 	}
 
-	return NSError(domain: errorDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "Filen could not download this item (\(code))."])
+	return NSError(domain: errorDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: message, NSLocalizedFailureReasonErrorKey: code])
 }
 
 private final class Ticket {
@@ -484,7 +493,7 @@ private final class Tickets: @unchecked Sendable {
 		}
 
 		entry.progress.unpublish()
-		entry.completion(error.map(writeError))
+		entry.completion(error.map { writeError($0, message: entry.session.failureMessage) })
 		entry.session.closed(entry.index)
 	}
 }
@@ -611,6 +620,7 @@ private struct DragFailure: Sendable {
 	items: [Item],
 	picture: NSImage,
 	size: NSSize,
+	failureMessage: String,
 	callbacks: (onWrite: napi_value?, onCancel: napi_value?, onEnded: napi_value?)
 ) -> DragFailure? {
 	if let active = activeDrag {
@@ -668,7 +678,7 @@ private struct DragFailure: Sendable {
 		return DragFailure(code: "internalFailure", message: "could not create a threadsafe function")
 	}
 
-	let session = DragSession(items: items.count, onWrite: onWrite, onCancel: onCancel, onEnded: onEnded)
+	let session = DragSession(items: items.count, onWrite: onWrite, onCancel: onCancel, onEnded: onEnded, failureMessage: failureMessage)
 	let origin = view.convert(location, from: nil)
 
 	picture.size = size
@@ -707,7 +717,8 @@ private struct DragFailure: Sendable {
 	return app?.windows.lazy.compactMap(\.contentView).first { UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque()) == handle }
 }
 
-// begin({ view, items, image, onWrite, onCancel, onEnded }): starts the drag and returns at once.
+// begin({ view, items, image, onWrite, onCancel, onEnded, failureMessage? }): starts the drag and returns at once.
+// failureMessage is Finder's alert text for a failed write; English when absent or not a string.
 private func begin(env: napi_env?, info: napi_callback_info?) -> napi_value? {
 	guard let env else {
 		return nil
@@ -735,6 +746,7 @@ private func begin(env: napi_env?, info: napi_callback_info?) -> napi_value? {
 		return invalid(env, "image must be { png, width, height }: a PNG of at most 2 MiB, sized in points")
 	}
 
+	let failureMessage = stringArgument(env, property(env, options, "failureMessage"), maxBytes: maxFailureMessageBytes) ?? defaultFailureMessage
 	let onWrite = property(env, options, "onWrite")
 	let onCancel = property(env, options, "onCancel")
 	let onEnded = property(env, options, "onEnded")
@@ -750,7 +762,15 @@ private func begin(env: napi_env?, info: napi_callback_info?) -> napi_value? {
 	// assumeIsolated runs the closure at once on this thread, so the JS values never leave it.
 	nonisolated(unsafe) let js = (env: env, callbacks: (onWrite: onWrite, onCancel: onCancel, onEnded: onEnded))
 	let failure = MainActor.assumeIsolated {
-		startDrag(js.env, handle: handle, items: items, picture: picture, size: NSSize(width: width, height: height), callbacks: js.callbacks)
+		startDrag(
+			js.env,
+			handle: handle,
+			items: items,
+			picture: picture,
+			size: NSSize(width: width, height: height),
+			failureMessage: failureMessage,
+			callbacks: js.callbacks
+		)
 	}
 
 	if let failure {

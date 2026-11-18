@@ -20,7 +20,7 @@ import {
 import { serialQueue } from "../shared/serial.ts"
 import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
-// The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
+// The one-time import from the old client (3.0.53). A marker file in userData records where
 // it got to:
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`. Without secure storage
 //             (`volatileStash`) a read that worked stays here: its stash lives in memory only, so every launch reads
@@ -817,7 +817,7 @@ export function withoutFeature(stash: LegacyStash, userId: string, feature: Lega
 export interface StashStore {
 	// Stores what the migration stashed; with no cipher it is kept for this run only (false).
 	write(text: string): Promise<boolean>
-	// The feature's old config for the user (PLAN §6 step 5), undefined when none is waiting.
+	// The feature's old config for the user, undefined when none is waiting.
 	pending(userId: string, feature: LegacyFeature): Promise<unknown>
 	// The user's part of the feature was applied: rewritten without it, deleted once empty.
 	consume(userId: string, feature: LegacyFeature): Promise<void>

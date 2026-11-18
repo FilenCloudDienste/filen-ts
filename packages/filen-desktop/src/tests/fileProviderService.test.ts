@@ -62,7 +62,6 @@ function fakeAddon() {
 
 			return [...domains.values()]
 		},
-		signalWorkingSet: () => Promise.resolve(),
 		pushAuth: async ({ identifier, json }) => {
 			calls.push(`push ${identifier}`)
 			await maybeFail("pushAuth")
@@ -98,9 +97,11 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		cloudStorage: ["Filen-user@example.com", "iCloud Drive"],
 		openFailure: "",
 		opened: [] as string[],
-		settingsOpened: 0
+		settingsOpened: 0,
+		addonMissing: false
 	}
 	const clearOwed = memoryFile()
+	const removeOwed = memoryFile()
 	const warnings: string[] = []
 	const infos: string[] = []
 	const deps: FileProviderDeps = {
@@ -108,11 +109,12 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		addon: () => {
 			state.loads++
 
-			return fake.addon
+			return state.addonMissing ? null : fake.addon
 		},
 		vault: { get: () => Promise.resolve(state.session) },
 		store: createFileProviderStore(fileFor, message => warnings.push(message)),
 		clearOwed,
+		removeOwed,
 		pinSet: () => state.pin,
 		translocated: () => options.translocated ?? false,
 		cloudStorage: { root: "/Users/a/Library/CloudStorage", list: () => Promise.resolve(state.cloudStorage) },
@@ -129,7 +131,7 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		log: { info: message => infos.push(message), warn: message => warnings.push(message) }
 	}
 
-	return { ...fake, service: createFileProviderService(deps), state, files: fileFor, clearOwed, warnings, infos }
+	return { ...fake, service: createFileProviderService(deps), state, files: fileFor, clearOwed, removeOwed, warnings, infos }
 }
 
 describe("fileProviderAuth", () => {
@@ -253,6 +255,78 @@ describe("file provider service", () => {
 
 		expect(calls).toEqual([`add ${domain}`, `clear ${domain}`, `push ${domain}`])
 		expect(clearOwed.data).toBeNull()
+	})
+
+	it("owes a domain removal that failed at sign-out and finishes it at the next launch", async () => {
+		const { service, calls, fail, removeOwed, files } = setup()
+
+		await service.enable()
+		fail.add("removeDomain")
+		await service.signedOut("7")
+
+		expect(files("7").data).toBeNull()
+		expect(JSON.parse(removeOwed.data?.toString() ?? "null")).toEqual([domain])
+
+		fail.delete("removeDomain")
+		calls.length = 0
+		await service.launch()
+
+		expect(calls).toEqual([`clear ${domain}`, `remove ${domain}`])
+		expect(removeOwed.data).toBeNull()
+	})
+
+	it("drops an owed removal whose domain is no longer listed, and keeps one still listed", async () => {
+		const { service, calls, fail, domains, removeOwed } = setup()
+		const other = domainIdentifier("8")
+
+		domains.set(other, { identifier: other, displayName: "other@example.com", userEnabled: true })
+		await removeOwed.write(Buffer.from(JSON.stringify([domain, other])))
+		fail.add("removeDomain")
+		await service.launch()
+
+		expect(calls).toEqual([`clear ${domain}`, `remove ${domain}`, `clear ${other}`, `remove ${other}`])
+		expect(JSON.parse(removeOwed.data?.toString() ?? "null")).toEqual([other])
+	})
+
+	it("drops an owed removal of the domain it registers again, so a later launch never removes it in use", async () => {
+		const { service, calls, fail, domains, removeOwed } = setup()
+
+		domains.set(domain, { identifier: domain, displayName: "user@example.com", userEnabled: true })
+		await removeOwed.write(Buffer.from(JSON.stringify([domain])))
+		fail.add("removeDomain")
+
+		await expect(service.enable()).resolves.toMatchObject({ ok: true, value: { enabled: true } })
+		expect(removeOwed.data).toBeNull()
+
+		fail.delete("removeDomain")
+		calls.length = 0
+		await service.launch()
+
+		expect(calls).not.toContain(`remove ${domain}`)
+		expect(domains.has(domain)).toBe(true)
+	})
+
+	it("treats the addon's no manager for the domain as removed", async () => {
+		const { service, fail, failure, domains, removeOwed } = setup()
+
+		domains.set(domain, { identifier: domain, displayName: "user@example.com", userEnabled: true })
+		await removeOwed.write(Buffer.from(JSON.stringify([domain])))
+		fail.add("removeDomain")
+		Object.assign(failure, { code: 2 })
+		await service.launch()
+
+		expect(removeOwed.data).toBeNull()
+	})
+
+	it("owes no removal when the addon cannot be loaded", async () => {
+		const { service, state, removeOwed, files } = setup()
+
+		await service.enable()
+		state.addonMissing = true
+		await service.signedOut("7")
+
+		expect(files("7").data).toBeNull()
+		expect(removeOwed.data).toBeNull()
 	})
 
 	it("never loads the addon for a user who has it off", async () => {

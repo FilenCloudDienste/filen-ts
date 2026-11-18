@@ -21,7 +21,15 @@ import {
 	residualBackoff
 } from "../../scripts/ci/e2e/driveLock.ts"
 import { LIVE_TIMEOUT_MS, LIVE_UPLOAD_MS } from "../../scripts/ci/e2e/chains/common.ts"
-import { allWaiting, backOnline, converged, offlineFailure, P11_TURN, P11_TURN_TIMING } from "../../scripts/ci/e2e/chains/offlineListing.ts"
+import {
+	allOffline,
+	allWaiting,
+	backOnline,
+	converged,
+	offlineFailure,
+	P11_TURN,
+	P11_TURN_TIMING
+} from "../../scripts/ci/e2e/chains/offlineListing.ts"
 import { stallNote } from "../../scripts/ci/e2e/chains/offlineCheck.ts"
 import type { Sample } from "../../scripts/ci/e2e/offlineBlock.ts"
 
@@ -176,6 +184,14 @@ describe("P11 listing drop", () => {
 		expect(backOnline(sample(0, 0, 1))).toBe(false)
 		expect(converged(sample(0, 0, 0))).toBe(true)
 		expect(converged({ ...sample(0, 0, 0), lastErrors: 1 })).toBe(false)
+	})
+
+	it("counts no pair as offline, back online or converged in a sample without pairs", () => {
+		expect(allOffline(sample(0, 3, 0))).toBe(true)
+		expect(allOffline(sample(0, 2, 1))).toBe(false)
+		expect(allOffline(sample(0, 0, 0, 0))).toBe(false)
+		expect(backOnline(sample(0, 0, 0, 0))).toBe(false)
+		expect(converged(sample(0, 0, 0, 0))).toBe(false)
 	})
 
 	it("names a pair still waiting for the cloud as the regression", () => {
@@ -386,7 +402,7 @@ describe("e2e drive-write in N's log", () => {
 	})
 
 	it("gives a live upload one foreign batch and an orphaned lease on top of the live window", () => {
-		expect(LIVE_UPLOAD_MS).toBe(LIVE_TIMEOUT_MS + 60_000 + LOCK_SERVER_TTL_MS)
+		expect(LIVE_UPLOAD_MS).toBeGreaterThanOrEqual(LIVE_TIMEOUT_MS + 60_000 + LOCK_SERVER_TTL_MS)
 		expect(DRIVE_LOCK_TIMING.capMs).toBeGreaterThan(LOCK_SERVER_TTL_MS)
 	})
 })

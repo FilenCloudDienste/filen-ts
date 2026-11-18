@@ -1,5 +1,6 @@
 import type { MenuItemConstructorOptions } from "electron"
 import { describe, expect, it, vi } from "vitest"
+import { DESKTOP_SHELL_STRINGS } from "@filen/shared/desktopShellStrings"
 import { isDevToolsKey, isMenuAction, type MenuOptions, menuTemplate, toAccelerator, transportItems, zoomLevelAfter } from "../main/menu.ts"
 
 describe("toAccelerator", () => {
@@ -75,6 +76,48 @@ describe("menuTemplate", () => {
 			"windowMenu",
 			"help"
 		])
+	})
+
+	it("labels every item in the UI language, role items included", () => {
+		const shellTexts = new Set<string>(Object.values(DESKTOP_SHELL_STRINGS))
+		const unlabelled = items(standard).filter(
+			item => item.type !== "separator" && item.role !== "appMenu" && !shellTexts.has(item.label ?? "")
+		)
+
+		expect(unlabelled).toEqual([])
+		expect(find(standard, "Quit Filen")?.role).toBe("quit")
+	})
+
+	it("spells out Electron's macOS Edit and Window menus under their roles", () => {
+		const submenu = (name: string) =>
+			(standard.find(item => item.role === name)?.submenu as MenuItemConstructorOptions[]).map(
+				item => item.role ?? item.type ?? item.label
+			)
+
+		expect(submenu("editMenu")).toEqual([
+			"undo",
+			"redo",
+			"separator",
+			"cut",
+			"copy",
+			"paste",
+			"pasteAndMatchStyle",
+			"delete",
+			"selectAll",
+			"separator",
+			"Substitutions",
+			"Speech"
+		])
+		expect(items([find(standard, "Substitutions") ?? {}]).map(item => item.role ?? item.type)).toEqual([
+			undefined,
+			"showSubstitutions",
+			"separator",
+			"toggleSmartQuotes",
+			"toggleSmartDashes",
+			"toggleTextReplacement"
+		])
+		expect(items([find(standard, "Speech") ?? {}]).map(item => item.role)).toEqual([undefined, "startSpeaking", "stopSpeaking"])
+		expect(submenu("windowMenu")).toEqual(["minimize", "zoom", "separator", "front"])
 	})
 
 	it("displays the web's combos without registering them", () => {

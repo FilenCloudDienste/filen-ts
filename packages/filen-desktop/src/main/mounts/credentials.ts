@@ -118,8 +118,6 @@ export interface CredentialStore {
 	regenerate(protocol: CredentialProtocol): Promise<ServeCredentials>
 	// Credentials the user chose or the migration kept; the caller checked them with credentialsProblem.
 	set(protocol: CredentialProtocol, credentials: ServeCredentials): Promise<void>
-	// false: there is no secure storage (Linux basic_text, no OS encryption), so they last for this run only.
-	persistent(): Promise<boolean>
 }
 
 // `<userData>/mounts/<userId>/credentials.bin`, decrypted once and served from memory. A file that cannot be decrypted
@@ -206,7 +204,6 @@ export function createCredentialStore(
 		set: (protocol, credentials) =>
 			serial(async () => {
 				await put(protocol, credentials)
-			}),
-		persistent: async () => (await cipher()) !== null
+			})
 	}
 }

@@ -27,7 +27,7 @@ import type {
 } from "@filen/shared/desktop"
 import type { NativePlanSummary } from "../shared/nativeProtocol.ts"
 import type { NativeSdk } from "./addon.ts"
-import { clip } from "./errors.ts"
+import { clip, clipPath } from "./errors.ts"
 
 export const PLAN_TTL_MS = 300_000
 
@@ -150,9 +150,9 @@ export function toAction(sdk: NativeSdk, action: PlannedAction): DesktopSyncPlan
 	const { kind } = action
 
 	return {
-		relPath: clip(action.relPath),
+		relPath: clipPath(action.relPath),
 		kind: ACTION_KINDS[kind.tag],
-		to: kind.tag === "MoveRemote" || kind.tag === "MoveLocal" ? clip(kind.inner.to) : null,
+		to: kind.tag === "MoveRemote" || kind.tag === "MoveLocal" ? clipPath(kind.inner.to) : null,
 		node: nodeKind(sdk, action.node),
 		size: action.size === undefined ? null : count(action.size)
 	}
@@ -160,7 +160,7 @@ export function toAction(sdk: NativeSdk, action: PlannedAction): DesktopSyncPlan
 
 export function toConflict(sdk: NativeSdk, conflict: PlannedConflict): DesktopSyncConflict {
 	return {
-		relPath: clip(conflict.relPath),
+		relPath: clipPath(conflict.relPath),
 		local: conflict.local === undefined ? null : nodeKind(sdk, conflict.local),
 		remote: conflict.remote === undefined ? null : nodeKind(sdk, conflict.remote)
 	}
@@ -186,12 +186,12 @@ function unsyncableDetail(reason: IssuePath["reason"]): string | null {
 export function toUnsyncable(path: IssuePath): DesktopSyncUnsyncable {
 	const detail = unsyncableDetail(path.reason)
 
-	return { relPath: clip(path.relPath), reason: UNSYNCABLE_REASONS[path.reason.tag], detail: detail === null ? null : clip(detail) }
+	return { relPath: clipPath(path.relPath), reason: UNSYNCABLE_REASONS[path.reason.tag], detail: detail === null ? null : clip(detail) }
 }
 
 // The engine reports the target relative to the root.
 export function toSkippedSymlink(path: SymlinkPath): DesktopSyncSkippedSymlink {
-	return { relPath: clip(path.relPath), target: clip(path.reason.inner.target) }
+	return { relPath: clipPath(path.relPath), target: clipPath(path.reason.inner.target) }
 }
 
 // How many of `list` are symlinks.
@@ -344,16 +344,20 @@ const GAP_CAUSES: Record<SyncScanGap["cause"]["tag"], DesktopSyncScanGap["cause"
 export function toScanGap(gap: SyncScanGap): DesktopSyncScanGap {
 	const { cause } = gap
 
-	return { relPath: clip(gap.relPath), cause: GAP_CAUSES[cause.tag], kind: cause.tag === "Unreadable" ? clip(cause.inner.kind) : null }
+	return {
+		relPath: clipPath(gap.relPath),
+		cause: GAP_CAUSES[cause.tag],
+		kind: cause.tag === "Unreadable" ? clip(cause.inner.kind) : null
+	}
 }
 
 export function toIgnored(path: IgnoredPath): DesktopSyncIgnored {
 	const { level } = path
 
 	return {
-		relPath: clip(path.relPath),
+		relPath: clipPath(path.relPath),
 		level: level.tag === "Default" ? "default" : level.tag === "User" ? "user" : "file",
-		dir: level.tag === "File" ? clip(level.inner.dir) : null,
+		dir: level.tag === "File" ? clipPath(level.inner.dir) : null,
 		pattern: clip(path.pattern),
 		tracked: path.tracked
 	}

@@ -6,7 +6,7 @@ import { assertDisposableMachine } from "./e2e/context.ts"
 import { asarVersion, fail, powershell, run } from "./support.ts"
 
 // One install format on the runner it is tested on: how a user installs it, where its files and userData land, how
-// it is launched and how its running main process is found. Names and locations are the frozen 3.x ones (PLAN D5),
+// it is launched and how its running main process is found. Names and locations are the frozen 3.x ones,
 // so the same target serves the 3.0.53 artifacts and the new ones.
 
 export type Platform = "win" | "mac" | "linux"

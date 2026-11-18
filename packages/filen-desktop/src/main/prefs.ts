@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import type { DesktopPrefs } from "@filen/shared/desktop"
 import { DEFAULT_DESKTOP_LOCK_AFTER_SECONDS, DESKTOP_LOCK_AFTER_SECONDS } from "@filen/shared/desktopLock"
-import { type AtomicFile, errorCode } from "./atomicFile.ts"
+import { type AtomicFile, readStoreFile } from "./atomicFile.ts"
 import { absolutePathSchema } from "../shared/nativeProtocol.ts"
 import { serialQueue } from "../shared/serial.ts"
 
@@ -84,17 +84,14 @@ export interface PrefsStore {
 // Read once at startup and served from memory. Writes run one at a time (they share the file's temp sibling); a failed
 // write rejects the set and keeps the in-memory prefs as they were.
 export async function loadPrefs(file: AtomicFile, warn: (message: string) => void): Promise<PrefsStore> {
-	let current = DEFAULT_PREFS
+	const stored = await readStoreFile(file, parsePrefs, DEFAULT_PREFS, "prefs", warn)
+	let current = stored.value
 	const serial = serialQueue()
-
-	try {
-		current = parsePrefs((await file.read())?.toString("utf8") ?? null)
-	} catch (error) {
-		warn(`prefs unreadable, using defaults: ${errorCode(error)}`)
-	}
 
 	function apply(patch: Partial<DesktopPrefs>): Promise<DesktopPrefs> {
 		return serial(async () => {
+			current = (await stored.beforeWrite()) ?? current
+
 			const next = { ...current, ...patch }
 
 			await file.write(Buffer.from(JSON.stringify(next)))

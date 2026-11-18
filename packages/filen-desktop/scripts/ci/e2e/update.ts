@@ -429,7 +429,7 @@ export async function runUpdate({
 
 		await hooks?.beforeUpdate()
 
-		// N-1 against a feed that fails in every way first (plan D5); what follows reads main.log only past it.
+		// N-1 against a feed that fails in every way first; what follows reads main.log only past it.
 		const settleFaults = legacy
 			? () => undefined
 			: await runFaultLaunch({
@@ -734,7 +734,7 @@ export async function runUpdate({
 			const gone = userDataBefore.filter(entry => !userDataAfter.has(entry))
 			const migration = path.join(target.userData, "migration.json")
 
-			// Informational: the 4.x migration removes some of 3.x's stores by design (PLAN §6).
+			// Informational: the 4.x migration removes some of 3.x's stores by design.
 			console.log(`userData entries ${fromVersion} had that are gone now: ${gone.length > 0 ? gone.join(", ") : "none"}`)
 			console.log(`migration marker: ${existsSync(migration) ? readFileSync(migration, "utf8") : "absent"}`)
 		}

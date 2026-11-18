@@ -18,7 +18,7 @@ import {
 	startThrough
 } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
-import { backOnline, CONVERGE_MS, converged, RECOVER_MS, releaseSentAgain, runListingDrop } from "./offlineListing.ts"
+import { allOffline, backOnline, CONVERGE_MS, converged, RECOVER_MS, releaseSentAgain, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
 //   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s, stays out of
@@ -205,10 +205,7 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 					await block.block(target, [])
 					await startThrough(chain, block.via, options.pin)
 
-					const offline = await sampler.watch(
-						START_OFFLINE_MS,
-						current => current.offline === current.pairs || current.errors > 0
-					)
+					const offline = await sampler.watch(START_OFFLINE_MS, current => allOffline(current) || current.errors > 0)
 
 					if (offline.hit === null || offline.hit.errors > 0) {
 						fail(`not every pair offline (or one in error) within 90 s of the launch: ${describeSample(offline.last)}`)

@@ -140,6 +140,38 @@ describe("loadPrefs", () => {
 		expect(warn).toHaveBeenCalledOnce()
 	})
 
+	it("adopts a file that failed its startup read once it reads, before the first set", async () => {
+		const file = memoryFile(JSON.stringify({ startMinimized: true }))
+		const read = file.read
+		const setAside = vi.fn(() => Promise.resolve())
+		let failures = 1
+		const store = await loadPrefs(
+			{ ...file, read: () => (failures-- > 0 ? Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" })) : read()), setAside },
+			vi.fn()
+		)
+
+		expect(store.get()).toEqual(DEFAULT_PREFS)
+		await store.set({ minimizeToTray: true })
+
+		expect(JSON.parse(file.data ?? "")).toEqual({ ...DEFAULT_PREFS, startMinimized: true, minimizeToTray: true })
+		expect(setAside).not.toHaveBeenCalled()
+	})
+
+	it("sets a file that stays unreadable aside before the first set, and goes on from the defaults", async () => {
+		const file = memoryFile(JSON.stringify({ startMinimized: true }))
+		const setAside = vi.fn(() => Promise.resolve())
+		const store = await loadPrefs(
+			{ ...file, read: () => Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" })), setAside },
+			vi.fn()
+		)
+
+		await store.set({ minimizeToTray: true })
+		await store.set({ chatNotifications: false })
+
+		expect(setAside).toHaveBeenCalledOnce()
+		expect(store.get()).toEqual({ ...DEFAULT_PREFS, minimizeToTray: true, chatNotifications: false })
+	})
+
 	it("keeps the prefs unchanged when a write fails, and runs later writes", async () => {
 		const file = memoryFile(null)
 		const store = await loadPrefs({ ...file, write: () => Promise.reject(new Error("ENOSPC")) }, vi.fn())

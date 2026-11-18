@@ -15,7 +15,6 @@ export interface FileProviderAddon {
 	// Removes the domain and every replicated file of it.
 	removeDomain(options: { identifier: string }): Promise<void>
 	listDomains(): Promise<FileProviderDomain[]>
-	signalWorkingSet(options: { identifier: string }): Promise<void>
 	// One-shot XPC calls to the extension's auth service.
 	pushAuth(options: { identifier: string; json: string }): Promise<void>
 	clearAuth(options: { identifier: string }): Promise<void>

@@ -449,12 +449,22 @@ export class FakeTransferClient implements TransferClient {
 		return this.#call("downloadDirRecursively", [dirPath, callback, target, managedFuture])
 	}
 
+	// Rejects at once when its signal aborts, as the addon's asyncOpts_ does.
 	listDirRecursiveWithPaths(
 		dir: AnyDirWithContext,
 		progress: undefined,
-		errors: DirContentDownloadErrorCallback
+		errors: DirContentDownloadErrorCallback,
+		asyncOpts?: { signal: AbortSignal }
 	): Promise<DirsAndFilesWithPaths> {
-		return this.#call("listDirRecursiveWithPaths", [dir, progress, errors])
+		const call = this.#call<DirsAndFilesWithPaths>("listDirRecursiveWithPaths", [dir, progress, errors, asyncOpts])
+		// The executor ran synchronously: this call's record is the last one.
+		const record = this.calls.at(-1)
+
+		asyncOpts?.signal.addEventListener("abort", () => {
+			record?.reject(new DOMException("aborted", "AbortError"))
+		})
+
+		return call
 	}
 
 	// The calls of one method, oldest first.

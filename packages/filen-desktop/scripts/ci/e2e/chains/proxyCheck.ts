@@ -448,87 +448,93 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 				sampler.reset()
 
 				const watching = watchPairs(sampler)
-				const name = `f6-${randomBytes(4).toString("hex")}.bin`
-				const content = seededBytes(name, 2 * MIB)
-				const mark = outputMark(chain.appOutput)
-				const armed = proxy.arm({ kind: "resetAll", host: INGEST })
-				const armedAt = Date.now()
-				let offline: string
-				let reached: string
 
 				try {
-					writeFileSync(path.join(pair.localRoot, name), content)
+					const name = `f6-${randomBytes(4).toString("hex")}.bin`
+					const content = seededBytes(name, 2 * MIB)
+					const mark = outputMark(chain.appOutput)
+					const armed = proxy.arm({ kind: "resetAll", host: INGEST })
+					const armedAt = Date.now()
+					let offline: string
+					let reached: string
 
-					// The outage starts when N first tries ingest: another client's hold of the account's drive-write keeps
-					// N's pass waiting for the lock (up to its cap) before any upload, and an idle tunnel's reset fails nothing.
-					const outageAt = await waitFor(
-						`a new ${INGEST} tunnel`,
-						DRIVE_LOCK_TIMING.capMs,
-						() => firstNewTunnel(proxy.tunnels(), INGEST, armedAt),
+					try {
+						writeFileSync(path.join(pair.localRoot, name), content)
+
+						// The outage starts when N first tries ingest: another client's hold of the account's drive-write keeps
+						// N's pass waiting for the lock (up to its cap) before any upload, and an idle tunnel's reset fails nothing.
+						const outageAt = await waitFor(
+							`a new ${INGEST} tunnel`,
+							DRIVE_LOCK_TIMING.capMs,
+							() => firstNewTunnel(proxy.tunnels(), INGEST, armedAt),
+							500
+						)
+
+						reached = `N reached ${INGEST} ${String(Math.round((outageAt - armedAt) / 1000))} s after the edit`
+
+						const went = await sampler.watch(Math.max(0, outageAt + OUTAGE_MS - Date.now()), sample =>
+							sample.phases.includes(`${pair.name}:offline`)
+						)
+
+						offline = went.hit === null ? "" : describeSample(went.hit)
+						// The outage lasts its whole minute either way: it is the fault.
+						await sleep(Math.max(0, outageAt + OUTAGE_MS - Date.now()))
+					} finally {
+						armed.disarm()
+					}
+
+					const lifted = Date.now()
+					// What the resets' pass backoff still had to run at the lift (the last one logged before it).
+					const backoff = residualBackoff(outputSince(chain.appOutput, mark), lifted, BACKOFF_CAP_MS)
+					const recovered = await sampler.watch(RECOVER_MS, sample => sample.offline === 0 && sample.errors === 0)
+					// N's next try after the lift: a drive-write grant, or a new ingest tunnel when it held the lock through the
+					// outage. A hold of another client (a lease its lost network left included) delays it up to the lock's cap.
+					const retried = await waitFor(
+						`N at drive-write or ${INGEST} after the lift`,
+						backoff + DRIVE_LOCK_TIMING.capMs,
+						() => nextTry(driveWriteGrants(outputSince(chain.appOutput, mark)), proxy.tunnels(), INGEST, lifted),
 						500
-					)
+					).catch(onTimeout(null))
+					const uploaded =
+						retried !== null &&
+						(await waitFor(`${name} in the cloud`, Math.max(0, retried + RECOVER_MS - Date.now()), async () =>
+							(await inCloud(name)) ? true : null
+						).catch(onTimeout(false)))
+					const uploadedAt = Date.now()
+					const seen = await watching.stop()
+					const timing = `residual backoff ${seconds(0, backoff)}; from the lift to N's next drive-write or ${INGEST} ${retried === null ? "never" : seconds(lifted, retried)}`
 
-					reached = `N reached ${INGEST} ${String(Math.round((outageAt - armedAt) / 1000))} s after the edit`
+					if (armed.fired === 0) {
+						fail("the fault never fired")
+					}
 
-					const went = await sampler.watch(Math.max(0, outageAt + OUTAGE_MS - Date.now()), sample =>
-						sample.phases.includes(`${pair.name}:offline`)
-					)
+					if (offline === "") {
+						fail(`${pair.name} not offline during the outage`)
+					}
 
-					offline = went.hit === null ? "" : describeSample(went.hit)
-					// The outage lasts its whole minute either way: it is the fault.
-					await sleep(Math.max(0, outageAt + OUTAGE_MS - Date.now()))
+					if (recovered.hit === null) {
+						fail(`not back online within 60 s of the lift: ${describeSample(recovered.last)}`)
+					}
+
+					if (retried === null) {
+						fail(
+							`N neither got drive-write nor reached ${INGEST} within ${seconds(0, backoff + DRIVE_LOCK_TIMING.capMs)} of the lift (${timing}): ${lockWaitNote(outputSince(chain.appOutput, mark))}`
+						)
+					}
+
+					if (!uploaded) {
+						fail(`${name} not uploaded within 60 s of N's next try (${timing}): ${describeSample(recovered.last)}`)
+					}
+
+					if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
+						fail(`${name} in the cloud differs from the local file`)
+					}
+
+					return `fired ${String(armed.fired)}x; ${reached}; offline (${offline}); back online ${seconds(lifted, recovered.hit.at)} after the lift; ${timing}; uploaded ${seconds(retried, uploadedAt)} after it; ${nothingSeen(seen, ["attention"])}`
 				} finally {
-					armed.disarm()
+					// Idempotent: also ends the loop when a wait or a cloud call above throws.
+					await watching.stop()
 				}
-
-				const lifted = Date.now()
-				// What the resets' pass backoff still had to run at the lift (the last one logged before it).
-				const backoff = residualBackoff(outputSince(chain.appOutput, mark), lifted, BACKOFF_CAP_MS)
-				const recovered = await sampler.watch(RECOVER_MS, sample => sample.offline === 0 && sample.errors === 0)
-				// N's next try after the lift: a drive-write grant, or a new ingest tunnel when it held the lock through the
-				// outage. A hold of another client (a lease its lost network left included) delays it up to the lock's cap.
-				const retried = await waitFor(
-					`N at drive-write or ${INGEST} after the lift`,
-					backoff + DRIVE_LOCK_TIMING.capMs,
-					() => nextTry(driveWriteGrants(outputSince(chain.appOutput, mark)), proxy.tunnels(), INGEST, lifted),
-					500
-				).catch(onTimeout(null))
-				const uploaded =
-					retried !== null &&
-					(await waitFor(`${name} in the cloud`, Math.max(0, retried + RECOVER_MS - Date.now()), async () =>
-						(await inCloud(name)) ? true : null
-					).catch(onTimeout(false)))
-				const uploadedAt = Date.now()
-				const seen = await watching.stop()
-				const timing = `residual backoff ${seconds(0, backoff)}; from the lift to N's next drive-write or ${INGEST} ${retried === null ? "never" : seconds(lifted, retried)}`
-
-				if (armed.fired === 0) {
-					fail("the fault never fired")
-				}
-
-				if (offline === "") {
-					fail(`${pair.name} not offline during the outage`)
-				}
-
-				if (recovered.hit === null) {
-					fail(`not back online within 60 s of the lift: ${describeSample(recovered.last)}`)
-				}
-
-				if (retried === null) {
-					fail(
-						`N neither got drive-write nor reached ${INGEST} within ${seconds(0, backoff + DRIVE_LOCK_TIMING.capMs)} of the lift (${timing}): ${lockWaitNote(outputSince(chain.appOutput, mark))}`
-					)
-				}
-
-				if (!uploaded) {
-					fail(`${name} not uploaded within 60 s of N's next try (${timing}): ${describeSample(recovered.last)}`)
-				}
-
-				if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
-					fail(`${name} in the cloud differs from the local file`)
-				}
-
-				return `fired ${String(armed.fired)}x; ${reached}; offline (${offline}); back online ${seconds(lifted, recovered.hit.at)} after the lift; ${timing}; uploaded ${seconds(retried, uploadedAt)} after it; ${nothingSeen(seen, ["attention"])}`
 			}
 		)
 

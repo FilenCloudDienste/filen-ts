@@ -10,7 +10,7 @@ import {
 	SERVE_PROTOCOLS,
 	vfsTuningSchema
 } from "../../shared/nativeProtocol.ts"
-import { type AtomicFile, errorCode } from "../atomicFile.ts"
+import { type AtomicFile, readStoreFile } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
 
 // What the user set up for the network drive and the servers, per user. Credentials live apart, encrypted
@@ -195,19 +195,16 @@ export interface MountsStore {
 // `<userData>/mounts/<userId>/mounts.json`; the caller creates the directory. Read once, served from memory. Writes
 // run one at a time (they share the file's temp sibling).
 export async function loadMountsStore(file: AtomicFile, warn: (message: string) => void): Promise<MountsStore> {
-	let current = DEFAULT_MOUNTS
+	const stored = await readStoreFile(file, data => parseMountsConfig(data, warn), DEFAULT_MOUNTS, "mounts store", warn)
+	let current = stored.value
 	const serial = serialQueue()
-
-	try {
-		current = parseMountsConfig((await file.read())?.toString("utf8") ?? null, warn)
-	} catch (error) {
-		warn(`mounts store unreadable: ${errorCode(error)}`)
-	}
 
 	return {
 		get: () => current,
 		update: change =>
 			serial(async () => {
+				current = (await stored.beforeWrite()) ?? current
+
 				const next = change(current)
 
 				if (next !== current) {

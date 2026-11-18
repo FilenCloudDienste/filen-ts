@@ -14,7 +14,7 @@ import {
 	SYNC_TRANSFERS_KEPT
 } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk } from "./addon.ts"
-import { clip } from "./errors.ts"
+import { clip, clipPath } from "./errors.ts"
 import { refusal, reportSplit } from "./plans.ts"
 
 // How often at most the host reports what changed: overview pushes stay at 4 Hz however fast the engine emits.
@@ -235,14 +235,14 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				break
 			case "Uploading":
 			case "Downloading": {
-				const relPath = clip(event.inner.relPath)
+				const relPath = clipPath(event.inner.relPath)
 
 				begin(runtime, activity, { pairId, at, kind: BEGIN_KINDS[event.tag], relPath })
 				started(runtime, { relPath, direction: event.tag === "Uploading" ? "upload" : "download", bytes: 0, total: 0 })
 				break
 			}
 			case "Progress": {
-				const relPath = clip(event.inner.relPath)
+				const relPath = clipPath(event.inner.relPath)
 				const direction = event.inner.direction === sdk.TransferDirection.Upload ? "upload" : "download"
 				const transfer = runtime.transfers.find(entry => entry.relPath === relPath && entry.direction === direction)
 				const bytes = Number(event.inner.bytes)
@@ -266,7 +266,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 			case "CreatingLocalDir":
 			case "TrashingRemote":
 			case "DeletingLocal":
-				begin(runtime, activity, { pairId, at, kind: BEGIN_KINDS[event.tag], relPath: clip(event.inner.relPath) })
+				begin(runtime, activity, { pairId, at, kind: BEGIN_KINDS[event.tag], relPath: clipPath(event.inner.relPath) })
 				break
 			case "MovingRemote":
 			case "MovingLocal":
@@ -274,8 +274,8 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 					pairId,
 					at,
 					kind: event.tag === "MovingRemote" ? "movedRemote" : "movedLocal",
-					relPath: clip(event.inner.from),
-					to: clip(event.inner.to)
+					relPath: clipPath(event.inner.from),
+					to: clipPath(event.inner.to)
 				})
 				break
 			case "AdoptedBaseline":
@@ -284,10 +284,10 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.done++
 				break
 			case "Quarantined":
-				activity.push({ pairId, at, kind: "binned", relPath: clip(event.inner.relPath), to: clip(event.inner.binPath) })
+				activity.push({ pairId, at, kind: "binned", relPath: clipPath(event.inner.relPath), to: clipPath(event.inner.binPath) })
 				break
 			case "ActionFailed": {
-				const relPath = clip(event.inner.relPath)
+				const relPath = clipPath(event.inner.relPath)
 
 				if (runtime.pending?.relPath === relPath) {
 					runtime.pending = null
@@ -299,7 +299,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				break
 			}
 			case "Conflict":
-				activity.push({ pairId, at, kind: "conflict", relPath: clip(event.inner.relPath) })
+				activity.push({ pairId, at, kind: "conflict", relPath: clipPath(event.inner.relPath) })
 				break
 			case "DeletionsHeld":
 				activity.push({ pairId, at, kind: "deletionsHeld", detail: event.inner.count.toString() })

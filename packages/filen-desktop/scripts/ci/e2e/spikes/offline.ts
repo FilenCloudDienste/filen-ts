@@ -4,6 +4,7 @@ import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail } from "../../support.ts"
 import type { Chain } from "../chains/common.ts"
+import { allOffline } from "../chains/offlineListing.ts"
 import {
 	appPids,
 	createSampler,
@@ -58,19 +59,19 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 			findings.info("offline: right after the block", await block.connections(await pids()))
 
 			let first: Sample | null = null
-			const allOffline = (current: Sample) => {
+			const offline = (current: Sample) => {
 				first ??= current.offline > 0 ? current : null
 
-				return current.offline === current.pairs
+				return allOffline(current)
 			}
-			let reached = await watch(CONNECTIONS_AGAIN_MS, allOffline)
+			let reached = await watch(CONNECTIONS_AGAIN_MS, offline)
 
 			if (reached.hit === null) {
 				findings.info(
 					`offline: ${seconds(0, CONNECTIONS_AGAIN_MS)} into the block`,
 					`${describe(reached.last)}; ${await block.connections(await pids())}`
 				)
-				reached = await watch(CAP_MS - CONNECTIONS_AGAIN_MS, allOffline)
+				reached = await watch(CAP_MS - CONNECTIONS_AGAIN_MS, offline)
 			}
 
 			findings.info(
@@ -88,7 +89,7 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 
 				const restarted = Date.now()
 
-				reached = await watch(CAP_MS, current => current.offline === current.pairs)
+				reached = await watch(CAP_MS, allOffline)
 				findings.info(
 					"offline: fallback, a launch with the block in place",
 					`${reached.hit === null ? `not every pair offline within ${seconds(0, CAP_MS)}` : `every pair offline after ${seconds(restarted, reached.hit.at)}`}; ${describe(reached.last)}`

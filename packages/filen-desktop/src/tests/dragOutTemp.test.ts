@@ -84,21 +84,18 @@ describe("drag temp", () => {
 		expect(await readdir(root)).toEqual([])
 	})
 
-	it("sweep removes only s- entries older than an hour and never follows a symlink", async () => {
+	it("sweep removes only s- entries older than an hour", async () => {
 		await mkdir(root, { mode: 0o700 })
 
 		const old = path.join(root, "s-old123")
 		const fresh = path.join(root, "s-new123")
 		const foreign = path.join(root, "keep-me")
-		const target = path.join(base, "target")
-		const link = path.join(root, "s-link12")
 
-		for (const dir of [old, fresh, foreign, target]) {
+		for (const dir of [old, fresh, foreign]) {
 			await mkdir(dir, { mode: 0o700 })
 			await writeFile(path.join(dir, "file"), "x")
 		}
 
-		await symlink(target, link)
 		await aged(old, 2 * HOUR)
 		await aged(foreign, 2 * HOUR)
 
@@ -106,7 +103,25 @@ describe("drag temp", () => {
 
 		await temp.sweep(HOUR)
 
-		expect((await readdir(root)).sort()).toEqual(["keep-me", "s-link12", "s-new123"])
+		expect((await readdir(root)).sort()).toEqual(["keep-me", "s-new123"])
+	})
+
+	it.skipIf(!posix)("sweep never follows a symlink", async () => {
+		await mkdir(root, { mode: 0o700 })
+
+		const target = path.join(base, "target")
+		const link = path.join(root, "s-link12")
+
+		await mkdir(target, { mode: 0o700 })
+		await writeFile(path.join(target, "file"), "x")
+		await symlink(target, link)
+		await aged(target, 2 * HOUR)
+
+		const temp = createDragTemp(deps())
+
+		await temp.sweep(HOUR)
+
+		expect(await readdir(root)).toEqual(["s-link12"])
 		expect(await readdir(target)).toEqual(["file"])
 	})
 
@@ -119,7 +134,22 @@ describe("drag temp", () => {
 		expect(await readdir(root)).toEqual([path.basename(dir)])
 	})
 
-	it("removeAllSync removes only this run's sessions and survives a failing entry", async () => {
+	it("removeAllSync removes only this run's sessions", async () => {
+		const temp = createDragTemp(deps())
+		const one = await temp.sessionDir("one")
+		const two = await temp.sessionDir("two")
+		const other = path.join(root, "s-other1")
+
+		await mkdir(other, { mode: 0o700 })
+		await writeFile(path.join(one, "file"), "x")
+		await writeFile(path.join(two, "file"), "x")
+
+		temp.removeAllSync()
+
+		expect(await readdir(root)).toEqual(["s-other1"])
+	})
+
+	it.skipIf(!posix)("removeAllSync survives a failing entry", async () => {
 		const temp = createDragTemp(deps())
 		const one = await temp.sessionDir("one")
 		const two = await temp.sessionDir("two")

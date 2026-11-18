@@ -71,7 +71,7 @@ describe("commitDownload", () => {
 		expect([...state.files]).toEqual([at("a.txt")])
 	})
 
-	it.each(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "ENOSYS"])(
+	it.each(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "ENOSYS", "EISDIR", "EACCES", "UNKNOWN"])(
 		"keepBoth falls back to a placeholder on %s from link",
 		async code => {
 			const { fs, state, error } = memoryFs([STAGING])

@@ -322,7 +322,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 			}
 
 			// What 3.0.53 leaves running past its main process (a helper or crash handler) is hard-killed once its storage
-			// has gone quiet, as chain L does (D13).
+			// has gone quiet, as chain L does.
 			const lingering = await endLeftovers(
 				os,
 				target,
@@ -336,7 +336,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 
 			state.legacyLogs = existsSync(legacyLogs)
 
-			return `wrote ${written.join(", ")} (the other user's settings beside the account's); @filen/logs ${state.legacyLogs ? "written" : "not written"}${lingering.length === 0 ? "" : `; left after app.quit(), hard-killed (D13): ${lingering.join("; ")}`}`
+			return `wrote ${written.join(", ")} (the other user's settings beside the account's); @filen/logs ${state.legacyLogs ? "written" : "not written"}${lingering.length === 0 ? "" : `; left after app.quit(), hard-killed: ${lingering.join("; ")}`}`
 		})
 
 		await findings.must("N installed over it as a package upgrade (no updater), the profile kept aside", () => {

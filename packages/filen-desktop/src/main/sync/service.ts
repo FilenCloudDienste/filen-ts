@@ -294,6 +294,14 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			return fail("pairNotFound")
 		}
 
+		// A migrated pair still preparing starts only through its dry run, verdict and guard, one at a time.
+		if (found.pair.state === "preparing") {
+			await patchPair(found.store, pairId, { paused: false })
+			nextRound((await supervisor.user())?.userId ?? null, found.store, "pair resumed")
+
+			return DONE
+		}
+
 		// A migrated pair started from its review gets the guard it would have started on.
 		if (found.pair.review?.reason === "migrated") {
 			const guarded = await supervisor.call("setMigratedGuard", { pairId: found.engineId })
@@ -312,6 +320,15 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		await patchPair(found.store, pairId, { paused: false, state: "active", review: null, legacyRules: null })
 
 		return DONE
+	}
+
+	// A round now when the host runs for the current user, otherwise the host is started and its `ready` runs one.
+	function nextRound(userId: string | null, store: SyncStore, reason: string): void {
+		if (userId !== null && userId === hostUser && host.state === "running") {
+			roundNow(userId, store)
+		} else {
+			supervisor.ensure(reason)
+		}
 	}
 
 	function stopRounds(): void {
@@ -768,7 +785,14 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 			return DONE
 		},
-		syncNow: pairId => engineCall(pairId, "requestPass", id => ({ pairId: id })),
+		syncNow: async pairId => {
+			const found = await findHeld(pairId)
+
+			// A preparing pair's first pass is started by its round, never by the page.
+			return found === null || found.pair.state === "preparing"
+				? fail("pairNotFound")
+				: supervisor.call("requestPass", { pairId: found.engineId })
+		},
 		plan: async (page, pairId) => {
 			const found = await findHeld(pairId)
 
@@ -916,11 +940,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				)
 			}
 
-			if (user.userId === hostUser && host.state === "running") {
-				roundNow(user.userId, found.store)
-			} else {
-				supervisor.ensure("pair held")
-			}
+			nextRound(user.userId, found.store, "pair held")
 
 			return DONE
 		},

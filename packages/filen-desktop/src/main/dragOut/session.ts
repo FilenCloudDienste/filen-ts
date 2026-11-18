@@ -58,11 +58,13 @@ const STAGING_EMIT_MS = 250
 
 type Phase = "preparing" | "staging" | "ready" | "begun" | "ended"
 
-// One download a session runs; `id` once the service named it.
+// One download a session runs; `id` once the service named it. `abandoned`: its last waiter left before the start
+// answered, so it is cancelled once named.
 interface Download {
 	id: string | null
 	bytes: number
 	done: boolean
+	abandoned: boolean
 }
 
 // promise: one Finder write. virtual: one Explorer stream waiting on a file.
@@ -157,11 +159,13 @@ export class DragSessions {
 
 		const limits = this.mode === "virtual" ? WINDOWS_LIMITS : STAGED_LIMITS
 		const listingId = randomUUID()
+
+		// Set before the listing answers, so a session closed meanwhile (drop, Escape) releases it at once.
+		session.listingId = listingId
+
 		const listed = await this.effects.transfers.listTree({ listingId, items, maxEntries: limits.maxEntries })
 
 		if (session.closed) {
-			this.effects.transfers.releaseTree(listingId)
-
 			return UNAVAILABLE
 		}
 
@@ -176,8 +180,6 @@ export class DragSessions {
 
 			return { refused: { reason: "tooMany", entries: listed.value.tooMany, limit: limits.maxEntries } }
 		}
-
-		session.listingId = listingId
 
 		const plan = planEntries(listed.value.entries, limits, this.platform)
 
@@ -372,7 +374,11 @@ export class DragSessions {
 				// Nobody else reads it: stop it, and start over if asked again.
 				if (fetch.waiters.size === 0 && fetch.state === "running") {
 					session.fetches.delete(index)
-					this.cancelDownloads(fetch.download === null ? [] : [fetch.download])
+
+					if (fetch.download !== null) {
+						fetch.download.abandoned = true
+						this.cancelDownloads([fetch.download])
+					}
 				}
 
 				waiter(null)
@@ -769,7 +775,7 @@ export class DragSessions {
 	}
 
 	private download(session: Session): Download {
-		const download: Download = { id: null, bytes: 0, done: false }
+		const download: Download = { id: null, bytes: 0, done: false, abandoned: false }
 
 		session.pending.add(download)
 
@@ -781,7 +787,7 @@ export class DragSessions {
 		let download = session.downloads.get(id)
 
 		if (download === undefined) {
-			download = { id, bytes: 0, done: false }
+			download = { id, bytes: 0, done: false, abandoned: false }
 			session.downloads.set(id, download)
 			session.pending.add(download)
 		}
@@ -795,7 +801,8 @@ export class DragSessions {
 		session.pending.delete(download)
 	}
 
-	// One download's start: its id recorded, cancelled at once if the session or ticket ended meanwhile.
+	// One download's start: its id recorded, cancelled at once if the session or ticket ended or every waiter left
+	// meanwhile.
 	private track(
 		session: Session,
 		download: Download,
@@ -821,7 +828,7 @@ export class DragSessions {
 
 					const ticket = [...session.tickets.values()].find(each => each.download === download)
 
-					if (session.closed || ticket?.cancelled === true) {
+					if (session.closed || download.abandoned || ticket?.cancelled === true) {
 						this.cancelDownloads([download])
 					}
 				}

@@ -1,3 +1,4 @@
+import { errorMessage } from "../atomicFile.ts"
 import { macAddonPath, type AddonPathContext } from "../native/addonPath.ts"
 
 // The drag-out half of filen-mac.node (native/mac/DragOut.swift): an OS drag of file promises, which Finder fulfils by
@@ -18,6 +19,8 @@ export interface DragOutAddonMac {
 		// Finder's cancel on the ticket's progress; fulfil still follows.
 		onCancel(ticket: number): void
 		onEnded(operation: "copy" | "none"): void
+		// Finder's alert text for a failed write, in the UI language; the addon falls back to English without it.
+		failureMessage?: string
 	}): void
 	// Re-publishes the ticket's progress on the file the bytes are written to, which Finder shows while it grows.
 	progressAt(ticket: number, path: string): void
@@ -51,7 +54,7 @@ export function createDragOutAddon(ctx: DragOutAddonContext): DragOutAddonMac | 
 	try {
 		return ctx.load(file) as DragOutAddonMac
 	} catch (error) {
-		ctx.warn(`dragOut: ${file} did not load: ${error instanceof Error ? error.message : String(error)}`)
+		ctx.warn(`dragOut: ${file} did not load: ${errorMessage(error)}`)
 
 		return null
 	}

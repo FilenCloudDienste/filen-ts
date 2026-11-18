@@ -1,5 +1,5 @@
 import type { ConflictReason, ConflictResolution, DeleteGuardState, JsSyncPlan, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
-import type { DesktopSyncResolution } from "@filen/shared/desktop"
+import type { DesktopSyncPlanPage, DesktopSyncResolution } from "@filen/shared/desktop"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
@@ -21,7 +21,8 @@ import {
 	toSkippedSymlink,
 	toSummary,
 	toUnsyncable,
-	truncatedUnsyncable
+	truncatedUnsyncable,
+	type UnsyncableSplit
 } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
@@ -244,6 +245,32 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 	function isStale(error: unknown): boolean {
 		return sdk.FilenSdkError.hasInner(error) && sdk.FilenSdkError.getInner(error).kind() === sdk.ErrorKind.StaleState
+	}
+
+	// One of the unsyncable lists from the last report (null before one): the list's total, and the dry run's page when
+	// the page runs past what the report lists, which falls back to the report's entries when no dry run reads it.
+	async function unsyncableRead(
+		pairId: string,
+		list: keyof UnsyncableSplit,
+		offset: number,
+		limit: number
+	): Promise<{ report: SyncPassReport; total: number; page: DesktopSyncPlanPage | null } | null> {
+		const { id } = held(pairId)
+		const report = await engine.lastReport(id)
+
+		if (report === undefined) {
+			return null
+		}
+
+		const total = reportSplit(report)[list]
+
+		if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report)[list]) {
+			return { report, total, page: null }
+		}
+
+		const plan = await pagerPlan(pairId, id)
+
+		return { report, total, page: plan === null ? null : planPage(sdk, plan, list, offset, limit) }
 	}
 
 	function held(pairId: string): { id: bigint; info: SyncPairInfo } {
@@ -495,50 +522,30 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		},
 		// A page the report lists is read from it; past it, from a dry run (see `pagers`).
 		unsyncablePaths: async ({ pairId, offset, limit }) => {
-			const { id } = held(pairId)
-			const report = await engine.lastReport(id)
+			const read = await unsyncableRead(pairId, "unsyncable", offset, limit)
 
-			if (report === undefined) {
+			if (read === null) {
 				return null
 			}
 
-			const { unsyncable: total } = reportSplit(report)
-			const listed = (): NativeOpResult<"unsyncablePaths"> => ({
-				total,
-				entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable)
-			})
+			const { report, total, page } = read
 
-			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report).unsyncable) {
-				return listed()
-			}
-
-			const plan = await pagerPlan(pairId, id)
-			const page = plan === null ? null : planPage(sdk, plan, "unsyncable", offset, limit)
-
-			return page?.list === "unsyncable" ? { total, entries: page.entries } : listed()
+			return page?.list === "unsyncable"
+				? { total, entries: page.entries }
+				: { total, entries: keptPage(report.unsyncable, isIssue, offset, limit).map(toUnsyncable) }
 		},
 		skippedSymlinks: async ({ pairId, offset, limit }) => {
-			const { id } = held(pairId)
-			const report = await engine.lastReport(id)
+			const read = await unsyncableRead(pairId, "skippedSymlinks", offset, limit)
 
-			if (report === undefined) {
+			if (read === null) {
 				return null
 			}
 
-			const { skippedSymlinks: total } = reportSplit(report)
-			const listed = (): NativeOpResult<"skippedSymlinks"> => ({
-				total,
-				entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink)
-			})
+			const { report, total, page } = read
 
-			if (!truncatedUnsyncable(report) || offset + limit <= listedSplit(report).skippedSymlinks) {
-				return listed()
-			}
-
-			const plan = await pagerPlan(pairId, id)
-			const page = plan === null ? null : planPage(sdk, plan, "skippedSymlinks", offset, limit)
-
-			return page?.list === "skippedSymlinks" ? { total, entries: page.entries } : listed()
+			return page?.list === "skippedSymlinks"
+				? { total, entries: page.entries }
+				: { total, entries: keptPage(report.unsyncable, isSymlink, offset, limit).map(toSkippedSymlink) }
 		},
 		setMigratedGuard: async ({ pairId }) => {
 			await engine.setDeleteGuard(held(pairId).id, MIGRATED_GUARD.floor, MIGRATED_GUARD.ratio)

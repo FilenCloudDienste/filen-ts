@@ -179,6 +179,8 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 	let fuseLookup: Promise<void> | null = null
 	// Applies, cache clears and sign-out steps run one at a time.
 	const queue = serialQueue()
+	// Drive and server settings read the config, await, then write it back: one at a time, apart from the long applies.
+	const settings = serialQueue()
 
 	const schedulePush = pushThrottle(
 		() => {
@@ -400,6 +402,146 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 		return userId === null ? fail("hostUnavailable") : change(userId)
 	}
 
+	async function setDrive(userId: string, patch: DesktopDrivePatch): Promise<Result<null>> {
+		const store = await deps.storeFor(userId)
+		const drive = { ...store.get().drive }
+		const windows = platform === "win32"
+
+		if (patch.mountPointId !== undefined) {
+			const chosen = deps.tokens.take(patch.mountPointId)
+
+			if (windows || chosen === null) {
+				return fail("mountPointExpired")
+			}
+
+			// The directory may have changed since it was chosen.
+			const inspected = await inspectMountPoint(chosen, await deps.dialogs.mountPointContext(userId))
+
+			if (inspected.problem !== null) {
+				return fail("mountPointInvalid", inspected.problem)
+			}
+
+			drive.mountPoint = inspected.path
+		}
+
+		if (patch.driveLetter !== undefined || (windows && patch.enabled === true && drive.driveLetter === null)) {
+			if (!windows) {
+				return fail("mountPointInvalid")
+			}
+
+			const letters = await supervisor.callMounts("driveLetters", {}, userId)
+
+			if (!letters.ok) {
+				return letters
+			}
+
+			const letter = patch.driveLetter ?? defaultMountPoint("", platform, letters.value)
+
+			if (letter === null || (letter !== drive.driveLetter && !validDriveLetter(letter, letters.value))) {
+				return fail("driveLetterInUse")
+			}
+
+			drive.driveLetter = letter
+		}
+
+		// Enabled without a mount point: ~/Filen, made when missing.
+		if (!windows && patch.enabled === true && drive.mountPoint === null) {
+			const context = await deps.dialogs.mountPointContext(userId)
+			const target = defaultMountPoint(context.home, platform, [])
+
+			if (target !== null) {
+				await mkdir(target, { recursive: true, mode: 0o700 }).catch(() => undefined)
+			}
+
+			const inspected = target === null ? null : await inspectMountPoint(target, context)
+
+			if (inspected === null || inspected.problem !== null) {
+				return fail("mountPointInvalid", inspected?.problem ?? undefined)
+			}
+
+			drive.mountPoint = inspected.path
+		}
+
+		drive.readOnly = patch.readOnly ?? drive.readOnly
+		drive.enabled = patch.enabled ?? drive.enabled
+
+		await store.update(config => ({ ...config, drive }))
+		changed(userId)
+
+		return DONE
+	}
+
+	async function setServe(userId: string, protocol: DesktopServeProtocol, patch: DesktopServePatch): Promise<Result<null>> {
+		if (!offeredProtocols(platform).includes(protocol)) {
+			return fail("unsupportedProtocol")
+		}
+
+		const config = (await deps.storeFor(userId)).get()
+		const current = config.serves[protocol] ?? defaultServe(protocol)
+		const next = { ...current }
+
+		if (patch.address !== undefined && patch.address !== current.host) {
+			const offered = listenAddresses(deps.interfaces()).some(entry => entry.address === patch.address)
+
+			if (!offered || (protocol === "nfs" && !isLoopbackHost(patch.address))) {
+				return fail("addressUnavailable")
+			}
+
+			// Credentials must not cross the LAN in plain text unless the user says so.
+			if (isLoopbackHost(current.host) && !isLoopbackHost(patch.address) && HTTPS_PROTOCOLS.has(protocol)) {
+				next.https = true
+			}
+
+			next.host = patch.address
+		}
+
+		if (patch.https === true && !HTTPS_PROTOCOLS.has(protocol)) {
+			return fail("unsupportedProtocol")
+		}
+
+		next.port = patch.port ?? next.port
+		next.https = patch.https ?? next.https
+		next.readOnly = patch.readOnly ?? next.readOnly
+		next.acknowledgedUnauthenticated = patch.acknowledgeUnauthenticated ?? next.acknowledgedUnauthenticated
+		next.enabled = patch.enabled ?? next.enabled
+
+		if (next.enabled) {
+			if (authKindOf(protocol) === "none" && !next.acknowledgedUnauthenticated) {
+				return fail("acknowledgementRequired")
+			}
+
+			const clash = Object.entries(config.serves).some(
+				([other, serve]) =>
+					other !== protocol &&
+					serve.enabled &&
+					serve.port === next.port &&
+					(serve.host === next.host || serve.host === "0.0.0.0" || next.host === "0.0.0.0")
+			)
+
+			if (clash) {
+				return fail("portInUse")
+			}
+
+			// Made before the config names them, so a locked keychain leaves the server as it was.
+			try {
+				if (protocol !== "nfs") {
+					await deps.credentialsFor(userId).ensure(protocol)
+				}
+
+				if (next.https) {
+					await certificateFor(userId, protocol, next.host)
+				}
+			} catch (error) {
+				return fail("unknown", errorCode(error))
+			}
+		}
+
+		await updateServe(userId, protocol, next)
+		changed(userId)
+
+		return DONE
+	}
+
 	async function updateServe(userId: string, protocol: DesktopServeProtocol, serve: MountsServe): Promise<void> {
 		await (await deps.storeFor(userId)).update(config => ({ ...config, serves: { ...config.serves, [protocol]: serve } }))
 	}
@@ -582,147 +724,9 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 
 			return letters.ok ? { ok: true, value: letters.value } : letters
 		},
-		setDrive: patch =>
-			forUser(async userId => {
-				const store = await deps.storeFor(userId)
-				const drive = { ...store.get().drive }
-				const windows = platform === "win32"
-
-				if (patch.mountPointId !== undefined) {
-					const chosen = deps.tokens.take(patch.mountPointId)
-
-					if (windows || chosen === null) {
-						return fail("mountPointExpired")
-					}
-
-					// The directory may have changed since it was chosen.
-					const inspected = await inspectMountPoint(chosen, await deps.dialogs.mountPointContext(userId))
-
-					if (inspected.problem !== null) {
-						return fail("mountPointInvalid", inspected.problem)
-					}
-
-					drive.mountPoint = inspected.path
-				}
-
-				if (patch.driveLetter !== undefined || (windows && patch.enabled === true && drive.driveLetter === null)) {
-					if (!windows) {
-						return fail("mountPointInvalid")
-					}
-
-					const letters = await supervisor.callMounts("driveLetters", {}, userId)
-
-					if (!letters.ok) {
-						return letters
-					}
-
-					const letter = patch.driveLetter ?? defaultMountPoint("", platform, letters.value)
-
-					if (letter === null || (letter !== drive.driveLetter && !validDriveLetter(letter, letters.value))) {
-						return fail("driveLetterInUse")
-					}
-
-					drive.driveLetter = letter
-				}
-
-				// Enabled without a mount point: ~/Filen, made when missing.
-				if (!windows && patch.enabled === true && drive.mountPoint === null) {
-					const context = await deps.dialogs.mountPointContext(userId)
-					const target = defaultMountPoint(context.home, platform, [])
-
-					if (target !== null) {
-						await mkdir(target, { recursive: true, mode: 0o700 }).catch(() => undefined)
-					}
-
-					const inspected = target === null ? null : await inspectMountPoint(target, context)
-
-					if (inspected === null || inspected.problem !== null) {
-						return fail("mountPointInvalid", inspected?.problem ?? undefined)
-					}
-
-					drive.mountPoint = inspected.path
-				}
-
-				drive.readOnly = patch.readOnly ?? drive.readOnly
-				drive.enabled = patch.enabled ?? drive.enabled
-
-				await store.update(config => ({ ...config, drive }))
-				changed(userId)
-
-				return DONE
-			}),
+		setDrive: patch => forUser(userId => settings(() => setDrive(userId, patch))),
 		listenAddresses: () => listenAddresses(deps.interfaces()),
-		setServe: (protocol, patch) =>
-			forUser(async userId => {
-				if (!offeredProtocols(platform).includes(protocol)) {
-					return fail("unsupportedProtocol")
-				}
-
-				const config = (await deps.storeFor(userId)).get()
-				const current = config.serves[protocol] ?? defaultServe(protocol)
-				const next = { ...current }
-
-				if (patch.address !== undefined && patch.address !== current.host) {
-					const offered = listenAddresses(deps.interfaces()).some(entry => entry.address === patch.address)
-
-					if (!offered || (protocol === "nfs" && !isLoopbackHost(patch.address))) {
-						return fail("addressUnavailable")
-					}
-
-					// Credentials must not cross the LAN in plain text unless the user says so.
-					if (isLoopbackHost(current.host) && !isLoopbackHost(patch.address) && HTTPS_PROTOCOLS.has(protocol)) {
-						next.https = true
-					}
-
-					next.host = patch.address
-				}
-
-				if (patch.https === true && !HTTPS_PROTOCOLS.has(protocol)) {
-					return fail("unsupportedProtocol")
-				}
-
-				next.port = patch.port ?? next.port
-				next.https = patch.https ?? next.https
-				next.readOnly = patch.readOnly ?? next.readOnly
-				next.acknowledgedUnauthenticated = patch.acknowledgeUnauthenticated ?? next.acknowledgedUnauthenticated
-				next.enabled = patch.enabled ?? next.enabled
-
-				if (next.enabled) {
-					if (authKindOf(protocol) === "none" && !next.acknowledgedUnauthenticated) {
-						return fail("acknowledgementRequired")
-					}
-
-					const clash = Object.entries(config.serves).some(
-						([other, serve]) =>
-							other !== protocol &&
-							serve.enabled &&
-							serve.port === next.port &&
-							(serve.host === next.host || serve.host === "0.0.0.0" || next.host === "0.0.0.0")
-					)
-
-					if (clash) {
-						return fail("portInUse")
-					}
-
-					// Made before the config names them, so a locked keychain leaves the server as it was.
-					try {
-						if (protocol !== "nfs") {
-							await deps.credentialsFor(userId).ensure(protocol)
-						}
-
-						if (next.https) {
-							await certificateFor(userId, protocol, next.host)
-						}
-					} catch (error) {
-						return fail("unknown", errorCode(error))
-					}
-				}
-
-				await updateServe(userId, protocol, next)
-				changed(userId)
-
-				return DONE
-			}),
+		setServe: (protocol, patch) => forUser(userId => settings(() => setServe(userId, protocol, patch))),
 		credentials: protocol =>
 			forUser(async userId => {
 				try {

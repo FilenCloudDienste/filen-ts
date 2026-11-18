@@ -1,3 +1,4 @@
+import { type } from "arktype"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CacheStatusMessage, PlannedAction, UnsyncablePath } from "@filen/sdk-rs"
 import { createConvergence } from "../native/convergence.ts"
@@ -5,7 +6,7 @@ import { classify } from "../native/errors.ts"
 import { createHostEngine } from "../native/ops.ts"
 import { createPlanRegistry } from "../native/plans.ts"
 import { createRuntimeFeed } from "../native/reducer.ts"
-import type { FromNative } from "../shared/nativeProtocol.ts"
+import { type FromNative, opResult } from "../shared/nativeProtocol.ts"
 import { action, DIVERGED, fakeEngine, fakePlan, fakeSdk, pairInfo, passEvent, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
 
 beforeEach(() => {
@@ -451,6 +452,26 @@ describe("native ops", () => {
 		// A report that lists every path needs no dry run.
 		await host.passEnded(1n, (await engine.lastReport(1n)) ?? null)
 		expect(engine.planPair).not.toHaveBeenCalled()
+	})
+
+	it("reports a remote name holding a NUL with U+FFFD, so main's validation takes the reply", async () => {
+		const { engine, host } = setup()
+
+		await host.refreshPairs()
+
+		engine.lastReport.mockResolvedValue(
+			report({
+				unsyncable: [{ relPath: `dir/a\0b${"x".repeat(5000)}`, reason: { tag: "RemoteInvalidName", inner: { name: "a\0b" } } }],
+				unsyncableTotal: 1n
+			})
+		)
+
+		const page = await host.ops.unsyncablePaths({ pairId: "1", offset: 0, limit: 10 })
+		const relPath = page?.entries[0]?.relPath
+
+		expect(relPath?.startsWith("dir/a\uFFFDb")).toBe(true)
+		expect(relPath).toHaveLength(4096)
+		expect(opResult("unsyncablePaths")(page)).not.toBeInstanceOf(type.errors)
 	})
 
 	it("counts a pass's unsyncable paths from its report, and pages past its list from one dry run", async () => {

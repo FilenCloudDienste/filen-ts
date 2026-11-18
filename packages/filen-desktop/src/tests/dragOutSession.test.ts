@@ -503,17 +503,30 @@ describe("drag sessions: ownership and lifetime", () => {
 		expect(f.deleted).toEqual([{ id, later: null }])
 	})
 
-	it("a release while the listing is pending releases it once it arrives", async () => {
+	it("a release while the listing is pending releases it at once, not when it arrives", async () => {
 		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] })
+		const reply = Promise.withResolvers<Awaited<ReturnType<DragSessionEffects["transfers"]["listTree"]>>>()
+
+		f.effects.transfers.listTree = request => {
+			f.listings.push({ listingId: request.listingId, maxEntries: request.maxEntries })
+
+			return reply.promise
+		}
+
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 		const pending = sessions.prepare(1, [item("d", "directory")])
 
+		expect(sessions.live()).toBe(1)
 		sessions.ownerGone(1)
+
+		expect(f.released).toEqual([f.listings[0]?.listingId])
+		expect(sessions.live()).toBe(0)
+
+		reply.resolve({ ok: true, value: { entries: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] } })
 
 		expect(await pending).toEqual({ refused: { reason: "unavailable" } })
 		expect(f.started).toEqual([])
 		expect(f.released).toHaveLength(1)
-		expect(sessions.live()).toBe(0)
 	})
 
 	it("markBegun refuses a second native drag", async () => {
@@ -860,6 +873,35 @@ describe("drag sessions: virtual", () => {
 		// Still read by ticket 2: answered from the same copy, nothing downloaded again.
 		expect(done.slice(1)).toEqual([path.join(`/temp/s-${id}`, "2"), path.join(`/temp/s-${id}`, "2"), path.join(`/temp/s-${id}`, "2")])
 		expect(f.started.filter(s => s.index === 0)).toHaveLength(1)
+	})
+
+	it("a stream released before its download start answered cancels it once named; the prefetch runs on", async () => {
+		const f = fakes({ tree })
+		const sessions = new DragSessions(f.effects, "win32", "virtual")
+		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const done: (string | null)[] = []
+
+		sessions.markBegun(id)
+		sessions.contents(id, 0, 1, file => done.push(file))
+		sessions.streamReleased(id, 0)
+
+		expect(done).toEqual([null])
+		expect(f.cancelled).toEqual([])
+
+		await flush()
+
+		// t0 is the released entry, t1 the prefetch of the next file nobody waits on yet.
+		expect(f.started.map(s => s.index)).toEqual([null, 0])
+		expect(f.cancelled).toEqual(["t0"])
+
+		// The abandoned download settling later does not answer a new request for the same entry.
+		sessions.contents(id, 1, 1, file => done.push(file))
+		f.settle(f.started[0] as Started, "cancelled")
+		await flush()
+
+		expect(done).toEqual([null])
+		expect(f.started.map(s => s.index)).toEqual([null, 0, null])
+		expect(f.cancelled).toEqual(["t0"])
 	})
 
 	it("a cancelled drag releases everything at once", async () => {

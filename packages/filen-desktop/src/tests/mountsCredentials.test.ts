@@ -88,7 +88,6 @@ describe("createCredentialStore", () => {
 		const http = await store.ensure("http")
 
 		expect(await store.ensure("http")).toEqual(http)
-		expect(await store.persistent()).toBe(false)
 		expect(file.writes).toBe(0)
 	})
 

@@ -23,7 +23,7 @@ import { diffSnapshots, localSnapshot, type Snapshot } from "../snapshot.ts"
 import { approveHeldThroughIssues, findingText, removeThroughNotice, startReviewThroughCard, syncText } from "../syncUi.ts"
 import { json, LIVE_TIMEOUT_MS, ok, SETUP_TIMEOUT_MS, type Chain } from "./common.ts"
 
-// Chain L's pairs that N's first run does not start on its own (plan D2, proving C2 and C4):
+// Chain L's pairs that N's first run does not start on its own (proving C2 and C4):
 //   L16  review card         a file uploaded into e2e-l2c's cloud directory while 3.x is closed: a local-to-cloud pair
 //                            whose first sync would delete it, so N holds the pair in review (heldDeletions,
 //                            firstSyncWithDeletions). Through the page: the card's title and finding, its changes in ONE

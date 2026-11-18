@@ -375,7 +375,12 @@ export async function loadAppLock(
 			return { ok: false, retryAt: retryAtOf(charged, now()) }
 		}
 
-		await store({ ...charged, failures: 0, retryAt: 0 })
+		// The PIN is right: a failed reset only leaves the charged attempt on disk (and in memory, to match).
+		try {
+			await store({ ...charged, failures: 0, retryAt: 0 })
+		} catch (error) {
+			warn(`app lock: the attempt count was not reset: ${errorCode(error)}`)
+		}
 
 		return { ok: true }
 	}

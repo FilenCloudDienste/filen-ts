@@ -19,9 +19,6 @@ function codeOf(error: unknown): unknown {
 	return typeof error === "object" && error !== null && "code" in error ? error.code : undefined
 }
 
-// What a hard link refuses on a filesystem without them (FAT, exFAT, some network shares) or across volumes.
-const LINK_UNSUPPORTED = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "ENOSYS"])
-
 // join(dirname(target), `${id}.filendl`): a uuid-stem .filendl FILE, which sync scans ignore and collect when stale.
 export function stagingPathOf(target: string, id: string): string {
 	return path.join(path.dirname(target), `${id}.filendl`)
@@ -39,7 +36,7 @@ function candidate(dir: string, name: string, n: number, kind: "file" | "directo
 // replace: rename over target (win32 EBUSY: another app holds it open → localInUse; EPERM stays a permission failure,
 // as a read-only or protected target answers it too).
 // keepBoth: link(staging, free name) until not EEXIST, then unlink(staging), so a file that appeared at the name
-// meanwhile is never replaced; where links are unsupported, an exclusive placeholder (open "wx") reserves the name and
+// meanwhile is never replaced; when a link fails otherwise, an exclusive placeholder (open "wx") reserves the name and
 // the staging file is renamed over it.
 export async function commitDownload(
 	fs: CommitFs,
@@ -74,17 +71,13 @@ export async function commitDownload(
 		try {
 			await fs.link(staging, free)
 		} catch (error) {
-			const code = codeOf(error)
-
-			if (code === "EEXIST") {
+			if (codeOf(error) === "EEXIST") {
 				continue
 			}
 
-			if (typeof code === "string" && LINK_UNSUPPORTED.has(code)) {
-				break
-			}
-
-			throw error
+			// Any other refusal (FAT/exFAT answer EISDIR on win32, others EPERM/ENOTSUP/EXDEV...) falls back to the
+			// placeholder, whose open("wx")/rename report a real problem themselves.
+			break
 		}
 
 		// The file is in place; a staging name left behind is swept as stale.

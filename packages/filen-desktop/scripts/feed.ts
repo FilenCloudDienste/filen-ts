@@ -4,7 +4,8 @@ import { stat } from "node:fs/promises"
 import type { Readable } from "node:stream"
 
 // The electron-updater manifests (latest*.yml) as electron-builder writes them: flat top-level scalars plus one
-// `files` list of flat maps. Only that shape is read, so anything else fails parsing instead of being skipped.
+// `files` list of flat maps. Only that shape is read, so anything else fails parsing instead of being skipped. Lines
+// end in `\n` only (js-yaml's dump); a CRLF manifest is not electron-builder output and fails on the trailing `\r`.
 
 export interface FeedFile {
 	url: string

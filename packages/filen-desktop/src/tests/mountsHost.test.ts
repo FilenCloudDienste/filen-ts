@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_TUNING, type FromNative, type NativeMountsDesired } from "../shared/nativeProtocol.ts"
 import { createBinaryCheck, TEAM_REQUIREMENT } from "../native/mounts/binaryCheck.ts"
-import { cacheUsage } from "../native/mounts/cacheUsage.ts"
+import { allocatedBytes, cacheUsage } from "../native/mounts/cacheUsage.ts"
 import { classifyMounts } from "../native/mounts/errors.ts"
 import { CRASH_BACKOFF_MS, CRASH_LIMIT, createMountsHost } from "../native/mounts/host.ts"
 import { DRAIN_POLL_MS } from "../native/mounts/legacy.ts"
@@ -560,5 +560,14 @@ describe("cacheUsage", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true })
 		}
+	})
+
+	it("counts a sparse file's allocated blocks, not its length", () => {
+		expect(allocatedBytes({ size: 40 * 1024 ** 3, blocks: 2048 })).toBe(2048 * 512)
+		expect(allocatedBytes({ size: 100, blocks: 8 })).toBe(100)
+	})
+
+	it("falls back to the length when no blocks are reported", () => {
+		expect(allocatedBytes({ size: 4096, blocks: 0 })).toBe(4096)
 	})
 })

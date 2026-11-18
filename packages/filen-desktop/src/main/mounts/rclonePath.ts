@@ -1,4 +1,5 @@
 import path from "node:path"
+import { stagedDirName } from "../../shared/buildLayout.ts"
 
 // { arch: sha256 } of the Linux rclone this build ships, baked into the main bundle by scripts/build.ts; {} on macOS
 // and Windows, where the binary carries the app's signature instead, and in tests.
@@ -25,9 +26,6 @@ export interface RclonePaths {
 	fuseInstaller: string | null
 }
 
-// electron-builder's ${os}, which names the staged directories.
-const BUILDER_OS: Partial<Record<NodeJS.Platform, string>> = { darwin: "mac", win32: "win", linux: "linux" }
-
 // The bundled rclone: shipped in resources/rclone when packaged; in development FILEN_DESKTOP_RCLONE, else the copy
 // scripts/stageRclone.ts staged. null when there is none, and for a packaged Linux build without its baked digest,
 // which would otherwise run an unchecked binary.
@@ -53,7 +51,7 @@ export function rclonePaths(ctx: RclonePathContext): RclonePaths | null {
 		return ctx.exists(override) ? { binary: { path: path.resolve(override), sha256: null }, fuseInstaller } : null
 	}
 
-	const staged = path.join(ctx.appPath, "build", "rclone", `${BUILDER_OS[ctx.platform] ?? ctx.platform}-${ctx.arch}`, executable)
+	const staged = path.join(ctx.appPath, "build", "rclone", stagedDirName(ctx.platform, ctx.arch), executable)
 
 	return ctx.exists(staged) ? { binary: { path: staged, sha256: null }, fuseInstaller } : null
 }

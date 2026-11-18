@@ -816,6 +816,31 @@ describe("transfers service: listings", () => {
 		expect(supervisor.ensure).toHaveBeenCalledWith("listing released")
 	})
 
+	it("a release while listTree is pending reaches the host at once and nothing is held after", async () => {
+		const { service, answers, supervisor } = setup()
+		const reply = Promise.withResolvers<unknown>()
+
+		answers.transfersListTree = () => reply.promise
+
+		const listed = service.listTree({ listingId: LISTING, items: [dirItem()], maxEntries: 100 })
+
+		await vi.waitFor(() => {
+			expect(supervisor.callTransfers).toHaveBeenCalled()
+		})
+		service.releaseTree(LISTING)
+		service.releaseTree(LISTING)
+
+		expect(supervisor.callTransfersIfRunning).toHaveBeenCalledTimes(1)
+		expect(supervisor.callTransfersIfRunning).toHaveBeenCalledWith("transfersReleaseTree", { listingId: LISTING }, "1")
+
+		reply.resolve({ ok: true, value: { entries } })
+
+		expect(await listed).toEqual({ ok: true, value: { entries } })
+		expect(service.active("1")).toBe(0)
+		service.releaseTree(LISTING)
+		expect(supervisor.callTransfersIfRunning).toHaveBeenCalledTimes(1)
+	})
+
 	it("a timed-out listTree releases the listing on a running host", async () => {
 		const { service, answers, supervisor } = setup()
 

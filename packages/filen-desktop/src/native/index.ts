@@ -483,7 +483,3 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		}
 	})
 }
-
-startHost(process.parentPort, code => {
-	process.exit(code)
-})

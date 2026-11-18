@@ -88,6 +88,9 @@ interface Entry {
 	cancelled: boolean
 	// The file is being put under its final name: a cancel from here on no longer stops it.
 	committing: boolean
+	// Set while the download waits behind another of the same file into the same directory: a cancel calls it, so the
+	// entry leaves the queue at once.
+	waiting: (() => void) | null
 	logged: number
 	// The quarantine marks in flight, which the transfer waits for before it settles.
 	marking: Promise<void>
@@ -175,8 +178,9 @@ export function createTransferRegistry(
 	const dirty = new Set<Entry>()
 	let settles: NativeTransferEvent[] = []
 	const listings = new Map<string, Listing>()
-	// Listings in flight; a release meanwhile removes the id, so the finished listing is not held.
-	const pendingListings = new Set<string>()
+	// Listings in flight, each with what stops its SDK calls: a release aborts and removes it, so the listing stops and
+	// nothing it found is held.
+	const pendingListings = new Map<string, AbortController>()
 	// dirname + "\0" + file uuid → the last download into that directory of that file. The SDK's own temp is
 	// `<file uuid>.filendl` beside the target and is truncated on open, so these run one after the other.
 	const chains = new Map<string, Promise<unknown>>()
@@ -273,18 +277,57 @@ export function createTransferRegistry(
 		}
 	}
 
-	function failed(entry: Entry, files: DesktopTransferFiles, items: readonly { path?: string; bytes: number }[]): void {
+	// A directory transfer's per-item error is the SDK error itself, not thrown: classified as if it were.
+	const itemErrorSdk: TransferErrorSdk = {
+		ErrorKind: sdk.ErrorKind,
+		FilenSdkError: { hasInner: () => true, getInner: error => error as ReturnType<TransferErrorSdk["FilenSdkError"]["getInner"]> }
+	}
+
+	function itemError(error: unknown): DesktopTransferError {
+		const record = obj(error)
+
+		return classifyTransfer(
+			typeof record["kind"] === "function" && typeof record["message"] === "function" ? itemErrorSdk : sdk,
+			error,
+			platform
+		)
+	}
+
+	function failed(entry: Entry, files: DesktopTransferFiles, items: readonly { path?: string; bytes: number; error?: unknown }[]): void {
 		for (const item of items) {
 			files.failed++
 			files.failedBytes += item.bytes
 
-			if (entry.logged < LOGGED_ERRORS && item.path !== undefined) {
+			if (entry.logged < LOGGED_ERRORS) {
 				entry.logged++
-				log.warn(`transfer ${entry.id}: ${item.path} failed`)
+
+				const reason = item.error === undefined ? null : itemError(item.error)
+
+				log.warn(
+					`transfer ${entry.id}: ${item.path ?? "scanning an entry"} failed${reason === null ? "" : `: ${reason.code}`}${reason?.message === undefined ? "" : `: ${reason.message}`}`
+				)
 			}
 		}
 
 		touch(entry)
+	}
+
+	// What the per-item lines left out: the failures past the cap and the entries the SDK skipped.
+	function logUnlisted(entry: Entry, outcome: DesktopTransferOutcome): void {
+		const files = entry.files
+
+		if (files === null) {
+			return
+		}
+
+		if (files.failed > entry.logged) {
+			log.warn(`transfer ${entry.id}: ${files.failed - entry.logged} more failed`)
+		}
+
+		// A cancelled or failed transfer never reached the rest; only a finished one skipped them.
+		if (outcome === "completedWithErrors" && entry.scanTotal !== null && entry.scanTotal > files.done + files.failed) {
+			log.warn(`transfer ${entry.id}: ${entry.scanTotal - files.done - files.failed} skipped`)
+		}
 	}
 
 	// Marked before the transfer settles, so nothing can be opened unmarked; a failure only logs. Batches that arrive
@@ -337,6 +380,7 @@ export function createTransferRegistry(
 		entry.cancelled = true
 		entry.pause.resume()
 		entry.controller.abort()
+		entry.waiting?.()
 	}
 
 	function ensureRunning(entry: Entry): void {
@@ -345,20 +389,38 @@ export function createTransferRegistry(
 		}
 	}
 
-	async function chained<T>(target: string, fileUuid: string, run: () => Promise<T>): Promise<T> {
+	// Its turn comes when the previous download of the file into the directory settled, or at once when it is cancelled
+	// meanwhile; a cancelled one never runs.
+	async function turn(entry: Entry, previous: Promise<unknown>): Promise<void> {
+		ensureRunning(entry)
+
+		await Promise.race([
+			previous,
+			new Promise<void>(resolve => {
+				entry.waiting = resolve
+			})
+		])
+		entry.waiting = null
+		ensureRunning(entry)
+	}
+
+	async function chained<T>(entry: Entry, target: string, fileUuid: string, run: () => Promise<T>): Promise<T> {
 		const key = `${path.dirname(target)}\0${fileUuid}`
-		const current = (chains.get(key) ?? Promise.resolve()).then(run)
-		const tail = current.catch(() => undefined)
+		const previous = chains.get(key) ?? Promise.resolve()
+		const current = turn(entry, previous).then(run)
+		// The next one waits for the download that holds the SDK temp, also when this one left the queue early.
+		const tail = Promise.all([previous, current.catch(() => undefined)])
 
 		chains.set(key, tail)
 
-		try {
-			return await current
-		} finally {
+		// Dropped once the tail settled, never when this entry left early, so a later download still finds the holder.
+		void tail.then(() => {
 			if (chains.get(key) === tail) {
 				chains.delete(key)
 			}
-		}
+		})
+
+		return current
 	}
 
 	async function downloadTo(entry: Entry, file: Napi.AnyFile, target: string, conflict: "replace" | "keepBoth"): Promise<string> {
@@ -438,7 +500,7 @@ export function createTransferRegistry(
 		failed(
 			entry,
 			files,
-			errors.map(() => ({ bytes: 0 }))
+			errors.map(error => ({ bytes: 0, error }))
 		)
 	}
 
@@ -452,7 +514,7 @@ export function createTransferRegistry(
 
 				resize(entry, facts.size)
 
-				return { savedPath: await chained(spec.path, facts.uuid, () => downloadTo(entry, file, spec.path, spec.conflict)) }
+				return { savedPath: await chained(entry, spec.path, facts.uuid, () => downloadTo(entry, file, spec.path, spec.conflict)) }
 			}
 			case "downloadListed": {
 				const listing = listings.get(spec.listingId)
@@ -469,7 +531,7 @@ export function createTransferRegistry(
 				resize(entry, facts.size)
 
 				return {
-					savedPath: await chained(spec.path, facts.uuid, () =>
+					savedPath: await chained(entry, spec.path, facts.uuid, () =>
 						downloadTo(entry, { tag: "File", inner: [file] }, spec.path, "replace")
 					)
 				}
@@ -515,7 +577,11 @@ export function createTransferRegistry(
 							failed(
 								entry,
 								files,
-								errors.map(error => ({ path: error.path, bytes: count(obj(innerOf(error.item))["size"]) }))
+								errors.map(error => ({
+									path: error.path,
+									bytes: count(obj(innerOf(error.item))["size"]),
+									error: error.error
+								}))
 							)
 						}
 					},
@@ -577,7 +643,7 @@ export function createTransferRegistry(
 							failed(
 								entry,
 								files,
-								errors.map(error => ({ path: error.path, bytes: 0 }))
+								errors.map(error => ({ path: error.path, bytes: 0, error: error.error }))
 							)
 						}
 					},
@@ -626,6 +692,7 @@ export function createTransferRegistry(
 			}
 		}
 
+		logUnlisted(entry, outcome)
 		await entry.marking
 		entries.delete(entry.id)
 
@@ -674,6 +741,7 @@ export function createTransferRegistry(
 					dirty: false,
 					cancelled: false,
 					committing: false,
+					waiting: null,
 					logged: 0,
 					marking: Promise.resolve(),
 					unmarked: null
@@ -706,11 +774,18 @@ export function createTransferRegistry(
 		listTree: async ({ listingId, items, maxEntries }) => {
 			const tree: NativeTreeEntry[] = []
 			const files: Napi.File[] = []
+			const controller = new AbortController()
+			const { signal } = controller
 
-			pendingListings.add(listingId)
+			pendingListings.set(listingId, controller)
 
 			try {
 				for (const [source, item] of items.entries()) {
+					// Released: main no longer waits for the answer.
+					if (signal.aborted) {
+						return { entries: [] }
+					}
+
 					if (item.ref.variant.startsWith("AnyFile.")) {
 						const facts = fileFacts(innerOf(fileOf(item.ref)))
 
@@ -723,11 +798,30 @@ export function createTransferRegistry(
 							source
 						})
 					} else {
-						const listed = await client.listDirRecursiveWithPaths(dirWithContextOf(item.ref), undefined, {
-							onErrors: errors => {
-								log.warn(`listing ${item.name}: ${String(errors.length)} entries not listed`)
-							}
-						})
+						const listed = await client
+							.listDirRecursiveWithPaths(
+								dirWithContextOf(item.ref),
+								undefined,
+								{
+									onErrors: errors => {
+										log.warn(`listing ${item.name}: ${String(errors.length)} entries not listed`)
+									}
+								},
+								{ signal }
+							)
+							.catch((error: unknown) => {
+								if (signal.aborted) {
+									return null
+								}
+
+								throw error
+							})
+
+						// Released while it listed: the SDK stopped, nothing to answer.
+						if (listed === null) {
+							return { entries: [] }
+						}
+
 						const known = tree.length + 1 + listed.dirs.length + listed.files.length
 
 						if (known > maxEntries) {
@@ -769,8 +863,12 @@ export function createTransferRegistry(
 					}
 				}
 			} finally {
+				if (pendingListings.get(listingId) === controller) {
+					pendingListings.delete(listingId)
+				}
+
 				// Released (or aborted) while listing: nothing is held.
-				if (!pendingListings.delete(listingId) || closed) {
+				if (signal.aborted || closed) {
 					files.length = 0
 				}
 			}
@@ -783,6 +881,7 @@ export function createTransferRegistry(
 			return { entries: tree }
 		},
 		releaseTree: listingId => {
+			pendingListings.get(listingId)?.abort()
 			pendingListings.delete(listingId)
 			listings.delete(listingId)
 		},
@@ -799,6 +898,11 @@ export function createTransferRegistry(
 			}
 
 			listings.clear()
+
+			for (const controller of pendingListings.values()) {
+				controller.abort()
+			}
+
 			pendingListings.clear()
 			dirty.clear()
 			settles = []

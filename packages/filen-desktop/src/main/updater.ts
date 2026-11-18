@@ -1,4 +1,5 @@
 import type { Logger, UpdateCheckResult, UpdateDownloadedEvent } from "electron-updater"
+import { errorMessage } from "./atomicFile.ts"
 
 // The first check waits a little, so it never competes with startup; later ones run on an interval.
 export const UPDATE_FIRST_CHECK_DELAY_MS = 15 * 1000
@@ -137,10 +138,6 @@ export function testUpdateFeed(value: string | undefined): string | null {
 	return url.href.endsWith("/") ? url.href : `${url.href}/`
 }
 
-function messageOf(value: unknown): string {
-	return value instanceof Error ? value.message : String(value)
-}
-
 // electron-updater's generic provider on the feed electron-builder wrote into app-update.yml; Windows checks the
 // installer's signature against the publisher named there. Downloads run in the background and install when the
 // user restarts from the page's prompt or on the next quit. The engine loads on first use, so startup never evaluates
@@ -167,13 +164,13 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 	})
 	const updaterLog = {
 		info: (message?: unknown) => {
-			log.info(`updater: ${messageOf(message)}`)
+			log.info(`updater: ${errorMessage(message)}`)
 		},
 		warn: (message?: unknown) => {
-			log.warn(`updater: ${messageOf(message)}`)
+			log.warn(`updater: ${errorMessage(message)}`)
 		},
 		error: (message?: unknown) => {
-			log.warn(`updater: ${messageOf(message)}`)
+			log.warn(`updater: ${errorMessage(message)}`)
 		}
 	}
 
@@ -328,7 +325,7 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 		} catch (error) {
 			// Squirrel was never handed a complete download.
 			settleSquirrel()
-			log.warn(`updater: check failed: ${messageOf(error)}`)
+			log.warn(`updater: check failed: ${errorMessage(error)}`)
 		} finally {
 			cancelCheck = null
 			stall.disarm()
@@ -370,7 +367,7 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 				// failure to start the installer comes as an error event, at once or (an elevation) later.
 				updater.quitAndInstall(true, true)
 			} catch (error) {
-				installFailed(messageOf(error))
+				installFailed(errorMessage(error))
 			}
 
 			return true

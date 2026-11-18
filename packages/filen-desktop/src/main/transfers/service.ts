@@ -234,6 +234,8 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 	// Finished, revealable downloads: id → path, insertion order = age.
 	const finished = new Map<string, string>()
 	const listings = new Map<string, Listing>()
+	// listTree calls the host has not answered yet: listingId → their user, and whether main released them meanwhile.
+	const listingsPending = new Map<string, { userId: string; released: boolean }>()
 	// dirname + "\0" + collision key of the names in-flight downloads were given.
 	const reserved = new Set<string>()
 	const pages = new Map<number, Page>()
@@ -821,7 +823,22 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				items: request.items.map(item => ({ ref: item.ref, name: item.name })),
 				maxEntries: request.maxEntries
 			}
-			const result = await supervisor.callTransfers("transfersListTree", args, user.userId, LIST_TREE_TIMEOUT_MS)
+			const pending = { userId: user.userId, released: false }
+
+			listingsPending.set(request.listingId, pending)
+
+			let result: NativeTransfersResult<"transfersListTree">
+
+			try {
+				result = await supervisor.callTransfers("transfersListTree", args, user.userId, LIST_TREE_TIMEOUT_MS)
+			} finally {
+				listingsPending.delete(request.listingId)
+			}
+
+			if (pending.released) {
+				// Released while listing: the host was told to stop or free it, so nothing is held here.
+				return result
+			}
 
 			if (!result.ok) {
 				if (result.error.code === "timeout" || result.error.code === "hostUnavailable") {
@@ -886,6 +903,14 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			const listing = listings.get(listingId)
 
 			if (listing === undefined) {
+				const pending = listingsPending.get(listingId)
+
+				// A listing still in flight: the release aborts its SDK walk now, not on the listing's timeout.
+				if (pending !== undefined && !pending.released) {
+					pending.released = true
+					sendRelease(listingId, pending.userId)
+				}
+
 				return
 			}
 

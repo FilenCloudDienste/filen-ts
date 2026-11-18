@@ -12,6 +12,8 @@ import { createQuarantine, type MacAddon } from "../native/quarantine.ts"
 // The built addon for this machine, loaded for real: run `node scripts/buildMacAddon.ts --dev` first.
 const output = process.platform === "darwin" && (process.arch === "arm64" || process.arch === "x64") ? macAddonOutput(process.arch) : null
 const built = output !== null && existsSync(output)
+// CI's macOS job builds the addon first: there a missing addon is a failure, never a skip.
+const required = output !== null && process.env["CI"] === "true"
 
 const QUARANTINE = /^[0-9a-f]{4};[0-9a-f]{8};[^;]*;[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}\n?$/
 
@@ -28,6 +30,10 @@ afterEach(async () => {
 function quarantineOf(file: string): string {
 	return execFileSync("xattr", ["-p", "com.apple.quarantine", file], { encoding: "utf8" })
 }
+
+it.runIf(required && !built)("the macOS addon is built in CI", () => {
+	expect.fail(`${output ?? ""} is missing: run node scripts/buildMacAddon.ts --dev`)
+})
 
 describe.skipIf(!built)("filen-mac.node", () => {
 	const addon = (): MacAddon & DragOutAddonMac => createRequire(import.meta.url)(output ?? "") as MacAddon & DragOutAddonMac
@@ -142,6 +148,14 @@ describe.skipIf(!built)("filen-mac.node", () => {
 
 		it("begin with a handle that is no open window's content view throws invalidArgument without touching it", () => {
 			expect(() => addon().begin(options())).toThrow(expect.objectContaining({ code: "invalidArgument" }))
+		})
+
+		it("begin takes an optional failure message: with, without or malformed, only the handle is refused", () => {
+			const noWindow = expect.objectContaining({ code: "invalidArgument", message: expect.stringContaining("no open window") })
+
+			for (const failureMessage of [undefined, "Filen konnte dieses Objekt nicht laden.", 42]) {
+				expect(() => addon().begin(options({ failureMessage }))).toThrow(noWindow)
+			}
 		})
 
 		it("fulfil, progress and progressAt of an unknown ticket are ignored", () => {

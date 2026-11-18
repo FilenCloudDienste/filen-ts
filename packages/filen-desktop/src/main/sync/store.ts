@@ -10,7 +10,7 @@ import type {
 	DesktopSyncRootProblem
 } from "@filen/shared/desktop"
 import { localPathSchema, pairIdSchema, pinned, planSummarySchema, syncModeSchema } from "../../shared/nativeProtocol.ts"
-import { type AtomicFile, errorCode } from "../atomicFile.ts"
+import { type AtomicFile, readStoreFile } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
 
 // What the shell keeps about each sync pair beside the engine: the name, the review and notices, the old client's
@@ -94,10 +94,15 @@ const rootProblemSchema = pinned<DesktopSyncRootProblem>()(
 	)
 )
 
+// A pair's name: what the page may set, what the 3.x import truncates to and what a stored record must satisfy, so a
+// name accepted once never drops its record on the next launch.
+export const PAIR_NAME_MAX = 1024
+export const pairNameSchema = type.string.atLeastLength(1).atMostLength(PAIR_NAME_MAX)
+
 const shellPairSchema = pinned<ShellPair>()(
 	type({
 		pairId: pairIdSchema.or("null"),
-		name: "0 < string <= 1024",
+		name: pairNameSchema,
 		localRoot: localPathSchema,
 		remoteRoot: "string.uuid",
 		mode: syncModeSchema,
@@ -186,19 +191,16 @@ export interface SyncStore {
 // `<dir>/shell.json` beside the user's engine DBs; the caller creates the directory. Read once, served from memory.
 // Writes run one at a time (they share the file's temp sibling).
 export async function loadSyncStore(file: AtomicFile, warn: (message: string) => void): Promise<SyncStore> {
-	let current = EMPTY
+	const stored = await readStoreFile(file, data => parseSyncState(data, warn), EMPTY, "sync pair store", warn)
+	let current = stored.value
 	const serial = serialQueue()
-
-	try {
-		current = parseSyncState((await file.read())?.toString("utf8") ?? null, warn)
-	} catch (error) {
-		warn(`sync pair store unreadable: ${errorCode(error)}`)
-	}
 
 	return {
 		get: () => current,
 		update: change =>
 			serial(async () => {
+				current = (await stored.beforeWrite()) ?? current
+
 				const next = change(current)
 
 				if (next !== current) {

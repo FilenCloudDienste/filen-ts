@@ -484,7 +484,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		await findings.must(`${LEGACY_VERSION} quits through ${release.quit}, rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
-			// D13 as the fallback, on every OS: whatever of the old app still runs a minute after its quit (its main
+			// The fallback, on every OS: whatever of the old app still runs a minute after its quit (its main
 			// process, or a helper or watchdog it left) is hard-killed once nothing has been written for 30 s, and named.
 			const settled = [...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")]
 			const hardKill = async (left: readonly string[], why: string): Promise<void> => {
@@ -492,14 +492,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				await chain.os.forceKill(pidsOf(left))
 				findings.info(
 					`${LEGACY_VERSION}'s processes left after ${release.quit}`,
-					`${left.join("; ")}: hard-killed after 30 s without writes (D13); ${why}`
+					`${left.join("; ")}: hard-killed after 30 s without writes; ${why}`
 				)
 			}
 			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS, release.quit).catch(
 				async (error: unknown) => {
 					await hardKill(await chain.os.appProcesses(target), errorMessage(error))
 
-					return "hard-killed (D13)"
+					return "hard-killed"
 				}
 			)
 			const lingering = await endLeftovers(chain.os, target, () => quiet(settled), EXIT_TIMEOUT_MS)
@@ -507,7 +507,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			if (lingering.length > 0) {
 				findings.info(
 					`${LEGACY_VERSION}'s processes left after ${release.quit}`,
-					`${lingering.join("; ")}: hard-killed after 30 s without writes (D13); still running a minute after the main process ended`
+					`${lingering.join("; ")}: hard-killed after 30 s without writes; still running a minute after the main process ended`
 				)
 			}
 
@@ -647,7 +647,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 	// Quits N gracefully where the OS lets a harness do it. Windows has no signal and N keeps running in the tray while
 	// minimizeToTray (imported on) holds: with a page, the preference goes off just before the window is closed (put back
-	// after the next unlock); without one (the updater's own relaunch, started hidden), D13: a hard kill once nothing has
+	// after the next unlock); without one (the updater's own relaunch, started hidden), a hard kill once nothing has
 	// been written for 30 s, which the next launch then also proves recovery from.
 	const quitN = async (what: string): Promise<void> => {
 		if (target.platform === "win") {
@@ -665,7 +665,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				await chain.os.forceKill(target.mainProcesses().map(item => item.pid))
 				await waitFor(`${what} to end`, EXIT_TIMEOUT_MS, () => (target.mainProcesses().length === 0 ? true : null), 1000)
 				chain.launched = null
-				findings.info(`${what} quit`, "hard-killed after 30 s without writes (D13): a tray-only app with no window to close")
+				findings.info(`${what} quit`, "hard-killed after 30 s without writes: a tray-only app with no window to close")
 
 				return
 			}

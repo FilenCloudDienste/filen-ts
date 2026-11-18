@@ -18,7 +18,7 @@ import { inspectLocalRoot, type LocalRootContext, samePath } from "./localRoot.t
 import { shellPairId } from "./mirror.ts"
 import type { ShellPair, SyncStore } from "./store.ts"
 
-// The first run of a pair the user did not just add (PLAN §6.6). A migrated pair is dry-run once its cloud directory
+// The first run of a pair the user did not just add. A migrated pair is dry-run once its cloud directory
 // is read and starts by itself unless the run would hold deletions, hit many conflicts, be refused, or (one-way) replace
 // a lot on its destination; it then waits in review. Migrated pairs start one at a time, each on a guard that holds
 // every deletion until a clean pass. One a baseline reset lost starts only when its dry run is close to nothing.

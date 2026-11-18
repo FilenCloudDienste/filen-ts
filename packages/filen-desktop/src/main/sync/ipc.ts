@@ -12,7 +12,7 @@ import {
 } from "../../shared/nativeProtocol.ts"
 import { type CheckedCall, checkedCalls, type IpcMain, pageOf, registerCalls } from "../pages.ts"
 import type { SyncService } from "./service.ts"
-import { infoNoticeSchema, noticeSchema } from "./store.ts"
+import { infoNoticeSchema, noticeSchema, pairNameSchema } from "./store.ts"
 
 // DesktopSyncPair.id: the engine's id, or the stand-in of a pair the engine does not hold (mirror.ts shellPairId).
 const pairIdSchema = type(/^(?:0|[1-9]\d{0,19}|(?:legacy|remote):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
@@ -20,7 +20,7 @@ const pairIdSchema = type(/^(?:0|[1-9]\d{0,19}|(?:legacy|remote):[0-9a-f]{8}-[0-
 const limitSchema = type("1 <= number.integer <= 200")
 // localRoot.ts createRootTokens: 128 bits as hex.
 export const rootIdSchema = type(/^[0-9a-f]{32}$/)
-const nameSchema = type("0 < string <= 1024").narrow(name => name.trim().length > 0)
+const nameSchema = pairNameSchema.narrow(name => name.trim().length > 0)
 const newPairSchema = type({
 	localRootId: rootIdSchema,
 	remoteRoot: "string.uuid",

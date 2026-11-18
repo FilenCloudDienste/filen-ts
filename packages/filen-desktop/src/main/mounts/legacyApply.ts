@@ -13,7 +13,7 @@ import { type HostResolver, legacyDriveMountPoint, legacyMountsImport, type Lega
 import type { MountPointContext } from "./mountPoint.ts"
 import { anyEnabled, type MountsConfig, type MountsStore } from "./store.ts"
 
-// PLAN §6.7: the old client's (3.x) rclone, its caches and the user's drive/WebDAV/S3 settings. The old rclone may
+// The old client's (3.x) rclone, its caches and the user's drive/WebDAV/S3 settings. The old rclone may
 // outlive the old app by ~10 s (its watchdog reaps it), and its caches may hold writes not uploaded yet, so:
 //   1. quiesce   the old rclone is stopped (on Windows also the one 3.0.47's tray Exit leaves running, legacyRclone.ts)
 //                and a stale old mount unmounted, then the old binaries, TLS files and watchdog scripts are deleted.

@@ -40,7 +40,7 @@ export function bundleOptions(): BuildOptions[] {
 		// @filen/sdk-rs is imported for its types only; the addon is loaded at runtime by path.
 		{
 			...common,
-			entryPoints: ["src/native/index.ts"],
+			entryPoints: ["src/native/main.ts"],
 			outfile: "dist/native.js",
 			format: "esm",
 			conditions: ["filen-desktop"],

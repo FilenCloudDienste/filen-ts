@@ -1,3 +1,5 @@
+import { errorMessage } from "./atomicFile.ts"
+
 // The native host (the SDK's HTTP client and websocket) and the rclone it starts read their proxy from the environment,
 // which a PAC script, WPAD or the OS settings never reach. Main asks Chromium's resolver once per launch, for the API's
 // address, and hands the answer on; a host started before the answer goes without until it restarts.
@@ -104,7 +106,7 @@ export function resolveHostProxy(deps: HostProxyDeps): HostProxy {
 			}
 		},
 		(error: unknown) => {
-			deps.log.warn(`proxy: not resolved: ${error instanceof Error ? error.message : String(error)}`)
+			deps.log.warn(`proxy: not resolved: ${errorMessage(error)}`)
 		}
 	)
 	let timer: NodeJS.Timeout | undefined

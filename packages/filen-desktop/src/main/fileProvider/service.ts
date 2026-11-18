@@ -16,6 +16,8 @@ export interface FileProviderDeps {
 	store: FileProviderStore
 	// Present while the extension may still hold a session it was told to forget but never confirmed.
 	clearOwed: AtomicFile
+	// The domain identifiers whose removal failed (a JSON array), tried again at launch and before a registration.
+	removeOwed: AtomicFile
 	// A PIN app lock is set (or one is set but unreadable).
 	pinSet(): boolean
 	// The app runs from a translocated copy or a disk image.
@@ -67,6 +69,33 @@ const PROVIDER_TRANSLOCATED = -2002
 const EXTENSION_NOT_FOUND = -2014
 // The addon's XPC call unanswered in time.
 const ADDON_TIMEOUT = 4
+// The addon found no manager for the domain: it is gone.
+const ADDON_NO_MANAGER = 2
+
+function isGoneDomain(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		"domain" in error &&
+		"code" in error &&
+		error.domain === ADDON_ERROR_DOMAIN &&
+		error.code === ADDON_NO_MANAGER
+	)
+}
+
+// The owed removals as written; anything unreadable as none, so the marker cannot stick.
+function owedIdentifiers(raw: Buffer | null): string[] {
+	if (raw === null) {
+		return []
+	}
+
+	try {
+		const parsed: unknown = JSON.parse(raw.toString("utf8"))
+
+		return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : []
+	} catch {
+		return []
+	}
+}
 
 const REFUSALS: ReadonlyMap<string, DesktopFileProviderErrorCode> = new Map([
 	["file provider unsupported", "unsupported"],
@@ -157,7 +186,87 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 		return read.status === "present" ? fileProviderAuth(read.blob) : null
 	}
 
+	async function writeOwedRemovals(identifiers: readonly string[]): Promise<void> {
+		await (identifiers.length === 0 ? deps.removeOwed.remove() : deps.removeOwed.write(Buffer.from(JSON.stringify(identifiers))))
+	}
+
+	// A removal that failed is owed until it succeeds or the domain is gone. Never rejects.
+	async function oweRemoval(identifier: string): Promise<void> {
+		try {
+			const owed = owedIdentifiers(await deps.removeOwed.read())
+
+			if (!owed.includes(identifier)) {
+				await writeOwedRemovals([...owed, identifier])
+			}
+		} catch (error) {
+			warn(`file provider: owed domain removal not recorded: ${errorCode(error)}`)
+		}
+	}
+
+	// The removals an earlier teardown could not finish: the session is cleared (best effort) and the domain removed.
+	// The addon loads only when one is owed. Never rejects: what is still owed stays for the next try and is returned.
+	async function settleOwedRemovals(): Promise<readonly string[]> {
+		try {
+			const raw = await deps.removeOwed.read()
+
+			return raw === null ? [] : await removeOwedDomains(owedIdentifiers(raw))
+		} catch (error) {
+			warn(`file provider: owed domain removals not settled: ${describe(error)}`)
+
+			return []
+		}
+	}
+
+	// A domain registered again is wanted: a later retry would remove it in use. Never rejects.
+	async function dropOwedRemoval(identifier: string): Promise<void> {
+		try {
+			await writeOwedRemovals(owedIdentifiers(await deps.removeOwed.read()).filter(owed => owed !== identifier))
+		} catch (error) {
+			warn(`file provider: owed domain removal not dropped: ${errorCode(error)}`)
+		}
+	}
+
+	async function removeOwedDomains(owed: readonly string[]): Promise<readonly string[]> {
+		if (owed.length === 0) {
+			await deps.removeOwed.remove()
+
+			return []
+		}
+
+		const fp = addon()
+		const left: string[] = []
+		let listed: Promise<readonly string[] | null> | null = null
+
+		for (const identifier of owed) {
+			await fp.clearAuth({ identifier }).catch(() => undefined)
+
+			try {
+				await fp.removeDomain({ identifier })
+				info("file provider: owed domain removal done")
+			} catch (error) {
+				listed ??= fp.listDomains().then(
+					domains => domains.map(domain => domain.identifier),
+					() => null
+				)
+
+				const present = await listed
+
+				if (isGoneDomain(error) || (present !== null && !present.includes(identifier))) {
+					info("file provider: owed domain removal done (the domain is gone)")
+				} else {
+					warn(`file provider: owed domain removal failed: ${describe(error)}`)
+					left.push(identifier)
+				}
+			}
+		}
+
+		await writeOwedRemovals(left)
+
+		return left
+	}
+
 	async function register(auth: FileProviderAuth): Promise<void> {
+		const stillOwed = await settleOwedRemovals()
 		const fp = addon()
 		const identifier = domainIdentifier(auth.userId)
 
@@ -167,6 +276,10 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 
 		await fp.addDomain({ identifier, displayName: auth.displayName })
 		registered = auth.userId
+
+		if (stillOwed.includes(identifier)) {
+			await dropOwedRemoval(identifier)
+		}
 
 		if ((await deps.clearOwed.read()) !== null) {
 			try {
@@ -201,7 +314,14 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 			registered = null
 		}
 
-		await fp.removeDomain({ identifier })
+		try {
+			await fp.removeDomain({ identifier })
+		} catch (error) {
+			await oweRemoval(identifier)
+
+			throw error
+		}
+
 		info("file provider: domain removed")
 	}
 
@@ -367,6 +487,8 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 				if (!deps.supported()) {
 					return
 				}
+
+				await settleOwedRemovals()
 
 				const auth = await presentAuth()
 

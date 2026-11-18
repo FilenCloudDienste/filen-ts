@@ -36,6 +36,7 @@ import {
 	VERSION_ARG_PREFIX
 } from "../shared/channels.ts"
 import { createDragStates } from "./dragStates.ts"
+import { skippedFileIndexes } from "./skippedIndexes.ts"
 import { directoryRootOf, uploadInCalls, uploadPaths } from "./uploadPaths.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
@@ -263,14 +264,13 @@ const upload: DesktopTransfers["upload"] = async (files, parent, options) => {
 		return result
 	}
 
-	const skippedFiles =
-		options?.asDirectory === true
-			? result.value.skipped.length > 0
-				? files.map((_file, index) => index)
-				: []
-			: [...skipped, ...result.value.skipped.flatMap(index => indexes[index] ?? [])].sort((a, b) => a - b)
-
-	return { ok: true, value: { ...result.value, skipped: skippedFiles } }
+	return {
+		ok: true,
+		value: {
+			...result.value,
+			skipped: skippedFileIndexes(files.length, indexes, skipped, result.value.skipped, options?.asDirectory === true)
+		}
+	}
 }
 
 const bridge: DesktopBridge = {
@@ -447,7 +447,7 @@ const bridge: DesktopBridge = {
 		dismissInfo: (pairId, notice) => syncInvoke("dismissInfo", pairId, notice),
 		dismissImportNote: () => syncInvoke("dismissImportNote"),
 		retryHost: () => {
-			void syncInvoke("retryHost")
+			syncInvoke("retryHost").catch(() => undefined)
 		},
 		onOpenPair: callback => {
 			openPairListeners.add(callback)
@@ -507,7 +507,7 @@ const bridge: DesktopBridge = {
 		confirmSignOut: () => mountsInvoke("confirmSignOut"),
 		dismissNotice: notice => mountsInvoke("dismissNotice", notice),
 		retryHost: () => {
-			void mountsInvoke("retryHost")
+			mountsInvoke("retryHost").catch(() => undefined)
 		}
 	},
 	fileProvider: {

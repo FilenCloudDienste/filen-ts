@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import type {
+	DesktopSyncActivity,
 	DesktopSyncHeldDeletions,
 	DesktopSyncPair,
 	DesktopSyncPlan,
@@ -21,9 +22,9 @@ import {
 	syncCount,
 	syncText
 } from "../syncUi.ts"
-import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, SETUP_TIMEOUT_MS, type Chain } from "./common.ts"
+import { activityTrail, BIN_DIR, json, LIVE_TIMEOUT_MS, ok, SETUP_TIMEOUT_MS, type Chain } from "./common.ts"
 
-// P12: conflicts and held deletions through the Issues tab, on N, in the two-way pair (plan D2, proving C3 and C5).
+// P12: conflicts and held deletions through the Issues tab, on N, in the two-way pair (proving C3 and C5).
 //   seed        gap4/ (two keep files, three bulk files, thirty held files) is part of the pair's tree on N-1, so it
 //               uploads during convergence and both sides track it
 //   hold        the cloud's gap4/held purged while the pair runs: more deletions than the engine's guard lets through
@@ -188,6 +189,17 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 	}
 	const local = (relPath: string) => path.join(pair.localRoot, ...relPath.split("/"))
 	const putOff: number[] = []
+	// The window to prove quiet is longer than the app's activity ring: the activity is gathered after every step.
+	const trail = await activityTrail(limit =>
+		desktop<DesktopSyncActivity[]>(page(), `window.desktop.sync.activity(${json(pair.id)}, ${String(limit)})`)
+	)
+	const check = async (name: string, probe: () => string | Promise<string>): Promise<boolean> => {
+		try {
+			return await findings.check(name, probe)
+		} finally {
+			await trail.read()
+		}
+	}
 	const ui = async <T>(run: () => Promise<T>): Promise<T> => {
 		const done = await underReminder(page(), run)
 
@@ -197,7 +209,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 	}
 
 	try {
-		const held = await findings.check(
+		const held = await check(
 			"P12 a pass holds the deletions of the purged gap4/held (over the guard); paused, both sides edited, a dry run shows five conflicts and the hold",
 			async () => {
 				await cloud.purge(`${options.cloudDir}/${HELD_DIR}`)
@@ -260,7 +272,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 			return
 		}
 
-		const approved = await findings.check("P12 approving the held deletions while paused says it applies on resume (C5)", async () => {
+		const approved = await check("P12 approving the held deletions while paused says it applies on resume (C5)", async () => {
 			const shown = await ui(() => approveHeldThroughIssues(page(), pair.name, true, SETUP_TIMEOUT_MS))
 
 			if (!existsSync(local(HELD_DIR))) {
@@ -270,7 +282,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 			return `${shown}; nothing deleted while paused`
 		})
 
-		await findings.check("P12 the resumed pass applies the approved batch and holds the five conflicts", async () => {
+		await check("P12 the resumed pass applies the approved batch and holds the five conflicts", async () => {
 			// Without the page's approval, the contract's, so the steps after this one still run; this check then fails.
 			if (!approved) {
 				const list = ok(
@@ -317,7 +329,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 
 		let keepCloudBin: { day: string; relPath: string } | null = null
 
-		await findings.check(`P12 ${KEEP_LOCAL} resolved with ${syncText("conflictKeepLocal")}`, async () => {
+		await check(`P12 ${KEEP_LOCAL} resolved with ${syncText("conflictKeepLocal")}`, async () => {
 			const toast = await ui(() => resolveThroughIssues(page(), pair.name, KEEP_LOCAL, "keepLocal", SETUP_TIMEOUT_MS))
 
 			if (toast !== syncText("conflictKeptLocal")) {
@@ -327,24 +339,21 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 			return `toast "${toast}"`
 		})
 
-		await findings.check(
-			`P12 ${KEEP_CLOUD} resolved with ${syncText("conflictKeepRemote")}; the toast names the bin path`,
-			async () => {
-				const toast = await ui(() => resolveThroughIssues(page(), pair.name, KEEP_CLOUD, "keepRemote", SETUP_TIMEOUT_MS))
-				const binPath = binPathFromToast(toast) ?? fail(`toast "${toast}" names no bin path`)
-				const parts = binPathParts(binPath)
+		await check(`P12 ${KEEP_CLOUD} resolved with ${syncText("conflictKeepRemote")}; the toast names the bin path`, async () => {
+			const toast = await ui(() => resolveThroughIssues(page(), pair.name, KEEP_CLOUD, "keepRemote", SETUP_TIMEOUT_MS))
+			const binPath = binPathFromToast(toast) ?? fail(`toast "${toast}" names no bin path`)
+			const parts = binPathParts(binPath)
 
-				if (parts === null || parts.relPath !== KEEP_CLOUD || !binDays(Date.now()).includes(parts.day)) {
-					fail(`the toast's bin path ${binPath} is not ${BIN_DIR}/<a day within one of today>/${KEEP_CLOUD}`)
-				}
-
-				keepCloudBin = parts
-
-				return `toast "${toast}"`
+			if (parts === null || parts.relPath !== KEEP_CLOUD || !binDays(Date.now()).includes(parts.day)) {
+				fail(`the toast's bin path ${binPath} is not ${BIN_DIR}/<a day within one of today>/${KEEP_CLOUD}`)
 			}
-		)
 
-		await findings.check(`P12 the three bulk conflicts resolved with ${syncText("conflictsKeepAllBoth")} (C3)`, async () => {
+			keepCloudBin = parts
+
+			return `toast "${toast}"`
+		})
+
+		await check(`P12 the three bulk conflicts resolved with ${syncText("conflictsKeepAllBoth")} (C3)`, async () => {
 			const toast = await ui(() => resolveAllThroughIssues(page(), pair.name, "keepBoth", BULK.length, SETUP_TIMEOUT_MS))
 			const want = syncCount("conflictsKeptAllBoth", BULK.length)
 
@@ -358,7 +367,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 		const cloudRestored = async (): Promise<number> =>
 			((await cloud.list(`${options.cloudDir}/${RESTORE_DIR}`)) ?? []).filter(entry => !entry.isDir).length
 
-		const restoreHeld = await findings.check(
+		const restoreHeld = await check(
 			`P12 a second batch (${RESTORE_DIR}, written on this device) uploads; its cloud purge is held over the guard`,
 			async () => {
 				mkdirSync(local(RESTORE_DIR), { recursive: true })
@@ -402,13 +411,13 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 		)
 
 		if (restoreHeld) {
-			const restored = await findings.check(`P12 ${syncText("heldRestore")} through the Issues tab (C1)`, async () => {
+			const restored = await check(`P12 ${syncText("heldRestore")} through the Issues tab (C1)`, async () => {
 				const toast = await ui(() => restoreHeldThroughIssues(page(), pair.name, SETUP_TIMEOUT_MS))
 
 				return `toast "${toast}"`
 			})
 
-			await findings.check(`P12 the restoring pass puts ${RESTORE_DIR} back in the cloud and the hold clears`, async () => {
+			await check(`P12 the restoring pass puts ${RESTORE_DIR} back in the cloud and the hold clears`, async () => {
 				// Without the page's restoration, the contract's, so the end state still holds; this check then fails.
 				if (!restored) {
 					const list = ok(
@@ -499,7 +508,7 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 				return Object.values(current.issues).every(count => count === 0) ? current.issues : null
 			})
 
-			return `${json(issues)}; ${await chain.quietActivity([pair], conflictsAllowed(pair.name), {}, since)}`
+			return `${json(issues)}; ${await chain.quietActivity([pair], conflictsAllowed(pair.name), {}, since, new Map([[pair.id, trail]]))}`
 		})
 	} finally {
 		findings.info(

@@ -98,7 +98,7 @@ import {
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
 
-// Gap 5's checks (plan D3) as chain P runs them on `platform`: the local disk full (P13), Windows file locks (P16), then N
+// Gap 5's checks as chain P runs them on `platform`: the local disk full (P13), Windows file locks (P16), then N
 // through a proxy only and its faults (P14, P15). None inside the offline spike (E2E_OFFLINE_SPIKE), which measures N
 // offline and nothing else.
 export type Gap5Check = "diskFull" | "fileLock" | "proxy"
@@ -111,8 +111,11 @@ export function gap5Checks(platform: Platform, offlineSpike: boolean): Gap5Check
 const DRIVE_SETTLE_MS = 30_000
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
 const DOMAIN_TIMEOUT_MS = 60_000
-// Only prefs N-1 and N both name: N-1's schema refuses keys it does not know, and N drops ones it no longer has.
-const PREFS: Partial<DesktopPrefs> = { minimizeToTray: false, startMinimized: false, launchAtLogin: false }
+// Only prefs N-1 and N both name: N-1's schema refuses keys it does not know, and N drops ones it no longer has (N-1 is a
+// build of the same commit, scripts/ci/e2e/update.ts). lockAfterSeconds is off its default, so an N that answers the
+// defaults fails P6; the longest choice only makes an inactivity lock rarer, and N still locks at launch (P3). The three
+// window keys stay off: closing, launching and quitting the window assume them off.
+const PREFS: Partial<DesktopPrefs> = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, lockAfterSeconds: 86400 }
 
 interface PairState {
 	name: string
@@ -235,10 +238,16 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			})
 
 			await findings.must("preferences set", async () => {
+				const before = await desktop<DesktopPrefs>(page(), "window.desktop.prefs.get()")
 				const prefs = await desktop<DesktopPrefs>(page(), `window.desktop.prefs.set(${json(PREFS)})`)
 
 				if (json(prefs) !== json({ ...prefs, ...PREFS })) {
 					fail(`prefs.set returned ${json(prefs)}`)
+				}
+
+				// Else P6 holds for an N that lost the file and answers the defaults.
+				if (json(prefs) === json(before)) {
+					fail(`prefs.set changed nothing: ${json(before)} before`)
 				}
 
 				return json(prefs)

@@ -1,6 +1,7 @@
 import { lstatSync, rmSync, type Stats } from "node:fs"
 import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises"
 import path from "node:path"
+import { errorCode, errorMessage } from "../atomicFile.ts"
 
 // Where drag-out copies live until the OS has them: one directory per session under a root in userData (per app
 // identity, so "Filen Dev" and "Filen" never share one), never in a shared temp directory another user can write.
@@ -37,14 +38,6 @@ const SESSION_PREFIX = "s-"
 
 // mkdtemp appends six characters.
 const SESSION_NAME = /^s-[A-Za-z0-9]{6}$/
-
-function message(error: unknown): string {
-	return error instanceof Error ? error.message : String(error)
-}
-
-function errorCode(error: unknown): unknown {
-	return typeof error === "object" && error !== null && "code" in error ? error.code : undefined
-}
 
 export function createDragTemp(deps: DragTempDeps): DragTemp {
 	const { root, uid, log } = deps
@@ -101,7 +94,7 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 			}
 		} catch (error) {
 			// Kept for removeAllSync (a file the OS still holds open).
-			log.warn(`drag-out: session temp not removed: ${message(error)}`)
+			log.warn(`drag-out: session temp not removed: ${errorMessage(error)}`)
 		}
 	}
 
@@ -207,11 +200,11 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 							await rm(dir, { recursive: true, force: true })
 						}
 					} catch (error) {
-						log.warn(`drag-out: ${dir} not swept: ${message(error)}`)
+						log.warn(`drag-out: ${dir} not swept: ${errorMessage(error)}`)
 					}
 				}
 			} catch (error) {
-				log.warn(`drag-out: temp not swept: ${message(error)}`)
+				log.warn(`drag-out: temp not swept: ${errorMessage(error)}`)
 			}
 		},
 		removeAll: async () => {
@@ -230,7 +223,7 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 						log.warn(`drag-out: ${dir} is not ours; not removed`)
 					}
 				} catch (error) {
-					log.warn(`drag-out: ${dir} not removed: ${message(error)}`)
+					log.warn(`drag-out: ${dir} not removed: ${errorMessage(error)}`)
 				}
 			}
 

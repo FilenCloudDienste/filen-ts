@@ -182,9 +182,14 @@ export function allWaiting(sample: Sample): boolean {
 	return sample.pairs > 0 && sample.waiting === sample.pairs && sample.offline === 0 && sample.errors === 0
 }
 
-// Back online after the lift: none offline, none in error.
+// Every pair offline; a sample without pairs (no session read yet) is not.
+export function allOffline(sample: Sample): boolean {
+	return sample.pairs > 0 && sample.offline === sample.pairs
+}
+
+// Back online after the lift: the pairs listed, none offline, none in error.
 export function backOnline(sample: Sample): boolean {
-	return sample.offline === 0 && sample.errors === 0
+	return sample.pairs > 0 && sample.offline === 0 && sample.errors === 0
 }
 
 // Converged after the lift: back online, none waiting for the cloud, no lastError.
@@ -253,7 +258,7 @@ export async function runListingDrop(chain: Chain, block: OfflineBlock, sampler:
 
 				await block.block(chain.target, await appPids(chain))
 
-				const offline = await sampler.watch(LIVE_OFFLINE_MS, current => current.offline === current.pairs || current.errors > 0)
+				const offline = await sampler.watch(LIVE_OFFLINE_MS, current => allOffline(current) || current.errors > 0)
 
 				if (offline.hit === null || offline.hit.errors > 0) {
 					fail(

@@ -58,16 +58,19 @@ describe("retireLegacySyncState", () => {
 		])
 	})
 
-	it("throws when it cannot rename, leaving the state where it is for the next try", async () => {
-		await oldState()
-		await chmod(userData, 0o500)
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"throws when it cannot rename, leaving the state where it is for the next try",
+		async () => {
+			await oldState()
+			await chmod(userData, 0o500)
 
-		await expect(retireLegacySyncState(userData, NOW)).rejects.toThrow()
+			await expect(retireLegacySyncState(userData, NOW)).rejects.toThrow()
 
-		await chmod(userData, 0o700)
-		expect(await readdir(userData)).toEqual(["sync"])
-		await expect(retireLegacySyncState(userData, NOW)).resolves.toEqual({ renamedTo: "sync.migrated-2026-10-31" })
-	})
+			await chmod(userData, 0o700)
+			expect(await readdir(userData)).toEqual(["sync"])
+			await expect(retireLegacySyncState(userData, NOW)).resolves.toEqual({ renamedTo: "sync.migrated-2026-10-31" })
+		}
+	)
 })
 
 describe("readLegacyIgnorer", () => {

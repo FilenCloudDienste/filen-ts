@@ -1,6 +1,7 @@
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { createDragOutAddon, type DragOutAddonContext } from "../main/dragOut/addon.ts"
+import { dragFakes, dragImage, dragItem, preparedId } from "./dragOutFakes.ts"
 
 function context(overrides: Partial<DragOutAddonContext> = {}): DragOutAddonContext {
 	return {
@@ -44,5 +45,17 @@ describe("createDragOutAddon", () => {
 
 		expect(createDragOutAddon(context({ load, warn }))).toBeNull()
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dlopen failed"))
+	})
+})
+
+describe("the macOS addon's begin", () => {
+	it("is given Finder's failure text from the shell strings", async () => {
+		const f = dragFakes("promise")
+		const page = f.page(1)
+		const id = await preparedId(f.service.prepare(page, [dragItem("a.txt")]))
+
+		void f.service.begin(page, id, dragImage())
+
+		expect(f.mac.begins[0]?.failureMessage).toBe("Filen could not download this item.")
 	})
 })

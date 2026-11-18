@@ -3,6 +3,7 @@ import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { type } from "arktype"
+import { builderOs, stagedDirName } from "../src/shared/buildLayout.ts"
 import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
 
 // Copies the sync addon of every architecture installed for this OS to build/native/<os>-<arch>/sdk-rs.node, where
@@ -16,8 +17,6 @@ import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
 //   node scripts/stageNapi.ts [--dev]
 
 const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-// electron-builder's ${os}.
-const BUILDER_OS: Partial<Record<NodeJS.Platform, string>> = { darwin: "mac", win32: "win", linux: "linux" }
 // The ABI suffix of napi-rs's target triple.
 const ABI: Partial<Record<NodeJS.Platform, string>> = { win32: "-msvc", linux: "-gnu" }
 const ARCHS: NativeArch[] = ["x64", "arm64"]
@@ -85,9 +84,7 @@ export function installedAddon(arch: NativeArch): string | null {
 }
 
 export function stageNapi(options: { dev: boolean }): void {
-	const builderOs = BUILDER_OS[process.platform]
-
-	if (builderOs === undefined) {
+	if (builderOs(process.platform) === undefined) {
 		throw new Error(`No sync addon for ${process.platform}`)
 	}
 
@@ -105,8 +102,8 @@ export function stageNapi(options: { dev: boolean }): void {
 	let staged = 0
 
 	for (const arch of archs) {
-		const target = path.join(packageDir, "build", "native", `${builderOs}-${arch}`)
-		const stampFile = path.join(packageDir, "build", "native", `${builderOs}-${arch}.json`)
+		const target = path.join(packageDir, "build", "native", stagedDirName(process.platform, arch))
+		const stampFile = `${target}.json`
 		const source = addonFor(arch)
 		const stamp = source === null ? null : stampOf(source)
 

@@ -56,7 +56,7 @@ export interface DesktopOs {
 	uninstall(target: Target): Promise<string>
 	// Every process running from the app's install (helpers and rclone included), as "pid path".
 	appProcesses(target: Target): Promise<string[]>
-	// Ends processes at once (D13: for a tray-only app with neither a window nor a signal to quit it).
+	// Ends processes at once (for a tray-only app with neither a window nor a signal to quit it).
 	forceKill(pids: readonly number[]): Promise<void>
 	// The old client's drive setting under `base` (prepared), and where it is then reached.
 	legacyDrive(base: string): { setting: string; root: string }

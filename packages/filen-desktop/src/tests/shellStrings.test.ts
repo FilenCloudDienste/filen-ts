@@ -40,7 +40,6 @@ describe("shell strings", () => {
 		const file = memoryFile()
 
 		expect(strings.applyShellStrings(german, file, vi.fn())).toBe(true)
-		expect(strings.shellLanguage()).toBe("de")
 		expect(strings.shellText("shellOpen")).toBe("Filen öffnen")
 		expect(strings.shellText("shellQuit")).toBe("Quit Filen")
 		expect(tray.roleFailureMessage(["drive"])).toBe("Das Netzlaufwerk wurde beendet.")
@@ -85,6 +84,22 @@ describe("shell strings", () => {
 		expect(strings.shellPlural("shellSignOutUploadingDetail", 5)).toBe("5 файлов")
 	})
 
+	it("words the taskbar badge's unread count per plural form, translated once the page sends it", async () => {
+		const { strings } = await load()
+
+		expect(strings.shellPlural("shellBadgeUnread", 1)).toBe("1 unread")
+		expect(strings.shellPlural("shellBadgeUnread", 5)).toBe("5 unread")
+
+		strings.applyShellStrings(
+			{ language: "de", strings: { shellBadgeUnread_one: "{{count}} ungelesen", shellBadgeUnread_other: "{{count}} ungelesene" } },
+			memoryFile(),
+			vi.fn()
+		)
+
+		expect(strings.shellPlural("shellBadgeUnread", 1)).toBe("1 ungelesen")
+		expect(strings.shellPlural("shellBadgeUnread", 5)).toBe("5 ungelesene")
+	})
+
 	it("ignores malformed payloads, unknown keys and an unchanged repeat", async () => {
 		const { strings } = await load()
 		const file = memoryFile()
@@ -111,7 +126,6 @@ describe("shell strings", () => {
 
 		await second.strings.loadShellStrings(file, vi.fn())
 
-		expect(second.strings.shellLanguage()).toBe("de")
 		expect(second.strings.shellText("shellOpen")).toBe("Filen öffnen")
 	})
 

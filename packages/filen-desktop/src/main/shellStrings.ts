@@ -19,6 +19,9 @@ const payloadSchema = type({
 
 type Values = Readonly<Record<string, string | number>>
 
+// A plural key without its suffix: every plural carries `_other` in English.
+type PluralBase = DesktopShellStringKey extends infer K ? (K extends `${infer B}_other` ? B : never) : never
+
 const PLURAL_BASES = new Set(
 	Object.keys(DESKTOP_SHELL_STRINGS)
 		.filter(key => PLURAL_SUFFIX.test(key))
@@ -44,17 +47,12 @@ export function shellText(key: DesktopShellStringKey, values: Values = {}): stri
 }
 
 /** The form of a plural key (`base` without its suffix) the current language selects for `count`. */
-export function shellPlural(base: string, count: number, values: Values = {}): string {
+export function shellPlural(base: PluralBase, count: number, values: Values = {}): string {
 	const category = new Intl.PluralRules(language).select(count)
 	const template =
 		strings.get(`${base}_${category}`) ?? strings.get(`${base}_other`) ?? english(`${base}_${category}`) ?? english(`${base}_other`)
 
 	return formatShellString(template ?? base, { count, ...values })
-}
-
-/** The UI language main currently shows. */
-export function shellLanguage(): string {
-	return language
 }
 
 // Only known keys with non-empty text; null when the payload is malformed.

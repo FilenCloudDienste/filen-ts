@@ -7,7 +7,9 @@ import type {
 	DesktopDragState
 } from "@filen/shared/desktop"
 import { CHANNELS } from "../../shared/channels.ts"
+import { errorMessage } from "../atomicFile.ts"
 import type { Page } from "../pages.ts"
+import { shellText } from "../shellStrings.ts"
 import type { DragOutAddonMac } from "./addon.ts"
 import type { DragOutAddonWin } from "./addonWin.ts"
 import { pngPixels } from "./image.ts"
@@ -78,10 +80,6 @@ function addonCode(error: unknown): string | null {
 	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : null
 }
 
-function message(error: unknown): string {
-	return error instanceof Error ? error.message : String(error)
-}
-
 // Finder's URL for promised item `planned`: absolute and normalized, a direct child of the drop's directory, named
 // `planned` or Finder's unique form of it ("name 2.ext", "name 2"), which it picks when the name is taken.
 export function suppliedPathFits(target: string, planned: string): boolean {
@@ -125,7 +123,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 			winLoaded = native.addon()
 		} catch (error) {
 			winBroken = true
-			log.warn(`dragOut: filen-drag.node did not load: ${message(error)}`)
+			log.warn(`dragOut: filen-drag.node did not load: ${errorMessage(error)}`)
 		}
 
 		return winLoaded
@@ -193,6 +191,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 					view: window.handle(),
 					items: payload.items.map(item => ({ name: item.name, directory: item.directory, contentType: null })),
 					image: { png, width: image.width, height: image.height },
+					failureMessage: shellText("shellDragOutFailed"),
 					onWrite: (ticket, index, target) => {
 						const planned = payload.items[index]?.name
 
@@ -232,7 +231,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 				const code = addonCode(error)
 
 				if (code !== "buttonReleased") {
-					log.warn(`dragOut: Finder drag did not begin: ${code ?? message(error)}`)
+					log.warn(`dragOut: Finder drag did not begin: ${code ?? errorMessage(error)}`)
 				}
 
 				settle(code === "buttonReleased" ? "cancelled" : "failed")
@@ -279,7 +278,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 					}
 				})
 			} catch (error) {
-				log.warn(`dragOut: Explorer drag did not begin: ${message(error)}`)
+				log.warn(`dragOut: Explorer drag did not begin: ${errorMessage(error)}`)
 			}
 
 			settle(outcome)
@@ -300,7 +299,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 				window.startDrag(payload.paths, icon)
 				settle("ended")
 			} catch (error) {
-				log.warn(`dragOut: drag did not begin: ${message(error)}`)
+				log.warn(`dragOut: drag did not begin: ${errorMessage(error)}`)
 				settle("failed")
 			}
 		})

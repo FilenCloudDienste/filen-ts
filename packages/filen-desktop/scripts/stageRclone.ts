@@ -4,6 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { type } from "arktype"
 import { unzipSync } from "fflate"
+import { BUILDER_OS, stagedDirName, type BuilderOs } from "../src/shared/buildLayout.ts"
 import { nativeArch, type NativeArch } from "./nativeArch.ts"
 
 // Stages the official rclone of both architectures for this OS at build/rclone/<os>-<arch>/rclone[.exe], where
@@ -24,10 +25,10 @@ const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const cacheDir = path.join(packageDir, "node_modules", ".cache", "filen-rclone")
 export const ARCHS: NativeArch[] = ["x64", "arm64"]
 // electron-builder's ${os} and rclone's name for the same OS.
-export const OS: Partial<Record<NodeJS.Platform, { builder: "mac" | "win" | "linux"; rclone: string }>> = {
-	darwin: { builder: "mac", rclone: "osx" },
-	win32: { builder: "win", rclone: "windows" },
-	linux: { builder: "linux", rclone: "linux" }
+export const OS: Partial<Record<NodeJS.Platform, { builder: BuilderOs; rclone: string }>> = {
+	darwin: { builder: BUILDER_OS.darwin, rclone: "osx" },
+	win32: { builder: BUILDER_OS.win32, rclone: "windows" },
+	linux: { builder: BUILDER_OS.linux, rclone: "linux" }
 }
 const RCLONE_ARCH: Record<NativeArch, string> = { x64: "amd64", arm64: "arm64" }
 
@@ -168,7 +169,7 @@ export async function stageRclone(): Promise<void> {
 
 	for (const arch of ARCHS) {
 		const binary = await pinnedRclone(arch, versions)
-		const target = path.join(packageDir, "build", "rclone", `${os.builder}-${arch}`)
+		const target = path.join(packageDir, "build", "rclone", stagedDirName(process.platform, arch))
 
 		// A stale copy must not outlive the release it came from.
 		rmSync(target, { recursive: true, force: true })

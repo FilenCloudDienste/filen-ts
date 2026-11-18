@@ -91,14 +91,35 @@ async function generate(hosts: readonly string[], now: number): Promise<{ cert: 
 	return { cert: cert.toString("pem"), key: typeof key === "string" ? key : key.toString("utf8") }
 }
 
+// The last call for each `<dir>/<protocol>`, which the next one waits for: two writers of one pair would interleave.
+const pending = new Map<string, Promise<ServeCertificate>>()
+
 // `<dir>/<protocol>.crt` and `.key` (owner-only), made anew when missing, unusable, within RENEW_DAYS of expiry, or
-// not covering `hosts` (the address the server listens on; for every interface, the LAN addresses).
-export async function ensureCertificate(
+// not covering `hosts` (the address the server listens on; for every interface, the LAN addresses). Calls for one pair
+// run one at a time.
+export function ensureCertificate(
 	dir: string,
 	protocol: DesktopServeProtocol,
 	hosts: readonly string[],
 	now: number
 ): Promise<ServeCertificate> {
+	const id = path.join(dir, protocol)
+	const make = () => certificate(dir, protocol, hosts, now)
+	const previous = pending.get(id)
+	const run = previous === undefined ? make() : previous.then(make, make)
+	const done = () => {
+		if (pending.get(id) === run) {
+			pending.delete(id)
+		}
+	}
+
+	pending.set(id, run)
+	void run.then(done, done)
+
+	return run
+}
+
+async function certificate(dir: string, protocol: DesktopServeProtocol, hosts: readonly string[], now: number): Promise<ServeCertificate> {
 	const certFile = atomicFile(path.join(dir, `${protocol}.crt`))
 	const keyFile = atomicFile(path.join(dir, `${protocol}.key`))
 	const wanted = certificateHosts(hosts)

@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs"
 import { lstat, readdir, statfs } from "node:fs/promises"
 import path from "node:path"
 
@@ -9,6 +10,13 @@ function missing(error: unknown): boolean {
 	const code = (error as NodeJS.ErrnoException | null)?.code
 
 	return code === "ENOENT" || code === "ENOTDIR"
+}
+
+// The bytes a file takes on disk: rclone's full-mode VFS cache keeps a partly read file as a sparse file of the remote length, so
+// `size` alone overstates it. `blocks` is in 512-byte units on every platform (libuv fills it from the allocation size on
+// Windows). With no blocks reported this falls back to `size`, which over-reports a fully sparse file and tiny resident files.
+export function allocatedBytes(stats: Pick<Stats, "blocks" | "size">): number {
+	return typeof stats.blocks === "number" && stats.blocks > 0 ? Math.min(stats.blocks * 512, stats.size) : stats.size
 }
 
 // The bytes the files below `dir` take, one directory at a time; a missing directory holds none.
@@ -33,16 +41,13 @@ async function usedBytes(dir: string): Promise<number> {
 		if (entry.isDirectory()) {
 			total += await usedBytes(child)
 		} else if (entry.isFile()) {
-			total += await lstat(child).then(
-				stats => stats.size,
-				(error: unknown) => {
-					if (missing(error)) {
-						return 0
-					}
-
-					throw error
+			total += await lstat(child).then(allocatedBytes, (error: unknown) => {
+				if (missing(error)) {
+					return 0
 				}
-			)
+
+				throw error
+			})
 		}
 	}
 

@@ -31,7 +31,7 @@ import { gap5Checks } from "../../scripts/ci/e2e/chains/previous.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
 
-// The pure parts of the gap-5 checks (plan D3): the CONNECT proxy and its faults against a local echo server, the
+// The pure parts of the gap-5 checks: the CONNECT proxy and its faults against a local echo server, the
 // small volumes' tool scripts and parsers, the lock holder's script, the plan's quota entry and the workflow's wiring.
 // Nothing here installs, launches or mounts anything.
 

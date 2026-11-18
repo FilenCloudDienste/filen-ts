@@ -1,4 +1,5 @@
 import path from "node:path"
+import { stagedDirName } from "../../shared/buildLayout.ts"
 
 export interface AddonPathContext {
 	packaged: boolean
@@ -10,14 +11,11 @@ export interface AddonPathContext {
 	exists(file: string): boolean
 }
 
-// electron-builder's ${os}, which names the staged addon's directory.
-const BUILDER_OS: Partial<Record<NodeJS.Platform, string>> = { darwin: "mac", win32: "win", linux: "linux" }
-
 // A file of build/native/<os>-<arch>: shipped beside the asar when packaged, else the staged copy. null when there is none.
 export function nativeFilePath(ctx: Omit<AddonPathContext, "env">, file: string): string | null {
 	const candidate = ctx.packaged
 		? path.join(ctx.resourcesPath, "native", file)
-		: path.join(ctx.appPath, "build", "native", `${BUILDER_OS[ctx.platform] ?? ctx.platform}-${ctx.arch}`, file)
+		: path.join(ctx.appPath, "build", "native", stagedDirName(ctx.platform, ctx.arch), file)
 
 	return ctx.exists(candidate) ? candidate : null
 }

@@ -125,7 +125,7 @@ describe("ensureRules", () => {
 		expect(await readFile(file())).toEqual(bytes)
 	})
 
-	it("keeps the file's mode", async () => {
+	it.skipIf(process.platform === "win32")("keeps the file's mode", async () => {
 		await writeFile(file(), "build/")
 		await chmod(file(), 0o640)
 
@@ -133,7 +133,7 @@ describe("ensureRules", () => {
 		expect((await stat(file())).mode & 0o777).toBe(0o640)
 	})
 
-	it("never replaces a link or anything but a file", async () => {
+	it.skipIf(process.platform === "win32")("never replaces a link", async () => {
 		const target = path.join(directory, "elsewhere")
 
 		await writeFile(target, "")
@@ -142,13 +142,14 @@ describe("ensureRules", () => {
 		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")
 		expect(await readFile(target, "utf8")).toBe("")
 		expect((await lstat(file())).isSymbolicLink()).toBe(true)
+	})
 
-		await rm(file())
+	it("never replaces anything but a file", async () => {
 		await mkdir(file())
 		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")
 	})
 
-	it("says so when the directory cannot be written", async () => {
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("says so when the directory cannot be written", async () => {
 		await chmod(directory, 0o500)
 
 		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")

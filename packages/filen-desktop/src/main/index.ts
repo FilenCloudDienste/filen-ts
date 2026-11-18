@@ -45,7 +45,7 @@ import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
 import type { NativeAggregate } from "../shared/nativeProtocol.ts"
 import { type AppLock, inactivityLock, loadAppLock } from "./appLock.ts"
-import { atomicFile, codedError, errorCode } from "./atomicFile.ts"
+import { atomicFile, codedError, errorCode, errorMessage } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
@@ -827,7 +827,7 @@ async function mountPointContext(userId: string) {
 // A slow DNS answer for an old server's host name only turns that server off.
 const LEGACY_HOST_LOOKUP_TIMEOUT_MS = 3000
 
-// The old client's rclone, caches and mount settings (PLAN §6.7).
+// The old client's rclone, caches and mount settings.
 const legacyMounts = createLegacyMounts({
 	userData: userDataPath,
 	mountsDir: userId => path.join(mountsRoot, userId),
@@ -925,6 +925,7 @@ const fileProvider = createFileProviderService({
 		}
 	}, warn),
 	clearOwed: atomicFile(path.join(userDataPath, "fileProvider.clearOwed")),
+	removeOwed: atomicFile(path.join(userDataPath, "fileProvider.removeOwed")),
 	pinSet: () => appLock?.status().enabled ?? true,
 	translocated: () =>
 		runsTranslocated({ packaged: app.isPackaged, inApplications: app.isInApplicationsFolder(), appPath: app.getAppPath() }),
@@ -967,6 +968,9 @@ function currentPrefs() {
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+// Set once will-quit runs and never reset (unlike `quitting`): the host is stopping, so no window opens and no page
+// can cancel the quit.
+let shuttingDown = false
 const sessionEnd = createSessionEnd(source => {
 	info(`quit: the OS session ends (${source}); no confirm`)
 })
@@ -1051,6 +1055,11 @@ function setMediaTransport(state: DesktopMediaTransport): void {
 }
 
 function showWindow(): void {
+	// The tray, dock, menu and page all come here: a quitting app opens no window.
+	if (shuttingDown) {
+		return
+	}
+
 	if (!started) {
 		showRequested = true
 
@@ -1114,7 +1123,7 @@ function trackWindowState(window: BrowserWindow): void {
 
 let idleTimer: NodeJS.Timeout | undefined
 
-// D14: a hidden window gives its renderer back after a while, unless the page still has work that must not be dropped.
+// A hidden window gives its renderer back after a while, unless the page still has work that must not be dropped.
 function scheduleIdleDestroy(): void {
 	clearTimeout(idleTimer)
 	idleTimer = undefined
@@ -1242,7 +1251,7 @@ function applyBadge(): void {
 		badgeDot ??= nativeImage.createFromBitmap(badgeDotBitmap(), { width: BADGE_DOT_SIZE, height: BADGE_DOT_SIZE })
 	}
 
-	mainWindow?.setOverlayIcon(badgeCount > 0 ? badgeDot : null, badgeCount > 0 ? `${badgeCount} unread` : "")
+	mainWindow?.setOverlayIcon(badgeCount > 0 ? badgeDot : null, badgeCount > 0 ? shellPlural("shellBadgeUnread", badgeCount) : "")
 }
 
 function createWindow(): void {
@@ -1355,6 +1364,7 @@ function createWindow(): void {
 	sessionEnd.watchWindow(window)
 	window.webContents.on("will-prevent-unload", event => {
 		if (
+			shuttingDown ||
 			!unloadGuardAsks({ installingUpdate, sessionEnding: sessionEnd.ending() }) ||
 			confirmUnload(window, shellText(quitting ? "shellBusyQuit" : "shellBusyLeave"))
 		) {
@@ -1470,7 +1480,7 @@ function closeFocusedWindow(): void {
 
 let menuShortcuts: MenuShortcuts = {}
 
-// Windows and Linux have no menu bar (and no default menu's accelerators); macOS gets the full one (D18).
+// Windows and Linux have no menu bar (and no default menu's accelerators); macOS gets the full one.
 function applyMenu(): void {
 	Menu.setApplicationMenu(
 		PLATFORM === "darwin"
@@ -1796,6 +1806,7 @@ if (!instanceLock.held) {
 	})
 	// After the windows closed (and the page's unload guard agreed): the native host closes its engine first.
 	app.on("will-quit", event => {
+		shuttingDown = true
 		// The windows closed and the page agreed: drags end (Finder's waiting writes and Explorer's reads fail) before
 		// the host stops; their temp goes once it has.
 		dragOut.quit()
@@ -2046,6 +2057,7 @@ if (!instanceLock.held) {
 		applyMenu()
 		applyTray()
 		applyTrayMenu()
+		applyBadge()
 	})
 
 	ipcMain.on(CHANNELS.setMenuShortcuts, (event, payload: unknown) => {
@@ -2153,6 +2165,8 @@ if (!instanceLock.held) {
 		const lock = await appLockLoading
 		const user = await nativeSupervisor.user()
 
+		// As a sign-out does: the profile is listed before the session leaves the vault.
+		await signOutFlow.begin()
 		await sessionVault.clear()
 		await signOut(user?.userId ?? null)
 		await lock.reset()
@@ -2224,7 +2238,7 @@ if (!instanceLock.held) {
 			}
 		})
 		.catch((error: unknown) => {
-			warn(`updater did not start: ${error instanceof Error ? error.message : String(error)}`)
+			warn(`updater did not start: ${errorMessage(error)}`)
 		})
 
 	app.whenReady()
@@ -2304,7 +2318,7 @@ if (!instanceLock.held) {
 			}
 		})
 		.catch((error: unknown) => {
-			dialog.showErrorBox("Filen", `${shellText("shellStartFailed")}\n\n${error instanceof Error ? error.message : String(error)}`)
+			dialog.showErrorBox("Filen", `${shellText("shellStartFailed")}\n\n${errorMessage(error)}`)
 			app.exit(1)
 		})
 }

@@ -10,7 +10,7 @@ import type { IpcEvent, IpcMain } from "../main/pages.ts"
 import { registerSyncIpc } from "../main/sync/ipc.ts"
 import { createRootTokens, ROOT_TOKEN_TTL_MS } from "../main/sync/localRoot.ts"
 import { createSyncService, OVERVIEW_PUSH_INTERVAL_MS, type SyncServiceDeps } from "../main/sync/service.ts"
-import type { ShellPair } from "../main/sync/store.ts"
+import { loadSyncStore, type ShellPair } from "../main/sync/store.ts"
 import { memoryStore, shellPair as baseShellPair } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
@@ -520,6 +520,59 @@ describe("registerSyncIpc", () => {
 
 		expect(ops()).toEqual(["setMigratedGuard", "resume", "resume"])
 		expect(store.get().pairs[0]).toMatchObject({ state: "active", paused: false, review: null })
+	})
+
+	it("leaves a preparing migrated pair to its round: no engine resume and no sync now from the page", async () => {
+		const { invoke, ops, store, supervisor } = setup({
+			pairs: [
+				shellPair({ paused: true, state: "preparing", legacyRules: ["*.tmp"] }),
+				shellPair({ pairId: "8", remoteRoot: ACCOUNT_ROOT, paused: true, state: "preparing", legacyRules: ["*.tmp"] })
+			]
+		})
+
+		expect(await invoke("startPair", "7")).toEqual({ ok: true, value: null })
+		expect(await invoke("resumePair", "8")).toEqual({ ok: true, value: null })
+		expect(await invoke("syncNow", "7")).toMatchObject({ ok: false, error: { code: "pairNotFound" } })
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs.map(pair => [pair.state, pair.paused, pair.legacyRules])).toEqual([
+			["preparing", false, ["*.tmp"]],
+			["preparing", false, ["*.tmp"]]
+		])
+		expect(supervisor.ensure).toHaveBeenCalledWith("pair resumed")
+	})
+
+	it("adopts a pair store that failed its startup read once it reads, or sets it aside, before the first update", async () => {
+		const stored = { version: 1, pairs: [shellPair()], legacyApplied: true, importNote: null }
+		const eio = () => Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" }))
+		let failures = 1
+		let data: Buffer | null = Buffer.from(JSON.stringify(stored))
+		const setAside = vi.fn(() => Promise.resolve())
+		const file = {
+			read: () => (failures-- > 0 ? eio() : Promise.resolve(data)),
+			write: (next: Buffer) => {
+				data = next
+
+				return Promise.resolve()
+			},
+			remove: () => Promise.resolve(),
+			setAside
+		}
+		const store = await loadSyncStore(file, vi.fn())
+
+		expect(store.hasPairs()).toBe(false)
+		await store.update(state => ({ ...state, pairs: state.pairs.map(pair => ({ ...pair, name: "Renamed" })) }))
+		expect(store.get()).toMatchObject({ legacyApplied: true, pairs: [{ pairId: "7", name: "Renamed" }] })
+		expect(setAside).not.toHaveBeenCalled()
+
+		failures = Infinity
+
+		const unreadable = await loadSyncStore(file, vi.fn())
+
+		await unreadable.update(state => ({ ...state, legacyApplied: true }))
+		await unreadable.update(state => state)
+		expect(setAside).toHaveBeenCalledOnce()
+		expect(unreadable.get()).toMatchObject({ pairs: [], legacyApplied: true })
 	})
 
 	it("keeps the previous app's sync state aside once its pairs are imported, trying again on the next start", async () => {

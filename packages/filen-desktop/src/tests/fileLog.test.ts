@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createFileLog, formatLogLine, LOG_FILE_MAX_BYTES, LOG_LINE_MAX_LENGTH } from "../main/fileLog.ts"
 
 const AT = new Date("2026-10-26T12:00:00.000Z")
+// Windows has no POSIX permission bits.
+const posix = process.platform !== "win32"
 
 describe("formatLogLine", () => {
 	it("stamps, levels, redacts and keeps each entry on one bounded line", () => {
@@ -32,7 +34,10 @@ describe("createFileLog", () => {
 		log.write("warn", "two")
 
 		expect(await log.read()).toBe("[2026-10-26T12:00:00.000Z] INFO one\n[2026-10-26T12:00:00.000Z] WARN two\n")
-		expect((await stat(path.join(directory, "logs", "main.log"))).mode & 0o777).toBe(0o600)
+
+		if (posix) {
+			expect((await stat(path.join(directory, "logs", "main.log"))).mode & 0o777).toBe(0o600)
+		}
 	})
 
 	it("writes pending lines at once on flushSync, in order after what was flushed before", async () => {
@@ -55,8 +60,11 @@ describe("createFileLog", () => {
 		log.flushSync()
 
 		expect(readFileSync(path.join(directory, "logs", "main.log"), "utf8")).toBe("[2026-10-26T12:00:00.000Z] WARN first\n")
-		expect(statSync(path.join(directory, "logs", "main.log")).mode & 0o777).toBe(0o600)
-		expect(statSync(path.join(directory, "logs")).mode & 0o777).toBe(0o700)
+
+		if (posix) {
+			expect(statSync(path.join(directory, "logs", "main.log")).mode & 0o777).toBe(0o600)
+			expect(statSync(path.join(directory, "logs")).mode & 0o777).toBe(0o700)
+		}
 	})
 
 	it("rotates into at most two files, each within the size bound, keeping the newest lines", async () => {

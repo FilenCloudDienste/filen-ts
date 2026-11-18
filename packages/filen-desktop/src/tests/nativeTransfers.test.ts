@@ -5,7 +5,16 @@ import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FEED_INTERVAL_MS } from "../native/reducer.ts"
 import { classifyTransfer, TransferCommitError } from "../native/transferErrors.ts"
-import type { Dir, DirWithPath, File, FileWithPath, JsDirDownloadCallback, JsDirUploadCallback, ManagedFuture } from "@filen/sdk-rs"
+import type {
+	Dir,
+	DirWithPath,
+	File,
+	FileWithPath,
+	JsDirDownloadCallback,
+	JsDirUploadCallback,
+	ManagedFuture,
+	NonRootItem
+} from "@filen/sdk-rs"
 import { createTransferRegistry } from "../native/transfers.ts"
 import {
 	type FromNative,
@@ -330,6 +339,82 @@ describe("transfer registry", () => {
 		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "completedWithErrors", savedPath: at("Projects") })
 	})
 
+	it("logs each directory download failure and scan failure with its classified reason, and the skipped entries", async () => {
+		const { client, registry, warn } = setup()
+
+		registry.start([{ id: ID, t: "downloadDirectory", dir: DIR_REF, path: at("Projects") }])
+		await flush()
+
+		const download = client.last("downloadDirRecursively")
+		const callback = download.args[1] as JsDirDownloadCallback
+
+		callback.onScanErrors([sdkErrorValue(fakeSdk.ErrorKind.Server, "listing refused")])
+		callback.onScanComplete(0n, 4n, 40n)
+		callback.onDownloadErrors([
+			{
+				path: at("Projects", "a"),
+				error: sdkErrorValue(fakeSdk.ErrorKind.Io, "Permission denied (os error 13)"),
+				item: { tag: "File", inner: [ubrnFile()] } as unknown as NonRootItem
+			}
+		])
+		download.resolve()
+		await round()
+
+		expect(warn.mock.calls.map(([line]) => line)).toEqual([
+			`transfer ${ID}: scanning an entry failed: unknown: listing refused`,
+			`transfer ${ID}: ${at("Projects", "a")} failed: localDenied: Permission denied (os error 13)`,
+			`transfer ${ID}: 2 skipped`
+		])
+	})
+
+	it("a directory transfer cancelled after its scan logs no skipped line for the entries it never reached", async () => {
+		const { client, registry, warn, settled } = setup()
+
+		registry.start([{ id: ID, t: "downloadDirectory", dir: DIR_REF, path: at("Projects") }])
+		await flush()
+
+		const download = client.last("downloadDirRecursively")
+		const callback = download.args[1] as JsDirDownloadCallback
+
+		callback.onScanComplete(0n, 2000n, 20_000n)
+		callback.onDownloadUpdate([], [fileAt(at("Projects", "a"))], 10n)
+		registry.cancel([ID])
+		download.reject(sdkError(fakeSdk.ErrorKind.Cancelled))
+		await round()
+
+		expect(settled()).toMatchObject({ outcome: "cancelled" })
+		expect(warn).not.toHaveBeenCalled()
+	})
+
+	it("logs at most LOGGED_ERRORS directory upload failures, then one line for the rest", async () => {
+		const { client, registry, warn } = setup()
+
+		registry.start([{ id: ID, t: "uploadDirectory", path: path.resolve("Photos"), parent: PARENT_REF, name: "Photos" }])
+		await flush()
+		client.last("createDir").resolve(ubrnDir())
+		await flush()
+
+		const upload = client.last("uploadDirRecursively")
+		const callback = upload.args[1] as JsDirUploadCallback
+
+		callback.onScanErrors([sdkErrorValue(fakeSdk.ErrorKind.Io, "Device busy (os error 16)")])
+		callback.onUploadErrors(
+			Array.from({ length: 24 }, (_, index) => ({
+				path: path.resolve("Photos", `${index}.jpg`),
+				error: sdkErrorValue(fakeSdk.ErrorKind.MaxStorageReached, "full")
+			}))
+		)
+		upload.resolve()
+		await round()
+
+		const lines = warn.mock.calls.map(([line]) => line)
+
+		expect(lines).toHaveLength(21)
+		expect(lines[0]).toBe(`transfer ${ID}: scanning an entry failed: localInUse: Device busy (os error 16)`)
+		expect(lines[1]).toBe(`transfer ${ID}: ${path.resolve("Photos", "0.jpg")} failed: storageFull: full`)
+		expect(lines[20]).toBe(`transfer ${ID}: 5 more failed`)
+	})
+
 	it("an unauthenticated failure calls onAuthFailed once", async () => {
 		const { client, registry, onAuthFailed, settled } = setup()
 
@@ -496,19 +581,51 @@ describe("transfer registry", () => {
 		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "cancelled" })
 	})
 
-	it("a download cancelled while it waits behind the same file settles cancelled and never starts", async () => {
+	it("a download cancelled while it waits behind the same file settles cancelled at once and never starts", async () => {
 		const { client, state, registry, settled } = setup()
+		const third = "2f5e8d3a-0b6c-4e4f-9d9a-7c3b5a4f6e8e"
 
-		registry.start([downloadFile(), downloadFile(ID2, at("a.txt"))])
+		registry.start([downloadFile(), downloadFile(ID2, at("a.txt")), downloadFile(third, at("a.txt"))])
 		await flush()
 		registry.cancel([ID2])
+		await round()
+
+		// The first still runs: the cancelled one left the queue without waiting for it.
+		expect(settled(ID2)).toEqual({ k: "settled", id: ID2, outcome: "cancelled" })
+		expect(settled()).toBeUndefined()
+		expect(registry.active()).toBe(2)
+		// The third still waits for the one that holds the SDK temp.
+		expect(client.of("downloadFileToPath")).toHaveLength(1)
+
 		state.files.add(at(`${ID}.filendl`))
 		client.last("downloadFileToPath").resolve()
 		await round()
 
-		expect(client.of("downloadFileToPath")).toHaveLength(1)
 		expect(settled()).toMatchObject({ outcome: "done" })
+		expect(client.of("downloadFileToPath")).toHaveLength(2)
+		expect(client.last("downloadFileToPath").args[1]).toBe(at(`${third}.filendl`))
+	})
+
+	it("a download started after a cancelled waiter left the queue still waits for the one holding the SDK temp", async () => {
+		const { client, state, registry, settled } = setup()
+		const third = "2f5e8d3a-0b6c-4e4f-9d9a-7c3b5a4f6e8e"
+
+		registry.start([downloadFile(), downloadFile(ID2, at("a.txt"))])
+		await flush()
+		registry.cancel([ID2])
+		await round()
+
 		expect(settled(ID2)).toEqual({ k: "settled", id: ID2, outcome: "cancelled" })
+		registry.start([downloadFile(third, at("a.txt"))])
+		await flush()
+		expect(client.of("downloadFileToPath")).toHaveLength(1)
+
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").resolve()
+		await round()
+
+		expect(client.of("downloadFileToPath")).toHaveLength(2)
+		expect(client.last("downloadFileToPath").args[1]).toBe(at(`${third}.filendl`))
 	})
 
 	it("a failed or cancelled directory download leaves what it wrote", async () => {
@@ -601,6 +718,46 @@ describe("transfer registry", () => {
 		await listed
 
 		expect(registry.active()).toBe(0)
+	})
+
+	it("a release stops the SDK listing it is waiting on and answers without logging a failure", async () => {
+		const { client, registry, warn } = setup()
+		const listed = registry.listTree({
+			listingId: LISTING,
+			items: [
+				{ ref: DIR_REF, name: "Projects" },
+				{ ref: DIR_REF, name: "More" }
+			],
+			maxEntries: 100
+		})
+
+		await flush()
+
+		const signal = (client.last("listDirRecursiveWithPaths").args[3] as { signal: AbortSignal }).signal
+
+		expect(signal.aborted).toBe(false)
+		registry.releaseTree(LISTING)
+
+		expect(signal.aborted).toBe(true)
+		await expect(listed).resolves.toEqual({ entries: [] })
+		expect(client.of("listDirRecursiveWithPaths")).toHaveLength(1)
+		expect(registry.active()).toBe(0)
+		expect(warn).not.toHaveBeenCalled()
+	})
+
+	it("abortAll stops every listing in flight", async () => {
+		const { client, registry } = setup()
+		const first = registry.listTree({ listingId: LISTING, items: [{ ref: DIR_REF, name: "Projects" }], maxEntries: 100 })
+		const second = registry.listTree({ listingId: ID, items: [{ ref: DIR_REF, name: "Other" }], maxEntries: 100 })
+
+		await flush()
+		registry.abortAll()
+
+		expect(client.of("listDirRecursiveWithPaths").map(call => (call.args[3] as { signal: AbortSignal }).signal.aborted)).toEqual([
+			true,
+			true
+		])
+		await expect(Promise.all([first, second])).resolves.toEqual([{ entries: [] }, { entries: [] }])
 	})
 
 	it("downloadListed reads the held listing and an unknown index settles invalidItem", async () => {
@@ -860,19 +1017,20 @@ describe("native host", () => {
 		const posts: FromNative[] = []
 
 		hoisted.client = client
-		Object.defineProperty(process, "parentPort", {
-			configurable: true,
-			value: {
-				on: (_event: string, listener: (message: { data: unknown }) => void) => {
+
+		const { startHost } = await import("../native/index.ts")
+
+		startHost(
+			{
+				on: (_event, listener) => {
 					listeners.push(listener)
 				},
-				postMessage: (message: FromNative) => {
+				postMessage: message => {
 					posts.push(message)
 				}
-			}
-		})
-
-		await import("../native/index.ts")
+			},
+			vi.fn()
+		)
 
 		const send = (data: unknown) => {
 			for (const listener of listeners) {

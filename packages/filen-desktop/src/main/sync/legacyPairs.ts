@@ -4,9 +4,9 @@ import { localPathSchema } from "../../shared/nativeProtocol.ts"
 import { codedError, errorCode } from "../atomicFile.ts"
 import type { FirstRunDeps } from "./firstRun.ts"
 import { basename, rootKey } from "./mirror.ts"
-import type { ShellPair } from "./store.ts"
+import { PAIR_NAME_MAX, type ShellPair } from "./store.ts"
 
-// The old client's (3.0.53) sync pairs, PLAN §6 step 6: its config, and each pair's ignore file. Its engine state under
+// The old client's (3.0.53) sync pairs: its config, and each pair's ignore file. Its engine state under
 // userData/sync is never read; a migrated pair's first run proves what is in sync from both sides (see firstRun.ts).
 
 const MODES = {
@@ -159,15 +159,13 @@ export function legacyPairRules(pair: LegacyPair, ignorer: string | null): strin
 	return rules.length === 0 ? null : rules
 }
 
-const NAME_MAX = 1024
-
 // The shell's records of the imported pairs, before the engine holds any: the attach step (firstRun.ts) adds them.
 // Each starts waiting for its directory; a pair the old client kept from running stays paused. `ignorers` holds each
 // pair's old ignore file by uuid.
 export function legacyRecords(imported: LegacyImport, ignorers: ReadonlyMap<string, string>, now: number): ShellPair[] {
 	return imported.pairs.map(pair => ({
 		pairId: null,
-		name: pair.name.trim().slice(0, NAME_MAX) || basename(pair.localPath).slice(0, NAME_MAX),
+		name: pair.name.trim().slice(0, PAIR_NAME_MAX) || basename(pair.localPath).slice(0, PAIR_NAME_MAX),
 		localRoot: pair.localPath,
 		remoteRoot: pair.remoteRoot,
 		mode: pair.mode,

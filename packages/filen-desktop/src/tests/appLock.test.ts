@@ -366,6 +366,22 @@ describe("loadAppLock", () => {
 		expect(writes.map(data => parseLockRecord(data.toString("utf8").slice(4))?.failures)).toEqual([1, 0])
 	})
 
+	it("unlocks with the right PIN when the reset write fails, keeping the charged attempt", async () => {
+		const cipher = fakeCipher()
+		const { lock, file } = await lockWithPin("1234", memoryFile(), cipher)
+		const write = file.write.bind(file)
+		let writes = 0
+
+		file.write = data => (++writes === 2 ? Promise.reject(Object.assign(new Error("EPERM"), { code: "EPERM" })) : write(data))
+
+		lock.lock()
+		await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
+
+		expect(lock.status().locked).toBe(false)
+		expect(parseLockRecord(file.data?.toString("utf8").slice(4) ?? "")?.failures).toBe(1)
+		expect(warn).toHaveBeenCalledWith("app lock: the attempt count was not reset: EPERM")
+	})
+
 	it("changes and removes the PIN only with the current one, and never while locked", async () => {
 		const { lock, file } = await lockWithPin("1234")
 

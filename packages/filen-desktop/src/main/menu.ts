@@ -154,6 +154,12 @@ export interface MenuOptions {
 	onWebsite: () => void
 }
 
+// A role item labelled in the UI language: Electron's own role labels are English. The role keeps its accelerator,
+// enablement and what macOS adds to it.
+function role(name: NonNullable<MenuItemConstructorOptions["role"]>, key: DesktopShellStringKey): MenuItemConstructorOptions {
+	return { role: name, label: shellText(key) }
+}
+
 type MenuKeys = Pick<MenuItemConstructorOptions, "accelerator" | "registerAccelerator">
 
 function menuKeys(combo: string | undefined): MenuKeys {
@@ -188,27 +194,57 @@ export function menuTemplate({
 		{
 			role: "appMenu",
 			submenu: [
-				{ role: "about" },
+				role("about", "shellMenuAbout"),
 				{ type: "separator" },
 				action("app.openSettings"),
 				...(onLock === null ? [] : [{ label: shellText("shellLock"), ...menuKeys(shortcuts["app.lock"]), click: onLock }]),
 				{ type: "separator" },
-				{ role: "services" },
+				role("services", "shellMenuServices"),
 				{ type: "separator" },
-				{ role: "hide" },
-				{ role: "hideOthers" },
-				{ role: "unhide" },
+				role("hide", "shellMenuHide"),
+				role("hideOthers", "shellMenuHideOthers"),
+				role("unhide", "shellMenuShowAll"),
 				{ type: "separator" },
-				{ role: "quit" }
+				role("quit", "shellQuit")
 			]
 		},
 		{
-			role: "fileMenu",
+			...role("fileMenu", "shellMenuFile"),
 			submenu: [{ label: shellText("shellMenuClose"), ...menuKeys(shortcuts["desktop.close"] ?? CLOSE_DEFAULT), click: onClose }]
 		},
-		{ role: "editMenu" },
+		// Electron's own macOS Edit menu, item by item so each is labelled; the role keeps the system's dictation and
+		// emoji items.
 		{
-			role: "viewMenu",
+			...role("editMenu", "shellMenuEdit"),
+			submenu: [
+				role("undo", "shellMenuUndo"),
+				role("redo", "shellMenuRedo"),
+				{ type: "separator" },
+				role("cut", "shellMenuCut"),
+				role("copy", "shellMenuCopy"),
+				role("paste", "shellMenuPaste"),
+				role("pasteAndMatchStyle", "shellMenuPasteAndMatchStyle"),
+				role("delete", "shellMenuDelete"),
+				role("selectAll", "shellMenuSelectAll"),
+				{ type: "separator" },
+				{
+					label: shellText("shellMenuSubstitutions"),
+					submenu: [
+						role("showSubstitutions", "shellMenuShowSubstitutions"),
+						{ type: "separator" },
+						role("toggleSmartQuotes", "shellMenuSmartQuotes"),
+						role("toggleSmartDashes", "shellMenuSmartDashes"),
+						role("toggleTextReplacement", "shellMenuTextReplacement")
+					]
+				},
+				{
+					label: shellText("shellMenuSpeech"),
+					submenu: [role("startSpeaking", "shellMenuStartSpeaking"), role("stopSpeaking", "shellMenuStopSpeaking")]
+				}
+			]
+		},
+		{
+			...role("viewMenu", "shellMenuView"),
 			submenu: [
 				action("app.openTransfers"),
 				{ type: "separator" },
@@ -217,13 +253,14 @@ export function menuTemplate({
 				{ type: "separator" },
 				// The page's document viewers take these keys first (a PDF zooms itself); the window zooms otherwise. Zoom
 				// In's own key is Cmd+Plus, which a US keyboard types with Shift: the hidden twin takes Cmd+=.
-				{ role: "resetZoom" },
-				{ role: "zoomIn" },
-				{ role: "zoomIn", accelerator: "CommandOrControl+=", visible: false },
-				{ role: "zoomOut" },
+				role("resetZoom", "shellMenuActualSize"),
+				role("zoomIn", "shellMenuZoomIn"),
+				{ ...role("zoomIn", "shellMenuZoomIn"), accelerator: "CommandOrControl+=", visible: false },
+				role("zoomOut", "shellMenuZoomOut"),
 				{ type: "separator" },
+				// Development builds only: left in English.
 				...(devTools ? ([{ role: "toggleDevTools" }, { type: "separator" }] as const) : []),
-				{ role: "togglefullscreen" }
+				role("togglefullscreen", "shellMenuToggleFullScreen")
 			]
 		},
 		// Disabled while nothing is queued; the first item says Pause while audio plays.
@@ -237,9 +274,18 @@ export function menuTemplate({
 				})
 			)
 		},
-		{ role: "windowMenu" },
+		// Electron's own macOS Window menu; the role keeps the list of open windows.
 		{
-			role: "help",
+			...role("windowMenu", "shellMenuWindow"),
+			submenu: [
+				role("minimize", "shellMenuMinimize"),
+				role("zoom", "shellMenuZoom"),
+				{ type: "separator" },
+				role("front", "shellMenuBringAllToFront")
+			]
+		},
+		{
+			...role("help", "shellMenuHelp"),
 			submenu: [action("app.openShortcuts"), { type: "separator" }, { label: shellText("shellWebsite"), click: onWebsite }]
 		}
 	]

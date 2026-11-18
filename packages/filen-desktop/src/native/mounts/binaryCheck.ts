@@ -21,10 +21,12 @@ export interface BinaryCheckContext {
 	log(message: string): void
 }
 
-// Whether the bundled rclone may run (Q2). Linux: the SDK checks the sha256 main baked in at build time. Windows: the
-// per-machine install's ACL and its Authenticode signature (checkPackage --signed). macOS: codesign rewrites the binary
-// after the build, so it must carry the app's team signature, checked once per binary per host run. An app that is not
-// itself team-signed (development, a local unsigned package) has no signature to hold rclone to.
+// Whether the bundled rclone may run. Only macOS checks anything here: codesign rewrites the binary after the build, so
+// it must carry the app's team signature, checked once per binary per host run; an app that is not itself team-signed
+// (development, a local unsigned package) has no signature to hold rclone to. Elsewhere this passes every binary:
+// Linux's guarantee is the sha256 main bakes in at build time and the SDK checks before each start (rclonePath.ts);
+// Windows checks nothing at run time (the per-machine install directory protects it, and the release's package check
+// verifies rclone's Authenticode signature).
 export function createBinaryCheck(ctx: BinaryCheckContext): (binary: string) => Promise<boolean> {
 	if (ctx.platform !== "darwin") {
 		return () => Promise.resolve(true)

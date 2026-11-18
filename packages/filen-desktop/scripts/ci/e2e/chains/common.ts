@@ -13,8 +13,9 @@ import type {
 } from "@filen/shared/desktop"
 import type { StringifiedClient } from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
-import { errorMessage, fail, waitFor } from "../../support.ts"
+import { errorMessage, fail, waitFor, WaitTimeout } from "../../support.ts"
 import { PROFILE_ENTRIES } from "../../../../src/main/signOut.ts"
+import { ACTIVITY_PER_PAIR } from "../../../../src/main/sync/activity.ts"
 import type { Target } from "../../targets.ts"
 import { APP_ORIGIN, desktop, desktopCall, signOut } from "../app.ts"
 import { listTargets } from "../cdp/inspector.ts"
@@ -22,7 +23,7 @@ import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir, type Cloud } from "../cloud.ts"
 import { LOCK_SERVER_TTL_MS } from "../driveLock.ts"
 import { createFindings, type Findings } from "../findings.ts"
-import { exitWithin, launchDebuggable, type LaunchExtra, type Launched } from "../launch.ts"
+import { type Exit, exitWithin, launchDebuggable, type LaunchExtra, type Launched } from "../launch.ts"
 import { type DesktopOs, osFor } from "../os.ts"
 import { redactor } from "../redact.ts"
 import { type SignIn, signInMode } from "../seed.ts"
@@ -178,7 +179,7 @@ export function pidsOf(lines: readonly string[]): number[] {
 	return lines.map(line => Number.parseInt(line, 10)).filter(pid => Number.isSafeInteger(pid))
 }
 
-// D13 after an app's main process ended: whatever of it still runs `timeoutMs` later (a helper, crash handler or
+// After an app's main process ended: whatever of it still runs `timeoutMs` later (a helper, crash handler or
 // watchdog it left) is hard-killed once `settle` resolves (what it may still write gone quiet), then must be gone within
 // `timeoutMs`. Returns what lingered ("pid path"), empty when nothing did.
 export async function endLeftovers(
@@ -205,6 +206,170 @@ export async function endLeftovers(
 	)
 
 	return lingering
+}
+
+// How long a pair's plan may answer null (its cloud listing not converged) before that counts as a problem: an answer
+// right after the pair went idle can be a resync in flight.
+export const PLAN_TIMEOUT_MS = 60_000
+
+// The problem with a pair's plan, null for none: a plan with an action, a held deletion, a refusal or other than
+// `conflicts` conflicts, or none at all within `timeoutMs`. Every plan read is released.
+export async function planProblem(
+	pair: string,
+	readPlan: () => Promise<DesktopSyncPlan | null>,
+	release: (planId: string) => Promise<unknown>,
+	conflicts: number,
+	timeoutMs = PLAN_TIMEOUT_MS,
+	pollMs = 2000
+): Promise<string | null> {
+	const plan = await waitFor(`${pair}'s plan`, timeoutMs, readPlan, pollMs).catch((error: unknown) => {
+		if (error instanceof WaitTimeout) {
+			return null
+		}
+
+		throw error
+	})
+
+	if (plan === null) {
+		return `${pair}: no plan (the cloud side not read)`
+	}
+
+	await release(plan.planId)
+
+	const { actions, heldDeletions, refused } = plan.summary
+
+	return actions !== 0 || heldDeletions !== 0 || plan.summary.conflicts !== conflicts || refused !== null
+		? `${pair}: plan ${json(plan.summary)}`
+		: null
+}
+
+// A pair's activity gathered over reads, for a window longer than the app's ring (ACTIVITY_PER_PAIR entries) holds.
+export interface ActivityTrail {
+	// Reads the ring and merges it in (by seq); a full read reaching no further back than the last read's newest entry
+	// lost what lay between, which is kept as a gap. A failed read is a gap too.
+	read(): Promise<void>
+	// What every read since the first one brought in, newest first.
+	entries(): DesktopSyncActivity[]
+	gaps(): string[]
+}
+
+// The trail starts with a read; only what is newer than that read counts. A read never throws.
+export async function activityTrail(
+	readRing: (limit: number) => Promise<DesktopSyncActivity[]>,
+	limit = ACTIVITY_PER_PAIR
+): Promise<ActivityTrail> {
+	const gathered = new Map<number, DesktopSyncActivity>()
+	const gaps: string[] = []
+	// Awaited inside the try so a reader that throws before returning its promise is a gap too.
+	const readOrGap = async () => {
+		try {
+			return await readRing(limit)
+		} catch (error) {
+			gaps.push(`an activity read failed: ${errorMessage(error)}`)
+
+			return null
+		}
+	}
+	// The first read's newest seq: what is at or below it predates the trail.
+	const start = (await readOrGap())?.[0]?.seq ?? -1
+	let newest = start
+
+	return {
+		async read() {
+			const ring = await readOrGap()
+
+			if (ring === null) {
+				return
+			}
+
+			const oldest = ring.at(-1)
+
+			if (ring.length >= limit && oldest !== undefined && oldest.seq > newest) {
+				gaps.push(`activity lost between seq ${String(newest)} and ${String(oldest.seq)} (the ring overran between two reads)`)
+			}
+
+			for (const item of ring) {
+				if (item.seq > start) {
+					gathered.set(item.seq, item)
+				}
+			}
+
+			newest = Math.max(newest, ring[0]?.seq ?? -1)
+		},
+		entries: () => [...gathered.values()].sort((a, b) => b.seq - a.seq),
+		gaps: () => [...gaps]
+	}
+}
+
+// Quits the instance a chain started: asks its main processes to quit gracefully (DesktopOs.requestQuit) and fails on
+// an unclean exit or a crash report. The launched child (the app, its AppImage runtime or the wrapper it was started
+// through) must exit with 0 and no signal when it still runs at the quit; when it has already exited and no main process
+// is left, an exit other than that fails too. A child that exited cleanly long ago (an update or relaunch started the
+// running app) is not this instance's.
+export async function quitInstance(
+	os: Pick<DesktopOs, "crashReport" | "requestQuit">,
+	target: Pick<Target, "executable" | "mainProcesses">,
+	launched: Launched | null,
+	what: string,
+	attach: (file: string, text: string) => void,
+	output: () => string,
+	timeoutMs = EXIT_TIMEOUT_MS,
+	pollMs = 1000
+): Promise<void> {
+	const pids = target.mainProcesses().map(item => item.pid)
+	const running = launched !== null && (await exitWithin(launched, 0)) === null
+
+	if (pids.length === 0 && running) {
+		fail(`${what}: the launched instance is running but no main process is visible`)
+	}
+
+	const evidence = async (extra: readonly number[] = []): Promise<string[]> => {
+		const cores: string[] = []
+
+		for (const pid of [...pids, ...extra.filter(pid => !pids.includes(pid))]) {
+			const report = await os.crashReport(target.executable, pid)
+
+			if (report !== null) {
+				cores.push(report.slice(0, report.indexOf("\n")))
+				attach(`core-${String(pid)}.txt`, report)
+			}
+		}
+
+		attach("output.log", output())
+
+		return cores
+	}
+	const unclean = (exit: Exit | null) => exit === null || exit.code !== 0 || exit.signal !== null
+
+	if (launched !== null && !running && pids.length === 0) {
+		const exit = await launched.exited
+
+		if (unclean(exit)) {
+			const cores = await evidence(launched.child.pid === undefined ? [] : [launched.child.pid])
+
+			fail(`${what} had already exited, not gracefully: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
+		}
+	}
+
+	await os.requestQuit(pids)
+
+	if (launched !== null && running) {
+		const exit = await exitWithin(launched, timeoutMs)
+
+		if (unclean(exit)) {
+			const cores = await evidence()
+
+			fail(`${what} did not quit gracefully: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
+		}
+	}
+
+	await waitFor(`${what} to exit`, timeoutMs, () => (target.mainProcesses().length === 0 ? true : null), pollMs)
+
+	const cores = await evidence()
+
+	if (cores.length > 0) {
+		fail(`${what} crashed while quitting: ${cores.join(", ")}`)
+	}
 }
 
 // A contract result's value; anything but { ok: true, value } fails, named, with what came back.
@@ -303,12 +468,14 @@ export interface Chain {
 	snapshotOf(name: string): Promise<Snapshot>
 	rootOf(name: string): string
 	// No transfer in any pair's activity but the `allowed` ("<pair>:<kind>:<relPath>"), and every plan empty but for
-	// exactly the held `conflicts` per pair name. With `since` (epoch ms), only the activity from then on counts.
+	// exactly the held `conflicts` per pair name. With `since` (epoch ms), only the activity from then on counts. A pair
+	// with a trail (by pair id) is read through it: what the trail gathered counts, and so does a gap in it.
 	quietActivity(
 		pairs: readonly { name: string; id: string }[],
 		allowed: ReadonlySet<string>,
 		conflicts?: Readonly<Record<string, number>>,
-		since?: number
+		since?: number,
+		trails?: ReadonlyMap<string, ActivityTrail>
 	): Promise<string>
 	// The update scenario with the chain's hooks, then evidence, cleanup and the findings.
 	run(options: Omit<UpdateOptions, "hooks">, hooks: Omit<UpdateHooks, "beforeReset">): Promise<void>
@@ -406,49 +573,15 @@ export async function openChain(name: string, options: Pick<UpdateOptions, "targ
 			await chain.renderer?.browser.close().catch(() => undefined)
 			chain.renderer = null
 
-			const pids = target.mainProcesses().map(item => item.pid)
-
-			if (pids.length === 0 && chain.launched !== null && (await exitWithin(chain.launched, 0)) === null) {
-				fail(`${what}: the launched instance is running but no main process is visible`)
-			}
-
-			await os.requestQuit(pids)
-
-			const evidence = async (): Promise<string[]> => {
-				const cores: string[] = []
-
-				for (const pid of pids) {
-					const report = await os.crashReport(target.executable, pid)
-
-					if (report !== null) {
-						cores.push(report.slice(0, report.indexOf("\n")))
-						findings.attach(`${name}-${what}-core-${String(pid)}.txt`, report)
-					}
-				}
-
-				findings.attach(`${name}-${what}-output.log`, tail(appOutput, 3000))
-
-				return cores
-			}
-
-			if (chain.launched !== null && pids.includes(chain.launched.child.pid ?? -1)) {
-				const exit = await exitWithin(chain.launched, EXIT_TIMEOUT_MS)
-
-				if (exit === null || exit.code !== 0 || exit.signal !== null) {
-					const cores = await evidence()
-
-					fail(`${what} did not quit gracefully: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
-				}
-			}
-
-			await waitFor(`${what} to exit`, EXIT_TIMEOUT_MS, () => (target.mainProcesses().length === 0 ? true : null), 1000)
+			await quitInstance(
+				os,
+				target,
+				chain.launched,
+				what,
+				(file, text) => findings.attach(`${name}-${what}-${file}`, text),
+				() => tail(appOutput, 3000)
+			)
 			chain.launched = null
-
-			const cores = await evidence()
-
-			if (cores.length > 0) {
-				fail(`${what} crashed while quitting: ${cores.join(", ")}`)
-			}
 		},
 
 		async signedOutOnFailure(step) {
@@ -565,13 +698,23 @@ export async function openChain(name: string, options: Pick<UpdateOptions, "targ
 			}
 		},
 
-		async quietActivity(pairs, allowed, conflicts = {}, since = 0) {
+		async quietActivity(pairs, allowed, conflicts = {}, since = 0, trails) {
 			const problems: string[] = []
 
 			for (const pair of pairs) {
-				const activity = await desktop<DesktopSyncActivity[]>(chain.page(), `window.desktop.sync.activity(${json(pair.id)}, 200)`)
+				const trail = trails?.get(pair.id)
+
+				await trail?.read()
+
+				const activity =
+					trail?.entries() ??
+					(await desktop<DesktopSyncActivity[]>(
+						chain.page(),
+						`window.desktop.sync.activity(${json(pair.id)}, ${String(ACTIVITY_PER_PAIR)})`
+					))
 
 				problems.push(
+					...(trail?.gaps() ?? []).map(gap => `${pair.name}: ${gap}`),
 					...activity
 						.filter(
 							item =>
@@ -582,24 +725,22 @@ export async function openChain(name: string, options: Pick<UpdateOptions, "targ
 						.map(item => `${pair.name}: ${item.kind} ${item.relPath ?? ""}`)
 				)
 
-				const plan = ok(
-					"plan",
-					await desktop<DesktopSyncResult<DesktopSyncPlan | null>>(chain.page(), `window.desktop.sync.plan(${json(pair.id)})`)
+				const problem = await planProblem(
+					pair.name,
+					async () =>
+						ok(
+							"plan",
+							await desktop<DesktopSyncResult<DesktopSyncPlan | null>>(
+								chain.page(),
+								`window.desktop.sync.plan(${json(pair.id)})`
+							)
+						),
+					planId => desktopCall(chain.page(), `window.desktop.sync.releasePlan(${json(planId)})`),
+					conflicts[pair.name] ?? 0
 				)
 
-				if (plan !== null) {
-					await desktopCall(chain.page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
-
-					const { actions, heldDeletions, refused } = plan.summary
-
-					if (
-						actions !== 0 ||
-						heldDeletions !== 0 ||
-						plan.summary.conflicts !== (conflicts[pair.name] ?? 0) ||
-						refused !== null
-					) {
-						problems.push(`${pair.name}: plan ${json(plan.summary)}`)
-					}
+				if (problem !== null) {
+					problems.push(problem)
 				}
 			}
 

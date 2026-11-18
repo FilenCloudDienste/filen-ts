@@ -56,6 +56,45 @@ describe("loadMountsStore", () => {
 		expect(parseMountsConfig(file.data?.toString() ?? null, vi.fn())).toEqual(store.get())
 	})
 
+	it("adopts a file that failed its startup read once it reads, before the first update", async () => {
+		const stored = { ...DEFAULT_MOUNTS, legacyApplied: true }
+		const file = memoryFile(Buffer.from(JSON.stringify(stored)))
+		const setAside = vi.fn(() => Promise.resolve())
+		let failures = 1
+		const store = await loadMountsStore(
+			{
+				...file,
+				read: () => (failures-- > 0 ? Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" })) : file.read()),
+				setAside
+			},
+			vi.fn()
+		)
+
+		expect(store.get()).toBe(DEFAULT_MOUNTS)
+		await store.update(config => ({ ...config, serves: { sftp: { ...defaultServe("sftp"), enabled: true } } }))
+
+		expect(parseMountsConfig(file.data?.toString() ?? null, vi.fn())).toEqual({
+			...stored,
+			serves: { sftp: { ...defaultServe("sftp"), enabled: true } }
+		})
+		expect(setAside).not.toHaveBeenCalled()
+	})
+
+	it("sets a file that stays unreadable aside before the first update, and goes on from the defaults", async () => {
+		const file = memoryFile(Buffer.from(JSON.stringify({ ...DEFAULT_MOUNTS, legacyApplied: true })))
+		const setAside = vi.fn(() => Promise.resolve())
+		const store = await loadMountsStore(
+			{ ...file, read: () => Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" })), setAside },
+			vi.fn()
+		)
+
+		await store.update(config => ({ ...config, drive: { ...config.drive, enabled: true, mountPoint: "/Users/u/Filen" } }))
+		await store.update(config => config)
+
+		expect(setAside).toHaveBeenCalledOnce()
+		expect(store.get()).toMatchObject({ legacyApplied: false, drive: { enabled: true } })
+	})
+
 	it("a failed write keeps the config", async () => {
 		const file = memoryFile()
 		const store = await loadMountsStore({ ...file, write: () => Promise.reject(new Error("EIO")) }, vi.fn())

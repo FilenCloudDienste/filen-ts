@@ -9,6 +9,11 @@ export function clip(text: string): string {
 	return text.length > TEXT_MAX ? text.slice(0, TEXT_MAX) : text
 }
 
+// A path the engine reports, which main refuses with a NUL in it: a remote name may hold one, so it is shown as U+FFFD.
+export function clipPath(path: string): string {
+	return clip(path.replaceAll("\0", "\uFFFD"))
+}
+
 // An error the host raises itself, before any engine call.
 export class HostError extends Error {
 	readonly error: NativeError
