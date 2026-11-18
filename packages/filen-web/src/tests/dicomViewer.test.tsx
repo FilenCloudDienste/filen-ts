@@ -20,6 +20,7 @@ const remote = vi.hoisted(() => ({
 	reset: vi.fn(),
 	attach: vi.fn(),
 	setBudget: vi.fn(),
+	tagValue: vi.fn((_path: readonly number[]) => Promise.resolve("the whole value")),
 	tags: vi.fn((): Promise<DicomTagLevel> =>
 		Promise.resolve({
 			rows: [
@@ -29,6 +30,7 @@ const remote = vi.hoisted(() => ({
 					name: "Patient's Name",
 					item: null,
 					value: "Doe^Jane",
+					truncated: false,
 					length: 8,
 					children: 0,
 					isPrivate: false
@@ -161,7 +163,9 @@ describe("DicomViewer", () => {
 		renderViewer({ info: INFO, failure: null })
 
 		expect(await screen.findByText("CT · 3×2")).toBeTruthy()
-		expect(remote.show).toHaveBeenCalledWith(0)
+		await vi.waitFor(() => {
+			expect(remote.show).toHaveBeenCalledWith(0)
+		})
 
 		for (const name of ["Window: Default", "Invert", "Reset", "Tags"]) {
 			expect(screen.getByRole("button", { name }), name).toBeTruthy()
@@ -254,6 +258,36 @@ describe("DicomViewer", () => {
 		})
 		expect(remote.open).toHaveBeenCalledTimes(1)
 		device.refine(false)
+	})
+
+	it("copies the whole of a value its row shows cut, from the worker", async () => {
+		const writeText = vi.fn((_text: string) => Promise.resolve())
+
+		Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+		remote.tags.mockResolvedValueOnce({
+			rows: [
+				{
+					tag: "(0008,1030)",
+					vr: "LO",
+					name: "Study Description",
+					item: null,
+					value: "the whole…",
+					truncated: true,
+					length: 2048,
+					children: 0,
+					isPrivate: false
+				}
+			],
+			more: 0
+		})
+		renderViewer({ info: INFO, failure: null })
+		fireEvent.click(await screen.findByRole("button", { name: "Tags" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Copy value" }))
+		await vi.waitFor(() => {
+			expect(writeText).toHaveBeenCalledWith("the whole value")
+		})
+		expect(remote.tagValue).toHaveBeenCalledWith([0])
+		Reflect.deleteProperty(navigator, "clipboard")
 	})
 
 	it("closes a bridge that opens only once the viewer is gone", async () => {

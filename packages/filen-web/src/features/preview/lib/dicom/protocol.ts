@@ -73,6 +73,8 @@ export interface DicomTagRow {
 	readonly item: number | null
 	// The value as text; null for binary data or a value the file does not hold in what was read.
 	readonly value: string | null
+	// The value is cut for its row (ending in …): a copy asks the worker for the whole of it.
+	readonly truncated: boolean
 	// The value's length in bytes; -1 for an undefined length.
 	readonly length: number
 	// Items of a sequence, elements of an item.

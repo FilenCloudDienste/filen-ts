@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronRightIcon, CopyIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
-import { copyText } from "@/lib/copyText"
+import { copyText, copyTextLater } from "@/lib/copyText"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import type { DicomTagLevel, DicomTagRow } from "@/features/preview/lib/dicom/protocol"
 
@@ -58,9 +58,16 @@ function TagValue({ row }: { row: DicomTagRow }) {
 }
 
 // The file's tags, as the worker names and reads them, one level at a time: sequences and items collapsed until opened,
-// a window of rows drawn however many there are. One value at a time is copied. Its own file, as useVirtualizer opts it
-// out of the React Compiler.
-export function DicomTagTree({ load }: { load: (path: readonly number[]) => Promise<DicomTagLevel> }) {
+// a window of rows drawn however many there are. One value at a time is copied, whole even when its row shows it cut.
+// Its own file, as useVirtualizer opts it out of the React Compiler.
+export function DicomTagTree({
+	load,
+	loadValue
+}: {
+	load: (path: readonly number[]) => Promise<DicomTagLevel>
+	// The whole value of the row at a path, for a copy of one cut for its row.
+	loadValue: (path: readonly number[]) => Promise<string | null>
+}) {
 	const { t } = useTranslation("preview")
 	const [levels, setLevels] = useState<ReadonlyMap<string, DicomTagLevel>>(new Map())
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -183,7 +190,16 @@ export function DicomTagTree({ load }: { load: (path: readonly number[]) => Prom
 											title={t("previewDicomTagCopy")}
 											aria-label={t("previewDicomTagCopy")}
 											onClick={() => {
-												void copyText(row.value ?? "", t("previewDicomTagCopied"))
+												const copied = t("previewDicomTagCopied")
+
+												if (row.truncated) {
+													void copyTextLater(
+														loadValue(shown.path).then(value => value ?? ""),
+														copied
+													)
+												} else {
+													void copyText(row.value ?? "", copied)
+												}
 											}}
 										>
 											<CopyIcon />

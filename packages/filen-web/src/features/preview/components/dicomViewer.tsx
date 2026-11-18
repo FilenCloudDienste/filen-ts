@@ -443,7 +443,14 @@ function DicomImage({
 							</span>
 						) : undefined
 					}
-					sidePanel={tags ? <DicomTagTree load={path => owned.run(remote => remote.tags(path))} /> : undefined}
+					sidePanel={
+						tags ? (
+							<DicomTagTree
+								load={path => owned.run(remote => remote.tags(path))}
+								loadValue={path => owned.run(remote => remote.tagValue(path))}
+							/>
+						) : undefined
+					}
 					toolbar={
 						<div className="flex flex-col items-center gap-1 rounded-xl bg-background/80 p-1 shadow-sm">
 							{info.frames > 1 ? (
@@ -547,7 +554,10 @@ function TagsOnly({ owned, onBack }: { owned: DicomWorkerHandle; onBack: () => v
 				</Button>
 			</div>
 			<div className="min-h-0 flex-1">
-				<DicomTagTree load={path => owned.run(remote => remote.tags(path))} />
+				<DicomTagTree
+					load={path => owned.run(remote => remote.tags(path))}
+					loadValue={path => owned.run(remote => remote.tagValue(path))}
+				/>
 			</div>
 		</div>
 	)

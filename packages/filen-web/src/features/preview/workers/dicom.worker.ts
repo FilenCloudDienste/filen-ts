@@ -37,7 +37,7 @@ import {
 	type Window
 } from "@/features/preview/lib/dicom/pixels.logic"
 import { FITTED, dragWindow, panBy, placement, wheelFactor, windowStep, zoomAt, type View } from "@/features/preview/lib/dicom/view.logic"
-import { tagLevel, textOf } from "@/features/preview/lib/dicom/tagTree"
+import { tagLevel, tagValue, textOf } from "@/features/preview/lib/dicom/tagTree"
 import type { DicomText } from "@/features/preview/lib/dicom/charset.logic"
 import type { FragmentIndex } from "@/features/preview/lib/dicom/frames.logic"
 import type {
@@ -603,6 +603,12 @@ const api = {
 		const state = opened
 
 		return state === null ? { rows: [], more: 0 } : tagLevel(state.header.dataSet, path, state.text)
+	},
+	// The whole value of the row at `path`, for a copy (one value at a time).
+	tagValue: (path: readonly number[]): string | null => {
+		const state = opened
+
+		return state === null ? null : tagValue(state.header.dataSet, path, state.text)
 	}
 }
 

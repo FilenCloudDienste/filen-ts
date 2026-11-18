@@ -18,7 +18,7 @@ import {
 	nativeFrame,
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
-import { tagLevel, textOf } from "@/features/preview/lib/dicom/tagTree"
+import { TAG_VALUE_CHARS, tagLevel, tagValue, textOf } from "@/features/preview/lib/dicom/tagTree"
 import { DICOM_WHOLE_MAX_BYTES, type DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import {
 	DEFLATED,
@@ -504,6 +504,28 @@ describe("the tags", () => {
 		expect(rows(false).get("(0028,0106)")).toMatchObject({ vr: "US", value: "65531" })
 		expect(rows(false).get("(0028,1101)")).toMatchObject({ vr: "US", value: "256\\0\\16" })
 		expect(rows(false).get("(0028,1201)")).toMatchObject({ vr: "OW", value: null })
+	})
+
+	it("cuts a long value for its row, and gives the whole of it for a copy", () => {
+		const long = "x".repeat(TAG_VALUE_CHARS * 2)
+		const many = Array.from({ length: 100 }, (_, i) => i)
+		const file = dicomFile({
+			transferSyntax: EXPLICIT_LE,
+			elements: [text(0x00081030, "LO", long), us(0x00283002, ...many)]
+		})
+		const header = readHeader(memorySource(file), { decodeBytes: DECODE })
+		const rootText = textOf(header.dataSet, null)
+		const rows = tagLevel(header.dataSet, [], rootText).rows
+		const at = (tag: string) => rows.findIndex(row => row.tag === tag)
+		const description = rows[at("(0008,1030)")]
+		const lut = rows[at("(0028,3002)")]
+
+		expect(description).toMatchObject({ truncated: true, value: `${"x".repeat(TAG_VALUE_CHARS)}…` })
+		expect(tagValue(header.dataSet, [at("(0008,1030)")], rootText)).toBe(long)
+		expect(lut?.truncated).toBe(true)
+		expect(lut?.value?.endsWith("\\63\\…")).toBe(true)
+		expect(tagValue(header.dataSet, [at("(0028,3002)")], rootText)).toBe(many.join("\\"))
+		expect(rows.find(row => row.tag === "(0002,0010)")?.truncated).toBe(false)
 	})
 
 	it("reads an item's text by its own character set, else its parent's", () => {

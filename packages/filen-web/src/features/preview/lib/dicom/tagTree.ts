@@ -99,13 +99,17 @@ function held(dataSet: DataSet, element: Element): boolean {
 	return element.length !== 0xffffffff && element.dataOffset + element.length <= dataSet.byteArray.length
 }
 
-function cut(text: string): string {
-	return text.length > TAG_VALUE_CHARS ? `${text.slice(0, TAG_VALUE_CHARS)}…` : text
+// A value as text, and whether it was cut short of the whole.
+interface Value {
+	readonly text: string
+	readonly truncated: boolean
 }
 
-function numbers(dataSet: DataSet, element: Element, vr: string): string {
+// At most `limit` of a numeric element's values.
+function numbers(dataSet: DataSet, element: Element, vr: string, limit: number): Value {
 	const size = NUMBER_SIZES[vr] ?? 1
-	const count = Math.min(NUMBERS_SHOWN, Math.floor(element.length / size))
+	const total = Math.floor(element.length / size)
+	const count = Math.min(limit, total)
 	const values: string[] = []
 	const tag = element.tag
 
@@ -145,26 +149,28 @@ function numbers(dataSet: DataSet, element: Element, vr: string): string {
 		}
 	}
 
-	const shown = values.join("\\")
-
-	return Math.floor(element.length / size) > count ? `${shown}\\…` : shown
+	return { text: values.join("\\"), truncated: total > count }
 }
 
-function valueOf(dataSet: DataSet, element: Element, vr: string, text: DicomText): string | null {
+// An element's value as text: cut for its row (TAG_VALUE_CHARS, NUMBERS_SHOWN), or `whole` for a copy of it. Null for
+// binary data, or a value past what was read.
+function valueOf(dataSet: DataSet, element: Element, vr: string, text: DicomText, whole: boolean): Value | null {
 	if (!held(dataSet, element) || element.length === 0) {
-		return element.length === 0 ? "" : null
+		return element.length === 0 ? { text: "", truncated: false } : null
 	}
 
 	if (TEXT_VRS.has(vr)) {
-		// Long text past the cut is never decoded whole.
-		const bytes = dataSet.byteArray.subarray(element.dataOffset, element.dataOffset + Math.min(element.length, TAG_VALUE_CHARS * 4))
-		const value = text.decode(bytes, vr).replace(/[\0 ]+$/, "")
+		// Long text past the cut is never decoded whole for its row.
+		const length = whole ? element.length : Math.min(element.length, TAG_VALUE_CHARS * 4)
+		const value = text.decode(dataSet.byteArray.subarray(element.dataOffset, element.dataOffset + length), vr).replace(/[\0 ]+$/, "")
 
-		return cut(value)
+		if (whole) return { text: value, truncated: false }
+
+		return { text: value.slice(0, TAG_VALUE_CHARS), truncated: value.length > TAG_VALUE_CHARS || length < element.length }
 	}
 
 	if (vr in NUMBER_SIZES) {
-		return numbers(dataSet, element, vr)
+		return numbers(dataSet, element, vr, whole ? Number.POSITIVE_INFINITY : NUMBERS_SHOWN)
 	}
 
 	return null
@@ -174,13 +180,15 @@ function elementRow(dataSet: DataSet, element: Element, text: DicomText, signed:
 	const vr = vrOf(element, signed)
 	const isPrivate = isPrivateTag(element.tag)
 	const entry = isPrivate ? null : dictionaryEntry(element.tag)
+	const value = element.items === undefined ? valueOf(dataSet, element, vr, text, false) : null
 
 	return {
 		tag: displayTag(element.tag),
 		vr,
 		name: entry?.name ?? null,
 		item: null,
-		value: element.items === undefined ? valueOf(dataSet, element, vr, text) : null,
+		value: value === null ? null : value.truncated ? `${value.text}${TEXT_VRS.has(vr) ? "" : "\\"}…` : value.text,
+		truncated: value?.truncated ?? false,
 		length: element.hadUndefinedLength === true ? -1 : element.length,
 		children: element.items?.length ?? 0,
 		isPrivate
@@ -191,30 +199,52 @@ function sortedElements(dataSet: DataSet): Element[] {
 	return Object.values(dataSet.elements).sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
 }
 
-// The rows under `path` (indices from the root: an element, then its item, then that item's element, …).
-export function tagLevel(root: DataSet, path: readonly number[], rootText: DicomText): DicomTagLevel {
+interface Level {
+	readonly dataSet: DataSet
+	readonly text: DicomText
+	// A sequence's items, when `path` ends at the sequence; else the data set's elements are the level.
+	readonly items: Element[] | null
+}
+
+// The level `path` leads to (indices from the root: an element, then its item, then that item's element, …), or null
+// for a path that leads nowhere.
+function levelAt(root: DataSet, path: readonly number[], rootText: DicomText): Level | null {
 	let dataSet: DataSet = root
 	let text = rootText
-	const signed = root.elements["x00280103"] !== undefined && root.uint16("x00280103") === 1
 	let items: Element[] | null = null
 
 	for (const index of path) {
 		if (items === null) {
 			const element = sortedElements(dataSet)[index]
 
-			if (element?.items === undefined) return { rows: [], more: 0 }
+			if (element?.items === undefined) return null
 
 			items = element.items
 		} else {
 			const item = items[index]?.dataSet
 
-			if (item === undefined) return { rows: [], more: 0 }
+			if (item === undefined) return null
 
 			dataSet = item
 			text = textOf(item, text)
 			items = null
 		}
 	}
+
+	return { dataSet, text, items }
+}
+
+function pixelsSigned(root: DataSet): boolean {
+	return root.elements["x00280103"] !== undefined && root.uint16("x00280103") === 1
+}
+
+// The rows under `path`.
+export function tagLevel(root: DataSet, path: readonly number[], rootText: DicomText): DicomTagLevel {
+	const level = levelAt(root, path, rootText)
+
+	if (level === null) return { rows: [], more: 0 }
+
+	const { dataSet, text, items } = level
 
 	if (items !== null) {
 		const rows = items.slice(0, TAG_ROWS_MAX).map((item, index) => ({
@@ -223,6 +253,7 @@ export function tagLevel(root: DataSet, path: readonly number[], rootText: Dicom
 			name: null,
 			item: index + 1,
 			value: null,
+			truncated: false,
 			length: item.hadUndefinedLength === true ? -1 : item.length,
 			children: item.dataSet === undefined ? 0 : Object.keys(item.dataSet.elements).length,
 			isPrivate: false
@@ -232,9 +263,23 @@ export function tagLevel(root: DataSet, path: readonly number[], rootText: Dicom
 	}
 
 	const elements = sortedElements(dataSet)
+	const signed = pixelsSigned(root)
 
 	return {
 		rows: elements.slice(0, TAG_ROWS_MAX).map(element => elementRow(dataSet, element, text, signed)),
 		more: Math.max(0, elements.length - TAG_ROWS_MAX)
 	}
+}
+
+// The whole value of the element at `path` (its row's path), for a copy of a row whose value was cut.
+export function tagValue(root: DataSet, path: readonly number[], rootText: DicomText): string | null {
+	const level = levelAt(root, path.slice(0, -1), rootText)
+
+	if (level?.items !== null) return null
+
+	const element = sortedElements(level.dataSet)[path.at(-1) ?? -1]
+
+	if (element === undefined || element.items !== undefined) return null
+
+	return valueOf(level.dataSet, element, vrOf(element, pixelsSigned(root)), level.text, true)?.text ?? null
 }
