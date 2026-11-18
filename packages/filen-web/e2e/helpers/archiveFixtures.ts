@@ -424,6 +424,30 @@ export function gateStopTarGz(): Buffer {
 	return gzip(buildTar([...small, { name: "e2e-arc-gate-stop/blob.bin", data: prng(17)(GATE_BIG_BLOB_BYTES) }]), 1)
 }
 
+// Archives inside an archive (W6 §6.1 A): a zip and a tar stored in a zip (read by range, `mapped`) and a zip deflated
+// in it (inflated before it opens, `seekable`), next to a plain file.
+export const NESTED_TEXTS = {
+	zip: "inside the inner zip\n",
+	tar: "inside the inner tar\n",
+	packed: "inside the packed zip\n"
+} as const
+
+export function nestedZip(): Buffer {
+	const innerZip = buildZip([
+		{ name: "day1/photo.txt", data: "a photo's caption\n" },
+		{ name: "readme.txt", data: NESTED_TEXTS.zip }
+	])
+	const innerTar = buildTar([{ name: "notes/a.txt", data: NESTED_TEXTS.tar }])
+	const packed = buildZip([{ name: "packed.txt", data: NESTED_TEXTS.packed }])
+
+	return buildZip([
+		{ name: "top.txt", data: "the outer archive's own file\n" },
+		{ name: "trip/inner.zip", data: innerZip, method: "stored" },
+		{ name: "trip/inner.tar", data: innerTar, method: "stored" },
+		{ name: "trip/packed.zip", data: packed }
+	])
+}
+
 export function gateNextZip(): Buffer {
 	return buildZip([{ name: "next.txt", data: "the archive after the gate\n" }])
 }
