@@ -5,6 +5,9 @@ import { trackCspViolations } from "./helpers/csp"
 // The real Turnstile widget against the page's CSP, which admits its frame only under the challenge path. Nothing is
 // stubbed but the report endpoint (never reached: the dialog is not sent). public-links.spec.ts stubs the widget's
 // script, so this is the one test that would see the live widget move its frame elsewhere.
+// The frame is judged by its document's request and response, which every engine reports: Playwright's Firefox never
+// gives the widget's frame a URL (page.frames() lists it as ""), and a frame the CSP blocks issues no request at all.
+// The challenge itself fails under automation (Turnstile error 600010) in every engine; only the frame is checked.
 
 const RANDOM_UUID = "deadbeef-0000-4000-8000-0123456789ab"
 const HEX_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -26,6 +29,7 @@ test.describe("Turnstile challenge frame (real widget)", () => {
 	test("loads under the challenge path with no frame-src violation", async ({ page, context }) => {
 		const cspViolations = trackCspViolations(page)
 		const challengeDocuments: string[] = []
+		const loadedDocuments: string[] = []
 
 		// Recorded by the page itself: a violation event names the directive, which a console message does not in every
 		// engine.
@@ -42,18 +46,21 @@ test.describe("Turnstile challenge frame (real widget)", () => {
 				challengeDocuments.push(request.url())
 			}
 		})
+		context.on("response", response => {
+			if (response.request().resourceType() === "document" && response.url().startsWith(CHALLENGE_HOST) && response.ok()) {
+				loadedDocuments.push(response.url())
+			}
+		})
 		await page.route(REPORT_ENDPOINT, route => route.abort())
 
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 		await page.getByRole("button", { name: "Report abuse" }).click({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByRole("dialog", { name: "Report abuse" })).toBeVisible()
 
-		await expect
-			.poll(() => page.frames().filter(frame => frame.url().startsWith(CHALLENGE_PATH)).length, { timeout: WIDGET_TIMEOUT_MS })
-			.toBeGreaterThan(0)
+		await expect.poll(() => loadedDocuments.length, { timeout: WIDGET_TIMEOUT_MS }).toBeGreaterThan(0)
 
-		expect(challengeDocuments.length).toBeGreaterThan(0)
 		expect(challengeDocuments.filter(url => !url.startsWith(CHALLENGE_PATH))).toEqual([])
+		expect(loadedDocuments.filter(url => !url.startsWith(CHALLENGE_PATH))).toEqual([])
 		expect(await page.evaluate(() => window.__frameViolations ?? [])).toEqual([])
 		expect(cspViolations.filter(message => /frame/i.test(message))).toEqual([])
 	})
