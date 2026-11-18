@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 import type { EntryAccess } from "@filen/sdk-rs"
-import { comicPages, comicViews, largestSolidBlock, onScreen, viewLabel, viewOf } from "@/features/comics/lib/pages.logic"
+import {
+	comicPages,
+	comicViews,
+	landscapeOf,
+	largestSolidBlock,
+	onScreen,
+	pageOpens,
+	viewLabel,
+	viewOf
+} from "@/features/comics/lib/pages.logic"
 import { comicFormatOfName, COMIC_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { gateFor } from "@/features/archive/lib/archiveGate.logic"
@@ -45,6 +54,36 @@ describe("comicPages", () => {
 
 		expect(store.membersMapped).toBe(true)
 		expect(comicPages(store).map(slot => store.name(slot))).toEqual(["p1.jpg", "p2.jpg"])
+	})
+
+	it("orders paths segment by segment: a directory's pages stay together and sort as its name", () => {
+		const store = storeOf([
+			{ path: "ch1.5/p1.jpg", access: DIRECT },
+			{ path: "ch1/p2.jpg", access: DIRECT },
+			{ path: "a b/p1.jpg", access: DIRECT },
+			{ path: "a/p1.jpg", access: DIRECT },
+			{ path: "ch1/p10.jpg", access: DIRECT }
+		])
+
+		expect(comicPages(store).map(slot => `${store.dirPath(store.parent(slot))}/${store.name(slot)}`)).toEqual([
+			"a/p1.jpg",
+			"a b/p1.jpg",
+			"ch1/p2.jpg",
+			"ch1/p10.jpg",
+			"ch1.5/p1.jpg"
+		])
+	})
+
+	it("keeps a page too large to show in its place, marked as not shown", () => {
+		const store = storeOf([
+			{ path: "p1.jpg", access: DIRECT, size: 10 },
+			{ path: "p2.jpg", access: DIRECT, size: 2 ** 40 },
+			{ path: "p3.jpg", access: DIRECT, size: 10 }
+		])
+		const pages = comicPages(store)
+
+		expect(pages.map(slot => store.name(slot))).toEqual(["p1.jpg", "p2.jpg", "p3.jpg"])
+		expect(pages.map(slot => pageOpens(store, slot))).toEqual([true, false, true])
 	})
 
 	it("finds the largest solid block its pages lie in", () => {
@@ -114,5 +153,28 @@ describe("comic book names", () => {
 		expect(gateFor(comicFormatOfName("a.cbt"), big, false)).toBe("gate")
 		expect(gateFor(comicFormatOfName("a.cbr"), big, false)).toBe("gate")
 		expect(comicFormatOfName("a.zip")).toBeNull()
+	})
+})
+
+describe("landscapeOf", () => {
+	// A PNG's signature and IHDR chunk: all the header the sniff reads for its size.
+	function pngHead(width: number, height: number): Uint8Array {
+		const bytes = new Uint8Array(33)
+		const view = new DataView(bytes.buffer)
+
+		bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+		view.setUint32(8, 13)
+		bytes.set([0x49, 0x48, 0x44, 0x52], 12)
+		view.setUint32(16, width)
+		view.setUint32(20, height)
+		bytes.set([8, 6, 0, 0, 0], 24)
+
+		return bytes
+	}
+
+	it("tells a two-page scan from its header, before it is decoded", () => {
+		expect(landscapeOf(pngHead(200, 100))).toBe(true)
+		expect(landscapeOf(pngHead(100, 200))).toBe(false)
+		expect(landscapeOf(new Uint8Array(16))).toBeNull()
 	})
 })

@@ -129,8 +129,18 @@ export function readAheadBudget(retainedBudget: number | undefined): number {
 	return Math.floor((retainedBudget ?? ARCHIVE_RETAINED_BUDGET_BYTES) / 2)
 }
 
-// Most files a window reads ahead of the asked one.
-export const READ_AHEAD_MAX_ENTRIES = 16
+// Files a window reads ahead of the asked one: this many at first, and for an entry opened on its own.
+export const READ_AHEAD_MIN_ENTRIES = 16
+// The most, once a reader keeps turning pages (readAheadEntries; owner decision: an adaptive window).
+export const READ_AHEAD_MAX_ENTRIES = 64
+// Files the window grows by for each page turned in a row.
+const READ_AHEAD_GROWTH = 4
+
+// How many files a solid comic's window reads ahead after `turns` pages turned forward in a row: 16 at first, growing
+// with the turns up to 64, so a long read decodes the block far fewer times. The read-ahead budget still bounds it.
+export function readAheadEntries(turns: number): number {
+	return Math.min(READ_AHEAD_MAX_ENTRIES, Math.max(READ_AHEAD_MIN_ENTRIES, turns * READ_AHEAD_GROWTH))
+}
 
 // One entry's whole read, as the page planned it from its listing.
 export interface EntryReadPlan {

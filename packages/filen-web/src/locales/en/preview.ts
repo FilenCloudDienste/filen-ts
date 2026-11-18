@@ -834,6 +834,12 @@ export const preview = {
 	previewComicSpread: "Two-page spread",
 	/** Comic reader — toggle reading right to left (manga) */
 	previewComicRightToLeft: "Right to left",
+	/** Comic reader — a page image's text alternative, and the page slider's spoken value; {{page}} is its number, {{total}} the page count */
+	previewComicPageOf: "Page {{page}} of {{total}}",
+	/** Comic reader — in place of a page whose image is too large to show here; {{page}} is its number, {{size}} its size */
+	previewComicPageTooLarge: "Page {{page}} is too large to show here ({{size}}).",
+	/** Comic reader — shows the comic book archive's files as an archive's, when it holds no page the reader shows */
+	previewComicBrowseArchive: "Browse as archive",
 	/** Toast — the file lies in a solid block of the archive too large to read it from here (above 512 MiB); {{name}} is the file */
 	previewArchiveEntryExtractToRead: "“{{name}}” is packed with too much of the archive to read here. Extract the archive to read it.",
 	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */

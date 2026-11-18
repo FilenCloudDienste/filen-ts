@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { AnyFile, ArchiveEntryId, ArchiveFormat, EntryAccess, EntryByteAccess, EntryDownloadReport, ListUpdate } from "@filen/sdk-rs"
 import { createArchiveReaders, READ_AHEAD_IDLE_MS, type ReaderLike, type ReaderOpenRequest } from "@/workers/archiveReaders"
 import { entryCost, entryReadPlan, extractsToRead, SOLID_BLOCK_READ_MAX_BYTES } from "@/features/archive/lib/entryAccess.logic"
-import { READ_AHEAD_MAX_ENTRIES, readAheadBudget } from "@/lib/sdk/archiveListing"
+import { READ_AHEAD_MAX_ENTRIES, READ_AHEAD_MIN_ENTRIES, readAheadBudget, readAheadEntries } from "@/lib/sdk/archiveListing"
 import { storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
 
 // The worker's archive readers against a model of the SDK's: what each call fetches of the archive, so a run of entries
@@ -23,30 +23,39 @@ function idOf(index: number): ArchiveEntryId {
 	return { archive: TEST_ARCHIVE, index }
 }
 
-// Real comic pages: 2 to 5 MiB each, packed to 90 % of that.
-const SIZES = Array.from({ length: PAGES }, (_, i) => 2 * MiB + ((i * 7919) % 31) * Math.floor((3 * MiB) / 30))
-const PACKED = SIZES.map(size => Math.round(size * 0.9))
-const OFFSETS = SIZES.map((_, i) => SIZES.slice(0, i).reduce((sum, size) => sum + size, 0))
-const PACKED_ENDS = PACKED.map((_, i) => PACKED.slice(0, i + 1).reduce((sum, size) => sum + size, 0))
-const LINEAR = PACKED_ENDS.at(-1) ?? 0
+// A comic's pages, packed to 90 % of their size, one after another in one solid block.
+function shapeOf(sizes: readonly number[]) {
+	const packed = sizes.map(size => Math.round(size * 0.9))
+	const offsets = sizes.map((_, i) => sizes.slice(0, i).reduce((sum, size) => sum + size, 0))
+	const packedEnds = packed.map((_, i) => packed.slice(0, i + 1).reduce((sum, size) => sum + size, 0))
 
-function size(index: number): number {
-	return SIZES[index] ?? 0
+	return { sizes, offsets, packedEnds, linear: packedEnds.at(-1) ?? 0 }
 }
 
-function solidAccess(i: number): EntryAccess {
+type Shape = ReturnType<typeof shapeOf>
+
+// Real comic pages: 2 to 5 MiB each.
+const SHAPE = shapeOf(Array.from({ length: PAGES }, (_, i) => 2 * MiB + ((i * 7919) % 31) * Math.floor((3 * MiB) / 30)))
+const OFFSETS = SHAPE.offsets
+const LINEAR = SHAPE.linear
+
+function size(index: number, shape: Shape = SHAPE): number {
+	return shape.sizes[index] ?? 0
+}
+
+function solidAccess(i: number, shape: Shape = SHAPE): EntryAccess {
 	return {
 		type: "solidBlock",
-		skippedBytes: BigInt(OFFSETS[i] ?? 0),
-		estimatedPackedBytes: BigInt(PACKED_ENDS[i] ?? 0),
-		blockPackedBytes: BigInt(LINEAR)
+		skippedBytes: BigInt(shape.offsets[i] ?? 0),
+		estimatedPackedBytes: BigInt(shape.packedEnds[i] ?? 0),
+		blockPackedBytes: BigInt(shape.linear)
 	}
 }
 
-// A listing of PAGES pages in one solid block, as the SDK lists a solid .cbr's members and a .tar.gz's.
-function solidListing() {
+// A listing of the shape's pages in one solid block, as the SDK lists a solid .cbr's members and a .tar.gz's.
+function solidListing(shape: Shape = SHAPE) {
 	return storeOf(
-		Array.from({ length: PAGES }, (_, i) => ({ path: `p${String(i + 1)}.jpg`, index: i, size: size(i), access: solidAccess(i) }))
+		shape.sizes.map((pageSize, i) => ({ path: `p${String(i + 1)}.jpg`, index: i, size: pageSize, access: solidAccess(i, shape) }))
 	)
 }
 
@@ -63,7 +72,9 @@ const EMPTY_PASS = { entries: 0n, bytesWritten: 0n, bytesRead: 0n, checked: true
 // The SDK's reader as far as cost goes. A solid RAR (`sequential`): every pass decodes the block from its start. A gzip
 // tar (`seekable`): one decoder over the tar's stream goes on from where it stopped, else from the last checkpoint at or
 // before the read.
-function modelReader(kind: "solidRar" | "gzipTar") {
+function modelReader(kind: "solidRar" | "gzipTar", shape: Shape = SHAPE) {
+	const { offsets: OFFSETS, packedEnds: PACKED_ENDS } = shape
+	const size = (index: number): number => shape.sizes[index] ?? 0
 	const cost = { fetched: 0, passes: 0, downloads: 0, ranges: 0 }
 	let cursor = 0
 	let decodedTo = 0
@@ -162,6 +173,19 @@ function readPage(readers: ReturnType<typeof readersOver>["readers"], index: num
 	return readers.readWhole(id, idOf(index), size(index), entryReadPlan(solidListing(), index, true, BUDGET), EVENTS, signal)
 }
 
+// A comic read through from its first page, each page turned forward: the window grows with the turns.
+async function readThrough(readers: ReturnType<typeof readersOver>["readers"], shape: Shape): Promise<void> {
+	const store = solidListing(shape)
+
+	for (let index = 0; index < shape.sizes.length; index++) {
+		const plan = entryReadPlan(store, index, true, BUDGET, readAheadEntries(index))
+
+		expect((await readers.readWhole("r", idOf(index), size(index, shape), plan, EVENTS, new AbortController().signal)).length).toBe(
+			size(index, shape)
+		)
+	}
+}
+
 describe("archive readers: what 50 sequential pages of 2 to 5 MiB fetch, once the cost was accepted", () => {
 	it("reads a solid .cbr's pages in passes of a read-ahead window: a few times the archive, never once per page", async () => {
 		const model = modelReader("solidRar")
@@ -172,12 +196,38 @@ describe("archive readers: what 50 sequential pages of 2 to 5 MiB fetch, once th
 		}
 
 		// The window is bounded by the read-ahead budget (24 MiB): five to eleven pages a pass.
-		expect(model.cost.passes).toBeGreaterThanOrEqual(Math.ceil(PAGES / (READ_AHEAD_MAX_ENTRIES + 1)))
+		expect(model.cost.passes).toBeGreaterThanOrEqual(Math.ceil(PAGES / (READ_AHEAD_MIN_ENTRIES + 1)))
 		expect(model.cost.passes).toBeLessThan(PAGES / 4)
 		expect(model.cost.downloads).toBe(0)
 		// Each pass decodes from the block's start: about four times the archive in all.
 		expect(model.cost.fetched / LINEAR).toBeLessThan(5)
 		expect(model.cost.fetched / LINEAR).toBeGreaterThan(2.5)
+	})
+
+	it("reads big pages as often as the budget allows however many turns: the window grows only in pages", async () => {
+		const model = modelReader("solidRar")
+		const { readers } = readersOver(model)
+
+		await readThrough(readers, SHAPE)
+
+		// 2 to 5 MiB pages fill the 24 MiB budget after five to eleven: the window cannot grow past it.
+		expect(model.cost.fetched / LINEAR).toBeLessThan(5)
+	})
+
+	it("reads a long solid comic of scanned pages through in about twice its size, its window growing with the turns", async () => {
+		// 200 pages of 300 to 500 KiB (about 80 MiB): a typical scanned comic.
+		const long = shapeOf(Array.from({ length: 200 }, (_, i) => 300 * KiB + ((i * 7919) % 101) * 2 * KiB))
+		const model = modelReader("solidRar", long)
+		const { readers } = readersOver(model)
+
+		await readThrough(readers, long)
+
+		const ratio = model.cost.fetched / long.linear
+
+		// About 2.2 times in 4 passes; a window of 16 throughout fetches about 6.6 times the archive in 12.
+		expect(model.cost.passes).toBeLessThanOrEqual(5)
+		expect(ratio).toBeLessThan(2.5)
+		expect(ratio).toBeGreaterThan(1.5)
 	})
 
 	it("reads a .tar.gz's members through range reads that decode on from the last one: the archive once", async () => {
@@ -526,6 +576,11 @@ describe("archive readers: lifetime", () => {
 	})
 })
 
+// 100 pages of 1 KiB in one solid block.
+function shortPages() {
+	return solidListing(shapeOf(Array.from({ length: 100 }, () => KiB)))
+}
+
 describe("read plans", () => {
 	const solid = (skipped: number, block: number): EntryAccess => ({
 		type: "solidBlock",
@@ -585,6 +640,14 @@ describe("read plans", () => {
 		const plan = entryReadPlan(solidListing(), 0, true, BUDGET)
 
 		expect(plan.window.slice(1).reduce((sum, item) => sum + item.size, 0)).toBeLessThanOrEqual(BUDGET)
-		expect(plan.window.length).toBeLessThanOrEqual(READ_AHEAD_MAX_ENTRIES + 1)
+		expect(plan.window.length).toBeLessThanOrEqual(READ_AHEAD_MIN_ENTRIES + 1)
+		expect(entryReadPlan(shortPages(), 0, true, BUDGET, READ_AHEAD_MAX_ENTRIES).window).toHaveLength(READ_AHEAD_MAX_ENTRIES + 1)
+		expect(entryReadPlan(shortPages(), 0, true, 4 * KiB, READ_AHEAD_MAX_ENTRIES).window).toHaveLength(5)
+	})
+
+	it("grows the window with the pages turned, from 16 to 64", () => {
+		expect(readAheadEntries(0)).toBe(READ_AHEAD_MIN_ENTRIES)
+		expect(readAheadEntries(8)).toBe(32)
+		expect(readAheadEntries(1000)).toBe(READ_AHEAD_MAX_ENTRIES)
 	})
 })

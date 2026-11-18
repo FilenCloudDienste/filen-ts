@@ -3,7 +3,7 @@ import {
 	ENTRY_ACCESS,
 	ENTRY_FLAG,
 	ENTRY_KIND,
-	READ_AHEAD_MAX_ENTRIES,
+	READ_AHEAD_MIN_ENTRIES,
 	archiveRetainedBudget,
 	readAheadBudget,
 	type EntryReadPlan
@@ -158,15 +158,16 @@ export function lonePlan(index: number, size: number, maxSolidSkip: number): Ent
 }
 
 // How the entry is read whole: alone, or, once the session accepted a solid cost (`readAhead`), a solid block's entry
-// in one pass with the files its block stores right after it, up to READ_AHEAD_MAX_ENTRIES files and `aheadBytes`, so
-// reading them in turn decodes the block once per window rather than once per file. The pass may throw away the
-// entry's own skip and what lies between the window's files, no more. A slot no longer in the store (a relist) reads
-// alone.
+// in one pass with the files its block stores right after it, up to `aheadEntries` files (readAheadEntries) and
+// `aheadBytes`, so reading them in turn decodes the block once per window rather than once per file. The pass may throw
+// away the entry's own skip and what lies between the window's files, no more. A slot no longer in the store (a relist)
+// reads alone.
 export function entryReadPlan(
 	store: EntryStore,
 	slot: number,
 	readAhead: boolean,
-	aheadBytes: number = deviceReadAheadBytes()
+	aheadBytes: number = deviceReadAheadBytes(),
+	aheadEntries: number = READ_AHEAD_MIN_ENTRIES
 ): EntryReadPlan {
 	const index = store.index(slot)
 	const maxSolidSkip = maxSolidSkipFor(store, slot)
@@ -183,7 +184,7 @@ export function entryReadPlan(
 	let end = store.solidSkipped(slot) + store.size(slot)
 	let bytes = 0
 
-	for (let next = index + 1; next <= index + WINDOW_SCAN && window.length <= READ_AHEAD_MAX_ENTRIES; next++) {
+	for (let next = index + 1; next <= index + WINDOW_SCAN && window.length <= aheadEntries; next++) {
 		const at = store.slotOfIndex(next)
 
 		if (at === -1 || store.kind(at) !== ENTRY_KIND.file) {

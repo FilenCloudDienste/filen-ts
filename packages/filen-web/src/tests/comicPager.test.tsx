@@ -10,7 +10,12 @@ import "@/lib/i18n"
 // The comic reader's pager over a listed comic: pages read through leases on the archive's reader (the worker stood
 // in for by readPage), the solid cost asked once, the page keys, the spread and right-to-left toggles, the read-ahead.
 
-const { readPage } = vi.hoisted(() => ({ readPage: vi.fn<(index: number, maxSolidSkip: number) => Promise<Uint8Array>>() }))
+const { readPage, sdkCancels, pageTokens } = vi.hoisted(() => ({
+	readPage: vi.fn<(index: number, maxSolidSkip: number) => Promise<Uint8Array>>(),
+	sdkCancels: vi.fn<(token: string) => void>(),
+	// Each read's cancel token, to the page it read.
+	pageTokens: new Map<string, number>()
+}))
 
 vi.mock("@/lib/sdk/client", () => {
 	const leases = new Map<string, EntryReadPlan>()
@@ -30,13 +35,19 @@ vi.mock("@/lib/sdk/client", () => {
 
 				return Promise.resolve()
 			},
-			cancelPreviewDownload: () => Promise.resolve(),
-			downloadOriginBytes: (origin: ByteOrigin) => {
+			cancelPreviewDownload: (token: string) => {
+				sdkCancels(token)
+
+				return Promise.resolve()
+			},
+			downloadOriginBytes: (origin: ByteOrigin, _access: string, _cap: number, token: string) => {
 				const plan = origin.kind === "entry" ? leases.get(origin.reader) : undefined
 
 				if (origin.kind !== "entry" || plan === undefined) {
 					return Promise.reject(new Error("archive reader is closed"))
 				}
+
+				pageTokens.set(token, origin.entry.index)
 
 				return readPage(origin.entry.index, plan.maxSolidSkip)
 			}
@@ -49,14 +60,25 @@ vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client({ defaultOptions: { queries: { retry: false } } }) }
 })
+// The image viewer stood in for by its bytes as text, on screen (ImageShownContext) once they are in.
 vi.mock("@/features/preview/components/readOnlyPreviewBody", async () => {
+	const { use, useEffect } = await import("react")
 	const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
+	const { ImageShownContext } = await import("@/features/preview/lib/imageDisplay")
 
 	return {
-		ReadOnlyPreviewBody: ({ item }: { item: Parameters<typeof usePreviewBytes>[0] }) => {
+		ReadOnlyPreviewBody: ({ item, alt }: { item: Parameters<typeof usePreviewBytes>[0]; alt: string }) => {
 			const result = usePreviewBytes(item)
+			const shown = use(ImageShownContext)
+			const success = result.status === "success"
 
-			return <p>{result.status === "success" ? new TextDecoder().decode(result.bytes) : result.status}</p>
+			useEffect(() => {
+				if (success) {
+					shown?.({ width: 2, height: 3 })
+				}
+			}, [success, shown])
+
+			return <p title={alt}>{success ? new TextDecoder().decode(result.bytes) : result.status}</p>
 		}
 	}
 })
@@ -86,12 +108,12 @@ function solid(skipped: number): EntryAccess {
 	return { type: "solidBlock", skippedBytes: BigInt(skipped), estimatedPackedBytes: BigInt(skipped + 100), blockPackedBytes: 1000n }
 }
 
-function showComic(count: number, solidPages = false) {
+function showComic(count: number, solidPages = false, sizeOf: (index: number) => number = () => 4) {
 	const store = storeOf(
 		Array.from({ length: count }, (_, i) => ({
 			path: `p${String(i + 1)}.jpg`,
 			index: i,
-			size: 4,
+			size: sizeOf(i),
 			access: solidPages ? solid(i * 4) : ({ type: "direct", packedBytes: 4n } as const)
 		}))
 	)
@@ -149,14 +171,14 @@ describe("ComicPager", () => {
 		showComic(3)
 
 		expect(await screen.findByText("page 1")).toBeTruthy()
-		expect(screen.getByText("1 / 3")).toBeTruthy()
+		expect(screen.getAllByText("1 / 3")).toHaveLength(2)
 
 		press("PageDown")
 		expect(await screen.findByText("page 2")).toBeTruthy()
 		press("PageDown")
 		expect(await screen.findByText("page 3")).toBeTruthy()
 		press("PageDown")
-		expect(screen.getByText("3 / 3")).toBeTruthy()
+		expect(screen.getAllByText("3 / 3")).toHaveLength(2)
 		press("PageUp")
 		expect(await screen.findByText("page 2")).toBeTruthy()
 	})
@@ -202,12 +224,69 @@ describe("ComicPager", () => {
 		expect(readPage.mock.calls.map(([index]) => index)).toEqual([0])
 	})
 
+	it("keeps the read ahead of the page a turn shows, which its viewer joins: read once", async () => {
+		const second = Promise.withResolvers<Uint8Array>()
+
+		readPage.mockImplementation(index =>
+			index === 1 ? second.promise : Promise.resolve(new TextEncoder().encode(`page ${String(index + 1)}`))
+		)
+		showComic(3)
+
+		expect(await screen.findByText("page 1")).toBeTruthy()
+		await vi.waitFor(() => {
+			expect(readPage.mock.calls.map(([index]) => index)).toContain(1)
+		})
+		press("PageDown")
+		second.resolve(new TextEncoder().encode("page 2"))
+		expect(await screen.findByText("page 2")).toBeTruthy()
+		expect(readPage.mock.calls.filter(([index]) => index === 1)).toHaveLength(1)
+		expect(sdkCancels.mock.calls.map(([token]) => pageTokens.get(token))).not.toContain(1)
+	})
+
+	it("turns one page with Page Down on the slider, and names its value as a page of the book", async () => {
+		showComic(5)
+
+		expect(await screen.findByText("page 1")).toBeTruthy()
+
+		// The thumb's range input (jsdom lays nothing out, so Base UI keeps the thumb hidden from role queries).
+		const range = (): HTMLInputElement => {
+			const input = document.querySelector<HTMLInputElement>("input[type=range]")
+
+			if (input === null) {
+				throw new Error("no slider")
+			}
+
+			return input
+		}
+		const thumb = range()
+
+		expect(thumb.getAttribute("aria-valuetext")).toBe("Page 1 of 5")
+		act(() => {
+			fireEvent.keyDown(thumb, { key: "PageDown", code: "PageDown" })
+		})
+		expect(await screen.findByText("page 2")).toBeTruthy()
+		expect(screen.getAllByText("2 / 5").length).toBeGreaterThan(0)
+		expect(range().getAttribute("aria-valuetext")).toBe("Page 2 of 5")
+	})
+
+	it("keeps a page too large to show in its place with a note, the numbering the book's", async () => {
+		showComic(3, false, index => (index === 1 ? 2 ** 40 : 4))
+
+		expect(await screen.findByText("page 1")).toBeTruthy()
+		press("PageDown")
+		expect(await screen.findByText(/Page 2 is too large to show here/)).toBeTruthy()
+		expect(screen.getAllByText("2 / 3").length).toBeGreaterThan(0)
+		expect(readPage.mock.calls.map(([index]) => index)).not.toContain(1)
+		press("PageDown")
+		expect(await screen.findByText("page 3")).toBeTruthy()
+	})
+
 	it("shows the cover alone and then pairs, the earlier page on the right when reading right to left", async () => {
 		showComic(5)
 
 		fireEvent.click(await screen.findByRole("button", { name: "Two-page spread" }))
 		press("PageDown")
-		expect(await screen.findByText("2–3 / 5")).toBeTruthy()
+		expect(await screen.findAllByText("2–3 / 5")).toHaveLength(2)
 
 		const shown = (): string[] => screen.getAllByText(/^page \d$/).map(page => page.textContent)
 
@@ -221,6 +300,6 @@ describe("ComicPager", () => {
 		})
 		// ◀ goes forward now.
 		fireEvent.click(screen.getByRole("button", { name: "Next page" }))
-		expect(await screen.findByText("4–5 / 5")).toBeTruthy()
+		expect(await screen.findAllByText("4–5 / 5")).toHaveLength(2)
 	})
 })

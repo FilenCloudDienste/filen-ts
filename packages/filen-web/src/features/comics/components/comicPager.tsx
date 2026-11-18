@@ -1,9 +1,19 @@
-import { useEffect, useEffectEvent, useState } from "react"
+import {
+	useEffect,
+	useEffectEvent,
+	useRef,
+	useState,
+	type FocusEvent as ReactFocusEvent,
+	type KeyboardEvent as ReactKeyboardEvent,
+	type PointerEvent as ReactPointerEvent
+} from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronLeftIcon, ChevronRightIcon, Columns2Icon, ArrowLeftRightIcon } from "lucide-react"
+import { DirectionProvider } from "@base-ui/react/direction-provider"
 import { formatBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { useAction } from "@/lib/keymap/useAction"
+import { readAheadEntries } from "@/lib/sdk/archiveListing"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingSession } from "@/features/archive/lib/listingSession"
@@ -12,11 +22,12 @@ import { entryCost, entryKey, entryReadPlan, needsCostConfirm } from "@/features
 import { isArchivePasswordError } from "@/features/archive/lib/entryDownload"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
-import { getPreviewBytes } from "@/features/preview/lib/previewCache"
+import { getPreviewBytes, joinPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { ImageKeyGroupContext, type ImageKeyGroup, type ShownImage } from "@/features/preview/lib/imageDisplay"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
-import { comicViews, onScreen, viewLabel, viewOf } from "@/features/comics/lib/pages.logic"
+import { comicViews, landscapeOf, onScreen, pageOpens, viewLabel, viewOf } from "@/features/comics/lib/pages.logic"
 import { setComicDirection, setComicLayout, useComicDirection, useComicLayout } from "@/features/comics/lib/comicPreferences"
 import { ComicPage } from "@/features/comics/components/comicPage"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -33,11 +44,32 @@ export interface ComicPagerProps {
 
 const NO_PAGES: ReadonlySet<number> = new Set()
 
+// One page read ahead: its own lease, cancel token and abort, so a turn cancels only the pages it no longer needs.
+interface AheadRead {
+	readonly password: string | undefined
+	readonly abort: AbortController
+	readonly token: string
+	readonly release: () => void
+}
+
+// Ends a page's read ahead: its fetch, its lease.
+function cancelRead(running: Map<number, AheadRead>, slot: number, read: AheadRead): void {
+	running.delete(slot)
+	read.abort.abort()
+	void sdkApi.cancelPreviewDownload(read.token)
+	read.release()
+}
+
+function sliderPage(moved: number | readonly number[]): number {
+	return (typeof moved === "number" ? moved : (moved[0] ?? 1)) - 1
+}
+
 // A comic's pages, a page or a spread at a time (owner decisions E7/E8, W6 §6.3 A). PageUp/PageDown and the on-screen
-// arrows turn pages; ←/→ stay with paging between files. Right to left puts the earlier page of a spread on
-// the right and makes ◀ go forward. Below the layout breakpoint a spread shows as single pages, the stored setting
-// kept. A solid archive's later pages ask their cost once (the listing session's), as the archive browser does; the
-// next view is read ahead only after the shown one arrived, and a turn cancels it.
+// arrows turn pages; ←/→ stay with paging between files. Right to left puts the earlier page of a spread on the right,
+// makes ◀ go forward and runs the slider from the right. Below the layout breakpoint a spread shows as single pages, the
+// stored setting kept. A solid archive's later pages ask their cost once (the listing session's), as the archive
+// browser does. The next view is read ahead once the shown one is on screen; a turn keeps the reads of the pages it
+// turns to and cancels only the rest. A solid comic's window grows with the pages turned in a row (readAheadEntries).
 export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const access = usePreviewAccessMode()
@@ -53,9 +85,21 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 	const [declined, setDeclined] = useState(false)
 	const [password, setPassword] = useState(() => session()?.password())
 	const [passwordAsk, setPasswordAsk] = useState<{ wrong: boolean } | null>(null)
+	// The page the slider is dragged to, before it is let go.
+	const [scrub, setScrub] = useState<number | null>(null)
+	// Pages turned forward in a row: the read-ahead window grows with them.
+	const [turns, setTurns] = useState(0)
+	// Pages on screen (or done failing), by slot and password.
+	const [shownPages, setShownPages] = useState<ReadonlySet<string>>(() => new Set())
 	const views = comicViews(pages.length, layout, landscape)
 	const viewIndex = Math.max(0, viewOf(views, page))
 	const view = views[viewIndex] ?? []
+	const aheadEntries = readAheadEntries(turns)
+	const reads = useRef(new Map<number, AheadRead>())
+	const pagesRef = useRef<HTMLDivElement>(null)
+	const activePage = useRef<Element | null>(null)
+	const positions = new Map(pages.map((slot, position) => [slot, position]))
+	const shownKey = (slot: number): string => `${String(slot)}:${password ?? ""}`
 
 	const held = (position: number): boolean => {
 		const slot = pages[position]
@@ -72,11 +116,12 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 		return target.find(position => !held(position) && needsCostConfirm(store, pages[position] ?? -1)) ?? null
 	}
 
-	const show = (index: number): void => {
+	// Shows the view `index`, or asks its cost first; true when it shows.
+	const show = (index: number): boolean => {
 		const target = views[Math.min(Math.max(index, 0), views.length - 1)]
 
 		if (target === undefined) {
-			return
+			return false
 		}
 
 		const costly = costlyIn(target)
@@ -84,12 +129,41 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 		if (costly !== null) {
 			setCostAsk(costly)
 
-			return
+			return false
 		}
 
 		setDeclined(false)
 		setPage(target[0] ?? 0)
+
+		return true
 	}
+
+	const forward = (): void => {
+		if (viewIndex < views.length - 1 && show(viewIndex + 1)) {
+			setTurns(previous => previous + view.length)
+		}
+	}
+	const back = (): void => {
+		show(viewIndex - 1)
+	}
+	// A jump is no read in a row: the window starts small again.
+	const jump = (position: number): void => {
+		setTurns(0)
+		show(viewOf(views, position))
+	}
+
+	const markLandscape = (position: number): void => {
+		setLandscape(previous => (previous.has(position) ? previous : new Set([...previous, position])))
+	}
+
+	// A page's bytes, once in: its header tells a two-page scan before the picture is decoded.
+	const sniffLandscape = useEffectEvent((slot: number, bytes: Uint8Array) => {
+		const position = positions.get(slot)
+
+		if (position !== undefined && landscapeOf(bytes) === true) {
+			markLandscape(position)
+		}
+	})
 
 	const initialCost = viewIndex === 0 && page === 0 && !declined && costAsk === null ? costlyIn(view) : null
 
@@ -98,87 +172,120 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 	}
 
 	// Rebound to the view shown: a handler from an earlier render would turn from where it was.
-	useAction(
-		"preview.comicNextPage",
-		() => {
-			show(viewIndex + 1)
-		},
-		undefined,
-		[viewIndex, views]
-	)
-	useAction(
-		"preview.comicPreviousPage",
-		() => {
-			show(viewIndex - 1)
-		},
-		undefined,
-		[viewIndex, views]
-	)
+	useAction("preview.comicNextPage", forward, undefined, [viewIndex, views])
+	useAction("preview.comicPreviousPage", back, undefined, [viewIndex, views])
 
-	// The next view read ahead, once the shown one is in (its viewers' own loads, joined), and only when reading it
-	// asks nothing. A turn or a jump cancels it.
-	const next = views[viewIndex + 1]
-	const blocked = declined || costlyIn(view) !== null
-	const ahead = !blocked && next !== undefined && costlyIn(next) === null && costAsk === null ? next : null
-	// What the read-ahead reads: a new array of the same pages is the same read-ahead.
-	const aheadKey = ahead === null ? "" : `${view.join(",")}>${ahead.join(",")}:${password ?? ""}`
-	const aheadRead = useEffectEvent(() => ({ ahead, view, password }))
+	// The shown pages' headers, from bytes their viewers loaded or are loading (joined, never fetched again).
+	const viewSlots = view.map(position => pages[position] ?? -1)
+	const viewKey = `${viewSlots.join(",")}:${cacheScope ?? ""}`
+	const shownRead = useEffectEvent(() => ({ slots: viewSlots, scope: cacheScope }))
 
 	useEffect(() => {
-		const { ahead: reading, view: shown, password: readWith } = aheadRead()
+		const { slots, scope } = shownRead()
+		let gone = false
 
-		if (reading === null) {
-			return
-		}
-
-		const abort = new AbortController()
-		const token = crypto.randomUUID()
-		const releases: (() => void)[] = []
-		const load = (position: number): Promise<unknown> => {
-			const slot = pages[position]
-
-			if (slot === undefined) {
-				return Promise.resolve()
+		for (const slot of slots) {
+			if (slot === -1) {
+				continue
 			}
 
-			const leaseId = `${token}:${String(slot)}`
+			void joinPreviewBytes(scope, entryKey(source.uuid, store.index(slot))).then(bytes => {
+				if (!gone && bytes !== undefined) {
+					sniffLandscape(slot, bytes)
+				}
+			})
+		}
 
-			releases.push(
-				leaseEntry({
+		return () => {
+			gone = true
+		}
+	}, [viewKey, source.uuid, store])
+
+	// The next view read ahead, once the shown one is on screen, and only when reading it asks nothing.
+	const next = views[viewIndex + 1]
+	const blocked = declined || costlyIn(view) !== null
+	const viewShown = view.every(position => shownPages.has(shownKey(pages[position] ?? -1)))
+	const ahead = !blocked && viewShown && next !== undefined && costlyIn(next) === null && costAsk === null ? next : null
+	const wanted = (ahead ?? []).flatMap(position => {
+		const slot = pages[position]
+
+		return slot !== undefined && pageOpens(store, slot) && !held(position) ? [slot] : []
+	})
+	const readsKey = `${wanted.join(",")}|${viewSlots.join(",")}|${password ?? ""}|${String(aheadEntries)}`
+	const plan = useEffectEvent(() => ({
+		wanted,
+		keep: new Set([...wanted, ...viewSlots]),
+		password,
+		aheadEntries,
+		costAccepted: session()?.costAccepted() === true
+	}))
+
+	useEffect(() => {
+		const { wanted: wantedSlots, keep, password: readWith, aheadEntries: entries, costAccepted } = plan()
+		const running = reads.current
+
+		// A page no longer wanted, nor shown now (a turn onto it keeps it: its viewer joins the read), is cancelled.
+		for (const [slot, read] of running) {
+			if (!keep.has(slot) || read.password !== readWith) {
+				cancelRead(running, slot, read)
+			}
+		}
+
+		for (const slot of wantedSlots) {
+			if (running.has(slot)) {
+				continue
+			}
+
+			const token = crypto.randomUUID()
+			const leaseId = `${token}:${String(slot)}`
+			const read: AheadRead = {
+				password: readWith,
+				abort: new AbortController(),
+				token,
+				release: leaseEntry({
 					leaseId,
 					file: source.file,
 					anon: source.anon,
 					password: readWith,
-					plan: entryReadPlan(store, slot, session()?.costAccepted() === true),
+					plan: entryReadPlan(store, slot, costAccepted, undefined, entries),
 					events: { phase: () => undefined, verified: () => undefined, failed: () => undefined }
 				})
-			)
+			}
 
-			return loadOriginBytes(entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot)), token, {
+			running.set(slot, read)
+			loadOriginBytes(entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot)), token, {
 				access,
 				cap: store.size(slot),
 				scope: cacheScope,
-				signal: abort.signal
+				signal: read.abort.signal
 			})
+				.then(
+					bytes => {
+						sniffLandscape(slot, bytes)
+					},
+					() => undefined
+				)
+				.finally(() => {
+					// Done: its bytes are in the preview cache, and a viewer reading them holds a lease of its own.
+					if (running.get(slot) === read) {
+						running.delete(slot)
+						read.release()
+					}
+				})
+				.catch(() => undefined)
 		}
+		// readsKey stands for what plan() reads.
+	}, [readsKey, store, source.file, source.anon, access, cacheScope])
 
-		void (async () => {
-			await Promise.all(shown.map(load))
-
-			for (const position of reading) {
-				await load(position)
-			}
-		})().catch(() => undefined)
+	useEffect(() => {
+		const running = reads.current
 
 		return () => {
-			abort.abort()
-			void sdkApi.cancelPreviewDownload(token)
-
-			for (const release of releases) {
-				release()
+			for (const [slot, read] of running) {
+				cancelRead(running, slot, read)
 			}
 		}
-	}, [aheadKey, pages, store, source.file, source.anon, access, cacheScope])
+	}, [])
 
 	if (passwordAsk !== null) {
 		return (
@@ -195,63 +302,105 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 
 	const costSlot = costAsk === null ? undefined : pages[costAsk]
 	// What the read after a yes fetches: the page and the ones read ahead with it.
-	const cost = costSlot === undefined ? null : entryCost(store, costSlot, entryReadPlan(store, costSlot, true))
-	const forward = (): void => {
-		show(viewIndex + 1)
-	}
-	const back = (): void => {
-		show(viewIndex - 1)
-	}
+	const cost = costSlot === undefined ? null : entryCost(store, costSlot, entryReadPlan(store, costSlot, true, undefined, aheadEntries))
 	// ◀ goes forward when reading right to left.
 	const left = direction === "rtl" ? forward : back
 	const right = direction === "rtl" ? back : forward
 	const atStart = viewIndex === 0
 	const atEnd = viewIndex >= views.length - 1
+	const label = viewLabel(view)
+	const scrubbed = scrub === null ? label : viewLabel(views[viewOf(views, scrub)] ?? view)
+	// Of a spread's two pages, the one last pointed at or focused takes the zoom keys; the first on screen before that.
+	const keyGroup: ImageKeyGroup = {
+		owns: element => {
+			const owner = activePage.current?.isConnected === true ? activePage.current : pagesRef.current?.firstElementChild
+
+			return owner?.contains(element) ?? true
+		}
+	}
+	const activate = (event: ReactPointerEvent<HTMLElement> | ReactFocusEvent<HTMLElement>): void => {
+		if (event.target instanceof Element) {
+			activePage.current = event.target.closest("[data-comic-page]")
+		}
+	}
+	// On the slider, Page Up and Page Down turn one view, as everywhere else in the reader (not ten pages).
+	const sliderKeys = (event: ReactKeyboardEvent<HTMLElement>): void => {
+		if (event.key !== "PageUp" && event.key !== "PageDown") {
+			return
+		}
+
+		event.preventDefault()
+		event.stopPropagation()
+
+		if (event.key === "PageDown") {
+			forward()
+		} else {
+			back()
+		}
+	}
 
 	return (
 		<div className="flex size-full flex-col">
-			<div className="flex min-h-0 flex-1 justify-center gap-1">
-				{blocked
-					? null
-					: onScreen(view, direction).map(position => {
-							const slot = pages[position] ?? -1
+			<ImageKeyGroupContext value={keyGroup}>
+				<div
+					ref={pagesRef}
+					className="flex min-h-0 flex-1 justify-center gap-1"
+					onPointerOver={activate}
+					onFocus={activate}
+				>
+					{blocked
+						? null
+						: onScreen(view, direction).map(position => {
+								const slot = pages[position] ?? -1
 
-							return (
-								<ComicPage
-									key={`${String(slot)}:${password ?? ""}`}
-									source={source}
-									store={store}
-									slot={slot}
-									password={password}
-									readAhead={session()?.costAccepted() === true}
-									onLandscape={() => {
-										setLandscape(previous => (previous.has(position) ? previous : new Set([...previous, position])))
-									}}
-									onVerified={() => {
-										if (password !== undefined) {
-											session()?.acceptPassword(password)
-										}
-									}}
-									onFailed={error => {
-										if (isArchivePasswordError(error)) {
-											setPasswordAsk({ wrong: error.kind === "ArchiveWrongPassword" || password !== undefined })
-										}
-									}}
-									onCancelWait={() => {
-										setDeclined(true)
-									}}
-								/>
-							)
-						})}
-				{declined ? (
-					<PreviewErrorState
-						message={t("previewComicNotOpened")}
-						onRetry={() => {
-							show(viewIndex)
-						}}
-					/>
-				) : null}
-			</div>
+								return (
+									<ComicPage
+										key={`${String(slot)}:${password ?? ""}`}
+										source={source}
+										store={store}
+										slot={slot}
+										position={position}
+										total={pages.length}
+										password={password}
+										readAhead={session()?.costAccepted() === true}
+										aheadEntries={aheadEntries}
+										onShown={(image: ShownImage | null) => {
+											if (image !== null && image.width > image.height) {
+												markLandscape(position)
+											}
+
+											setShownPages(previous => {
+												const key = shownKey(slot)
+
+												return previous.has(key) ? previous : new Set([...previous, key])
+											})
+										}}
+										onVerified={() => {
+											if (password !== undefined) {
+												session()?.acceptPassword(password)
+											}
+										}}
+										onFailed={error => {
+											if (isArchivePasswordError(error)) {
+												setPasswordAsk({ wrong: error.kind === "ArchiveWrongPassword" || password !== undefined })
+											}
+										}}
+										onCancelWait={() => {
+											setDeclined(true)
+										}}
+									/>
+								)
+							})}
+					{declined ? (
+						<PreviewErrorState
+							message={t("previewComicNotOpened")}
+							onRetry={() => {
+								show(viewIndex)
+							}}
+						/>
+					) : null}
+				</div>
+			</ImageKeyGroupContext>
 			<div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
 				<Button
 					variant="ghost"
@@ -262,21 +411,43 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 				>
 					<ChevronLeftIcon />
 				</Button>
-				<Slider
-					aria-label={t("previewComicPageSlider")}
-					min={1}
-					max={Math.max(pages.length, 1)}
-					step={1}
-					value={(view[0] ?? 0) + 1}
-					className="max-w-96 flex-1"
-					onValueChange={moved => {
-						const target = (typeof moved === "number" ? moved : (moved[0] ?? 1)) - 1
-
-						show(viewOf(views, target))
-					}}
-				/>
-				<span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-					{t("previewComicCounter", { pages: viewLabel(view), total: pages.length })}
+				<div
+					dir={direction}
+					className="flex max-w-96 flex-1"
+					onKeyDownCapture={sliderKeys}
+				>
+					<DirectionProvider direction={direction}>
+						<Slider
+							aria-label={t("previewComicPageSlider")}
+							min={1}
+							max={Math.max(pages.length, 1)}
+							step={1}
+							value={(scrub ?? view[0] ?? 0) + 1}
+							className="flex-1"
+							getAriaValueText={(_formatted, value) => t("previewComicPageOf", { page: value, total: pages.length })}
+							// Dragging only moves the counter; the page is read once the slider is let go, and only then asks a cost.
+							onValueChange={moved => {
+								setScrub(sliderPage(moved))
+							}}
+							onValueCommitted={moved => {
+								setScrub(null)
+								jump(sliderPage(moved))
+							}}
+						/>
+					</DirectionProvider>
+				</div>
+				<span
+					aria-hidden="true"
+					className="shrink-0 text-sm text-muted-foreground tabular-nums"
+				>
+					{t("previewComicCounter", { pages: scrubbed, total: pages.length })}
+				</span>
+				<span
+					aria-live="polite"
+					aria-atomic="true"
+					className="sr-only"
+				>
+					{t("previewComicCounter", { pages: label, total: pages.length })}
 				</span>
 				<Button
 					variant="ghost"

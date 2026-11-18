@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
+import { use, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
 import { imageKeyTransform, imageViewerKey } from "@/features/preview/lib/imageViewerKeys.logic"
@@ -7,6 +7,7 @@ import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { useObjectUrl } from "@/lib/useObjectUrl"
+import { ImageKeyGroupContext, ImageShownContext } from "@/features/preview/lib/imageDisplay"
 
 // What the zoom hands the picture it wraps: its pointer and double-click handlers, and its fit and transform.
 interface ZoomBinding {
@@ -65,12 +66,15 @@ function useZoom(natural: Size | null): { containerRef: RefObject<HTMLDivElement
 	}, [natural])
 
 	const bindings = useBindings()
+	const keyGroup = use(ImageKeyGroupContext)
 	const zoomed = transform.scale > 1
 	const onViewerKey = useLatestRef((event: KeyboardEvent): void => {
 		const container = containerRef.current
 
 		if (
 			container === null ||
+			// Another viewer beside it on screen takes the keys (a spread's other page).
+			(keyGroup !== null && !keyGroup.owns(container)) ||
 			event.defaultPrevented ||
 			isImeKeydown(event) ||
 			isRecordingCombo() ||
@@ -175,6 +179,7 @@ export function ZoomableImage({
 }) {
 	const [natural, setNatural] = useState<Size | null>(null)
 	const [image, setImage] = useState<HTMLImageElement | null>(null)
+	const shown = use(ImageShownContext)
 
 	// Stepping past a streamed image before it has loaded stops its download.
 	useReleaseOnUnmount(image)
@@ -205,7 +210,10 @@ export function ZoomableImage({
 							}
 				}
 				onLoad={event => {
-					setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+					const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }
+
+					setNatural(size)
+					shown?.(size)
 				}}
 				{...binding}
 			/>
@@ -241,6 +249,7 @@ export function BitmapImage({ bitmap, width, height, alt }: { bitmap: ImageBitma
 	)
 
 	const { containerRef, binding } = useZoom({ width, height })
+	const shown = use(ImageShownContext)
 
 	return (
 		<div
@@ -255,6 +264,7 @@ export function BitmapImage({ bitmap, width, height, alt }: { bitmap: ImageBitma
 					}
 
 					canvas.getContext("bitmaprenderer")?.transferFromImageBitmap(bitmap)
+					shown?.({ width, height })
 				}}
 				width={width}
 				height={height}
