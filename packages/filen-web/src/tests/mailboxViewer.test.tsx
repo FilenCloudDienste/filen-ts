@@ -6,69 +6,76 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
-import { MboxIndex, headerBlock, messageBytes } from "@/features/preview/lib/textPager/mbox.logic"
-import { readHeaderSummary } from "@/features/preview/lib/emailReading"
 
-// A mailbox lists the messages its pager worker finds (here the worker's own logic, run in place), counts them, and opens
-// the one chosen in the email viewer.
+// A mailbox lists the messages its pager worker finds (here the worker's own session, run in place), counts them,
+// filters them, opens the one chosen in the email viewer, and reports a failed read to its error state.
 
+const SEP = "From x@x Mon Nov 16 09:14:00 2026"
 const MAILBOX = new TextEncoder().encode(
-	["One", "Two", "Three"].map(subject => `From x\nFrom: X <x@example.com>\nSubject: ${subject}\n\nbody ${subject}\n\n`).join("")
+	["One", "Two", "Three"].map(subject => `${SEP}\nFrom: X <x@example.com>\nSubject: ${subject}\n\nbody ${subject}\n\n`).join("")
 )
-const { opened } = vi.hoisted(() => ({ opened: { current: [] as string[] } }))
+const { opened, failed, broken, restart } = vi.hoisted(() => ({
+	opened: { current: [] as string[] },
+	failed: { current: [] as unknown[] },
+	broken: { current: false },
+	restart: { current: false }
+}))
 
 vi.mock("@/features/preview/hooks/useTextPagerSession", async () => {
-	const { MboxIndex: Index, searchHeaders: search } = await import("@/features/preview/lib/textPager/mbox.logic")
-	const index = new Index(MAILBOX.length)
-	const source = { size: MAILBOX.length, scan: (start: number, end: number) => Promise.resolve(MAILBOX.subarray(start, end)) }
+	const { MailboxSession } = await import("@/features/preview/lib/textPager/mailboxSession")
+	const { readHeaderSummary } = await import("@/features/preview/lib/emailReading")
+	const read = (start: number, end: number) => MAILBOX.slice(start, end)
+	const fresh = () =>
+		new MailboxSession({
+			cached: { size: MAILBOX.length, read },
+			scan: {
+				size: MAILBOX.length,
+				scan: (start: number, end: number) =>
+					broken.current ? Promise.reject(new RangeError("port lost")) : Promise.resolve(read(start, end))
+			},
+			parse: readHeaderSummary
+		})
+	let session = fresh()
 	const remote = {
-		mboxEnsure: (want: number) => index.scanUntil(source, want, new AbortController().signal, () => undefined),
-		mboxRowsOf: async (indexes: readonly number[]) => {
-			const rows = []
-
-			for (const at of indexes) rows.push((await remote.mboxRows(at, 1))[0] ?? null)
-
-			return rows
-		},
-		mboxSearch: (query: string) =>
-			search(query, {
-				ensure: (want: number) => index.scanUntil(source, want, new AbortController().signal, () => undefined),
-				row: async (at: number) => (await remote.mboxRows(at, 1))[0] ?? { from: null, subject: null },
-				signal: new AbortController().signal,
-				onProgress: () => undefined
-			}),
+		mboxEnsure: (want: number) => session.ensure(want),
+		mboxRows: (first: number, count: number) => session.rowsFrom(first, count),
+		mboxRowsOf: (indexes: readonly number[]) => session.rowsOf(indexes),
+		mboxSearch: (query: string) => session.find(query, () => undefined),
+		mboxStopSearch: () => undefined,
 		mboxStop: () => undefined,
-		mboxRows: async (first: number, count: number) => {
-			const rows = []
-
-			for (let at = first; at < Math.min(first + count, index.count); at++) {
-				const span = index.span(at)
-				const block = span === null ? null : headerBlock(MAILBOX.subarray(span.start, span.end ?? MAILBOX.length))
-
-				rows.push(block === null ? null : await readHeaderSummary(block))
-			}
-
-			return rows
-		},
-		mboxMessage: (at: number) => {
-			const span = index.span(at)
-
-			return Promise.resolve({ status: "ok", bytes: messageBytes(MAILBOX.subarray(span?.start ?? 0, span?.end ?? MAILBOX.length)) })
-		}
+		mboxMessage: (at: number) => session.message(at)
 	}
 
 	return {
-		useTextPagerSession: () => ({
-			status: "ready",
-			reading: { pager: { run: (job: (r: typeof remote) => unknown) => Promise.resolve(job(remote)) } }
-		})
+		useTextPagerSession: () => {
+			// A new viewer's own worker: a fresh session.
+			if (restart.current) {
+				restart.current = false
+				session = fresh()
+			}
+
+			return {
+				status: "ready",
+				reading: {
+					pager: {
+						run: (job: (r: typeof remote) => unknown) => {
+							return Promise.resolve(job(remote))
+						}
+					},
+					fail: (error: unknown) => {
+						failed.current.push(error)
+					}
+				}
+			}
+		}
 	}
 })
 // Every row laid out (jsdom has no layout for the virtualizer to measure).
 vi.mock("@tanstack/react-virtual", () => ({
 	useVirtualizer: ({ count }: { count: number }) => ({
 		getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, start: index * 56 })),
-		getTotalSize: () => count * 56
+		getTotalSize: () => count * 56,
+		scrollToIndex: () => undefined
 	})
 }))
 vi.mock("@/features/preview/lib/accessMode", async importOriginal => ({
@@ -87,6 +94,8 @@ const { MailboxViewer } = await import("@/features/preview/components/mailboxVie
 
 afterEach(() => {
 	cleanup()
+	broken.current = false
+	failed.current = []
 })
 
 const ITEM = narrowItem({
@@ -106,11 +115,23 @@ const ITEM = narrowItem({
 	}
 } satisfies File)
 
+function mount(): void {
+	render(<MailboxViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+}
+
 describe("MailboxViewer", () => {
-	it("counts the messages it found and opens the one chosen in the email viewer", async () => {
-		render(<MailboxViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+	it("counts the messages it found, gives the list its size, and opens the one chosen in the email viewer", async () => {
+		mount()
 
 		expect(await screen.findByText("3 messages")).toBeTruthy()
+
+		const items = await screen.findAllByRole("listitem")
+
+		expect(items.map(row => [row.getAttribute("aria-setsize"), row.getAttribute("aria-posinset")])).toEqual([
+			["3", "1"],
+			["3", "2"],
+			["3", "3"]
+		])
 
 		fireEvent.click(await screen.findByText("Two"))
 
@@ -119,33 +140,30 @@ describe("MailboxViewer", () => {
 	})
 
 	it("filters the list to the messages whose sender or subject holds the query, and back", async () => {
-		render(<MailboxViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+		mount()
 
 		expect(await screen.findByText("Three")).toBeTruthy()
 
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search senders and subjects" }), { target: { value: "thr" } })
 
-		expect(await screen.findByText("1 match")).toBeTruthy()
+		expect(await screen.findByRole("status")).toBeTruthy()
+		expect((await screen.findAllByText("1 match")).length).toBeGreaterThan(0)
 		expect(screen.queryByText("Two")).toBeNull()
 		expect(screen.getByText("Three")).toBeTruthy()
 
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search senders and subjects" }), { target: { value: "" } })
 
 		expect(await screen.findByText("Two")).toBeTruthy()
-		expect(screen.queryByText("1 match")).toBeNull()
 	})
-})
 
-// Index logic kept with the viewer's: a fresh index over the same bytes agrees with what the list showed.
-it("indexes the fixture as three messages", async () => {
-	const index = new MboxIndex(MAILBOX.length)
+	it("hands a failed read to the error state", async () => {
+		broken.current = true
+		restart.current = true
+		mount()
 
-	await index.scanUntil(
-		{ size: MAILBOX.length, scan: (start, end) => Promise.resolve(MAILBOX.subarray(start, end)) },
-		10,
-		new AbortController().signal,
-		() => undefined
-	)
-
-	expect(index.count).toBe(3)
+		await vi.waitFor(() => {
+			expect(failed.current).toHaveLength(1)
+		})
+		expect(failed.current[0]).toBeInstanceOf(RangeError)
+	})
 })

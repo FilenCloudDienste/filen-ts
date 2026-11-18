@@ -46,7 +46,9 @@ function isCancellation(error: unknown): boolean {
 // link's client, or a provided origin), under a token the preview's cancel registry ends. Unmounting closes the port
 // (its reads in flight end), cancels the token and terminates the worker. A lost port or a broken worker turns into the
 // error state, whose retry opens both again. Keyed on the origin's content, like usePreviewRangeSource.
-export function useTextPagerSession(item: DriveItem): TextPagerSession {
+// `textOnly: false`: a file whose head is not text is read anyway (a mailbox's binary parts are no reason to refuse it).
+export function useTextPagerSession(item: DriveItem, options?: { readonly textOnly?: boolean }): TextPagerSession {
+	const textOnly = options?.textOnly ?? true
 	const origin = usePreviewOrigin(item)
 	const access = usePreviewAccessMode()
 	const size = originSize(origin)
@@ -75,7 +77,7 @@ export function useTextPagerSession(item: DriveItem): TextPagerSession {
 	const failOpen = useEffectEvent(fail)
 	const open = opened?.generation === generation ? opened.value : null
 	const label = chosen.generation === generation ? chosen.label : null
-	const readable = open !== null && (open.text || shownAnyway === generation)
+	const readable = open !== null && (open.text || !textOnly || shownAnyway === generation)
 
 	useEffect(() => {
 		if (owned === null) {

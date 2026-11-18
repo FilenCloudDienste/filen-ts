@@ -34,6 +34,8 @@ export const previewTextMailbox = {
 	previewMailboxBack: "Back to the messages",
 	/** Mailbox preview — a message past the size the preview reads */
 	previewMailboxMessageTooLarge: "This message is too large to show here.",
+	/** Mailbox preview — a mailbox whose bytes can be read only whole (an archive's entry its reader cannot seek in) */
+	previewMailboxNoRanges: "This mailbox can't be read here: it could only be read whole.",
 	/** Mailbox preview — reading a message failed */
 	previewMailboxMessageFailed: "The message could not be read."
 }

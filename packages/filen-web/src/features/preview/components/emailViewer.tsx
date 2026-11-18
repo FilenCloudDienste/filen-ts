@@ -17,6 +17,8 @@ import { useLinkSaveable } from "@/features/publicLinks/queries/publicLink"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewDownloadable, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
+import { EmailLinkRootContext } from "@/features/preview/lib/emailLinkRoot"
+import { isMessageAttachment } from "@/features/preview/lib/emailMessageAttachment"
 import { sanitizeBody, type CidPicture } from "@/features/preview/lib/emailBody"
 import type { EmailSanitizeResult } from "@filen/shared/dom"
 import { readEmailFile } from "@/features/preview/lib/textFamilyClient"
@@ -38,9 +40,6 @@ import { cn } from "@filen/shared"
 
 // Messages opened from a message's attachments, how deep: a forwarded message opens as one, three levels at most.
 const EmailDepthContext = createContext(0)
-// The link's own file a message on a public link is (its uuid), for asking whether its visitor may save from it; null
-// for a message held in another file (an archive's), whose own file is not the link's; undefined outside a message.
-const EmailLinkRootContext = createContext<string | null | undefined>(undefined)
 const MAX_DEPTH = 3
 // Recipients shown before "+N more".
 const FOLDED_RECIPIENTS = 2
@@ -138,11 +137,11 @@ async function attachmentFile(attachment: EmailAttachment): Promise<File> {
 	return new File([attachment.blob], name, { type: mimeForExtension(extensionOf(name)) ?? "" })
 }
 
-function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailAttachment }) {
+function SaveToDrive({ attachment }: { attachment: EmailAttachment }) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
 	const access = usePreviewAccessMode()
-	const nested = useProvidedPreviewOrigin() !== null
+	const root = useContext(EmailLinkRootContext)
 	const [open, setOpen] = useState(false)
 
 	return (
@@ -164,8 +163,8 @@ function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailA
 					mode="pick"
 					startsWork
 					items={[]}
-					// The message's own directory on the drive; the root for a link's or an archive's.
-					initialPath={access === "authed" && !nested ? cachedOwnChain(item.data.parent) : undefined}
+					// The directory of the file the message is (or is in) on the drive; the root for a link's or an archive's.
+					initialPath={access === "authed" && root !== null && root !== undefined ? cachedOwnChain(root.parent) : undefined}
 					pickLabels={{ title: t("previewEmailSaveTitle", { name: attachment.name }), confirm: t("previewEmailSaveConfirm") }}
 					onPick={destination => {
 						void attachmentFile(attachment).then(file => {
@@ -190,30 +189,15 @@ function SaveToDrive({ item, attachment }: { item: DriveItem; attachment: EmailA
 
 // A link's visitor may save only when signed in, the link not their own, downloads allowed (useLinkSaveable); asked of
 // the link's own file, which a nested message (or one in an archive) is not.
-function LinkSaveGate({ item, attachment }: { item: DriveItem; attachment: EmailAttachment }) {
+function LinkSaveGate({ attachment }: { attachment: EmailAttachment }) {
 	const downloadable = usePreviewDownloadable()
 	const root = useContext(EmailLinkRootContext)
-	const saveable = useLinkSaveable("file", downloadable && typeof root === "string" ? root : null)
+	const saveable = useLinkSaveable("file", downloadable && root !== null && root !== undefined ? root.uuid : null)
 
-	return saveable ? (
-		<SaveToDrive
-			item={item}
-			attachment={attachment}
-		/>
-	) : null
+	return saveable ? <SaveToDrive attachment={attachment} /> : null
 }
 
-function AttachmentRow({
-	item,
-	attachment,
-	canOpen,
-	onOpen
-}: {
-	item: DriveItem
-	attachment: EmailAttachment
-	canOpen: boolean
-	onOpen: () => void
-}) {
+function AttachmentRow({ attachment, canOpen, onOpen }: { attachment: EmailAttachment; canOpen: boolean; onOpen: () => void }) {
 	const { t } = useTranslation("preview")
 	const downloadable = usePreviewDownloadable()
 	const access = usePreviewAccessMode()
@@ -251,17 +235,7 @@ function AttachmentRow({
 						{t("previewEmailDownload")}
 					</Button>
 				) : null}
-				{access === "authed" ? (
-					<SaveToDrive
-						item={item}
-						attachment={attachment}
-					/>
-				) : (
-					<LinkSaveGate
-						item={item}
-						attachment={attachment}
-					/>
-				)}
+				{access === "authed" ? <SaveToDrive attachment={attachment} /> : <LinkSaveGate attachment={attachment} />}
 			</span>
 		</li>
 	)
@@ -269,18 +243,6 @@ function AttachmentRow({
 
 function attachmentItem(item: DriveItem, index: number, attachment: EmailAttachment): DriveItem {
 	return embeddedFileItem(`${item.data.uuid}#att${String(index)}`, attachment.name, attachment.size, Number.NaN)
-}
-
-// A forwarded or embedded message, which opens as a message one level deeper.
-function isMessageAttachment(attachment: EmailAttachment): boolean {
-	const name = attachment.name.toLowerCase()
-
-	return (
-		attachment.mimeType === "message/rfc822" ||
-		attachment.mimeType === "application/vnd.ms-outlook" ||
-		name.endsWith(".eml") ||
-		name.endsWith(".msg")
-	)
 }
 
 function ViewSwitch({
@@ -536,7 +498,6 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 							return (
 								<AttachmentRow
 									key={index}
-									item={item}
 									attachment={attachment}
 									canOpen={
 										sniffedEntryCategory(nested, bytesOrigin(attachment.blob, nested.data.uuid)) !== null &&
@@ -593,7 +554,7 @@ export function EmailViewer({ item }: { item: DriveItem }) {
 	const outer = useContext(EmailLinkRootContext)
 	const held = useProvidedPreviewOrigin() !== null
 	// A message opened from a message keeps the first one's; the first is the link's own file unless another holds it.
-	const root = outer !== undefined ? outer : held ? null : item.data.uuid
+	const root = outer !== undefined ? outer : held ? null : { uuid: item.data.uuid, parent: item.data.parent }
 
 	return (
 		<EmailLinkRootContext value={root}>

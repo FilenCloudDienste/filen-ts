@@ -7,6 +7,7 @@ import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
+import { EmailLinkRootContext } from "@/features/preview/lib/emailLinkRoot"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import { readEmail } from "@/features/preview/lib/emailReading"
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
@@ -415,5 +416,22 @@ describe("EmailViewer", () => {
 		expect(await screen.findByRole("heading", { name: "Damaged" })).toBeTruthy()
 		expect(screen.getByText("1 part of this message could not be read and is left out.")).toBeTruthy()
 		expect(screen.getByText("plain body")).toBeTruthy()
+	})
+
+	it("on a link, asks about saving of the mailbox a message is in", async () => {
+		message.current = MESSAGE
+		linkSaveAsks.length = 0
+		render(
+			<PreviewAccessModeProvider mode="anon">
+				<EmailLinkRootContext value={{ uuid: "mbox-0000-0000-0000-000000000000", parent: null }}>
+					<EmailViewer item={ITEM} />
+				</EmailLinkRootContext>
+			</PreviewAccessModeProvider>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		expect(await screen.findByText("notes.txt")).toBeTruthy()
+		expect(linkSaveAsks.length).toBeGreaterThan(0)
+		expect(linkSaveAsks.every(uuid => uuid === "mbox-0000-0000-0000-000000000000")).toBe(true)
 	})
 })

@@ -1,18 +1,14 @@
-import { useEffect, useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import * as Comlink from "comlink"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowLeftIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { EmailViewer } from "@/features/preview/components/emailViewer"
-import {
-	PreviewErrorState,
-	PreviewLoading,
-	PreviewNotTextState,
-	PreviewUnsupportedState
-} from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { useTextPagerSession, type TextPager } from "@/features/preview/hooks/useTextPagerSession"
-import { PreviewByteOriginProvider, usePreviewOrigin } from "@/features/preview/lib/accessMode"
+import { PreviewByteOriginProvider, usePreviewOrigin, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
+import { EmailLinkRootContext } from "@/features/preview/lib/emailLinkRoot"
 import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
 import type { EmailHeaderSummary } from "@/features/preview/lib/emailReading"
 import type { MboxCount, MboxSearchEnd } from "@/features/preview/lib/textPager/mbox.logic"
@@ -120,20 +116,27 @@ function MessagePane({ item, opened }: { item: DriveItem; opened: Opened | null 
 function SearchStatus({ search, onStop }: { search: Search; onStop: () => void }) {
 	const { t } = useTranslation("preview")
 	const count = search.matches.length
+	const endText =
+		search.end === "capped"
+			? t("previewMailboxMatchesCapped", { count })
+			: search.end === "stopped"
+				? t("previewMailboxMatchesSoFar", { count })
+				: t("previewMailboxMatches", { count })
 
 	return (
 		<div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-border px-3 text-xs text-muted-foreground">
+			{/* Read out once, when it ends: progress every few hundred messages would talk over everything. */}
 			<span
 				role="status"
+				className="sr-only"
+			>
+				{search.end === null ? "" : endText}
+			</span>
+			<span
+				aria-hidden="true"
 				className="truncate tabular-nums"
 			>
-				{search.end === null
-					? t("previewMailboxSearching", { count, searched: search.searched })
-					: search.end === "capped"
-						? t("previewMailboxMatchesCapped", { count })
-						: search.end === "stopped"
-							? t("previewMailboxMatchesSoFar", { count })
-							: t("previewMailboxMatches", { count })}
+				{search.end === null ? t("previewMailboxSearching", { count, searched: search.searched }) : endText}
 			</span>
 			{search.end === null ? (
 				<Button
@@ -149,7 +152,8 @@ function SearchStatus({ search, onStop }: { search: Search; onStop: () => void }
 	)
 }
 
-function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
+// `fail`: a read that failed (not one stopped) turns the viewer into its error state, with Try again.
+function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPager; fail: (error: unknown) => void }) {
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const [count, setCount] = useState<MboxCount>({ count: 0, complete: false, capped: false, scanned: 0 })
@@ -191,6 +195,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 				},
 				(e: unknown) => {
 					log.error("preview", "scanning a mailbox failed", e)
+					fail(e)
 				}
 			)
 
@@ -230,7 +235,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 					(e: unknown) => {
 						log.error("preview", "searching a mailbox failed", e)
 
-						if (live) setSearch(current => (current?.query !== query ? current : { ...current, end: "stopped" }))
+						if (live) fail(e)
 					}
 				)
 		}, SEARCH_DELAY_MS)
@@ -268,6 +273,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 				},
 				(e: unknown) => {
 					log.error("preview", "reading a mailbox's rows failed", e)
+					fail(e)
 				}
 			)
 
@@ -275,6 +281,32 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 			live = false
 		}
 	}, [pager, first, last, shown, matches])
+
+	const [back, setBack] = useState<HTMLButtonElement | null>(null)
+	// The mailbox is the file its messages' attachments are saved from, unless another file holds it.
+	const outerRoot = useContext(EmailLinkRootContext)
+	const held = useProvidedPreviewOrigin() !== null
+	const root = outerRoot !== undefined ? outerRoot : held ? null : { uuid: item.data.uuid, parent: item.data.parent }
+	// The list row a message shows at (its place among the matches while a query is active), or null.
+	const shownRowOf = (index: number): number | null => {
+		if (search === null) return index
+
+		const row = search.matches.indexOf(index)
+
+		return row === -1 ? null : row
+	}
+	// Brings row `row` into view and focuses it once it is laid out.
+	const focusRow = (row: number): void => {
+		virtualizer.scrollToIndex(row)
+		requestAnimationFrame(() => {
+			scrollElement?.querySelector<HTMLElement>(`[data-row="${String(row)}"] button`)?.focus()
+		})
+	}
+
+	// On a narrow screen the list is hidden once a message opens: focus goes to the way back.
+	useEffect(() => {
+		if (back !== null && back.offsetParent !== null) back.focus()
+	}, [back])
 
 	const open = (index: number): void => {
 		setOpened({ status: "pending", index })
@@ -314,13 +346,17 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 				},
 				(e: unknown) => {
 					log.error("preview", "counting a mailbox failed", e)
+					fail(e)
 					setCounting(false)
 				}
 			)
 	}
 
-	const stop = (): void => {
+	const stopCount = (): void => {
 		void pager.run(remote => remote.mboxStop())
+	}
+	const stopSearch = (): void => {
+		void pager.run(remote => remote.mboxStopSearch())
 	}
 
 	const summary =
@@ -343,7 +379,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 							variant="ghost"
 							size="sm"
 							className="h-7 px-2 text-xs"
-							onClick={stop}
+							onClick={stopCount}
 						>
 							{t("previewMailboxStop")}
 						</Button>
@@ -371,7 +407,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 							// Cleared: every message again, the search stopped.
 							if (event.target.value.trim() === "") {
 								setSearch(null)
-								stop()
+								stopSearch()
 							}
 						}}
 					/>
@@ -379,7 +415,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 				{search === null ? null : (
 					<SearchStatus
 						search={search}
-						onStop={stop}
+						onStop={stopSearch}
 					/>
 				)}
 				<div
@@ -387,6 +423,24 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 					role="list"
 					aria-label={t("previewMailboxList")}
 					className="min-h-0 flex-1 overflow-y-auto"
+					onKeyDown={event => {
+						const at = Number((event.target as HTMLElement).closest("[data-row]")?.getAttribute("data-row") ?? Number.NaN)
+						const next =
+							event.key === "ArrowDown"
+								? at + 1
+								: event.key === "ArrowUp"
+									? at - 1
+									: event.key === "Home"
+										? 0
+										: event.key === "End"
+											? shown - 1
+											: Number.NaN
+
+						if (Number.isNaN(at) || Number.isNaN(next) || next < 0 || next >= shown) return
+
+						event.preventDefault()
+						focusRow(next)
+					}}
 				>
 					<div
 						className="relative w-full"
@@ -399,6 +453,10 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 								<div
 									key={entry.index}
 									role="listitem"
+									// The whole list's size and place, not the rows laid out.
+									aria-setsize={shown}
+									aria-posinset={entry.index + 1}
+									data-row={entry.index}
 									className="absolute top-0 left-0 w-full"
 									style={{ height: ROW_HEIGHT, transform: `translateY(${String(entry.start)}px)` }}
 								>
@@ -421,8 +479,14 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 						variant="ghost"
 						size="sm"
 						className="m-1 self-start md:hidden"
+						ref={setBack}
 						onClick={() => {
+							const row = shownRowOf(opened.index)
+
 							setOpened(null)
+
+							// Back where it came from: the row it was opened from.
+							if (row !== null) focusRow(row)
 						}}
 					>
 						<ArrowLeftIcon className="size-4" />
@@ -430,10 +494,12 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 					</Button>
 				)}
 				<div className="min-h-0 flex-1">
-					<MessagePane
-						item={item}
-						opened={opened}
-					/>
+					<EmailLinkRootContext value={root}>
+						<MessagePane
+							item={item}
+							opened={opened}
+						/>
+					</EmailLinkRootContext>
 				</div>
 			</div>
 		</div>
@@ -441,10 +507,12 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 }
 
 function MailboxSession({ item }: { item: DriveItem }) {
-	const session = useTextPagerSession(item)
+	// Binary parts (an 8-bit or binary transfer encoding) are no reason to refuse a mailbox: read it whatever its head.
+	const session = useTextPagerSession(item, { textOnly: false })
 
 	switch (session.status) {
 		case "pending":
+		case "notText":
 			return <PreviewLoading />
 		case "error":
 			return (
@@ -453,18 +521,12 @@ function MailboxSession({ item }: { item: DriveItem }) {
 					onRetry={session.retry}
 				/>
 			)
-		case "notText":
-			return (
-				<PreviewNotTextState
-					item={item}
-					onShowAnyway={session.showAnyway}
-				/>
-			)
 		case "ready":
 			return (
 				<MailboxReader
 					item={item}
 					pager={session.reading.pager}
+					fail={session.reading.fail}
 				/>
 			)
 	}
@@ -479,7 +541,7 @@ export function MailboxViewer({ item }: { item: DriveItem }) {
 		return (
 			<PreviewUnsupportedState
 				item={item}
-				message={t("previewTextTooLarge")}
+				message={t("previewMailboxNoRanges")}
 			/>
 		)
 	}
