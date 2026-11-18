@@ -423,6 +423,13 @@ test("a mailbox lists its messages from its ranges and opens one in the email vi
 	await expect(dialog.getByText("3 messages", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(list.getByText(MAILBOX_SUBJECTS[1])).toBeVisible()
 
+	// Filtered to its matches by sender or subject, and back.
+	await dialog.getByRole("searchbox", { name: "Search senders and subjects" }).fill("third")
+	await expect(dialog.getByText("1 match", { exact: true })).toBeVisible()
+	await expect(list.getByText(MAILBOX_SUBJECTS[0])).toHaveCount(0)
+	await dialog.getByRole("searchbox", { name: "Search senders and subjects" }).fill("")
+	await expect(list.getByText(MAILBOX_SUBJECTS[0])).toBeVisible()
+
 	await list.getByText(MAILBOX_SUBJECTS[1]).click()
 	await expect(dialog.getByRole("heading", { name: MAILBOX_SUBJECTS[1] })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	// The quoted line is unquoted once.

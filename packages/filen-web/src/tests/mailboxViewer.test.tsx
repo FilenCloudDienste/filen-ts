@@ -18,11 +18,26 @@ const MAILBOX = new TextEncoder().encode(
 const { opened } = vi.hoisted(() => ({ opened: { current: [] as string[] } }))
 
 vi.mock("@/features/preview/hooks/useTextPagerSession", async () => {
-	const { MboxIndex: Index } = await import("@/features/preview/lib/textPager/mbox.logic")
+	const { MboxIndex: Index, searchHeaders: search } = await import("@/features/preview/lib/textPager/mbox.logic")
 	const index = new Index(MAILBOX.length)
 	const source = { size: MAILBOX.length, scan: (start: number, end: number) => Promise.resolve(MAILBOX.subarray(start, end)) }
 	const remote = {
 		mboxEnsure: (want: number) => index.scanUntil(source, want, new AbortController().signal, () => undefined),
+		mboxRowsOf: async (indexes: readonly number[]) => {
+			const rows = []
+
+			for (const at of indexes) rows.push((await remote.mboxRows(at, 1))[0] ?? null)
+
+			return rows
+		},
+		mboxSearch: (query: string) =>
+			search(query, {
+				ensure: (want: number) => index.scanUntil(source, want, new AbortController().signal, () => undefined),
+				row: async (at: number) => (await remote.mboxRows(at, 1))[0] ?? { from: null, subject: null },
+				signal: new AbortController().signal,
+				onProgress: () => undefined
+			}),
+		mboxStop: () => undefined,
 		mboxRows: async (first: number, count: number) => {
 			const rows = []
 
@@ -101,6 +116,23 @@ describe("MailboxViewer", () => {
 
 		expect(await screen.findByText(`message ${ITEM.data.uuid}#msg1`)).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Back to the messages" })).toBeTruthy()
+	})
+
+	it("filters the list to the messages whose sender or subject holds the query, and back", async () => {
+		render(<MailboxViewer item={ITEM} />, { wrapper: queryClientWrapper(createTestQueryClient()) })
+
+		expect(await screen.findByText("Three")).toBeTruthy()
+
+		fireEvent.change(screen.getByRole("searchbox", { name: "Search senders and subjects" }), { target: { value: "thr" } })
+
+		expect(await screen.findByText("1 match")).toBeTruthy()
+		expect(screen.queryByText("Two")).toBeNull()
+		expect(screen.getByText("Three")).toBeTruthy()
+
+		fireEvent.change(screen.getByRole("searchbox", { name: "Search senders and subjects" }), { target: { value: "" } })
+
+		expect(await screen.findByText("Two")).toBeTruthy()
+		expect(screen.queryByText("1 match")).toBeNull()
 	})
 })
 

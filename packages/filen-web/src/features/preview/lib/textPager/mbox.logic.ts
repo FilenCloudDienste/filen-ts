@@ -250,7 +250,8 @@ export interface MboxSearchSteps {
 	// Message `index`'s list row.
 	readonly row: (index: number) => Promise<{ readonly from: string | null; readonly subject: string | null }>
 	readonly signal: AbortSignal
-	readonly onProgress: (searched: number, found: number) => void
+	// The messages searched, and every match so far (the same array, grown).
+	readonly onProgress: (searched: number, matches: readonly number[]) => void
 }
 
 // Every message whose sender or subject holds `query`, from the first on, finding messages as it goes (the scan streams
@@ -275,7 +276,7 @@ export async function searchHeaders(query: string, steps: MboxSearchSteps): Prom
 
 		index++
 
-		if (index % PROGRESS_EVERY === 0) steps.onProgress(index, matches.length)
+		if (index % PROGRESS_EVERY === 0) steps.onProgress(index, matches)
 	}
 }
 

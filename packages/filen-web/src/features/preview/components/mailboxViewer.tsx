@@ -15,7 +15,7 @@ import { useTextPagerSession, type TextPager } from "@/features/preview/hooks/us
 import { PreviewByteOriginProvider, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
 import type { EmailHeaderSummary } from "@/features/preview/lib/emailReading"
-import type { MboxCount } from "@/features/preview/lib/textPager/mbox.logic"
+import type { MboxCount, MboxSearchEnd } from "@/features/preview/lib/textPager/mbox.logic"
 import type { MboxMessage } from "@/features/preview/workers/textPager.worker"
 import { bytesOrigin } from "@/lib/sdk/byteOrigin"
 import { originServesRanges } from "@/features/drive/lib/preview.logic"
@@ -24,6 +24,7 @@ import { formatDateTime } from "@/lib/formatDate"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { log } from "@/lib/log"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { cn } from "@filen/shared"
 
 // A mailbox (F1): its messages listed on the left, found only as far as the list is scrolled ("≥ N messages" until the
@@ -31,11 +32,20 @@ import { cn } from "@filen/shared"
 // replaces the list, with a way back. Read in ranges in the pager worker, whatever the file's size.
 
 const ROW_HEIGHT = 56
+// A pause in typing before the search starts.
+const SEARCH_DELAY_MS = 300
 const OVERSCAN = 20
 // Messages found beyond the last row in view, so scrolling rarely waits on the scan.
 const SCAN_AHEAD = 200
 
 type Rows = ReadonlyMap<number, EmailHeaderSummary>
+// A header search: its matches so far (message indexes), how far it got, and how it ended (null while it runs).
+interface Search {
+	readonly query: string
+	readonly matches: readonly number[]
+	readonly searched: number
+	readonly end: MboxSearchEnd | null
+}
 type Opened =
 	| { readonly status: "pending"; readonly index: number }
 	| { readonly status: "ok"; readonly index: number; readonly blob: Blob }
@@ -107,6 +117,38 @@ function MessagePane({ item, opened }: { item: DriveItem; opened: Opened | null 
 	}
 }
 
+function SearchStatus({ search, onStop }: { search: Search; onStop: () => void }) {
+	const { t } = useTranslation("preview")
+	const count = search.matches.length
+
+	return (
+		<div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-border px-3 text-xs text-muted-foreground">
+			<span
+				role="status"
+				className="truncate tabular-nums"
+			>
+				{search.end === null
+					? t("previewMailboxSearching", { count, searched: search.searched })
+					: search.end === "capped"
+						? t("previewMailboxMatchesCapped", { count })
+						: search.end === "stopped"
+							? t("previewMailboxMatchesSoFar", { count })
+							: t("previewMailboxMatches", { count })}
+			</span>
+			{search.end === null ? (
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-6 px-2 text-xs"
+					onClick={onStop}
+				>
+					{t("previewMailboxStop")}
+				</Button>
+			) : null}
+		</div>
+	)
+}
+
 function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
@@ -114,8 +156,14 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 	const [rows, setRows] = useState<Rows>(new Map())
 	const [counting, setCounting] = useState(false)
 	const [opened, setOpened] = useState<Opened | null>(null)
+	const [filter, setFilter] = useState("")
+	const [search, setSearch] = useState<Search | null>(null)
+	const query = filter.trim()
+	// While a query is active the list is its matches, in file order.
+	const shown = search === null ? count.count : search.matches.length
+	const messageAt = (row: number): number => (search === null ? row : (search.matches[row] ?? -1))
 	const virtualizer = useVirtualizer({
-		count: count.count,
+		count: shown,
 		getScrollElement: () => scrollElement,
 		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => ROW_HEIGHT,
@@ -126,11 +174,12 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 	const last = range.at(-1)?.index ?? 0
 	// Messages wanted found: the rows in view and SCAN_AHEAD beyond.
 	const want = last + SCAN_AHEAD
+	const matches = search?.matches ?? null
 
 	useEffect(() => {
 		let live = true
 
-		if (count.complete || count.count >= want) {
+		if (matches !== null || count.complete || count.count >= want) {
 			return
 		}
 
@@ -148,28 +197,72 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 		return () => {
 			live = false
 		}
-	}, [pager, want, count.complete, count.count])
+	}, [pager, want, count.complete, count.count, matches])
+
+	// A query searches once typing pauses; an empty one shows every message again.
+	useEffect(() => {
+		if (query === "") {
+			return
+		}
+
+		let live = true
+		const timer = setTimeout(() => {
+			setSearch({ query, matches: [], searched: 0, end: null })
+			pager
+				.run(remote =>
+					remote.mboxSearch(
+						query,
+						Comlink.proxy((searched: number, found: readonly number[]) => {
+							if (!live) return
+
+							setSearch(current =>
+								current?.query !== query ? current : { ...current, searched, matches: [...current.matches, ...found] }
+							)
+						})
+					)
+				)
+				.then(
+					result => {
+						if (!live) return
+
+						setSearch({ query, matches: result.matches, searched: result.searched, end: result.end })
+					},
+					(e: unknown) => {
+						log.error("preview", "searching a mailbox failed", e)
+
+						if (live) setSearch(current => (current?.query !== query ? current : { ...current, end: "stopped" }))
+					}
+				)
+		}, SEARCH_DELAY_MS)
+
+		return () => {
+			live = false
+			clearTimeout(timer)
+		}
+	}, [pager, query])
 
 	useEffect(() => {
 		let live = true
 		const from = Math.max(0, first - OVERSCAN)
-		const to = Math.min(count.count, last + OVERSCAN + 1)
+		const to = Math.min(shown, last + OVERSCAN + 1)
 
 		if (to <= from) {
 			return
 		}
 
+		const indexes = matches === null ? null : matches.slice(from, to)
+
 		pager
-			.run(remote => remote.mboxRows(from, to - from))
+			.run(remote => (indexes === null ? remote.mboxRows(from, to - from) : remote.mboxRowsOf(indexes)))
 			.then(
 				read => {
 					if (!live) return
 
-					// Only the rows near the view are kept on the page; the worker keeps more.
+					// Only the rows near the view are kept on the page, by message; the worker keeps more.
 					const next = new Map<number, EmailHeaderSummary>()
 
 					read.forEach((row, offset) => {
-						if (row !== null) next.set(from + offset, row)
+						if (row !== null) next.set(indexes === null ? from + offset : (indexes[offset] ?? -1), row)
 					})
 					setRows(next)
 				},
@@ -181,7 +274,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 		return () => {
 			live = false
 		}
-	}, [pager, first, last, count.count])
+	}, [pager, first, last, shown, matches])
 
 	const open = (index: number): void => {
 		setOpened({ status: "pending", index })
@@ -226,6 +319,10 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 			)
 	}
 
+	const stop = (): void => {
+		void pager.run(remote => remote.mboxStop())
+	}
+
 	const summary =
 		count.complete && !count.capped
 			? t("previewMailboxCount", { count: count.count })
@@ -246,9 +343,7 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 							variant="ghost"
 							size="sm"
 							className="h-7 px-2 text-xs"
-							onClick={() => {
-								void pager.run(remote => remote.mboxStop())
-							}}
+							onClick={stop}
 						>
 							{t("previewMailboxStop")}
 						</Button>
@@ -263,6 +358,30 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 						</Button>
 					)}
 				</div>
+				<div className="shrink-0 border-b border-border p-2">
+					<Input
+						type="search"
+						value={filter}
+						placeholder={t("previewMailboxSearch")}
+						aria-label={t("previewMailboxSearch")}
+						className="h-8 text-sm"
+						onChange={event => {
+							setFilter(event.target.value)
+
+							// Cleared: every message again, the search stopped.
+							if (event.target.value.trim() === "") {
+								setSearch(null)
+								stop()
+							}
+						}}
+					/>
+				</div>
+				{search === null ? null : (
+					<SearchStatus
+						search={search}
+						onStop={stop}
+					/>
+				)}
 				<div
 					ref={setScrollElement}
 					role="list"
@@ -273,22 +392,26 @@ function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
 						className="relative w-full"
 						style={{ height: virtualizer.getTotalSize() }}
 					>
-						{range.map(entry => (
-							<div
-								key={entry.index}
-								role="listitem"
-								className="absolute top-0 left-0 w-full"
-								style={{ height: ROW_HEIGHT, transform: `translateY(${String(entry.start)}px)` }}
-							>
-								<MessageRow
-									row={rows.get(entry.index)}
-									selected={opened?.index === entry.index}
-									onOpen={() => {
-										open(entry.index)
-									}}
-								/>
-							</div>
-						))}
+						{range.map(entry => {
+							const index = messageAt(entry.index)
+
+							return (
+								<div
+									key={entry.index}
+									role="listitem"
+									className="absolute top-0 left-0 w-full"
+									style={{ height: ROW_HEIGHT, transform: `translateY(${String(entry.start)}px)` }}
+								>
+									<MessageRow
+										row={rows.get(index)}
+										selected={opened?.index === index}
+										onOpen={() => {
+											open(index)
+										}}
+									/>
+								</div>
+							)
+						})}
 					</div>
 				</div>
 			</div>

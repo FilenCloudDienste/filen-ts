@@ -425,15 +425,16 @@ const api = {
 		mboxCount?.abort()
 	},
 	// Every message whose sender or subject holds `query` (at most MBOX_MATCH_CAP), finding messages as it goes; stopped
-	// by mboxStop() or another search. Progress hears the messages searched and the matches so far.
+	// by mboxStop() or another search. Progress hears the messages searched and the matches found since its last report.
 	mboxSearch: async (
 		query: string,
-		onProgress: ((searched: number, found: number) => unknown) & Partial<Comlink.ProxyMethods>
+		onProgress: ((searched: number, found: readonly number[]) => unknown) & Partial<Comlink.ProxyMethods>
 	): Promise<MboxSearchResult> => {
 		mboxCount?.abort()
 		mboxCount = new AbortController()
 
 		const signal = mboxCount.signal
+		let sent = 0
 		const result = await searchHeaders(query, {
 			ensure: async want => {
 				const index = mailbox()
@@ -445,8 +446,10 @@ const api = {
 			},
 			row: async at => (await mboxRowsAt(at, 1))[0] ?? { from: null, subject: null },
 			signal,
-			onProgress: (searched, found) => {
-				void onProgress(searched, found)
+			// Only the matches found since the last report cross over.
+			onProgress: (searched, matches) => {
+				void onProgress(searched, matches.slice(sent))
+				sent = matches.length
 			}
 		}).catch((error: unknown): MboxSearchResult => {
 			if (!(error instanceof DOMException && error.name === "AbortError") && !isAbort(error)) throw error
@@ -461,6 +464,14 @@ const api = {
 	// Rows `first` to `first + count` (at most MBOX_ROWS_AT_ONCE) of the list, among the messages found: sender, subject
 	// and date, from each message's header block.
 	mboxRows: (first: number, count: number): Promise<(EmailHeaderSummary | null)[]> => mboxRowsAt(first, count),
+	// The rows of the messages `indexes` names (a search's matches; at most MBOX_ROWS_AT_ONCE), in that order.
+	mboxRowsOf: async (indexes: readonly number[]): Promise<(EmailHeaderSummary | null)[]> => {
+		const rows: (EmailHeaderSummary | null)[] = []
+
+		for (const index of indexes.slice(0, MBOX_ROWS_AT_ONCE)) rows.push((await mboxRowsAt(index, 1))[0] ?? null)
+
+		return rows
+	},
 	// Message `index`'s own bytes (unescaped), for the message viewer; its end found first when not yet.
 	mboxMessage: async (index: number): Promise<MboxMessage> => {
 		const messages = mailbox()

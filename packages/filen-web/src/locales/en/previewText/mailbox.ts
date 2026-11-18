@@ -6,6 +6,19 @@ export const previewTextMailbox = {
 	/** Mailbox preview — the list's count once every message has been found */
 	previewMailboxCount_one: "{{count}} message",
 	previewMailboxCount_other: "{{count}} messages",
+	/** Mailbox preview — the list's search field: filters the list to messages whose sender or subject holds the text */
+	previewMailboxSearch: "Search senders and subjects",
+	/** Mailbox preview — under the search field while it runs; {{count}} matches so far, {{searched}} messages looked at */
+	previewMailboxSearching_one: "{{count}} match · searching {{searched}} messages…",
+	previewMailboxSearching_other: "{{count}} matches · searching {{searched}} messages…",
+	/** Mailbox preview — under the search field once it searched the whole file */
+	previewMailboxMatches_one: "{{count}} match",
+	previewMailboxMatches_other: "{{count}} matches",
+	/** Mailbox preview — under the search field when it was stopped */
+	previewMailboxMatchesSoFar_one: "{{count}} match so far (stopped)",
+	previewMailboxMatchesSoFar_other: "{{count}} matches so far (stopped)",
+	/** Mailbox preview — under the search field when it stopped at its limit */
+	previewMailboxMatchesCapped: "The first {{count}} matches (the search stops there)",
 	/** Mailbox preview — reads the whole file to count its messages */
 	previewMailboxCountAll: "Count all",
 	/** Mailbox preview — stops counting */
