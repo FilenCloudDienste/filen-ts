@@ -12,6 +12,10 @@ export interface CodestreamHeader {
 	readonly bits: number
 	// JPEG 2000: decomposition levels (COD), the reductions a decode can ask for.
 	readonly levels: number
+	// JPEG 2000: the image's origin on the reference grid (XOsiz, YOsiz), which a reduced resolution's size depends on;
+	// 0 for the other codestreams.
+	readonly x0: number
+	readonly y0: number
 }
 
 function u16(bytes: Uint8Array, at: number): number | null {
@@ -68,7 +72,7 @@ export function jpegFrameHeader(bytes: Uint8Array): CodestreamHeader | null {
 
 			if (precision === undefined || rows === null || columns === null || components === undefined) return null
 
-			return { rows, columns, components, bits: precision, levels: 0 }
+			return { rows, columns, components, bits: precision, levels: 0, x0: 0, y0: 0 }
 		}
 
 		if (marker === 0xffda || marker === 0xffd9) return null
@@ -150,7 +154,7 @@ export function losslessJpegHeader(bytes: Uint8Array): CodestreamHeader | null {
 
 	if (marker === null || scanComponents === undefined || scanComponents !== frameComponents) return null
 
-	return { rows, columns, components: scanComponents, bits: precision, levels: 0 }
+	return { rows, columns, components: scanComponents, bits: precision, levels: 0, x0: 0, y0: 0 }
 }
 
 // JPEG-LS (ITU-T T.87): SOF55's dimensions, read by segment length from SOI to SOS. An LSE segment of type 4 (oversize
@@ -177,7 +181,7 @@ export function jpegLsHeader(bytes: Uint8Array): CodestreamHeader | null {
 
 			if (precision === undefined || rows === null || columns === null || components === undefined) return null
 
-			header = { rows, columns, components, bits: precision, levels: 0 }
+			header = { rows, columns, components, bits: precision, levels: 0, x0: 0, y0: 0 }
 		} else if (marker === 0xfff8 && bytes[at + 4] === 4) {
 			return null
 		}
@@ -243,7 +247,7 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 
 	if (levels < 0) return null
 
-	return { rows: ysiz - yosiz, columns: xsiz - xosiz, components, bits, levels }
+	return { rows: ysiz - yosiz, columns: xsiz - xosiz, components, bits, levels, x0: xosiz, y0: yosiz }
 }
 
 // Whether a JPEG 2000 codestream ends with its EOC marker (FFD9), allowing the one byte a fragment is padded with.
@@ -280,18 +284,23 @@ export function declaredPixels(header: CodestreamHeader, tags: FrameTags): numbe
 	return Math.max(header.rows * header.columns, tags.rows * tags.columns)
 }
 
-// A JPEG 2000 resolution's size `level` reductions down (each halves, rounding up, as the decoders do), from an image
-// offset of 0 (the frame's origin).
-export function reducedSize(rows: number, columns: number, level: number): { rows: number; columns: number } {
+// A JPEG 2000 resolution's size `level` reductions down, as the decoders size it (ISO/IEC 15444-1 B.5): the image's
+// extent on the reference grid divided by 2^level, rounding up at both its edges, so an image whose origin is not on
+// that grid loses or keeps a row the plain halving would not.
+export function reducedSize(
+	header: Pick<CodestreamHeader, "rows" | "columns" | "x0" | "y0">,
+	level: number
+): { rows: number; columns: number } {
 	const scale = 2 ** level
+	const edge = (from: number, extent: number): number => Math.ceil((from + extent) / scale) - Math.ceil(from / scale)
 
-	return { rows: Math.ceil(rows / scale), columns: Math.ceil(columns / scale) }
+	return { rows: edge(header.y0, header.rows), columns: edge(header.x0, header.columns) }
 }
 
 // The fewest reductions that bring the frame within `pixels`, or null when even the most the stream has do not.
 export function reductionWithin(header: CodestreamHeader, pixels: number): number | null {
 	for (let level = 0; level <= header.levels; level++) {
-		const size = reducedSize(header.rows, header.columns, level)
+		const size = reducedSize(header, level)
 
 		if (size.rows * size.columns <= pixels) return level
 	}

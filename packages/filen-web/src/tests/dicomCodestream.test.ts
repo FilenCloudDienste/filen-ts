@@ -8,6 +8,7 @@ import {
 	jpegLsHeader,
 	losslessJpegHeader,
 	matchesTags,
+	reducedSize,
 	reductionWithin
 } from "@/features/preview/lib/dicom/codestream.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
@@ -121,7 +122,7 @@ describe("codestream headers", () => {
 	})
 
 	it("reads JPEG 2000's SIZ and COD, refusing subsampled components", () => {
-		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({ rows: 48, columns: 64, components: 3, bits: 12, levels: 5 })
+		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({ rows: 48, columns: 64, components: 3, bits: 12, levels: 5, x0: 0, y0: 0 })
 		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, { subsampled: true }))).toBeNull()
 
 		// One-pixel tiles over a large image: more tiles than a codestream can index.
@@ -134,7 +135,7 @@ describe("codestream headers", () => {
 	})
 
 	it("matches the header to the tags, either way, and checks the larger against the budget", () => {
-		const header = { rows: 48, columns: 64, components: 1, bits: 16, levels: 0 }
+		const header = { rows: 48, columns: 64, components: 1, bits: 16, levels: 0, x0: 0, y0: 0 }
 
 		expect(matchesTags(header, TAGS)).toBe(true)
 		expect(matchesTags({ ...header, rows: 4800 }, TAGS)).toBe(false)
@@ -148,8 +149,20 @@ describe("codestream headers", () => {
 		expect(declaredPixels({ ...header, rows: 4800 }, TAGS)).toBe(4800 * 64)
 	})
 
+	it("sizes a reduced resolution from the image's origin on the reference grid, as the decoders do", () => {
+		const header = jpeg2000Header(siz(101, 7, 1, 8, 3, { x0: 1, y0: 3 }))
+
+		if (header === null) throw new Error("no header")
+
+		expect(header).toMatchObject({ columns: 101, rows: 7, x0: 1, y0: 3 })
+		// ceil(102 / 2) − ceil(1 / 2) and ceil(10 / 2) − ceil(3 / 2): not ceil(101 / 2) and ceil(7 / 2).
+		expect(reducedSize(header, 1)).toEqual({ columns: 50, rows: 3 })
+		expect(reducedSize(header, 0)).toEqual({ columns: 101, rows: 7 })
+		expect(reducedSize({ ...header, x0: 0, y0: 0 }, 1)).toEqual({ columns: 51, rows: 4 })
+	})
+
 	it("picks the fewest JPEG 2000 reductions that fit the budget", () => {
-		const header = { rows: 1000, columns: 1000, components: 1, bits: 16, levels: 3 }
+		const header = { rows: 1000, columns: 1000, components: 1, bits: 16, levels: 3, x0: 0, y0: 0 }
 
 		expect(reductionWithin(header, 1_000_000)).toBe(0)
 		expect(reductionWithin(header, 250_000)).toBe(1)

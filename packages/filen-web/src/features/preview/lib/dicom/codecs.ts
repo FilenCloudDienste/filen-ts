@@ -250,7 +250,7 @@ async function jpeg2000(
 	const loaded = high ? openjph : openjpeg
 	const codec = await loaded.get()
 	const decoder = "HTJ2KDecoder" in codec ? new codec.HTJ2KDecoder() : new codec.J2KDecoder()
-	const size = reducedSize(header.rows, header.columns, level)
+	const size = reducedSize(header, level)
 
 	try {
 		decoder.getEncodedBuffer(encoded.length).set(encoded)
