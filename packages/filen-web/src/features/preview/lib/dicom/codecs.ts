@@ -16,6 +16,7 @@ import {
 	matchesTags,
 	reducedSize,
 	reductionWithin,
+	withoutExif,
 	type CodestreamHeader
 } from "@/features/preview/lib/dicom/codestream.logic"
 import { DicomFrameFailure, type CompressedDecoder } from "@/features/preview/lib/dicom/frameDecode"
@@ -151,7 +152,7 @@ function decodedCopy(decoder: { getDecodedBuffer: () => Uint8Array }, expected: 
 
 async function jpegBaseline(encoded: Uint8Array, module: PixelModule, color: SampleColor, pixels: number): Promise<FrameSamples> {
 	const { rows, columns } = checked(jpegFrameHeader(encoded), module, pixels)
-	const bitmap = await createImageBitmap(new Blob([plain(encoded)], { type: "image/jpeg" }), {
+	const bitmap = await createImageBitmap(new Blob([plain(withoutExif(encoded))], { type: "image/jpeg" }), {
 		colorSpaceConversion: "none",
 		premultiplyAlpha: "none"
 	}).catch((error: unknown) => decodeFailure(error, null))

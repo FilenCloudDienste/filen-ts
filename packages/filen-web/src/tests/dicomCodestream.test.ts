@@ -9,7 +9,8 @@ import {
 	losslessJpegHeader,
 	matchesTags,
 	reducedSize,
-	reductionWithin
+	reductionWithin,
+	withoutExif
 } from "@/features/preview/lib/dicom/codestream.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
 import { siz } from "@/tests/support/dicomBytes"
@@ -109,6 +110,20 @@ describe("codestream headers", () => {
 
 		scanOfTwo[scanOfTwo.length - 3 - 6 - 1] = 2
 		expect(losslessJpegHeader(scanOfTwo)).toBeNull()
+	})
+
+	it("cuts a JPEG's Exif segments, and their orientation, out before the browser decodes it", () => {
+		const ascii = (text: string) => [...new TextEncoder().encode(text)]
+		// APP1 "Exif\0\0" with an orientation tag (6: rotate 90°), and an XMP APP1, which stays.
+		const exif = [0xff, 0xe1, 0, 18, ...ascii("Exif"), 0, 0, 0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0x01, 0x12]
+		const xmp = [0xff, 0xe1, 0, 6, ...ascii("http")]
+		const plainJpeg = jpeg(0xc0, 8, 48, 64, 1)
+		const withExif = jpeg(0xc0, 8, 48, 64, 1, [...exif, ...xmp])
+		const cut = withoutExif(withExif)
+
+		expect([...cut]).toEqual([...jpeg(0xc0, 8, 48, 64, 1, xmp)])
+		expect(jpegFrameHeader(cut)).toEqual(jpegFrameHeader(withExif))
+		expect(withoutExif(plainJpeg)).toBe(plainJpeg)
 	})
 
 	it("refuses JPEG-LS oversize dimensions, which would replace SOF55's", () => {

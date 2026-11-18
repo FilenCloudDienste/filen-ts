@@ -81,6 +81,45 @@ export function jpegFrameHeader(bytes: Uint8Array): CodestreamHeader | null {
 	}
 }
 
+const EXIF = [0x45, 0x78, 0x69, 0x66, 0, 0]
+
+// A JPEG without its Exif (APP1) segments, which carry the orientation a browser's decoder applies (createImageBitmap
+// defaults to it, and no option leaves it out everywhere): a DICOM frame is stored as it is shown. The bytes themselves
+// when there is none, else a copy without them; segments are walked from SOI to the first scan.
+export function withoutExif(bytes: Uint8Array): Uint8Array {
+	if (u16(bytes, 0) !== 0xffd8) return bytes
+
+	const cut: { from: number; to: number }[] = []
+	let at = 2
+
+	for (;;) {
+		const marker = u16(bytes, at)
+		const length = u16(bytes, at + 2)
+
+		if (marker === null || length === null || length < 2 || marker >> 8 !== 0xff || marker === 0xffda || isSof(marker)) break
+
+		if (marker === 0xffe1 && EXIF.every((byte, i) => bytes[at + 4 + i] === byte)) cut.push({ from: at, to: at + 2 + length })
+
+		at += 2 + length
+	}
+
+	if (cut.length === 0) return bytes
+
+	const out = new Uint8Array(bytes.length - cut.reduce((sum, span) => sum + span.to - span.from, 0))
+	let from = 0
+	let written = 0
+
+	for (const span of cut) {
+		out.set(bytes.subarray(from, span.from), written)
+		written += span.from - from
+		from = span.to
+	}
+
+	out.set(bytes.subarray(from), written)
+
+	return out
+}
+
 // A lossless JPEG's frame and its first scan, walked exactly as jpeg-lossless-decoder-js 2.1.2's Decoder.decode does
 // (its readers consume what their segments declare, APPn and COM their length, DRI four bytes, any other 0xFFxx only
 // itself), since the decoder allocates X × Y × the first scan's component count before decoding. `components` is the
