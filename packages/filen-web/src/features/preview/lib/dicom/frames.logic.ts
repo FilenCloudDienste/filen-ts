@@ -198,8 +198,14 @@ export class FragmentIndex {
 				throw new DicomFrameError("a frame's offset does not point at an item")
 			}
 
-			spans.push({ offset: item + ITEM_HEADER_BYTES, length: header.length })
-			item += ITEM_HEADER_BYTES + header.length
+			const body = item + ITEM_HEADER_BYTES
+
+			if (body + header.length > this.options.end) {
+				throw new DicomFrameError("a fragment runs past the file")
+			}
+
+			spans.push({ offset: body, length: header.length })
+			item = body + header.length
 
 			if (spans.length > MAX_FRAGMENTS) {
 				throw new DicomFrameError("too many fragments in one frame")

@@ -311,3 +311,64 @@ export function rleFrame(planes: readonly Uint8Array[]): Uint8Array {
 
 	return out
 }
+
+const be16 = (value: number): number[] => [(value >> 8) & 0xff, value & 0xff]
+const be32 = (value: number): number[] => [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]
+
+export interface J2kMainHeader {
+	// The image's origin on the reference grid (XOsiz, YOsiz); the image is `columns` × `rows` from it.
+	readonly x0?: number
+	readonly y0?: number
+	readonly subsampled?: boolean
+	// COC segments: a component's own decomposition levels.
+	readonly componentLevels?: readonly { readonly component: number; readonly levels: number }[]
+}
+
+// A JPEG 2000 codestream's main header (SOC, SIZ, COD, any COCs), up to the first tile part's SOT marker.
+export function siz(
+	columns: number,
+	rows: number,
+	components: number,
+	depth: number,
+	levels: number,
+	options: J2kMainHeader = {}
+): Uint8Array {
+	const x0 = options.x0 ?? 0
+	const y0 = options.y0 ?? 0
+
+	return Uint8Array.from([
+		0xff,
+		0x4f,
+		0xff,
+		0x51,
+		...be16(38 + components * 3),
+		0,
+		0,
+		...be32(x0 + columns),
+		...be32(y0 + rows),
+		...be32(x0),
+		...be32(y0),
+		...be32(x0 + columns),
+		...be32(y0 + rows),
+		...be32(0),
+		...be32(0),
+		...be16(components),
+		...Array.from({ length: components }, (_, i) => [depth - 1, options.subsampled === true && i > 0 ? 2 : 1, 1]).flat(),
+		0xff,
+		0x52,
+		...be16(12),
+		0,
+		0,
+		0,
+		1,
+		0,
+		levels,
+		4,
+		4,
+		0,
+		0,
+		...(options.componentLevels ?? []).flatMap(({ component, levels: own }) => [0xff, 0x53, ...be16(9), component, 0, own, 4, 4, 0, 0]),
+		0xff,
+		0x90
+	])
+}

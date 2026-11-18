@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { DicomOpenError, headerCap, memorySource, readHeader, type DicomSource } from "@/features/preview/lib/dicom/dicomFile"
+import { DicomOpenError, headerCap, memorySource, rangeSource, readHeader, type DicomSource } from "@/features/preview/lib/dicom/dicomFile"
 import { imageVerdict, readPixelModule } from "@/features/preview/lib/dicom/pixelModule"
 import {
+	DICOM_J2K_HEAD_BYTES,
 	DicomFrameFailure,
 	encapsulatedFrame,
 	fragmentIndex,
@@ -15,6 +16,7 @@ import {
 	EXPLICIT_BE,
 	EXPLICIT_LE,
 	IMPLICIT_LE,
+	JPEG_2000,
 	JPEG_BASELINE,
 	RLE,
 	binary,
@@ -24,6 +26,7 @@ import {
 	grayModule,
 	rleFrame,
 	sequence,
+	siz,
 	text,
 	us
 } from "@/tests/support/dicomBytes"
@@ -33,7 +36,7 @@ import {
 
 const MIB = 1024 * 1024
 const DECODE = 1024 * MIB
-const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle"])
+const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpeg2000"])
 
 // A 3×2 CT frame stored 12 bits in 16, signed, with a rescale to Hounsfield units.
 function ctFile(syntax: string, extra: ReturnType<typeof text>[] = []): Uint8Array {
@@ -63,20 +66,23 @@ function ctFile(syntax: string, extra: ReturnType<typeof text>[] = []): Uint8Arr
 	})
 }
 
-// Counts how far into the file reads reach.
-function counting(bytes: Uint8Array, size = bytes.length): DicomSource & { reach: () => number } {
+// Counts how far into the file reads reach, and how many bytes they read.
+function counting(bytes: Uint8Array, size = bytes.length): DicomSource & { reach: () => number; total: () => number } {
 	let furthest = 0
+	let read = 0
 
 	return {
 		size,
 		read: (offset, length) => {
 			furthest = Math.max(furthest, offset + length)
+			read += length
 
 			if (offset + length > bytes.length) throw new DicomOpenError("unreadable", "past the test bytes")
 
 			return bytes.slice(offset, offset + length)
 		},
-		reach: () => furthest
+		reach: () => furthest,
+		total: () => read
 	}
 }
 
@@ -239,6 +245,72 @@ describe("frames", () => {
 		const second = await encapsulatedFrame(frame, index, 1)
 
 		expect([...second.data]).toEqual([0x0507, 0x0608])
+	})
+
+	it("bounds an offset table's fragments by the file, before reading them", async () => {
+		const last = rleFrame([Uint8Array.from([3, 4])])
+		const frames = [rleFrame([Uint8Array.from([1, 2])]), last]
+		const file = dicomFile({
+			transferSyntax: RLE,
+			elements: grayModule({ rows: 1, columns: 2, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false, frames: 2 }),
+			pixelData: encapsulated(frames, frameOffsets(frames))
+		})
+		// The second fragment's item claims 4 GiB.
+		const second = file.length - 8 - (8 + last.length) + 4
+
+		new DataView(file.buffer).setUint32(second, 0xfffffff0, true)
+
+		const { context: frame, source } = context(file)
+		const index = fragmentIndex(frame)
+
+		if (index === null) throw new Error("no fragments")
+
+		await expect(encapsulatedFrame(frame, index, 1)).rejects.toMatchObject({ reason: "damaged" })
+		expect(source.reach()).toBeLessThanOrEqual(file.length)
+	})
+
+	it("refuses a JPEG 2000 frame no resolution of which fits, from its first bytes, before reading it", async () => {
+		const side = 16_384
+		const codestream = new Uint8Array(4 * DICOM_J2K_HEAD_BYTES)
+
+		codestream.set(siz(side, side, 1, 16, 2))
+
+		const file = dicomFile({
+			transferSyntax: JPEG_2000,
+			elements: grayModule({ rows: side, columns: side, bitsAllocated: 16, bitsStored: 16, highBit: 15, signed: false }),
+			pixelData: encapsulated([codestream])
+		})
+		const { context: frame, source } = context(file)
+		const decode = vi.fn()
+		const index = fragmentIndex(frame)
+
+		if (index === null) throw new Error("no fragments")
+
+		const header = source.total()
+		// Two reductions leave 4096² pixels: a budget of fewer than that refuses the frame.
+		const tight: FrameContext = { ...frame, compressed: decode, budget: { decodeBytes: 4096 * 4096 * 10, heldWith: () => 1 } }
+
+		await expect(encapsulatedFrame(tight, index, 0)).rejects.toMatchObject({ reason: "tooLarge" })
+		// The item headers and the head of the fragment, not the fragment.
+		expect(source.total() - header).toBeLessThan(DICOM_J2K_HEAD_BYTES + 64)
+
+		// Nothing left at all once the frame's bytes are held: refused before even its head is read.
+		const before = source.total()
+		const spent: FrameContext = { ...frame, compressed: decode, budget: { decodeBytes: 1000, heldWith: bytes => bytes } }
+
+		await expect(encapsulatedFrame(spent, index, 0)).rejects.toMatchObject({ reason: "tooLarge" })
+		expect(source.total()).toBe(before)
+		expect(decode).not.toHaveBeenCalled()
+	})
+
+	it("reads a range only within the file, allocating nothing for a read past its end", () => {
+		const readInto = vi.fn((out: Uint8Array) => out.length)
+		const source = rangeSource(100, readInto)
+
+		expect(source.read(90, 10)).toHaveLength(10)
+		expect(() => source.read(90, 0xfffffff0)).toThrow(expect.objectContaining({ reason: "damaged" }))
+		expect(() => source.read(-1, 1)).toThrow(DicomOpenError)
+		expect(readInto).toHaveBeenCalledTimes(1)
 	})
 
 	it("calls a frame's pixel data damaged when the value is shorter than its frames", () => {

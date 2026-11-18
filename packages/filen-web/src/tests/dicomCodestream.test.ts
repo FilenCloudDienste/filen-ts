@@ -10,6 +10,7 @@ import {
 	reductionWithin
 } from "@/features/preview/lib/dicom/codestream.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
+import { siz } from "@/tests/support/dicomBytes"
 
 // The codestream header checks made before a compressed DICOM frame reaches its decoder, and the decoders themselves
 // (CharLS, OpenJPEG, OpenJPH) on codestreams their own encoders wrote.
@@ -59,45 +60,6 @@ function jpeg(sof: number, precision: number, rows: number, columns: number, com
 	])
 }
 
-function siz(columns: number, rows: number, components: number, depth: number, levels: number, subsampled = false): Uint8Array {
-	const be32 = (value: number) => [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]
-
-	return Uint8Array.from([
-		0xff,
-		0x4f,
-		0xff,
-		0x51,
-		...be16(38 + components * 3),
-		0,
-		0,
-		...be32(columns),
-		...be32(rows),
-		...be32(0),
-		...be32(0),
-		...be32(columns),
-		...be32(rows),
-		...be32(0),
-		...be32(0),
-		...be16(components),
-		...Array.from({ length: components }, (_, i) => [depth - 1, subsampled && i > 0 ? 2 : 1, 1]).flat(),
-		0xff,
-		0x52,
-		...be16(12),
-		0,
-		0,
-		0,
-		1,
-		0,
-		levels,
-		4,
-		4,
-		0,
-		0,
-		0xff,
-		0x90
-	])
-}
-
 const TAGS = { rows: 48, columns: 64, samplesPerPixel: 1, bitsStored: 16 }
 
 describe("codestream headers", () => {
@@ -143,7 +105,7 @@ describe("codestream headers", () => {
 
 	it("reads JPEG 2000's SIZ and COD, refusing subsampled components", () => {
 		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({ rows: 48, columns: 64, components: 3, bits: 12, levels: 5 })
-		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, true))).toBeNull()
+		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, { subsampled: true }))).toBeNull()
 
 		// One-pixel tiles over a large image: more tiles than a codestream can index.
 		const tiny = siz(4096, 4096, 1, 8, 5)

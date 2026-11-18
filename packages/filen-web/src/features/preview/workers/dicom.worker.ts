@@ -2,7 +2,14 @@
 import * as Comlink from "comlink"
 import { SyncRangeReader } from "@filen/office/dom/pdfedit"
 import { RANGE_READ_TIMEOUT_MS } from "@/lib/media/rangePort"
-import { DicomOpenError, memorySource, readHeader, type DicomHeader, type DicomSource } from "@/features/preview/lib/dicom/dicomFile"
+import {
+	DicomOpenError,
+	memorySource,
+	rangeSource,
+	readHeader,
+	type DicomHeader,
+	type DicomSource
+} from "@/features/preview/lib/dicom/dicomFile"
 import { imageVerdict, readPixelModule, type PixelModule } from "@/features/preview/lib/dicom/pixelModule"
 import {
 	DicomFrameFailure,
@@ -172,18 +179,7 @@ function rangedSource(source: Extract<DicomOpenSource, { kind: "ranged" }>): Dic
 		now: () => performance.now()
 	})
 
-	return {
-		size: channel.length,
-		read: (offset, length) => {
-			const out = new Uint8Array(length)
-
-			if (length > 0 && reader.read(out, 0, length, offset) !== length) {
-				throw new DicomOpenError("unreadable", "a read of the file failed")
-			}
-
-			return out
-		}
-	}
+	return rangeSource(channel.length, (out, offset) => reader.read(out, 0, out.length, offset))
 }
 
 function grayModel(module: PixelModule): GrayModel {

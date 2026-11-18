@@ -38,15 +38,38 @@ export interface DicomSource {
 	read(offset: number, length: number): Uint8Array
 }
 
+function checkRange(size: number, offset: number, length: number): void {
+	if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > size) {
+		throw new DicomOpenError("damaged", "a read past the end of the file")
+	}
+}
+
 export function memorySource(bytes: Uint8Array): DicomSource {
 	return {
 		size: bytes.length,
 		read: (offset, length) => {
-			if (offset < 0 || offset + length > bytes.length) {
-				throw new DicomOpenError("damaged", "a read past the end of the file")
-			}
+			checkRange(bytes.length, offset, length)
 
 			return bytes.subarray(offset, offset + length)
+		}
+	}
+}
+
+// A file of `size` bytes read through `readInto` (the sync range reader: the bytes it wrote into `out`). A read past
+// the end is refused before its buffer is allocated, so a length the file declares is never trusted for one.
+export function rangeSource(size: number, readInto: (out: Uint8Array, offset: number) => number): DicomSource {
+	return {
+		size,
+		read: (offset, length) => {
+			checkRange(size, offset, length)
+
+			const out = new Uint8Array(length)
+
+			if (length > 0 && readInto(out, offset) !== length) {
+				throw new DicomOpenError("unreadable", "a read of the file failed")
+			}
+
+			return out
 		}
 	}
 }

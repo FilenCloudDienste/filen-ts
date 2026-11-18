@@ -5,8 +5,10 @@ import {
 	nativeFrameBytes,
 	nativeFrameSpan,
 	spansLength,
-	DicomFrameError
+	DicomFrameError,
+	type Span
 } from "@/features/preview/lib/dicom/frames.logic"
+import { jpeg2000Header, matchesTags, reductionWithin } from "@/features/preview/lib/dicom/codestream.logic"
 import { decodeRle, DicomRleError } from "@/features/preview/lib/dicom/rle.logic"
 import { pixelsWithin } from "@/lib/pixelBudget.logic"
 import type { FrameSamples, SampleColor } from "@/features/preview/lib/dicom/pixels.logic"
@@ -74,17 +76,39 @@ function samplesView(bytes: Uint8Array, bitsAllocated: number, littleEndian: boo
 // JPEG 2000 frames decode at a reduced resolution when the full one is over the budget.
 const REDUCIBLE: ReadonlySet<DicomDecoder> = new Set(["jpeg2000", "htj2k"])
 
-// The pixels left for a frame with `frameBytes` held; throws when the tags' frame does not fit them and the decoder
-// cannot reduce it.
+// What is read of a JPEG 2000 frame's first fragment before the rest: its main header (SIZ, COD, COC), whatever its
+// size but for packed packet headers (PPM), which a frame this viewer reads does not need.
+export const DICOM_J2K_HEAD_BYTES = 64 * 1024
+
+function tooLarge(): never {
+	throw new DicomFrameFailure("tooLarge", "the frame is larger than the decode budget")
+}
+
+// The pixels left for a frame with `frameBytes` held, checked before any of them is read: none left refuses the frame
+// whatever its decoder, and so does a tags' frame that does not fit them when the decoder cannot reduce it.
 function checkBudget(context: FrameContext, frameBytes: number): number {
 	const { rows, columns } = context.module
 	const pixels = pixelsWithin(context.budget.decodeBytes, context.budget.heldWith(frameBytes), DICOM_FRAME_BPP)
 
-	if (rows * columns > pixels && !REDUCIBLE.has(context.syntax.decoder)) {
-		throw new DicomFrameFailure("tooLarge", "the frame is larger than the decode budget")
-	}
+	if (pixels < 1 || (rows * columns > pixels && !REDUCIBLE.has(context.syntax.decoder))) tooLarge()
 
 	return pixels
+}
+
+// A JPEG 2000 frame's main header, read from the head of its first fragment, against the tags and the budget before
+// the frame itself is read: refused when even its most reduced resolution does not fit.
+function checkReducible(context: FrameContext, spans: readonly Span[], pixels: number): void {
+	const [first] = spans
+
+	if (first === undefined) throw new DicomFrameFailure("damaged", "a frame without fragments")
+
+	const header = jpeg2000Header(context.source.read(first.offset, Math.min(first.length, DICOM_J2K_HEAD_BYTES)))
+
+	if (header === null || !matchesTags(header, context.module)) {
+		throw new DicomFrameFailure("mismatch", "the codestream header does not match the tags")
+	}
+
+	if (reductionWithin(header, pixels) === null) tooLarge()
 }
 
 function rethrow(error: unknown): never {
@@ -144,6 +168,9 @@ export async function encapsulatedFrame(context: FrameContext, fragments: Fragme
 	try {
 		const spans = fragments.frame(index)
 		const pixels = checkBudget(context, spansLength(spans))
+
+		if (REDUCIBLE.has(syntax.decoder)) checkReducible(context, spans, pixels)
+
 		const encoded = joinSpans((offset, length) => source.read(offset, length), spans)
 
 		if (syntax.decoder === "rle") {
