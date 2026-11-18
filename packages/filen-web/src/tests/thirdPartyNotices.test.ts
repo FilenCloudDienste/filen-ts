@@ -261,6 +261,25 @@ describe("third-party notices payload integrity", () => {
 		expect(build).toContain("packages/filen-web/src/vendor/ffmpeg-decoders/decoders.worker.js")
 	})
 
+	it("carries the MIT text and copyright of every cornerstone codec wrapper, one its package does not ship included", () => {
+		const vendored = readFileSync("scripts/licenses/dicom/codec-openjpeg-LICENSE", "utf8")
+
+		for (const name of ["@cornerstonejs/codec-charls", "@cornerstonejs/codec-openjpeg", "@cornerstonejs/codec-openjph"]) {
+			const notice = THIRD_PARTY_NOTICES.find(entry => entry.ecosystem === "npm" && entry.name === name)
+
+			expect(notice?.license).toBe("MIT")
+			expect(notice?.copyright.length).toBeGreaterThan(0)
+			expect(notice?.texts.some(index => (LICENSE_TEXTS[index] ?? "").includes("Permission is hereby granted, free of charge"))).toBe(
+				true
+			)
+		}
+
+		const openjpeg = THIRD_PARTY_NOTICES.find(entry => entry.ecosystem === "npm" && entry.name === "@cornerstonejs/codec-openjpeg")
+
+		expect(openjpeg?.copyright).toEqual(["Copyright (c) 2019 Open Health Imaging Foundation", "Copyright (c) Chris Hafey"])
+		expect(vendored).toContain("Copyright (c) 2019 Open Health Imaging Foundation")
+	})
+
 	it("names the patch pnpm applies to every patched package that ships", () => {
 		// What ships is the patched source; MPL-2.0 and the LGPL ask that recipients learn where it is.
 		const workspace = readFileSync(new URL("../../../../pnpm-workspace.yaml", import.meta.url), "utf8")

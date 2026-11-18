@@ -108,7 +108,8 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 		const described = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY, { root: "../..", url: FILEN_TS_BLOBS })
 		const license = NPM_LICENSE_OVERRIDES.get(name)
 		// A package naming no license keeps the text it ships; the override only names that text's SPDX id.
-		const entry = described !== null && license !== undefined && described.license === "UNKNOWN" ? { ...described, license } : described
+		const named = described !== null && license !== undefined && described.license === "UNKNOWN" ? { ...described, license } : described
+		const entry = named === null ? null : withVendoredLicense(named)
 
 		// Marked seen only once actually described: an id pnpm reports but no directory can supply stays
 		// undescribed and fails the payload's drift guard loudly rather than silently.
@@ -121,6 +122,49 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 	}
 
 	return entries
+}
+
+/**
+ * npm packages that ship no license file although their source repository has one: the text is kept beside this
+ * script, read from the repository at the package's own release tag, with the copyright its sources carry.
+ */
+const NPM_VENDORED_LICENSES: ReadonlyMap<
+	string,
+	{ readonly file: string; readonly source: string; readonly copyright: readonly string[] }
+> = new Map([
+	[
+		"@cornerstonejs/codec-openjpeg",
+		{
+			file: "scripts/licenses/dicom/codec-openjpeg-LICENSE",
+			source: "https://github.com/cornerstonejs/codecs at the tag @cornerstonejs/codec-openjpeg@1.3.6",
+			// packages/openjpeg/src/*.{hpp,cpp} at that tag: "Copyright (c) Chris Hafey. SPDX-License-Identifier: MIT".
+			copyright: ["Copyright (c) Chris Hafey"]
+		}
+	]
+])
+
+function withVendoredLicense(entry: Collected): Collected {
+	const vendored = NPM_VENDORED_LICENSES.get(entry.name)
+
+	if (vendored === undefined) return entry
+
+	if (entry.terms.length > 0) {
+		throw new Error(`${entry.name} ${entry.version} now ships its own license text: drop its vendored one`)
+	}
+
+	if (!vendored.source.endsWith(`@${entry.version}`)) {
+		throw new Error(
+			`${entry.name} is installed at ${entry.version}, its vendored license is read for ${vendored.source}: read it again`
+		)
+	}
+
+	const text = splitCopyright(readFileSync(vendored.file, "utf8"))
+
+	return {
+		...entry,
+		copyright: [...text.copyright, ...vendored.copyright],
+		terms: [`The license of ${entry.name} ${entry.version}, which its npm package does not include: ${vendored.source}.`, text.terms]
+	}
 }
 
 /**
