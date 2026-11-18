@@ -1,4 +1,4 @@
-import { DxfViewer, type DxfSceneOptions } from "dxf-viewer"
+import { DxfViewer } from "dxf-viewer"
 import type { Color, WebGLRenderer } from "three"
 import { dxfContainer } from "@/features/preview/lib/dxfStubs"
 
@@ -6,12 +6,15 @@ import { dxfContainer } from "@/features/preview/lib/dxfStubs"
 // dxf-viewer and three stay out of the page.
 
 // The scene's work budget (patched into dxf-viewer, see pnpm-workspace.yaml): entity visits, generated vertices and
-// indices, arc segments, hatch lines and dash steps. Mostly vertices, 8 bytes each in the scene's buffers.
-export const DXF_MAX_WORK = 32 * 1024 * 1024
-// One entity's generated vertices and indices, held as objects until the entity is written.
-export const DXF_MAX_ENTITY_WORK = 1024 * 1024
-
-export const DXF_SCENE_OPTIONS: DxfSceneOptions = { maxWork: DXF_MAX_WORK, maxEntityWork: DXF_MAX_ENTITY_WORK }
+// indices, spline sampling, hatch lines and dash steps, each block instance's vertices, render batches and the fonts
+// loaded. Measured at about 0.3 µs, 40-90 bytes of heap and 11 bytes of scene buffer a unit at worst: 2^23 holds a
+// 32 MiB drawing of plain geometry at 40 % and bounds the build at about 0.7 GB over the parse.
+export const DXF_MAX_WORK = 8_388_608
+// One entity's work, checked before it generates its geometry.
+export const DXF_MAX_ENTITY_WORK = 1_048_576
+// Bytes of TrueType counted as one unit of work: opentype.js and dxf-viewer hold a parsed face at about 7 times its
+// size (Noto Sans SC: 10.6 MB, 77 MB of heap), about 64 bytes a unit.
+export const DXF_FONT_BYTES_PER_WORK = 8
 
 export interface DxfNotices {
 	// Some text has characters no offered font draws.
@@ -50,6 +53,8 @@ export interface DxfViewerSetup {
 	// Dot marks' size in backing pixels.
 	readonly pointSize: number
 	readonly encoding: string
+	// Work the fonts loaded so far count for.
+	readonly fontWork: () => number
 }
 
 // A viewer on `renderer` (its canvas given dxfCanvas's expandos first). Nothing is retained of the parse but the scene.
@@ -64,7 +69,12 @@ export function createDxfViewer(renderer: WebGLRenderer, setup: DxfViewerSetup):
 		pointSize: setup.pointSize,
 		fileEncoding: setup.encoding,
 		retainParsedDxf: false,
-		sceneOptions: DXF_SCENE_OPTIONS
+		sceneOptions: {
+			maxWork: DXF_MAX_WORK,
+			maxEntityWork: DXF_MAX_ENTITY_WORK,
+			fontWork: setup.fontWork,
+			releaseParsedDxf: true
+		}
 	})
 }
 

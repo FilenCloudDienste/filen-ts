@@ -2,7 +2,7 @@ import { textEncodingLabel } from "@filen/shared/textEncoding"
 
 // The text encoding a DXF drawing is read with. From R2007 (AC1021) on, a DXF is UTF-8 whatever its header says; before,
 // its text is in the codepage $DWGCODEPAGE names. A file that names none (or one no decoder here reads) is read as
-// UTF-8 when its head is valid UTF-8, else as Windows-1252, AutoCAD's default.
+// UTF-8 when the whole file is valid UTF-8, else as Windows-1252, AutoCAD's default (dxfText.logic).
 
 // The head read for the header variables: they open a DXF.
 export const DXF_HEADER_BYTES = 65_536
@@ -41,57 +41,67 @@ export function dxfHeaderFields(head: Uint8Array): DxfHeaderFields {
 	return { version, codepage }
 }
 
-const ANSI_CODEPAGES: ReadonlyMap<number, string> = new Map([
+// Codepages AutoCAD-family writers name, by the number after ANSI_ or DOS (or the bare name), that have a decoder here.
+const NUMBERED_CODEPAGES: ReadonlyMap<number, string> = new Map([
+	[866, "ibm866"],
 	[932, "shift_jis"],
 	[936, "gbk"],
 	[949, "euc-kr"],
 	[950, "big5"]
 ])
 
-function ansiLabel(number: number): string | null {
-	return ANSI_CODEPAGES.get(number) ?? (number === 874 || (number >= 1250 && number <= 1258) ? `windows-${String(number)}` : null)
+const NAMED_CODEPAGES: ReadonlyMap<string, string> = new Map([
+	["GB2312", "gbk"],
+	["BIG5", "big5"],
+	["KSC5601", "euc-kr"],
+	["MACINTOSH", "macintosh"],
+	["UTF8", "utf-8"],
+	["UTF-8", "utf-8"]
+])
+
+function numberedLabel(number: number): string | null {
+	return NUMBERED_CODEPAGES.get(number) ?? (number === 874 || (number >= 1250 && number <= 1258) ? `windows-${String(number)}` : null)
 }
 
-// The encoding label (filen-shared's TEXT_ENCODINGS) a $DWGCODEPAGE value names, or null when none reads it.
+function isoLabel(part: number): string {
+	// Latin-1 and Latin-5 are read as their Windows supersets, as the Encoding Standard does; Thai as Windows-874.
+	return part === 1 ? "windows-1252" : part === 9 ? "windows-1254" : part === 11 ? "windows-874" : `iso-8859-${String(part)}`
+}
+
+function decodable(label: string): boolean {
+	try {
+		new TextDecoder(label)
+
+		return true
+	} catch {
+		return false
+	}
+}
+
+// The encoding label a $DWGCODEPAGE value names (filen-shared's TEXT_ENCODINGS name where it lists one), or null when
+// no decoder here reads it (the DOS Latin pages, Johab).
 export function dwgCodepageLabel(codepage: string): string | null {
 	const value = codepage.trim().toUpperCase()
-	const ansi = /^ANSI_(\d+)$/.exec(value)
+	const numbered = /^(?:ANSI_|DOS)(\d+)$/.exec(value)
 	const iso = /^ISO8859-(\d+)$/.exec(value)
-	let label: string | null = null
+	const label =
+		numbered !== null
+			? numberedLabel(Number(numbered[1]))
+			: iso !== null
+				? isoLabel(Number(iso[1]))
+				: (NAMED_CODEPAGES.get(value) ?? null)
 
-	if (ansi !== null) {
-		label = ansiLabel(Number(ansi[1]))
-	} else if (iso !== null) {
-		const part = Number(iso[1])
+	if (label === null) return null
 
-		// Latin-1 and Latin-5 are read as their Windows supersets, as the Encoding Standard does.
-		label = part === 1 ? "windows-1252" : part === 9 ? "windows-1254" : `iso-8859-${String(part)}`
-	} else if (value === "DOS866") {
-		label = "ibm866"
-	} else if (value === "MACINTOSH") {
-		label = "macintosh"
-	} else if (value === "UTF8" || value === "UTF-8") {
-		label = "utf-8"
-	}
-
-	return label === null ? null : textEncodingLabel(label)
+	return textEncodingLabel(label) ?? (decodable(label) ? label : null)
 }
 
-export function dxfFileEncoding(head: Uint8Array): string {
+// The encoding the header declares: UTF-8 from R2007, else the codepage $DWGCODEPAGE names; null when it says nothing
+// usable, and the read pass decides (dxfText.logic).
+export function dxfDeclaredEncoding(head: Uint8Array): string | null {
 	const { version, codepage } = dxfHeaderFields(head)
 
 	if (version !== null && version >= UTF8_FROM_VERSION) return "utf-8"
 
-	const named = codepage === null ? null : dwgCodepageLabel(codepage)
-
-	if (named !== null) return named
-
-	try {
-		// A head may end inside a character: streamed, so only a sequence that cannot go on is an error.
-		new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(0, DXF_HEADER_BYTES), { stream: true })
-
-		return "utf-8"
-	} catch {
-		return "windows-1252"
-	}
+	return codepage === null ? null : dwgCodepageLabel(codepage)
 }

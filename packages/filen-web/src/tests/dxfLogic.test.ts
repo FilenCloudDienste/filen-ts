@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { FALLBACK_FAMILIES, PDF_FACES } from "@filen/office/core/pdfwrite/fonts"
-import { DXF_HEADER_BYTES, dwgCodepageLabel, dxfFileEncoding, dxfHeaderFields } from "@/features/preview/lib/dxfEncoding.logic"
+import { DXF_HEADER_BYTES, dwgCodepageLabel, dxfDeclaredEncoding, dxfHeaderFields } from "@/features/preview/lib/dxfEncoding.logic"
+import { DxfTextScan } from "@/features/preview/lib/dxfText.logic"
 import { DXF_MAX_CODE_POINTS, DxfCodePoints, dxfFontFaces, regularFace } from "@/features/preview/lib/dxfFonts.logic"
 import { DXF_MAX_ZOOM_IN, DXF_MAX_ZOOM_OUT, panDxfView, zoomDxfView } from "@/features/preview/lib/dxfView.logic"
 import { DXF_DEVICE_PIXEL_RATIO, dxfCanvas, dxfContainer } from "@/features/preview/lib/dxfStubs"
@@ -63,21 +64,43 @@ describe("dwgCodepageLabel", () => {
 		["ISO8859-9", "windows-1254"],
 		["DOS866", "ibm866"],
 		["MACINTOSH", "macintosh"],
-		["UTF8", "utf-8"]
+		["UTF8", "utf-8"],
+		["DOS932", "shift_jis"],
+		["DOS936", "gb18030"],
+		["GB2312", "gb18030"],
+		["DOS949", "euc-kr"],
+		["KSC5601", "euc-kr"],
+		["DOS950", "big5"],
+		["BIG5", "big5"],
+		["ISO8859-11", "windows-874"],
+		["ISO8859-3", "iso-8859-3"],
+		["ISO8859-14", "iso-8859-14"]
 	])("%s reads as %s", (codepage, label) => {
 		expect(dwgCodepageLabel(codepage)).toBe(label)
 		expect(() => new TextDecoder(label)).not.toThrow()
 	})
 
-	it.each(["ANSI_1361", "DOS437", "ISO8859-3", "ANSI_", "KOI8", ""])("%s names no decoder here", codepage => {
+	it("names a page TEXT_ENCODINGS does not list only where this engine decodes it", () => {
+		let decodes = true
+
+		try {
+			new TextDecoder("iso-8859-16")
+		} catch {
+			decodes = false
+		}
+
+		expect(dwgCodepageLabel("ISO8859-16")).toBe(decodes ? "iso-8859-16" : null)
+	})
+
+	it.each(["ANSI_1361", "JOHAB", "DOS437", "DOS850", "DOS852", "ANSI_", "KOI8", ""])("%s names no decoder here", codepage => {
 		expect(dwgCodepageLabel(codepage)).toBeNull()
 	})
 })
 
-describe("dxfFileEncoding", () => {
+describe("dxfDeclaredEncoding", () => {
 	it("reads R2007 and later as UTF-8 whatever the codepage says", () => {
 		expect(
-			dxfFileEncoding(
+			dxfDeclaredEncoding(
 				header([
 					["$ACADVER", "1", "AC1021"],
 					["$DWGCODEPAGE", "3", "ANSI_1251"]
@@ -86,34 +109,71 @@ describe("dxfFileEncoding", () => {
 		).toBe("utf-8")
 	})
 
-	it("reads an older drawing in its codepage", () => {
+	it("reads an older drawing in its codepage, and leaves one naming none usable to the read", () => {
 		expect(
-			dxfFileEncoding(
+			dxfDeclaredEncoding(
 				header([
 					["$ACADVER", "1", "AC1015"],
 					["$DWGCODEPAGE", "3", "ANSI_1251"]
 				])
 			)
 		).toBe("windows-1251")
+		expect(dxfDeclaredEncoding(header([["$DWGCODEPAGE", "3", "DOS437"]]))).toBeNull()
+		expect(dxfDeclaredEncoding(new TextEncoder().encode("0\nSECTION\n2\nENTITIES\n"))).toBeNull()
+	})
+})
+
+function scan(declared: string | null, ...chunks: (string | Uint8Array)[]) {
+	const read = new DxfTextScan(declared)
+
+	for (const chunk of chunks) read.add(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk)
+
+	return read.finish()
+}
+
+describe("DxfTextScan", () => {
+	it("collects the characters of text values only (group codes 1 and 3), not names, comments or other strings", () => {
+		const read = scan(null, "999\nκ comment\n0\nLAYER\n2\nЖ layer\n0\nTEXT\n1\nCafé\n0\nMTEXT\n3\nשלום\n1000\n中 xdata\n")
+
+		expect([...read.codePoints].sort((a, b) => a - b)).toEqual([0xe9, 0x5dc, 0x5d5, 0x5e9, 0x5dd].sort((a, b) => a - b))
+		expect(read.encoding).toBe("utf-8")
 	})
 
-	it("reads a drawing naming no usable codepage as UTF-8 when its head is, else as Windows-1252", () => {
-		expect(dxfFileEncoding(new TextEncoder().encode("0\nSECTION\n2\nENTITIES\n0\nTEXT\n1\nCafé\n"))).toBe("utf-8")
-		expect(dxfFileEncoding(Uint8Array.from([0x30, 0x0a, 0x54, 0x0a, 0x31, 0x0a, 0x43, 0x61, 0x66, 0xe9, 0x0a]))).toBe("windows-1252")
-		expect(dxfFileEncoding(header([["$DWGCODEPAGE", "3", "DOS437"]]))).toBe("utf-8")
-		// A head cut inside a character is still UTF-8.
-		expect(dxfFileEncoding(new TextEncoder().encode("1\nCafé").subarray(0, 6))).toBe("utf-8")
+	it("pairs lines across chunks, a CRLF split between two included", () => {
+		const read = scan(null, "0\r\nTEXT\r", "\n1\r\nCaf", "é\r\n2\r\n中\r\n")
+
+		expect([...read.codePoints]).toEqual([0xe9])
+	})
+
+	it("decides UTF-8 from the whole file: a byte invalid past the header's 64 KiB makes it Windows-1252", () => {
+		const padding = new TextEncoder().encode("999\n" + "x".repeat(DXF_HEADER_BYTES * 2) + "\n")
+		const late = Uint8Array.from([0x31, 0x0a, 0x43, 0x61, 0x66, 0xe9, 0x0a])
+		const read = scan(null, padding, late)
+
+		expect(read.encoding).toBe("windows-1252")
+		// Characters decoded as UTF-8 from it do not count; the escapes do.
+		expect(read.codePoints.size).toBe(0)
+		expect([...scan(null, padding, late, "1\n\\U+05D0\n").codePoints]).toEqual([0x5d0])
+		expect(scan(null, padding, new TextEncoder().encode("1\nCafé\n")).encoding).toBe("utf-8")
+	})
+
+	it("reads a declared encoding as declared", () => {
+		const read = scan("windows-1251", Uint8Array.from([0x31, 0x0a, 0xc6, 0x0a]))
+
+		expect(read.encoding).toBe("windows-1251")
+		expect([...read.codePoints]).toEqual([0x416])
 	})
 })
 
 describe("DxfCodePoints", () => {
-	it("collects the characters past ASCII, written out or escaped, across chunks", () => {
+	it("collects the characters past ASCII, written out or escaped", () => {
 		const points = new DxfCodePoints()
 
-		points.add("TEXT Café \\U+05D")
+		points.add("TEXT Café \\U+05D0")
 		points.add("0 and %%c 12 and \\M+1823C")
 
 		expect([...points.codePoints()].sort((a, b) => a - b)).toEqual([0xe9, 0x5d0, 0x2205, 0x3042])
+		expect([...points.codePoints(false)].sort((a, b) => a - b)).toEqual([0x5d0, 0x2205, 0x3042])
 	})
 
 	it("stops collecting at its cap", () => {

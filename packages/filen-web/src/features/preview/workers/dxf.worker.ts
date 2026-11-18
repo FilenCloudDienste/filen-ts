@@ -8,12 +8,14 @@ import type { DxfViewer } from "dxf-viewer"
 import { OFFICE_PDF_FONT_URLS } from "virtual:office-pdf-fonts"
 import { FALLBACK_FAMILIES, PDF_FACES, decodeFace, type PdfFaceFile } from "@filen/office/core/pdfwrite/fonts"
 import { DXF_MAX_BYTES } from "@/features/preview/lib/previewCaps"
-import { DXF_HEADER_BYTES, dxfFileEncoding } from "@/features/preview/lib/dxfEncoding.logic"
-import { DxfCodePoints, dxfFontFaces, regularFace } from "@/features/preview/lib/dxfFonts.logic"
+import { DXF_HEADER_BYTES, dxfDeclaredEncoding } from "@/features/preview/lib/dxfEncoding.logic"
+import { dxfFontFaces, regularFace } from "@/features/preview/lib/dxfFonts.logic"
+import { DxfTextScan, type DxfTextRead } from "@/features/preview/lib/dxfText.logic"
 import { panDxfView, zoomDxfView, type DxfView } from "@/features/preview/lib/dxfView.logic"
 import {
 	DXF_DRAWING_PATH,
 	DXF_FONT_PATH_PREFIX,
+	DXF_FONT_BYTES_PER_WORK,
 	createDxfViewer,
 	dxfLoadFailure,
 	loadDxf,
@@ -74,6 +76,8 @@ const fontUrls = new Map(
 	})
 )
 let drawing: Blob | null = null
+// Bytes of the faces loaded, which dxf-viewer holds parsed for the whole build.
+let fontBytes = 0
 
 // The drawing once (it is dropped as soon as the parser has it) and the bundled faces dxf-viewer asks for, decompressed.
 async function resolve(path: string): Promise<Blob | null> {
@@ -92,6 +96,8 @@ async function resolve(path: string): Promise<Blob | null> {
 	const response = await fetch(font.url)
 
 	if (!response.ok) return null
+
+	fontBytes += font.face.ttfBytes
 
 	// Decoded into a fresh ArrayBuffer (or the fetched one, already decoded).
 	return new Blob([decodeFace(new Uint8Array(await response.arrayBuffer()), font.face) as Uint8Array<ArrayBuffer>])
@@ -270,16 +276,16 @@ function onShell({ data }: MessageEvent<ShellToWorker>): void {
 	}
 }
 
-// The characters past ASCII the drawing's text may draw, read through once in its encoding.
-async function codePoints(source: Blob, encoding: string): Promise<ReadonlySet<number>> {
-	const collected = new DxfCodePoints()
-	const reader = source.stream().pipeThrough(new TextDecoderStream(encoding)).getReader()
+// One read of the drawing before it is parsed: its encoding, and the characters its drawn text holds.
+async function readText(source: Blob): Promise<DxfTextRead> {
+	const scan = new DxfTextScan(dxfDeclaredEncoding(new Uint8Array(await source.slice(0, DXF_HEADER_BYTES).arrayBuffer())))
+	const reader = source.stream().getReader()
 
 	for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
-		collected.add(chunk.value)
+		scan.add(chunk.value)
 	}
 
-	return collected.codePoints()
+	return scan.finish()
 }
 
 function layerColor(color: number): string {
@@ -315,14 +321,15 @@ const api = {
 
 		dark = darkBackground
 
-		const encoding = dxfFileEncoding(new Uint8Array(await source.slice(0, DXF_HEADER_BYTES).arrayBuffer()))
-		const faces: PdfFaceFile[] = dxfFontFaces(await codePoints(source, encoding), primaryFace, FALLBACK_FAMILIES)
+		const { encoding, codePoints } = await readText(source)
+		const faces: PdfFaceFile[] = dxfFontFaces(codePoints, primaryFace, FALLBACK_FAMILIES)
 		const loaded = createDxfViewer(built, {
 			width: size.width,
 			height: size.height,
 			background: dark ? BACKGROUNDS.dark : BACKGROUNDS.light,
 			pointSize: 2 * pixelRatio,
-			encoding
+			encoding,
+			fontWork: () => Math.ceil(fontBytes / DXF_FONT_BYTES_PER_WORK)
 		})
 		const notices = watchDxfMessages(loaded)
 

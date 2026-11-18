@@ -3,7 +3,7 @@ import type { FallbackFamily, PdfFaceFile } from "@filen/office/core/pdfwrite/fo
 // The fonts a DXF drawing's text is drawn with: the bundled office faces (gzip'd TrueType, which opentype.js reads once
 // decompressed). dxf-viewer loads them in order, each only once a character is missing from every font before it, and
 // a character no font has loads all of them; so a drawing is offered the sans face plus only the fallbacks for the
-// characters its text holds.
+// characters its drawn text holds (dxfText.logic reads them).
 
 // Distinct characters collected at most: a drawing's text uses a few hundred.
 export const DXF_MAX_CODE_POINTS = 65_536
@@ -18,37 +18,32 @@ const MIF_SAMPLES: ReadonlyMap<string, number> = new Map([
 	["5", 0x4e2d]
 ])
 
-// An escape may straddle two chunks: this much of a chunk's end is read again with the next.
-const ESCAPE_CARRY = 7
-
-// Collects the characters past ASCII a drawing's text may draw, chunk by chunk: those written out, those written as
-// \U+XXXX or MIF escapes, and the diameter sign %%c stands for.
+// Collects the characters past ASCII drawn text may hold, one text value at a time: those written out, those written
+// as \U+XXXX or MIF escapes, and the diameter sign %%c stands for. The escapes are ASCII, so they stand whatever the
+// file's encoding turns out to be; the written ones only in the encoding they were decoded with.
 export class DxfCodePoints {
-	private readonly seen = new Set<number>()
-	private carry = ""
+	private readonly written = new Set<number>()
+	private readonly escaped = new Set<number>()
 
-	public add(chunk: string): void {
-		for (const [char] of chunk.matchAll(/[\u0080-\u{10ffff}]/gu)) {
-			this.note(char.codePointAt(0) ?? 0)
+	public add(value: string): void {
+		for (const [char] of value.matchAll(/[\u0080-\u{10ffff}]/gu)) {
+			this.note(this.written, char.codePointAt(0) ?? 0)
 		}
 
-		const text = this.carry + chunk
-
-		for (const match of text.matchAll(/\\U\+([0-9A-Fa-f]{4})|\\M\+([1-5])|%%[cC]/g)) {
-			if (match[1] !== undefined) this.note(Number.parseInt(match[1], 16))
-			else if (match[2] !== undefined) this.note(MIF_SAMPLES.get(match[2]) ?? 0)
-			else this.note(0x2205)
+		for (const match of value.matchAll(/\\U\+([0-9A-Fa-f]{4})|\\M\+([1-5])|%%[cC]/g)) {
+			if (match[1] !== undefined) this.note(this.escaped, Number.parseInt(match[1], 16))
+			else if (match[2] !== undefined) this.note(this.escaped, MIF_SAMPLES.get(match[2]) ?? 0)
+			else this.note(this.escaped, 0x2205)
 		}
-
-		this.carry = text.slice(-ESCAPE_CARRY)
 	}
 
-	public codePoints(): ReadonlySet<number> {
-		return this.seen
+	// `written`: whether the characters written out count (false once the decode they came from was found wrong).
+	public codePoints(written = true): ReadonlySet<number> {
+		return written ? new Set([...this.escaped, ...this.written]) : this.escaped
 	}
 
-	private note(cp: number): void {
-		if (cp >= 0x80 && this.seen.size < DXF_MAX_CODE_POINTS) this.seen.add(cp)
+	private note(into: Set<number>, cp: number): void {
+		if (cp >= 0x80 && this.written.size + this.escaped.size < DXF_MAX_CODE_POINTS) into.add(cp)
 	}
 }
 

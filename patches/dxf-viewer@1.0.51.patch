@@ -1,8 +1,35 @@
+SPDX-License-Identifier: MPL-2.0
+Changes to dxf-viewer 1.0.51 (https://github.com/vagran/dxf-viewer). The files they change are under the Mozilla
+Public License 2.0 (https://mozilla.org/MPL/2.0/), as the package is, and so are these changes.
+
 diff --git a/src/DxfScene.js b/src/DxfScene.js
-index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f9e535f93 100644
+index 816d2513719b61cb4d24576067eb69145b52df5c..9eb088efb06a16c8cbdfea10810148a6049b63a0 100644
 --- a/src/DxfScene.js
 +++ b/src/DxfScene.js
-@@ -119,6 +119,14 @@ function SplitQuad(corners) {
+@@ -33,6 +33,22 @@ const MAX_HATCH_LINES = 20000
+  * out-of-memory issues on bad files.
+  */
+ const MAX_HATCH_SEGMENTS = 20000
++/** Largest angle magnitude, in radians, an arc or ellipse may give. Past it a double no longer turns
++ * a full circle (2^55 rad and up) long before, and no drawing needs it.
++ */
++const MAX_ANGLE = 1e9
++/** Deepest chain of blocks nested in blocks that is expanded. */
++const MAX_BLOCK_NESTING = 32
++/** Vertices in one solid fill region triangulated at most: earcut is superlinear on a self-
++ * intersecting loop. A larger region is drawn as its outline.
++ */
++const MAX_SOLID_FILL_VERTICES = 10000
++/** Work a new render batch costs: its three.js geometry, attribute, material and object. */
++const BATCH_WORK = 64
++/** Work one laid-out text character is reserved before layout (vertices and indices of a glyph). */
++const GLYPH_WORK = 48
++/** Units of nesting work (one loop tested against one vertex) counted as one unit of work. */
++const NESTING_WORK_DIVISOR = 32
+ 
+ 
+ /** Default values for system variables. Entry may be either value or function to call for obtaining
+@@ -119,6 +135,42 @@ function SplitQuad(corners) {
   * is decoupled in such a way so that it should be possible to build it in a web-worker, effectively
   * transfer it to the main thread, and easily apply it to a Three.js scene there.
   */
@@ -14,22 +41,72 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
 +    }
 +}
 +
++/** Thrown when one entity would generate more than `maxEntityWork`: the entity is skipped. */
++class EntityTooComplexError extends Error {
++    constructor() {
++        super("The entity needs more work to build than one entity may")
++        this.name = "DxfEntityTooComplex"
++    }
++}
++
++/** `end` moved by whole turns to the first value past `start`, as adding 2*PI until it is would.
++ * @throws {Error} When either angle is not finite or is past MAX_ANGLE.
++ */
++function NormalizeEndAngle(start, end) {
++    if (!Number.isFinite(start) || !Number.isFinite(end) ||
++        Math.abs(start) > MAX_ANGLE || Math.abs(end) > MAX_ANGLE) {
++
++        throw new Error("Angle out of range")
++    }
++    if (end > start) {
++        return end
++    }
++    const turn = Math.PI * 2
++    end += (Math.floor((start - end) / turn) + 1) * turn
++    if (end <= start) {
++        end += turn
++    }
++    return end
++}
++
  export class DxfScene {
  
      constructor(options) {
-@@ -150,6 +158,21 @@ export class DxfScene {
+@@ -150,6 +202,43 @@ export class DxfScene {
          this.numEntitiesFiltered = 0
          /* Entities dropped because they are malformed, see _ProcessDxfEntity(). */
          this.numEntitiesSkipped = 0
-+        /* Work done so far, see _Spend(). */
++        /* Work done so far, see _Spend(), and by the entity being decomposed. */
 +        this.work = 0
++        this.entityWork = 0
 +    }
 +
-+    /** Count work about to be done, and throw once the build is over `maxWork`. Every later call
-+     * throws as well, so the per-entity error handling cannot carry an over-budget build on. A
-+     * count that is not positive (a loop that will not run) costs nothing.
++    /** Count work an entity is about to do, before it does it: over `maxEntityWork` the entity is
++     * skipped (and what it was charged given back), over `maxWork` the build fails. A count that
++     * is not positive (a loop that will not run) costs nothing.
 +     */
 +    _Spend(amount) {
++        this._Reserve(amount)
++        if (amount > 0) {
++            this.entityWork += amount
++        }
++        this._SpendScene(amount)
++    }
++
++    /** Check that the entity being decomposed may still do `amount` of work, without counting it.
++     * @throws {EntityTooComplexError}
++     */
++    _Reserve(amount) {
++        if (this.entityWork + amount > this.options.maxEntityWork) {
++            throw new EntityTooComplexError()
++        }
++    }
++
++    /** Count work of the scene as a whole (instances, batches, fonts): over `maxWork` the build
++     * fails. Every later call throws as well.
++     * @throws {SceneTooComplexError}
++     */
++    _SpendScene(amount) {
 +        if (amount > 0) {
 +            this.work += amount
 +        }
@@ -39,25 +116,63 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
      }
  
      /** Build the scene from the provided parsed DXF.
-@@ -249,6 +272,8 @@ export class DxfScene {
+@@ -203,6 +292,8 @@ export class DxfScene {
+         this.textRenderer = new TextRenderer(fontFetchers, this.options.textOptions)
+         this.hasMissingChars = false
+         await this._FetchFonts(dxf)
++        /* The fonts loaded are held for the whole build. */
++        this._SpendScene(this.options.fontWork?.() ?? 0)
+ 
+         /* Scan all entities to analyze block usage statistics. */
+         for (const entity of dxf.entities) {
+@@ -249,6 +340,19 @@ export class DxfScene {
          if (this.numEntitiesSkipped > 0) {
              console.warn(`${this.numEntitiesSkipped} malformed entities skipped`)
          }
 +        /* The last entity may have gone over, its throw taken for a malformed entity. */
-+        this._Spend(0)
++        this._SpendScene(0)
++
++        if (this.options.releaseParsedDxf) {
++            /* Nothing below reads the parsed document: let it go before the buffers are built. */
++            for (const block of this.blocks.values()) {
++                block.data = null
++            }
++            dxf.entities = null
++            dxf.blocks = null
++            dxf.tables = null
++            this.inserts.clear()
++        }
  
          this.scene = this._BuildScene()
  
-@@ -359,6 +384,8 @@ export class DxfScene {
+@@ -359,15 +463,26 @@ export class DxfScene {
       * @param {?BlockContext} blockCtx
       */
      _ProcessDxfEntity(entity, blockCtx = null) {
 +        /* One per entity visit: a block nested in a block is visited once per path to it. */
-+        this._Spend(1)
++        this._SpendScene(1)
          let renderEntities
++        const outerWork = this.entityWork
++        this.entityWork = 0
          try {
              renderEntities = this._DecomposeDxfEntity(entity, blockCtx)
-@@ -434,8 +461,21 @@ export class DxfScene {
+         } catch (error) {
++            if (error instanceof SceneTooComplexError) {
++                throw error
++            }
++            /* Nothing of a skipped entity is written: what it was charged is given back. */
++            this.work -= this.entityWork
+             this.numEntitiesSkipped++
+             const handle = entity.handle !== undefined ? ` ${entity.handle}` : ""
+             const block = blockCtx ? ` in block ${blockCtx.name}` : ""
+             console.warn(`Skipped malformed ${entity.type} entity${handle}${block}:`, error)
+             return
++        } finally {
++            this.entityWork = outerWork
+         }
+         for (const renderEntity of renderEntities) {
+             this._ProcessEntity(renderEntity, blockCtx)
+@@ -434,8 +549,19 @@ export class DxfScene {
              console.log("Unhandled entity type: " + entity.type)
              return []
          }
@@ -67,40 +182,75 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
 +         * built: a hatch yields its segments one by one.
 +         */
 +        const materialized = []
-+        let entityWork = 0
 +        for (const renderEntity of renderEntities) {
-+            const work = 1 + renderEntity.vertices.length + (renderEntity.indices?.length ?? 0)
-+            entityWork += work
-+            if (entityWork > this.options.maxEntityWork) {
-+                throw new Error("Entity produces more geometry than one entity may")
-+            }
-+            this._Spend(work)
++            const vertices = renderEntity.vertices.length
++            /* A polyline is written with two indices per segment. */
++            const indices = renderEntity.indices?.length ??
++                (renderEntity.type === Entity.Type.POLYLINE ? 2 * vertices : 0)
++            this._Spend(1 + vertices + indices)
 +            materialized.push(renderEntity)
 +        }
 +        renderEntities = materialized
          /* Decomposers work in the entity's OCS; this is the one place it is mapped to WCS. Fresh
           * vertices are made rather than transforming in place, because render entities may hold
           * the parsed vertex objects themselves, and a block definition is decomposed again for
-@@ -618,6 +658,10 @@ export class DxfScene {
+@@ -618,9 +744,7 @@ export class DxfScene {
              endAngle = -tmp
          }
  
-+        if (endAngle <= startAngle) {
-+            /* Turns the loop below takes; it never ends once a turn no longer changes the angle. */
-+            this._Spend(Math.ceil((startAngle - endAngle) / (Math.PI * 2)) + 1)
-+        }
-         while (endAngle <= startAngle) {
-             endAngle += Math.PI * 2
-         }
-@@ -628,6 +672,7 @@ export class DxfScene {
+-        while (endAngle <= startAngle) {
+-            endAngle += Math.PI * 2
+-        }
++        endAngle = NormalizeEndAngle(startAngle, endAngle)
+ 
+         const arcAngle = endAngle - startAngle
+ 
+@@ -628,6 +752,8 @@ export class DxfScene {
          if (numSegments === 0) {
              numSegments = 1
          }
-+        this._Spend(numSegments)
++        /* The vertices are counted once the entity is written; refused here before they are made. */
++        this._Reserve(numSegments)
          const step = arcAngle / numSegments
  
          let rotationTransform = null
-@@ -1319,7 +1364,14 @@ export class DxfScene {
+@@ -710,10 +836,7 @@ export class DxfScene {
+                                             0, 0, 1)
+ 
+         const startAngle = entity.startAngle ?? 0
+-        let endAngle = entity.endAngle ?? startAngle + 2 * Math.PI
+-        while (endAngle <= startAngle) {
+-            endAngle += Math.PI * 2
+-        }
++        const endAngle = NormalizeEndAngle(startAngle, entity.endAngle ?? startAngle + 2 * Math.PI)
+         const isClosed = (entity.endAngle ?? null) === null ||
+             Math.abs(endAngle - startAngle - 2 * Math.PI) < 1e-6
+ 
+@@ -995,8 +1118,10 @@ export class DxfScene {
+         const color = this._GetEntityColor(entity, blockCtx)
+         const style = this._GetEntityTextStyle(entity)
+         const fixedHeight = style?.fixedTextHeight === 0 ? null : style?.fixedTextHeight
++        const text = ParseSpecialChars(entity.text)
++        this._Reserve(text.length * GLYPH_WORK)
+         yield* this.textRenderer.Render({
+-            text: ParseSpecialChars(entity.text),
++            text,
+             fontSize: entity.textHeight ?? (fixedHeight ?? 1),
+             startPos: entity.startPoint,
+             endPos: entity.endPoint,
+@@ -1016,8 +1141,10 @@ export class DxfScene {
+         const color = this._GetEntityColor(entity, blockCtx)
+         const style = this._GetEntityTextStyle(entity)
+         const fixedHeight = style?.fixedTextHeight === 0 ? null : style?.fixedTextHeight
++        const text = ParseSpecialChars(entity.text)
++        this._Reserve(text.length * GLYPH_WORK)
+         const parser = new MTextFormatParser()
+-        parser.Parse(ParseSpecialChars(entity.text))
++        parser.Parse(text)
+ 
+         let position = entity.position
+         let rotation = entity.rotation
+@@ -1319,11 +1446,31 @@ export class DxfScene {
  
          const calc = new HatchCalculator(filteredBoundaryLoops, style)
  
@@ -111,11 +261,28 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
 +
          if (entity.isSolid) {
 +            /* Nesting compares each loop with every other one. */
-+            this._Spend(filteredBoundaryLoops.length * boundaryVertices)
++            this._Spend(Math.ceil(filteredBoundaryLoops.length * boundaryVertices / NESTING_WORK_DIVISOR))
              /* Each region is triangulated on its own: the loops of one hatch may well be disjoint
               * areas rather than a single contour with its islands.
               */
-@@ -1389,7 +1441,7 @@ export class DxfScene {
+             for (const {contour, holes} of calc.GetSolidRegions()) {
++                const regionVertices = holes.reduce((sum, hole) => sum + hole.length, contour.length)
++                if (regionVertices > MAX_SOLID_FILL_VERTICES) {
++                    /* Too large to triangulate: its outline. */
++                    for (const loop of [contour, ...holes]) {
++                        yield new Entity({
++                            type: Entity.Type.POLYLINE,
++                            vertices: loop, layer, color, shape: true
++                        })
++                    }
++                    continue
++                }
++                /* Earcut's indices: three per triangle, about one triangle per vertex. */
++                this._Reserve(3 * regionVertices)
+                 const coords = this._GetBoundaryLoopCoords(contour)
+                 const vertices = [...contour]
+                 const holeIndices = []
+@@ -1389,7 +1536,7 @@ export class DxfScene {
              for (const line of pattern.lines) {
                  yield* this._DecomposeHatchPatternLine(line, calc, patTransform,
                                                         pattern.offsetInLineSpace,
@@ -124,7 +291,7 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
              }
          }
      }
-@@ -1405,7 +1457,8 @@ export class DxfScene {
+@@ -1405,7 +1552,8 @@ export class DxfScene {
       * @param {Boolean} offsetInLineSpace Pattern offsets are already rotated by the line angle.
       * @param {Object} renderParams `layer` and `color` for produced entities.
       */
@@ -134,7 +301,7 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
          let offsetX
          let offsetY
          if (offsetInLineSpace) {
-@@ -1453,6 +1506,8 @@ export class DxfScene {
+@@ -1453,6 +1601,8 @@ export class DxfScene {
              console.warn("Too many lines produced by hatching pattern")
              return
          }
@@ -143,7 +310,7 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
  
          let dashPatLength
          if (line.dashes && line.dashes.length > 1) {
-@@ -1552,6 +1607,7 @@ export class DxfScene {
+@@ -1552,6 +1702,7 @@ export class DxfScene {
              console.warn("Too many segments produced by hatching pattern line")
              return
          }
@@ -151,34 +318,275 @@ index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f
  
          for (let segIdx = minSegIdx; segIdx <= maxSegIdx; segIdx++) {
              let segStartParam = GetParam(xBase + segIdx * dashPatLength)
-@@ -3379,5 +3435,16 @@ DxfScene.DefaultOptions = {
+@@ -1707,14 +1858,10 @@ export class DxfScene {
+                             console.warn("Hatch boundary spline edge without control points")
+                             break
+                         }
+-                        const controlPoints = edge.controlPoints.map(p => [p.x, p.y])
+-                        const subdivisions = controlPoints.length * SPLINE_SUBDIVISION
+-                        const step = 1 / subdivisions
+-                        for (let i = 0; i <= subdivisions; i++) {
+-                            const pt = this._InterpolateSpline(i * step, edge.degreeOfSplineCurve,
+-                                                               controlPoints,
+-                                                               edge.knotValues)
+-                            vertices.push(new Vector2(pt[0], pt[1]))
++                        for (const v of this._SampleSpline(edge.controlPoints,
++                                                           edge.degreeOfSplineCurve,
++                                                           edge.knotValues)) {
++                            vertices.push(new Vector2(v.x, v.y))
+                         }
+                         break
+                     default:
+@@ -1785,6 +1932,13 @@ export class DxfScene {
+      */
+     _ProcessInsert(entity, blockCtx = null) {
+         if (blockCtx) {
++            if (blockCtx.depth >= MAX_BLOCK_NESTING) {
++                /* Left out and counted, without an Error per path: a fan of blocks reaches this once per
++                 * path to the cut, until the budget stops it.
++                 */
++                this.numEntitiesSkipped++
++                return
++            }
+             if (blockCtx.IsRecursiveReference(entity.name)) {
+                 console.warn("Recursive block reference: " +
+                              blockCtx.DescribeBlockPath(entity.name))
+@@ -1814,6 +1968,8 @@ export class DxfScene {
+             return
+         }
+ 
++        /* Flattened, its vertices are copied; instanced, they are drawn again every frame. */
++        this._SpendScene(block.verticesCount)
+         const layer = this._GetEntityLayer(entity, null)
+         const color = this._GetEntityColor(entity, null)
+         const lineType = this._GetLineType(entity, null, null)
+@@ -2193,16 +2349,40 @@ export class DxfScene {
+             //XXX knots or fit points not supported yet
+             return
+         }
+-        const controlPoints = entity.controlPoints.map(p => [p.x, p.y])
++        const vertices = this._SampleSpline(entity.controlPoints, entity.degreeOfSplineCurve,
++                                            entity.knotValues)
++        yield new Entity({type: Entity.Type.POLYLINE, vertices, layer, color, lineType})
++    }
++
++    /** Points along a B-spline, SPLINE_SUBDIVISION per control point, charged before sampling.
++     * @param {{x: number, y: number}[]} controlPoints
++     * @param {number} degree
++     * @param {?number[]} knotValues
++     * @returns {{x: number, y: number}[]}
++     */
++    _SampleSpline(controlPoints, degree, knotValues) {
++        const n = controlPoints.length
++        const subdivisions = n * SPLINE_SUBDIVISION
++        /* Each sample searches the knots and runs a (degree + 1)^2 de Boor pyramid; the knots and
++         * weights are built once.
++         */
++        this._Spend(n + subdivisions * ((degree + 1) * (degree + 1) + Math.ceil(Math.log2(n + degree + 2))))
++        const points = controlPoints.map(p => [p.x, p.y])
++        const knots = knotValues ?? null
++        if (knots !== null) {
++            for (let i = 1; i < knots.length; i++) {
++                if (!(knots[i] >= knots[i - 1])) {
++                    throw new Error("Knot vector is not non-decreasing")
++                }
++            }
++        }
+         const vertices = []
+-        const subdivisions = controlPoints.length * SPLINE_SUBDIVISION
+         const step = 1 / subdivisions
+         for (let i = 0; i <= subdivisions; i++) {
+-            const pt = this._InterpolateSpline(i * step, entity.degreeOfSplineCurve, controlPoints,
+-                                               entity.knotValues)
++            const pt = this._InterpolateSpline(i * step, degree, points, knots)
+             vertices.push({x: pt[0], y: pt[1]})
+         }
+-        yield new Entity({type: Entity.Type.POLYLINE, vertices, layer, color, lineType})
++        return vertices
+     }
+ 
+     /** Get a point on a B-spline.
+@@ -2228,20 +2408,14 @@ export class DxfScene {
+             throw new Error("Degree must be less than or equal to point count - 1")
+         }
+ 
+-        if (!weights) {
+-            // build weight vector of length [n]
+-            weights = []
+-            for (i = 0; i < n; i++) {
+-                weights[i] = 1
+-            }
+-        }
++        /* No weights: all 1. No knots: the uniform vector, knots[i] = i. Neither is built: a sample
++         * reads only degree + 2 of each.
++         */
++        const knotAt = knots ? i => knots[i] : i => i
++        const weightAt = weights ? i => weights[i] : () => 1
+ 
+         if (!knots) {
+-            // build knot vector of length [n + degree + 1]
+-            knots = []
+-            for (i = 0; i < n + degree + 1; i++) {
+-                knots[i] = i
+-            }
++            knots = {length: n + degree + 1}
+         } else {
+             if (knots.length !== n + degree + 1) {
+                 throw new Error("Bad knot vector length")
+@@ -2254,8 +2428,8 @@ export class DxfScene {
+         ]
+ 
+         // remap t to the domain where the spline is defined
+-        const low  = knots[domain[0]]
+-        const high = knots[domain[1]]
++        const low  = knotAt(domain[0])
++        const high = knotAt(domain[1])
+         t = t * (high - low) + low
+ 
+         if (t < low) {
+@@ -2264,21 +2438,31 @@ export class DxfScene {
+             t = high
+         }
+ 
+-        // find s (the spline segment) for the [t] value provided
+-        for (s = domain[0]; s < domain[1]; s++) {
+-            if (t >= knots[s] && t <= knots[s + 1]) {
+-                break
++        /* Find s (the spline segment) for t: the first s in the domain with t <= knots[s + 1], by
++         * bisection over the non-decreasing knots (the first s with t in [knots[s], knots[s + 1]],
++         * as a linear scan finds it). Past the domain, s ends at its end.
++         */
++        let lo = domain[0]
++        let hi = domain[1]
++        while (lo < hi) {
++            const mid = (lo + hi) >> 1
++            if (t <= knotAt(mid + 1)) {
++                hi = mid
++            } else {
++                lo = mid + 1
+             }
+         }
++        s = lo
+ 
+-        // convert points to homogeneous coordinates
++        // convert the points the pyramid reads, s - degree to s, to homogeneous coordinates
+         const v = []
+-        for (i = 0; i < n; i++) {
++        for (i = s - degree; i <= s; i++) {
++            const w = weightAt(i)
+             v[i] = []
+             for (j = 0; j < d; j++) {
+-                v[i][j] = points[i][j] * weights[i]
++                v[i][j] = points[i][j] * w
+             }
+-            v[i][d] = weights[i]
++            v[i][d] = w
+         }
+ 
+         // l (level) goes from 1 to the curve degree + 1
+@@ -2286,7 +2470,7 @@ export class DxfScene {
+         for (l = 1; l <= degree + 1; l++) {
+             // build level l of the pyramid
+             for (i = s; i > s - degree - 1 + l; i--) {
+-                alpha = (t - knots[i]) / (knots[i + degree + 1 - l] - knots[i])
++                alpha = (t - knotAt(i)) / (knotAt(i + degree + 1 - l) - knotAt(i))
+                 // interpolate each component
+                 for (j = 0; j < d + 1; j++) {
+                     v[i][j] = (1 - alpha) * v[i - 1][j] + alpha * v[i][j]
+@@ -2552,6 +2736,7 @@ export class DxfScene {
+         if (batch !== null) {
+             return batch
+         }
++        this._SpendScene(BATCH_WORK)
+         batch = new RenderBatch(key)
+         this.batches.insert(batch)
+         if (key.blockName !== null && !key.IsInstanced()) {
+@@ -2930,9 +3115,10 @@ class BlockContext {
+         /* Names of the blocks being expanded, outermost first. A nested context keeps `block`
+          * pointing to the outermost block, so this is the only record of what is on the expansion
+          * path, and thus the only way to detect a reference cycle which does not include the
+-         * outermost block.
++         * outermost block. A list from the innermost up, shared with the enclosing contexts.
+          */
+-        this.blockPath = [this.name]
++        this.blockPath = {name: this.name, parent: null}
++        this.depth = 1
+     }
+ 
+     /** @returns {string} Block name */
+@@ -2947,12 +3133,21 @@ class BlockContext {
+      * @returns {Boolean} True if the reference closes a cycle.
+      */
+     IsRecursiveReference(blockName) {
+-        return this.blockPath.includes(blockName)
++        for (let link = this.blockPath; link !== null; link = link.parent) {
++            if (link.name === blockName) {
++                return true
++            }
++        }
++        return false
+     }
+ 
+     /** @returns {string} Block reference chain, for diagnostic messages. */
+     DescribeBlockPath(blockName) {
+-        return this.blockPath.concat(blockName).join(" -> ")
++        const names = [blockName]
++        for (let link = this.blockPath; link !== null; link = link.parent) {
++            names.unshift(link.name)
++        }
++        return names.join(" -> ")
+     }
+ 
+     /**
+@@ -3035,7 +3230,8 @@ class BlockContext {
+         const nestedTransform = nestedCtx.GetInsertionTransform(entity)
+         const ctx = new BlockContext(this.block, BlockContext.Type.NESTED_DEFINITION)
+         ctx.transform = new Matrix3().multiplyMatrices(this.transform, nestedTransform)
+-        ctx.blockPath = this.blockPath.concat(block.data.name)
++        ctx.blockPath = {name: block.data.name, parent: this.blockPath}
++        ctx.depth = this.depth + 1
+         return ctx
+     }
+ }
+@@ -3379,5 +3575,25 @@ DxfScene.DefaultOptions = {
       * TextRendererOptions.js.
       */
      /** Text rendering options. See {@link TextRendererOptions}. */
 -    textOptions: DefaultTextOptions
 +    textOptions: DefaultTextOptions,
 +    /** Upper bound of the work one build may do: entity visits (a block nested in blocks is
-+     * visited once per path to it), generated vertices and indices, arc segments, and hatch
-+     * lines and dash steps. Over it the build fails with a `SceneTooComplexError`.
++     * visited once per path to it), generated vertices and indices, spline sampling, hatch lines
++     * and dash steps, each block instance's vertices, render batches and `fontWork`. Over it the
++     * build fails with a `SceneTooComplexError`.
 +     * @default
 +     */
 +    maxWork: Infinity,
-+    /** Upper bound of the vertices and indices one entity may generate. An entity over it is
-+     * skipped as malformed.
++    /** Upper bound of the work one entity may do, checked before it generates its geometry. An
++     * entity over it is skipped as malformed, and what it was charged is given back.
 +     * @default
 +     */
-+    maxEntityWork: Infinity
++    maxEntityWork: Infinity,
++    /** Work the loaded fonts count for, asked once they are loaded: () => number.
++     * @default
++     */
++    fontWork: null,
++    /** Let the parsed document go before the scene buffers are built (it is then unusable).
++     * @default
++     */
++    releaseParsedDxf: false
  }
 diff --git a/src/index.d.ts b/src/index.d.ts
-index baefc9e5b2532b096b926990b313fd94d78c3ea2..2953123f80785e4d51363b1b87a207b4e3763a1d 100644
+index baefc9e5b2532b096b926990b313fd94d78c3ea2..c4649a5f7dfb8c6a9f7acb45fba0ebae064357ed 100644
 --- a/src/index.d.ts
 +++ b/src/index.d.ts
-@@ -18,6 +18,8 @@ export type DxfSceneOptions = {
+@@ -18,6 +18,10 @@ export type DxfSceneOptions = {
      wireframeMesh?: boolean,
      suppressPaperSpace?: boolean,
      textOptions?: TextRendererOptions,
 +    maxWork?: number,
 +    maxEntityWork?: number,
++    fontWork?: (() => number) | null,
++    releaseParsedDxf?: boolean,
  }
  
  /** See DxfViewer.DefaultOptions for default values and documentation. */
