@@ -42,6 +42,7 @@ import { previewRichSqlite } from "@/locales/en/previewRich/sqlite"
 import { previewRichGeo } from "@/locales/en/previewRich/geo"
 import { previewRichModel3d } from "@/locales/en/previewRich/model3d"
 import { previewRichCad } from "@/locales/en/previewRich/cad"
+import { previewRichDicom } from "@/locales/en/previewRich/dicom"
 import { previewTextMetadata } from "@/locales/en/previewText/metadata"
 import { previewEbookReader } from "@/locales/en/previewEbook/reader"
 import { previewTextEncoding } from "@/locales/en/previewText/encoding"
@@ -902,6 +903,7 @@ export const preview = {
 	...previewRichGeo,
 	...previewRichModel3d,
 	...previewRichCad,
+	...previewRichDicom,
 	...previewTextMetadata,
 	...previewEbookReader,
 	...previewTextEncoding,

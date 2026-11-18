@@ -284,6 +284,26 @@ export const VIDEO_EDITOR_ACTIONS: readonly Def<VideoEditorAction>[] = [
 	videoEditorAction("preview.videoSaveFrame", "", "preview:previewVideoEditKeySaveFrame")
 ]
 
+// The DICOM viewer's frames: Page Down and Page Up step through a multi-frame image, as in the common DICOM viewers.
+export type DicomViewerAction = "preview.dicomNextFrame" | "preview.dicomPreviousFrame"
+
+export const DICOM_VIEWER_ACTIONS: readonly Def<DicomViewerAction>[] = [
+	{
+		id: "preview.dicomNextFrame",
+		defaultCombo: "pagedown",
+		scope: "editor",
+		section: "viewer",
+		descriptionKey: "preview:previewKeyDicomNextFrame"
+	},
+	{
+		id: "preview.dicomPreviousFrame",
+		defaultCombo: "pageup",
+		scope: "editor",
+		section: "viewer",
+		descriptionKey: "preview:previewKeyDicomPreviousFrame"
+	}
+]
+
 function codeAction(id: string, defaultCombo: string, descriptionKey: ActionDef["descriptionKey"], extra?: Partial<ActionDef>): ActionDef {
 	return { id, defaultCombo, scope: "editor", section: "code", descriptionKey, ...extra }
 }
@@ -394,5 +414,6 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	...VIDEO_EDITOR_ACTIONS,
 	...PREVIEW_OVERLAY_ACTIONS,
 	...IMAGE_VIEWER_ACTIONS,
+	...DICOM_VIEWER_ACTIONS,
 	...CODE_EDITOR_ACTIONS
 ]

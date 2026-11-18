@@ -484,7 +484,12 @@ describe("getPreviewType — stored mime", () => {
 
 	// Before = after: track types name extensions this platform's tables lack.
 	it("keeps an extensionless track unknown, with no type extension", () => {
-		for (const mime of ["application/gpx+xml", "application/vnd.google-earth.kml+xml", "application/vnd.google-earth.kmz", "application/geo+json"]) {
+		for (const mime of [
+			"application/gpx+xml",
+			"application/vnd.google-earth.kml+xml",
+			"application/vnd.google-earth.kmz",
+			"application/geo+json"
+		]) {
 			expect(getPreviewType("download", mime), mime).toBe("unknown")
 			expect(fileTypeExtension("download", mime), mime).toBe("")
 		}
@@ -500,6 +505,14 @@ describe("getPreviewType — stored mime", () => {
 
 		expect(getPreviewType("mesh.obj")).toBe("unknown")
 		expect(getPreviewType("mesh.obj", "text/plain")).toBe("text")
+	})
+
+	// Before = after: the DICOM type names an extension this platform's tables lack (its icon is the image glyph).
+	it("keeps an extensionless DICOM file and a .dcm unknown", () => {
+		expect(getPreviewType("download", "application/dicom")).toBe("unknown")
+		expect(fileTypeExtension("download", "application/dicom")).toBe("")
+		expect(getPreviewType("scan.dcm")).toBe("unknown")
+		expect(getPreviewType("scan.dicom", "application/dicom")).toBe("unknown")
 	})
 
 	// The JPEG alias extensions are web's: unchanged here (no table on this platform lists them).

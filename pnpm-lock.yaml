@@ -1190,6 +1190,9 @@ importers:
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
+      dicom-parser:
+        specifier: 1.8.21
+        version: 1.8.21
       docx-preview:
         specifier: 0.4.1
         version: 0.4.1
@@ -6259,6 +6262,9 @@ packages:
 
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
+
+  dicom-parser@1.8.21:
+    resolution: {integrity: sha512-lYCweHQDsC8UFpXErPlg86Px2A8bay0HiUY+wzoG3xv5GzgqVHU3lziwSc/Gzn7VV7y2KeP072SzCviuOoU02w==}
 
   diff@4.0.4:
     resolution: {integrity: sha512-X07nttJQkwkfKfvTPG/KSnE2OMdcUCao6+eXF3wmnIQRn2aPAHH3VxDbDOdegkd6JbPsXqShpvEOHfAT+nCNwQ==}
@@ -17207,6 +17213,8 @@ snapshots:
   devlop@1.1.0:
     dependencies:
       dequal: 2.0.3
+
+  dicom-parser@1.8.21: {}
 
   diff@4.0.4: {}
 

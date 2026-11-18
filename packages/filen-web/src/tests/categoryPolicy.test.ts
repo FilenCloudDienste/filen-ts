@@ -89,6 +89,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	geo: "drivePreviewKindGeo",
 	model3d: "drivePreviewKindModel3d",
 	cad: "drivePreviewKindCad",
+	dicom: "drivePreviewKindDicom",
 	torrent: "drivePreviewKindTorrent",
 	email: "drivePreviewKindEmail",
 	notebook: "drivePreviewKindNotebook",
@@ -310,7 +311,8 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"calendar",
 	"contact",
 	"binaryInfo",
-	"mermaid"
+	"mermaid",
+	"dicom"
 ])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
@@ -799,5 +801,21 @@ describe("the subtitle row", () => {
 		expect(isTextCategory("subtitle")).toBe(true)
 		expect(CATEGORY_POLICY.subtitle).toMatchObject({ textFamily: true, editsAsText: true, assistantKind: "document", pager: true })
 		expect(isPhotoCategory("subtitle")).toBe(false)
+	})
+})
+
+describe("the dicom row", () => {
+	it.each(["IM0001.dcm", "series.dicom"])("%s opens at any size on the drive and a link, whole up to 256 MiB in an archive", name => {
+		expect(previewType(fileNamed(name, 1024n))).toBe("dicom")
+		expect(canPreview(fileNamed(name, 50n * 1024n * MIB))).toBe(true)
+		expect(anonPreviewability(fileNamed(name, 50n * 1024n * MIB))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(PREVIEW_MAX_BYTES) }]), 0)).toBe(true)
+		expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(PREVIEW_MAX_BYTES) + 1 }]), 0)).toBe(false)
+	})
+
+	it("reads an extensionless DICOM file by its stored type", () => {
+		expect(previewType(fileNamed("IM0001", 1024n, "application/dicom"))).toBe("dicom")
+		expect(previewKindLabelKey("dicom")).toBe("drivePreviewKindDicom")
+		expect(isPhotoCategory("dicom")).toBe(false)
 	})
 })

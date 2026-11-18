@@ -295,6 +295,11 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["preview.imageRotateRight", "presentation.text.demote"],
 	["preview.pdfNextPage", "presentation.show.next"],
 	["preview.pdfPreviousPage", "presentation.show.previous"],
+	// The DICOM viewer's frame keys exist only while its image is the body shown, never beside a show or a player.
+	["preview.dicomNextFrame", "presentation.show.next"],
+	["preview.dicomPreviousFrame", "presentation.show.previous"],
+	["preview.dicomNextFrame", "media.chapterNext"],
+	["preview.dicomPreviousFrame", "media.chapterPrevious"],
 	["preview.pdfNextPage", "notes.newNote"],
 	["editor.undo", "preview.imageUndo"],
 	["editor.undo", "presentation.undo"],

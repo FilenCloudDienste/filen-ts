@@ -73,6 +73,7 @@
 		"buffer": "^6.0.3",
 		"class-variance-authority": "^0.7.1",
 		"comlink": "^4.4.2",
+		"dicom-parser": "1.8.21",
 		"docx-preview": "0.4.1",
 		"dompurify": "3.4.17",
 		"dxf-viewer": "1.0.51",

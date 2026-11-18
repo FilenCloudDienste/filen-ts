@@ -679,6 +679,8 @@ export const drive = {
 	drivePreviewKindModel3d: "3D model",
 	/** Info panel — Kind row value: a CAD drawing exchange file (.dxf) */
 	drivePreviewKindCad: "CAD drawing",
+	/** Info panel — Kind row value: a DICOM medical image file (dcm, dicom) */
+	drivePreviewKindDicom: "DICOM image",
 	/** Info panel — Kind row value: a BitTorrent metadata file (.torrent) */
 	drivePreviewKindTorrent: "Torrent",
 	/** Info panel — Kind row value: an e-mail message (.eml) */

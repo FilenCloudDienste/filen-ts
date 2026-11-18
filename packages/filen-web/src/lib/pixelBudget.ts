@@ -2,6 +2,7 @@ import { MUPDF_BYTES_PER_PIXEL, PDF_DESKTOP_MEMORY, PDF_HEAP_BASELINE, PDF_MOBIL
 import { THUMB_SDK_MEM_BUDGET } from "@/features/drive/lib/thumbnails.logic"
 import type { DeviceProfile } from "@/lib/deviceProfile"
 import { pdfViewerLimits } from "@/features/preview/lib/pdfLimits"
+import { pixelsWithin } from "@/lib/pixelBudget.logic"
 
 // The pixel budgets every decode of untrusted image bytes checks, each with its basis. A decode compares the dimensions
 // its header names (read from bytes already in hand) against its budget before it allocates anything. Workers never
@@ -58,7 +59,7 @@ export function workerDecodeBytes(profile: DeviceProfile): number {
 // What remains of the worker budget once the file is held, at the consumer's own bytes per pixel (its decoded frame
 // plus every copy it makes of it).
 export function workerDecodePixels(profile: DeviceProfile, fileBytes: number, bytesPerPixel: number): number {
-	return Math.max(0, Math.floor((workerDecodeBytes(profile) - fileBytes) / bytesPerPixel))
+	return pixelsWithin(workerDecodeBytes(profile), fileBytes, bytesPerPixel)
 }
 
 // One image page decoded by MuPDF, at its measured bytes per pixel (core/pdfedit/budget.ts). The engine reads an image

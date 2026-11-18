@@ -25,6 +25,7 @@ import type { NativeImageFormat } from "@/lib/nativeImageSupport"
 import { EXTENSIONLESS_SNIFF, type ExtensionlessSniff } from "@/features/preview/lib/contentSniff.logic"
 import { MODEL_FORMATS, MODEL_MAX_BYTES } from "@/features/preview/lib/model3d/preflight.logic"
 import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.logic"
+import { DICOM_EXTENSIONS, DICOM_WHOLE_MAX_BYTES } from "@/features/preview/lib/dicom/transferSyntax"
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 import { VIDEO_CONTAINERS, type VideoContainer } from "@filen/shared/videos"
@@ -53,6 +54,7 @@ export type PreviewCategory =
 	| "geo"
 	| "model3d"
 	| "cad"
+	| "dicom"
 	| "torrent"
 	| "email"
 	| "subtitle"
@@ -465,6 +467,23 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindCad",
 		assistantKind: null
 	},
+	// DICOM images, read in ranges by the DICOM worker on the drive and a public link at any size (only the header and the
+	// frames shown are downloaded); whole up to the cap where only a whole read reaches them (an archive's entry, held
+	// bytes). A deflated data set is read whole on any origin, under the same cap (the worker refuses it past that).
+	dicom: {
+		streamed: false,
+		ranged: true,
+		bufferCap: BigInt(DICOM_WHOLE_MAX_BYTES),
+		aboveCap: "refuse",
+		entry: "ranged",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindDicom",
+		assistantKind: null
+	},
 	// A message read whole in the text-family worker: its body in a script-less frame, nothing remote loaded; kept as it
 	// arrived (its source is read-only).
 	email: {
@@ -656,6 +675,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[MODEL_FORMATS, "model3d"],
 	// DXF is text (its source opens read-only from the viewer); DWG stays a download.
 	[["dxf"], "cad"],
+	[DICOM_EXTENSIONS, "dicom"],
 	[["torrent"], "torrent"],
 	[["eml", "msg"], "email"],
 	[["md", "markdown", "mkd"], "markdown"],
