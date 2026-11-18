@@ -37,8 +37,8 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 // line, View with Count lines), the size, position, encoding and a read-only badge, then the rows. Line numbers show
 // only for what a find, a go to line or Count lines has counted. An archive's entry read only whole stays too large.
 
-// What a scan reports as it goes: how far it has read.
-type Scan = { readonly kind: "search" | "count"; readonly scanned: number } | null
+// The scan running (a find, Count lines or a go to line, each its own `id`) and how far it has read.
+type Scan = { readonly id: number; readonly kind: "search" | "count"; readonly scanned: number } | null
 
 interface FindState {
 	readonly open: boolean
@@ -78,7 +78,10 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 	const [scan, setScan] = useState<Scan>(null)
 	const [find, setFind] = useState<FindState>(CLOSED_FIND)
 	const [goToLine, setGoToLine] = useState(false)
+	// The current query: bumped by a new search and by closing find, so an older one's answers are dropped.
 	const searches = useRef(0)
+	// Every scan started: its own progress and end touch the status only while it is the one shown.
+	const scans = useRef(0)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const pattern = find.open && find.query !== "" ? searchPattern(find.query, find.caseSensitive) : null
 	const rowsAbove = 3
@@ -87,12 +90,29 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 		setJump(previous => ({ seq: (previous?.seq ?? 0) + 1, offset, before: rowsAbove, line, match }))
 	}
 
-	const showMatch = (index: number): void => {
+	// Match `index` of the query `seq`; dropped when another query has started meanwhile.
+	const showMatch = (index: number, seq: number): void => {
 		void pager
 			.run(remote => remote.match(index))
 			.then(match => {
-				if (match !== null) jumpTo(match.offset, match.line, true)
+				if (match !== null && searches.current === seq) jumpTo(match.offset, match.line, true)
 			}, fail)
+	}
+
+	const startScan = (kind: "search" | "count"): number => {
+		const id = ++scans.current
+
+		setScan({ id, kind, scanned: 0 })
+
+		return id
+	}
+
+	const scanned = (id: number, at: number): void => {
+		setScan(current => (current?.id === id ? { ...current, scanned: at } : current))
+	}
+
+	const ended = (id: number): void => {
+		setScan(current => (current?.id === id ? null : current))
 	}
 
 	const counted = (next: { lines: number; complete: boolean }): void => {
@@ -100,9 +120,9 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 		setLinesVersion(version => version + 1)
 	}
 
-	const progress = (kind: "search" | "count") =>
-		Comlink.proxy((scanned: number) => {
-			setScan({ kind, scanned })
+	const progress = (id: number) =>
+		Comlink.proxy((at: number) => {
+			scanned(id, at)
 		})
 
 	const search = (query: string, caseSensitive: boolean): void => {
@@ -111,7 +131,7 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 		setFind(previous => ({ ...previous, query, caseSensitive, count: 0, capped: false, active: -1 }))
 
 		if (query === "") {
-			setScan(null)
+			setScan(current => (current?.kind === "search" ? null : current))
 			void pager.run(remote => remote.stop()).catch(fail)
 
 			return
@@ -120,21 +140,21 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 		// The first match at or after the view's top is shown as soon as the search reaches it.
 		let shown = false
 		const from = position.get()
-		const onProgress = Comlink.proxy((scanned: number, count: number, first: number) => {
+		const id = startScan("search")
+		const onProgress = Comlink.proxy((at: number, count: number, first: number) => {
 			if (searches.current !== seq) {
 				return
 			}
 
-			setScan({ kind: "search", scanned })
+			scanned(id, at)
 			setFind(previous => ({ ...previous, count, active: !shown && first !== -1 ? first : previous.active }))
 
 			if (!shown && first !== -1) {
 				shown = true
-				showMatch(first)
+				showMatch(first, seq)
 			}
 		})
 
-		setScan({ kind: "search", scanned: 0 })
 		void pager
 			.run(remote => remote.search(query, caseSensitive, from, onProgress))
 			.then(result => {
@@ -144,7 +164,8 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 
 				const active = shown ? null : result.first !== -1 ? result.first : result.count > 0 ? 0 : -1
 
-				setScan(null)
+				ended(id)
+				// Stopped (Stop, or a count or go to line that took over) or at the cap: there may be more.
 				setFind(previous => ({
 					...previous,
 					count: result.count,
@@ -153,7 +174,7 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 				}))
 				counted(result)
 
-				if (active !== null && active !== -1) showMatch(active)
+				if (active !== null && active !== -1) showMatch(active, seq)
 			}, fail)
 	}
 
@@ -162,23 +183,23 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 	}
 
 	const countLines = (): void => {
-		searches.current++
-		setScan({ kind: "count", scanned: 0 })
+		const id = startScan("count")
+
 		void pager
-			.run(remote => remote.countLines(progress("count")))
+			.run(remote => remote.countLines(progress(id)))
 			.then(result => {
-				setScan(current => (current?.kind === "count" ? null : current))
+				ended(id)
 				counted(result)
 			}, fail)
 	}
 
 	const goTo = (line: number): void => {
-		searches.current++
-		setScan({ kind: "count", scanned: 0 })
+		const id = startScan("count")
+
 		void pager
-			.run(remote => remote.lineStart(line, progress("count")))
+			.run(remote => remote.lineStart(line, progress(id)))
 			.then(offset => {
-				setScan(current => (current?.kind === "count" ? null : current))
+				ended(id)
 				void pager.run(remote => remote.lines()).then(counted, fail)
 
 				if (offset !== null) jumpTo(offset, null, false)
@@ -203,12 +224,14 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 			const next = find.active === -1 ? (direction > 0 ? 0 : find.count - 1) : (find.active + direction + find.count) % find.count
 
 			setFind(previous => ({ ...previous, active: next }))
-			showMatch(next)
+			showMatch(next, searches.current)
 		},
 		close: () => {
 			searches.current++
-			stop()
-			setScan(null)
+
+			if (scan?.kind === "search") stop()
+
+			setScan(current => (current?.kind === "search" ? null : current))
 			setFind(CLOSED_FIND)
 		}
 	}

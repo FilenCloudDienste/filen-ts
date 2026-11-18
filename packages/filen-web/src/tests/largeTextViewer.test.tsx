@@ -50,7 +50,18 @@ const remote = vi.hoisted(() => ({
 	after: () => Promise.resolve([]),
 	before: () => Promise.resolve([]),
 	lines: () => Promise.resolve({ lines: 1, complete: false, frontier: 0 }),
-	stop: () => Promise.resolve()
+	stop: () => Promise.resolve(),
+	// Scans settle when a test says so.
+	countLines: () => scans.count.promise,
+	lineStart: () => scans.lineStart.promise,
+	search: () => scans.search.promise,
+	match: () => Promise.resolve({ offset: 11, line: 2 })
+}))
+
+const scans = vi.hoisted(() => ({
+	count: Promise.withResolvers<{ lines: number; complete: boolean; frontier: number }>(),
+	lineStart: Promise.withResolvers<number | null>(),
+	search: Promise.withResolvers<{ lines: number; complete: boolean; frontier: number; end: string; count: number; first: number }>()
 }))
 
 // One worker per key, as useOwnedWorker starts a new one for a new key (a retry's).
@@ -97,6 +108,9 @@ beforeAll(async () => {
 
 afterEach(() => {
 	cleanup()
+	scans.count = Promise.withResolvers()
+	scans.lineStart = Promise.withResolvers()
+	scans.search = Promise.withResolvers()
 	workers.clear()
 	state.failLocate = false
 	state.opens = 0
@@ -170,5 +184,44 @@ describe("LargeTextViewer", () => {
 
 		expect(await screen.findByText("This file is too large to show as text.")).toBeTruthy()
 		expect(state.opens).toBe(0)
+	})
+
+	it("keeps a go to line's progress when the count it cut short ends", async () => {
+		await renderViewer()
+		await screen.findByText("first line")
+		fireEvent.click(screen.getByRole("button", { name: "Count lines" }))
+		expect(await screen.findByText(/^Counting lines…/)).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Go to line" }))
+		fireEvent.change(await screen.findByRole("textbox", { name: "Go to line" }), { target: { value: "5" } })
+		fireEvent.click(screen.getByRole("button", { name: "Go" }))
+
+		// The worker stops the count for the go to line; the count's end must not clear the go to line's progress.
+		await act(async () => {
+			scans.count.resolve({ lines: 3, complete: false, frontier: 100 })
+			await Promise.resolve()
+		})
+		expect(screen.getByText(/^Counting lines…/)).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy()
+
+		await act(async () => {
+			scans.lineStart.resolve(11)
+			await Promise.resolve()
+		})
+		expect(screen.queryByText(/^Counting lines…/)).toBeNull()
+	})
+
+	it("shows a search cut short as partial, not as every match", async () => {
+		await renderViewer()
+		await screen.findByText("first line")
+		fireEvent.click(screen.getByRole("button", { name: "Find" }))
+		fireEvent.change(await screen.findByRole("searchbox", { name: "Find" }), { target: { value: "line" } })
+		await screen.findByText(/^Searching/, undefined, { timeout: 2000 })
+
+		await act(async () => {
+			scans.search.resolve({ lines: 2, complete: false, frontier: 100, end: "stopped", count: 4, first: 0 })
+			await Promise.resolve()
+		})
+		expect(await screen.findByText("1/4+")).toBeTruthy()
 	})
 })
