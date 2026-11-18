@@ -1,4 +1,5 @@
 import type { ArchiveFormat } from "@filen/sdk-rs"
+import { isIndexedFormat } from "@/features/archive/lib/archiveGate.logic"
 import type { JobDestination } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { ENTRY_FLAG, ENTRY_KIND } from "@/lib/sdk/archiveListing"
@@ -42,7 +43,7 @@ type FormatType = ArchiveFormat["type"]
 // A zip's, 7z's or RAR's directory entry brings its whole subtree: the SDK checks the selection against the archive's
 // index (a RAR's member table) before anything is created.
 function bringsSubtree(format: FormatType | null): boolean {
-	return format === "zip" || format === "sevenZ" || format === "rar"
+	return isIndexedFormat(format)
 }
 
 function isFileKind(kind: number): boolean {

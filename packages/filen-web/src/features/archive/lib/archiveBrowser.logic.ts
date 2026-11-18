@@ -1,4 +1,5 @@
 import type { ArchiveFormat } from "@filen/sdk-rs"
+import { listsFromIndex } from "@/features/archive/lib/archiveGate.logic"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { ENTRY_FLAG, ENTRY_KIND, type SkipReason } from "@/lib/sdk/archiveListing"
 import type { PreviewKey } from "@/lib/i18n"
@@ -430,10 +431,9 @@ export function canExtractSelection(phase: ListingPhase, entryCount: number): bo
 	}
 }
 
-// A zip's or 7z's listing reads only its index, so its progress says nothing worth a bar. A RAR's reads through the
-// archive header by header, as a tar's does, so it gets one.
+// A zip's or 7z's listing reads only its index, so its progress says nothing worth a bar (listsFromIndex).
 export function readsWholeArchive(format: ArchiveFormat | null): boolean {
-	return format?.type !== "zip" && format?.type !== "sevenZ"
+	return !listsFromIndex(format?.type ?? null)
 }
 
 // The listbox's per-row element id, for aria-activedescendant.
