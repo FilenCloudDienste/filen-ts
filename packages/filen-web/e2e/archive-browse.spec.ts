@@ -2,7 +2,7 @@ import { formatBytes } from "@filen/shared"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect } from "./fixtures"
 import { archivePasswordPrompt, expectRows, expectRowSize, openArchive, openRowMenu } from "./helpers/archive"
-import { HOSTILE_MISLEADING_NAME, NOTE_TEXT, TREE_FILES, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
+import { GATE_STOP_FILES, HOSTILE_MISLEADING_NAME, NOTE_TEXT, TREE_FILES, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { holdChunks } from "./helpers/jobs"
@@ -18,6 +18,7 @@ import { resolveModKey } from "./helpers/modkey"
 
 const [CORRUPT, EMPTY, GARBAGE, HOSTILE, LINKS, LOCKED, NOTE, SMALL, TREE] = FIXTURE_FILES["archive-browse"]
 const [GATE_BIG, GATE_NEXT] = FIXTURE_FILES["archive-gate"]
+const [GATE_STOP] = FIXTURE_FILES["archive-gate-stop"]
 const [HUNDRED_K] = FIXTURE_FILES["archive-huge"]
 
 const textBytes = (path: keyof typeof TREE_FILES): number => Buffer.byteLength(TREE_FILES[path])
@@ -368,7 +369,7 @@ test.describe("archive browser", () => {
 		await expect(browser.row("e2e-arc-gate-big")).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 		await browser.into("e2e-arc-gate-big")
 		await expectRows(browser.list, ["blob.bin"])
-		// The entry shows after the first chunk; only a finished read lets a selection be extracted, and
+		// The entry shows once the walk passed its data; only a finished read lets a selection be extracted, and
 		// only a finished listing is cached.
 		await browser.check(browser.row("blob.bin"))
 		await expect(browser.overlay.getByRole("button", { name: "Extract selected", exact: true })).toBeEnabled({
@@ -402,8 +403,8 @@ test.describe("archive browser", () => {
 
 		await bootTo(page)
 
-		const { listbox } = await openFixtureRows(page, "archive-gate")
-		const browser = await openArchive(page, listbox, GATE_BIG)
+		const { listbox } = await openFixtureRows(page, "archive-gate-stop")
+		const browser = await openArchive(page, listbox, GATE_STOP)
 		const hold = await holdChunks(page, browserName, { hosts: "egest", passFirst: 1 })
 
 		try {
@@ -411,11 +412,14 @@ test.describe("archive browser", () => {
 			await expect(browser.status("Reading the archive…").first()).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 			await expect.poll(() => hold?.held() ?? 0, { timeout: LISTING_TIMEOUT_MS }).toBeGreaterThan(0)
 			await browser.overlay.getByRole("button", { name: "Stop", exact: true }).click()
-			await expect(browser.status(/^Listing stopped after \d+ entr(y|ies)\.$/)).toBeVisible()
+			// The small files ahead of the blob were whole within the first chunk: those stay.
+			await expect(browser.status(`Listing stopped after ${String(GATE_STOP_FILES.length)} entries.`)).toBeVisible()
+			await browser.into("e2e-arc-gate-stop")
+			await expectRows(browser.list, [...GATE_STOP_FILES])
 
 			hold?.release()
 			await browser.overlay.getByRole("button", { name: "List again", exact: true }).click()
-			await expect(browser.row("e2e-arc-gate-big")).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
+			await expect(browser.row("e2e-arc-gate-stop")).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 			await expect(browser.status(/^Listing stopped/)).toHaveCount(0)
 		} finally {
 			await hold?.dispose()

@@ -24,6 +24,7 @@ import {
 	garbageZip,
 	gateBigTarGz,
 	gateNextZip,
+	gateStopTarGz,
 	hostileZip,
 	hundredKZip,
 	linksTar,
@@ -75,6 +76,8 @@ export const CORE_SCENARIOS = scenarioModule(
 		],
 		// The gate pair: the big tarball lists only on "Browse contents", the zip after it at once.
 		"archive-gate": ["e2e-arc-gate-big.tar.gz", "e2e-arc-gate-next.zip"],
+		// A gated tarball whose first members are small, for a listing stopped mid-read.
+		"archive-gate-stop": ["e2e-arc-gate-stop.tar.gz"],
 		"archive-report": ["e2e-arc-many-links.zip"],
 		"archive-huge": ["e2e-arc-100k.zip"],
 		"archive-bulk": ["e2e-bulk-a.zip", "e2e-bulk-b.zip", "e2e-bulk-c.zip"],
@@ -146,6 +149,7 @@ export const CORE_SCENARIOS = scenarioModule(
 		// 8.5 MiB and 9 MB: off disk, like download-cancel.bin.
 		"e2e-arc-gate-big.tar.gz": { generate: gateBigTarGz },
 		"e2e-arc-gate-next.zip": { generate: gateNextZip },
+		"e2e-arc-gate-stop.tar.gz": { generate: gateStopTarGz },
 		"e2e-arc-many-links.zip": { buffer: manyLinksZip(), mimeType: "application/zip" },
 		"e2e-arc-100k.zip": { generate: hundredKZip },
 		"e2e-bulk-a.zip": { buffer: bulkZip("a"), mimeType: "application/zip" },

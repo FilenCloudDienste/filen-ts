@@ -414,6 +414,16 @@ export function gateBigTarGz(): Buffer {
 	return gzip(buildTar([{ name: "e2e-arc-gate-big/blob.bin", data: prng(13)(GATE_BIG_BLOB_BYTES) }]), 1)
 }
 
+// Past the gate too, for a listing stopped mid-read: a tar member is listed once the walk passed its data, so the
+// small files ahead of the blob are what a stop after the first chunk keeps.
+export const GATE_STOP_FILES = ["a.txt", "b.txt", "c.txt"] as const
+
+export function gateStopTarGz(): Buffer {
+	const small = GATE_STOP_FILES.map(name => ({ name: `e2e-arc-gate-stop/${name}`, data: `${name}\n` }))
+
+	return gzip(buildTar([...small, { name: "e2e-arc-gate-stop/blob.bin", data: prng(17)(GATE_BIG_BLOB_BYTES) }]), 1)
+}
+
 export function gateNextZip(): Buffer {
 	return buildZip([{ name: "next.txt", data: "the archive after the gate\n" }])
 }
