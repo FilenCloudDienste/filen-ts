@@ -341,6 +341,8 @@ function DicomImage({
 	})
 	const [invert, setInvert] = useState(false)
 	const [tags, setTags] = useState(false)
+	// A single frame that could not be shown: its card, or the file's tags from it.
+	const [tagsOnly, setTagsOnly] = useState(false)
 	const hostRef = useRef<HTMLDivElement>(null)
 	const [request] = useState(() =>
 		frameRequester(
@@ -388,10 +390,28 @@ function DicomImage({
 	}, [latest])
 
 	if (info.frames === 1 && status.failure !== null) {
+		if (tagsOnly) {
+			return (
+				<TagsOnly
+					owned={owned}
+					onBack={() => {
+						setTagsOnly(false)
+					}}
+				/>
+			)
+		}
+
 		return (
 			<PreviewUnsupportedState
 				item={item}
 				message={t(FRAME_MESSAGES[status.failure])}
+				secondary={
+					<TagsButton
+						onClick={() => {
+							setTagsOnly(true)
+						}}
+					/>
+				}
 			/>
 		)
 	}
@@ -495,6 +515,21 @@ function DicomImage({
 	)
 }
 
+// A card's way to the file's tags.
+function TagsButton({ onClick }: { onClick: () => void }) {
+	const { t } = useTranslation("preview")
+
+	return (
+		<Button
+			variant="outline"
+			onClick={onClick}
+		>
+			<ListTreeIcon data-icon="inline-start" />
+			{t("previewDicomTags")}
+		</Button>
+	)
+}
+
 // The file's tags in full, for a file whose image is not shown: the card's Tags button opens them.
 function TagsOnly({ owned, onBack }: { owned: DicomWorkerHandle; onBack: () => void }) {
 	const { t } = useTranslation("preview")
@@ -577,15 +612,11 @@ export function DicomViewer({ item }: { item: DriveItem }) {
 				item={item}
 				message={t(IMAGE_MESSAGES[info.image])}
 				secondary={
-					<Button
-						variant="outline"
+					<TagsButton
 						onClick={() => {
 							setTagsOnly(true)
 						}}
-					>
-						<ListTreeIcon data-icon="inline-start" />
-						{t("previewDicomTags")}
-					</Button>
+					/>
 				}
 			/>
 		)

@@ -202,7 +202,7 @@ describe("DicomViewer", () => {
 		expect(remote.play).toHaveBeenCalledWith(true)
 	})
 
-	it("shows a frame that failed as a notice on a multi-frame image, as a card on a single frame", async () => {
+	it("shows a frame that failed as a notice on a multi-frame image, as a card with the tags on a single frame", async () => {
 		renderViewer({ info: INFO, failure: null })
 		await screen.findByText("CT · 3×2")
 
@@ -210,7 +210,12 @@ describe("DicomViewer", () => {
 			shellStatus.push({ frame: 0, window: null, atDefault: true, playing: false, failure: "mismatch", reduced: false })
 		})
 		expect(screen.getByText("Pixel data doesn't match its header.")).toBeTruthy()
-		expect(screen.queryByRole("button", { name: "Tags" })).toBeNull()
+
+		// The file's tags are still a button away, and the card one more.
+		fireEvent.click(screen.getByRole("button", { name: "Tags" }))
+		expect(await screen.findByText("Patient's Name")).toBeTruthy()
+		fireEvent.click(screen.getByRole("button", { name: "Image" }))
+		expect(await screen.findByText("Pixel data doesn't match its header.")).toBeTruthy()
 	})
 
 	it.each([
