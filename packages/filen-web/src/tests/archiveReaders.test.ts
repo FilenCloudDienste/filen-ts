@@ -581,6 +581,41 @@ function shortPages() {
 	return solidListing(shapeOf(Array.from({ length: 100 }, () => KiB)))
 }
 
+describe("archive readers: nested archives", () => {
+	it("opens an inner archive through its parent, names its entries by its own id, and closes it with the parent", async () => {
+		const outer = modelReader("solidRar")
+		const inner = modelReader("solidRar")
+		const innerReader = { ...inner.reader, archiveId: "inner-id" } as unknown as ReaderLike
+		const nestedOpens: { entry: ArchiveEntryId; password: string | undefined }[] = []
+		const readers = createArchiveReaders({
+			open: () => Promise.resolve({ reader: outer.asReader, release: vi.fn() }),
+			openNested: ({ entry, password }) => {
+				nestedOpens.push({ entry, password })
+
+				return Promise.resolve({ reader: innerReader, release: vi.fn() })
+			},
+			aheadBudget: () => BUDGET
+		})
+		const signal = new AbortController().signal
+
+		readers.register("outer", ARCHIVE, false, undefined)
+		expect(readers.registerNested("inner", "outer", idOf(7), "pw")).toBe(true)
+		expect(readers.anon("inner")).toBe(false)
+		await readers.readRange("inner", idOf(2), 0, 10, signal)
+
+		expect(nestedOpens).toEqual([{ entry: idOf(7), password: "pw" }])
+		expect(inner.reader.readEntryRange).toHaveBeenCalledWith(expect.objectContaining({ entry: { archive: "inner-id", index: 2 } }))
+
+		readers.close("outer")
+		expect(readers.has("inner")).toBe(false)
+		expect(inner.reader.close).toHaveBeenCalledTimes(1)
+		expect(readers.registerNested("again", "outer", idOf(7), undefined)).toBe(false)
+		await expect(Promise.resolve().then(() => readers.readRange("again", idOf(2), 0, 10, signal))).rejects.toMatchObject({
+			name: "Cancelled"
+		})
+	})
+})
+
 describe("read plans", () => {
 	const solid = (skipped: number, block: number): EntryAccess => ({
 		type: "solidBlock",

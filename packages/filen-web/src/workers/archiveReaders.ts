@@ -42,12 +42,14 @@ export const READ_AHEAD_IDLE_MS = 10_000
 export type ReaderLike = Pick<
 	ArchiveReader,
 	| "format"
+	| "archiveId"
 	| "list"
 	| "entryByteAccess"
 	| "downloadEntry"
 	| "readEntryRange"
 	| "readEntries"
 	| "writeEntryEmbeddedPreview"
+	| "openNested"
 	| "close"
 	| "free"
 >
@@ -67,8 +69,19 @@ export interface OpenedReader {
 	readonly release: () => void
 }
 
+export interface NestedOpenRequest {
+	readonly parent: ReaderLike
+	// The entry holding the archive, as the parent reader names it.
+	readonly entry: ArchiveEntryId
+	// The nested archive's own.
+	readonly password: string | undefined
+	readonly managedFuture: ManagedFuture
+}
+
 export interface ArchiveReaderDeps {
 	open: (request: ReaderOpenRequest) => Promise<OpenedReader>
+	// An archive inside another's entry, read through the parent reader (ArchiveReader.openNested).
+	openNested?: (request: NestedOpenRequest) => Promise<OpenedReader>
 	// What every reader may hold decoded ahead, in all (readAheadBudget).
 	aheadBudget: () => number
 	setTimer?: (run: () => void, ms: number) => () => void
@@ -111,6 +124,8 @@ interface ReaderRecord {
 	readonly archive: AnyFile
 	readonly anon: boolean
 	readonly password: string | undefined
+	// A nested archive's: the reader it is read through, and the entry holding it there.
+	readonly parent: { readonly id: string; readonly entry: ArchiveEntryId } | null
 	// Aborted by close: every call's work stops.
 	readonly lifetime: AbortController
 	opened: OpenedReader | null
@@ -138,6 +153,9 @@ interface ReaderRecord {
 
 export interface ArchiveReaders {
 	register: (id: string, archive: AnyFile, anon: boolean, password: string | undefined) => void
+	// The archive in `entry` of the reader `parentId`, opened through it on first use with its own `password`; closed
+	// with its parent. False when the parent is closed.
+	registerNested: (id: string, parentId: string, entry: ArchiveEntryId, password: string | undefined) => boolean
 	has: (id: string) => boolean
 	anon: (id: string) => boolean | undefined
 	// What the reader's archive is, once it opened.
@@ -239,12 +257,48 @@ function defaultTimer(run: () => void, ms: number): () => void {
 	}
 }
 
+function newRecord(
+	id: string,
+	archive: AnyFile,
+	anon: boolean,
+	password: string | undefined,
+	parent: ReaderRecord["parent"]
+): ReaderRecord {
+	return {
+		id,
+		archive,
+		anon,
+		password,
+		parent,
+		lifetime: new AbortController(),
+		opened: null,
+		opening: null,
+		closed: false,
+		released: false,
+		pending: 0,
+		access: new Map(),
+		ahead: new Map(),
+		passes: new Map(),
+		reads: new Map(),
+		solidReads: new Set(),
+		waiting: new Map(),
+		changed: signal(),
+		leases: 0,
+		cancelIdle: null
+	}
+}
+
 export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 	const records = new Map<string, ReaderRecord>()
 	const setTimer = deps.setTimer ?? defaultTimer
 	// Every reader's read-ahead, oldest first, charged to one budget.
 	const aheadOrder = new Map<string, { record: ReaderRecord; index: number; bytes: number }>()
 	let aheadTotal = 0
+
+	// The SDK names a nested archive's entries by an id of its own, derived from its parent's: the page names them by
+	// the archive's (outermost) uuid, mapped here.
+	const ownId = (record: ReaderRecord, reader: ReaderLike, entry: ArchiveEntryId): ArchiveEntryId =>
+		record.parent === null ? entry : { archive: reader.archiveId as ArchiveEntryId["archive"], index: entry.index }
 
 	const require = (id: string): ReaderRecord => {
 		const record = records.get(id)
@@ -316,6 +370,14 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 	}
 
 	const dispose = (record: ReaderRecord): void => {
+		// The archives nested in it go with it (the SDK closes their readers too).
+		for (const child of [...records.values()]) {
+			if (child.parent?.id === record.id) {
+				records.delete(child.id)
+				dispose(child)
+			}
+		}
+
 		record.closed = true
 		record.cancelIdle?.()
 		record.cancelIdle = null
@@ -343,20 +405,47 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		}
 	}
 
+	// A nested archive opens through its parent's reader, borrowed for the opening.
+	const openNested = (record: ReaderRecord, parent: NonNullable<ReaderRecord["parent"]>, abort: AbortSignal): Promise<OpenedReader> => {
+		const parentRecord = records.get(parent.id)
+		const opener = deps.openNested
+
+		if (parentRecord === undefined || parentRecord.closed || opener === undefined) {
+			return Promise.reject(readerClosed())
+		}
+
+		return borrow(
+			parentRecord,
+			abort,
+			() => undefined,
+			(reader, signal) =>
+				opener({
+					parent: reader,
+					entry: ownId(parentRecord, reader, parent.entry),
+					password: record.password,
+					managedFuture: { abortSignal: signal }
+				})
+		)
+	}
+
 	const startOpening = (record: ReaderRecord): Opening => {
 		const controller = new AbortController()
 		const listeners = new Set<(update: ListUpdate) => void>()
-		const promise = deps.open({
-			archive: record.archive,
-			anon: record.anon,
-			password: record.password,
-			onUpdate: update => {
-				for (const listener of listeners) {
-					listener(update)
-				}
-			},
-			managedFuture: { abortSignal: AbortSignal.any([controller.signal, record.lifetime.signal]) }
-		})
+		const managedFuture = { abortSignal: AbortSignal.any([controller.signal, record.lifetime.signal]) }
+		const promise =
+			record.parent === null
+				? deps.open({
+						archive: record.archive,
+						anon: record.anon,
+						password: record.password,
+						onUpdate: update => {
+							for (const listener of listeners) {
+								listener(update)
+							}
+						},
+						managedFuture
+					})
+				: openNested(record, record.parent, managedFuture.abortSignal)
 		const opening: Opening = { promise, controller, listeners, waiters: 0 }
 
 		promise.then(
@@ -473,7 +562,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 			return known
 		}
 
-		const access = (await reader.entryByteAccess(entry, { abortSignal: signal })).type
+		const access = (await reader.entryByteAccess(ownId(record, reader, entry), { abortSignal: signal })).type
 
 		if (!record.closed) {
 			record.access.set(entry.index, access)
@@ -565,7 +654,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		makeRoom(record, plan, entry.index)
 
 		const report = await reader.readEntries({
-			entries: plan.window.map(item => ({ archive: entry.archive, index: item.index })),
+			entries: plan.window.map(item => ownId(record, reader, { archive: entry.archive, index: item.index })),
 			writerFor: (id, stated) => {
 				const buffer = entryBuffer(stated === undefined ? (sizes.get(id.index) ?? 0) : Number(stated))
 
@@ -635,7 +724,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 
 					events.phase("reading")
 					await reader.readEntryRange({
-						entry,
+						entry: ownId(record, reader, entry),
 						start: 0,
 						end: size,
 						writer: buffer.writer,
@@ -655,7 +744,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				let phase: EntryDownloadPhase | null = null
 				const checked = settle(
 					await reader.downloadEntry({
-						entry,
+						entry: ownId(record, reader, entry),
 						writer: buffer.writer,
 						maxSolidSkip: plan.maxSolidSkip,
 						onUpdate: update => {
@@ -678,27 +767,20 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				return
 			}
 
-			records.set(id, {
-				id,
-				archive,
-				anon,
-				password,
-				lifetime: new AbortController(),
-				opened: null,
-				opening: null,
-				closed: false,
-				released: false,
-				pending: 0,
-				access: new Map(),
-				ahead: new Map(),
-				passes: new Map(),
-				reads: new Map(),
-				solidReads: new Set(),
-				waiting: new Map(),
-				changed: signal(),
-				leases: 0,
-				cancelIdle: null
-			})
+			records.set(id, newRecord(id, archive, anon, password, null))
+		},
+		registerNested: (id, parentId, entry, password) => {
+			const parent = records.get(parentId)
+
+			if (parent === undefined || parent.closed) {
+				return false
+			}
+
+			if (!records.has(id)) {
+				records.set(id, newRecord(id, parent.archive, parent.anon, password, { id: parentId, entry }))
+			}
+
+			return true
 		},
 		has: id => records.get(id)?.closed === false,
 		anon: id => records.get(id)?.anon,
@@ -793,7 +875,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				},
 				(reader, signal) =>
 					reader.downloadEntry({
-						entry,
+						entry: ownId(record, reader, entry),
 						writer,
 						maxSolidSkip,
 						onUpdate: (update: EntryDownloadUpdate) => {
@@ -813,7 +895,13 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				async (reader, combined) => {
 					const buffer = entryBuffer(end - start)
 
-					await reader.readEntryRange({ entry, start, end, writer: buffer.writer, managedFuture: { abortSignal: combined } })
+					await reader.readEntryRange({
+						entry: ownId(record, reader, entry),
+						start,
+						end,
+						writer: buffer.writer,
+						managedFuture: { abortSignal: combined }
+					})
 
 					return buffer.take()
 				}
@@ -826,7 +914,12 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				record,
 				signal,
 				() => undefined,
-				(reader, combined) => reader.writeEntryEmbeddedPreview({ entry, writer, managedFuture: { abortSignal: combined } })
+				(reader, combined) =>
+					reader.writeEntryEmbeddedPreview({
+						entry: ownId(record, reader, entry),
+						writer,
+						managedFuture: { abortSignal: combined }
+					})
 			)
 		},
 		byteAccess: (id, entry, signal) => {

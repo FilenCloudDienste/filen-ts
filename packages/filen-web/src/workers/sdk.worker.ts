@@ -1042,6 +1042,17 @@ const archiveReaders = createArchiveReaders({
 			throw e
 		}
 	},
+	// Freed alone: it reads through its parent's client handle, which the parent's release frees.
+	openNested: async ({ parent, entry, password, managedFuture }) => {
+		const reader = await parent.openNested({ entry, managedFuture }, archivePassword(password))
+
+		return {
+			reader,
+			release: () => {
+				reader.free()
+			}
+		}
+	},
 	aheadBudget: () => readAheadBudget(clientConfig.archiveRetainedBudget)
 })
 
@@ -3119,6 +3130,12 @@ const api = {
 		}
 
 		archiveReaders.register(id, archive, anon, password)
+	},
+	// Opens the archive in the entry `entry` of the reader `parentId` for reads under the caller's `id`, through that reader
+	// (on the parent's client), with its own `password`; it closes with its parent. Nothing is read before its first call;
+	// with the parent closed already, every read is a cancel.
+	openNestedArchiveReader(id: string, parentId: string, entry: ArchiveEntryId, password: string | undefined): void {
+		archiveReaders.registerNested(id, parentId, entry, password)
 	},
 	// Gives up what the reader holds. Its leases' reads fail from then on.
 	closeArchiveReader(id: string): void {
