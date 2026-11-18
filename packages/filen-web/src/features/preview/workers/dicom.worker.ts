@@ -108,6 +108,29 @@ let tick: number | null = null
 let lastStep = 0
 const pointers = new Map<number, { x: number; y: number; buttons: number; pointerType: string }>()
 
+// The worker's decode budget (workerDecodeBytes): sent with the file, and again when the device profile is refined.
+let decodeBytes = 0
+
+// Everything shown of the file before: a second open starts from nothing, as the first did.
+function forgetFile(): void {
+	setPlaying(false)
+	opened = null
+	cache.clear()
+	requested++
+	samples = null
+	current = 0
+	failure = null
+	voiWindow = null
+	baseWindow = null
+	invert = false
+	view = FITTED
+	image = null
+	imageStale = true
+	lut = null
+	posted = ""
+	pointers.clear()
+}
+
 // The decoded frames held while another decodes: those kept, and the one on screen when it is not among them.
 function framesHeld(): number {
 	return cache.bytes + (samples !== null && !cache.has(current) ? samples.data.byteLength : 0)
@@ -479,12 +502,12 @@ async function showFrame(index: number): Promise<DicomFrameOutcome> {
 
 const api = {
 	open: (source: DicomOpenSource, budget: DicomBudget): DicomOpenResult => {
-		opened = null
-		cache.clear()
+		forgetFile()
+		decodeBytes = budget.decodeBytes
 
 		try {
 			const file = source.kind === "ranged" ? rangedSource(source) : memorySource(source.bytes)
-			const header = readHeader(file, { decodeBytes: budget.decodeBytes })
+			const header = readHeader(file, { decodeBytes })
 			const module = readPixelModule(header.dataSet, header.syntax?.littleEndian ?? true)
 			const verdict = imageVerdict(module, header.syntax, DECODERS)
 			// What stays held while a frame is read: an inflated data set, else the whole file read into memory, the
@@ -499,7 +522,9 @@ const api = {
 							color: verdict.color,
 							source: header.pixels,
 							budget: {
-								decodeBytes: budget.decodeBytes,
+								get decodeBytes() {
+									return decodeBytes
+								},
 								held: () => held + ringBytes + framesHeld(),
 								heap: codecHeap,
 								settle: (decoder, need) => {
@@ -536,6 +561,10 @@ const api = {
 		} catch (error) {
 			return openFailure(error)
 		}
+	},
+	// A refined device profile's budget, for the frames still to decode (the file stays open).
+	setBudget: (budget: DicomBudget): void => {
+		decodeBytes = budget.decodeBytes
 	},
 	attach: (port: MessagePort): void => {
 		shell?.close()

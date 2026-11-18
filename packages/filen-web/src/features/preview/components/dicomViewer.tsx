@@ -88,6 +88,12 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 	const [attempt, setAttempt] = useState(0)
 	const readOrigin = useRef(origin)
 	const decodeBytes = workerDecodeBytes(profile)
+	// Read when the file opens; a profile refined after that reaches the worker without opening (or downloading) it again.
+	const budgetBytes = useLatestRef(decodeBytes)
+
+	useEffect(() => {
+		if (owned !== null) void owned.run(remote => remote.setBudget({ decodeBytes })).catch(() => undefined)
+	}, [owned, decodeBytes])
 
 	useEffect(() => {
 		if (owned === null) {
@@ -99,7 +105,8 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 		const token = crypto.randomUUID()
 		const reads = new AbortController()
 		const from = readOrigin.current
-		const budget = { decodeBytes }
+		// Read as the file is sent, so a profile refined while it was being fetched is the one it opens with.
+		const budget = (): { decodeBytes: number } => ({ decodeBytes: budgetBytes.current })
 		const open = async (): Promise<DicomOpenResult> => {
 			if (originRanged(from)) {
 				const bridge = await openOriginSyncSource(from, token, { access })
@@ -120,7 +127,7 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 						Comlink.transfer({ kind: "ranged", channel: bridge.channel, ringBytes: syncRangeSlots() * BLOCK_BYTES }, [
 							bridge.channel.port
 						]),
-						budget
+						budget()
 					)
 				)
 			}
@@ -131,7 +138,7 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 
 			const bytes = await loadOriginBytes(from, token, { access, cap: DICOM_WHOLE_MAX_BYTES, store: false, signal: reads.signal })
 
-			return await owned.run(remote => remote.open(Comlink.transfer({ kind: "whole", bytes }, [bytes.buffer]), budget))
+			return await owned.run(remote => remote.open(Comlink.transfer({ kind: "whole", bytes }, [bytes.buffer]), budget()))
 		}
 
 		open().then(
@@ -153,7 +160,7 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 			close()
 			void sdkApi.cancelPreviewDownload(token)
 		}
-	}, [owned, access, decodeBytes, attempt])
+	}, [owned, access, budgetBytes, attempt])
 
 	return {
 		state,

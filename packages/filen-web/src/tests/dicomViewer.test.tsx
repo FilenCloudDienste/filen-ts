@@ -19,6 +19,7 @@ const remote = vi.hoisted(() => ({
 	setInvert: vi.fn(),
 	reset: vi.fn(),
 	attach: vi.fn(),
+	setBudget: vi.fn(),
 	tags: vi.fn((): Promise<DicomTagLevel> =>
 		Promise.resolve({
 			rows: [
@@ -43,6 +44,33 @@ const worker = vi.hoisted(() => ({
 	owned: { run: (call: (api: unknown) => unknown) => Promise.resolve(call(remote)) }
 }))
 const shellStatus = vi.hoisted(() => ({ push: (_status: DicomStatus): void => undefined }))
+
+// The device profile, refined from desktop to mobile by a test.
+const device = vi.hoisted(() => {
+	const profiles = { desktop: { mobile: false }, mobile: { mobile: true } }
+	let current = profiles.desktop
+	const listeners = new Set<() => void>()
+
+	return {
+		profile: () => current,
+		subscribe: (listener: () => void) => {
+			listeners.add(listener)
+
+			return () => listeners.delete(listener)
+		},
+		refine: (mobile: boolean) => {
+			current = mobile ? profiles.mobile : profiles.desktop
+
+			for (const listener of listeners) listener()
+		}
+	}
+})
+
+vi.mock("@/lib/useDeviceProfile", async () => {
+	const { useSyncExternalStore } = await import("react")
+
+	return { useDeviceProfile: () => useSyncExternalStore(device.subscribe, device.profile) }
+})
 
 vi.mock("@/lib/workers/ownedWorker", async importOriginal => ({
 	...(await importOriginal<typeof import("@/lib/workers/ownedWorker")>()),
@@ -203,6 +231,24 @@ describe("DicomViewer", () => {
 		await vi.waitFor(() => {
 			expect(remote.open).toHaveBeenCalledTimes(2)
 		})
+	})
+
+	it("sends a refined device profile's budget to the open file instead of opening it again", async () => {
+		remote.open.mockClear()
+		renderViewer({ info: INFO, failure: null })
+		await vi.waitFor(() => {
+			expect(remote.open).toHaveBeenCalledTimes(1)
+		})
+		expect(remote.open.mock.calls[0]?.[1]).toEqual({ decodeBytes: 1024 * 1024 * 1024 })
+
+		act(() => {
+			device.refine(true)
+		})
+		await vi.waitFor(() => {
+			expect(remote.setBudget).toHaveBeenLastCalledWith({ decodeBytes: 384 * 1024 * 1024 })
+		})
+		expect(remote.open).toHaveBeenCalledTimes(1)
+		device.refine(false)
 	})
 
 	it("closes a bridge that opens only once the viewer is gone", async () => {
