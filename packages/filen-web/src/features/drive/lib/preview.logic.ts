@@ -1,4 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { originRanged, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
@@ -848,12 +849,18 @@ function surfaceAdmits(surface: SniffSurface, category: PreviewCategory, extensi
 			return driveAdmits(category, extension, size, profile)
 		case "link":
 			return linkAdmits(category, size, profile)
-		case "entry": {
-			const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
-
-			return cap !== null && size <= cap
-		}
+		case "entry":
+			return entryAdmits(category, size, profile)
 	}
+}
+
+// Whether an archive entry of `category` opens at `size`: within the cap its viewer loads whole, or as large text up to
+// what the SDK worker holds to serve an entry's ranges from (an entry is read whole there until the SDK reads entries
+// by range).
+export function entryAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
+	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
+
+	return cap !== null && (size <= cap || (opensAsLargeText(category, size, profile) && size <= ENTRY_RANGE_BUFFER_CAP))
 }
 
 // Whether a file waiting on its content read opens on `surface` at its size: some kind the read may find it to be
@@ -987,12 +994,13 @@ export function canPreview(item: DriveItem): boolean {
 	return canPreviewWith(item, deviceProfile())
 }
 
-// "Open as text": a file nothing recognises, small enough to load whole, may still be text (a config file
-// under an unknown extension). Its viewer is read-only: saving a binary file back as text would corrupt it.
+// "Open as text": a file nothing recognises may still be text (a config file under an unknown extension), at any size:
+// above the text cap in the large text viewer. Its viewer is read-only: saving a binary file back as text would corrupt
+// it.
 export function canOpenAsText(item: DriveItem): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return base.type === "file" && !base.data.undecryptable && previewType(item) === "other" && base.data.size <= TEXT_MAX_BYTES
+	return base.type === "file" && !base.data.undecryptable && previewType(item) === "other"
 }
 
 // The JS-memory ceiling for a category previewed from a whole buffer; null for none (see CATEGORY_POLICY).
@@ -1006,6 +1014,16 @@ export function opensAsLargeText(category: PreviewCategory, size: bigint, profil
 	const cap = bufferedSizeCap(category, profile)
 
 	return CATEGORY_POLICY[category].aboveCap === "largeText" && cap !== null && size > cap
+}
+
+// The most an archive entry read whole is held in the SDK worker to serve its ranges from: the largest whole-buffer
+// preview.
+export const ENTRY_RANGE_BUFFER_CAP = PREVIEW_MAX_BYTES
+
+// A range port on `origin` serves any offset without the page holding all of it: a drive or link file, held bytes
+// (sliced from their Blob), an entry its reader seeks, or another entry up to ENTRY_RANGE_BUFFER_CAP.
+export function originServesRanges(origin: ByteOrigin): boolean {
+	return origin.kind !== "entry" || originRanged(origin) || BigInt(origin.size) <= ENTRY_RANGE_BUFFER_CAP
 }
 
 // Decision for a streamed image's POST-resolution failure (network drop, an SW-side decrypt abort, a

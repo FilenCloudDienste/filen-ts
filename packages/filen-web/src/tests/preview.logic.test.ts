@@ -577,8 +577,8 @@ describe("canOpenAsText", () => {
 		expect(canOpenAsText(fileNamed("data.bin", { size: TEXT_MAX_BYTES }))).toBe(true)
 	})
 
-	it("never holds over the cap, for a known type, a directory or an undecryptable file", () => {
-		expect(canOpenAsText(fileNamed("data.bin", { size: TEXT_MAX_BYTES + 1n }))).toBe(false)
+	it("offers any size (large text above the cap), never a known type, a directory or an undecryptable file", () => {
+		expect(canOpenAsText(fileNamed("data.bin", { size: TEXT_MAX_BYTES + 1n }))).toBe(true)
 		expect(canOpenAsText(fileNamed("notes.txt"))).toBe(false)
 		expect(canOpenAsText(fileNamed("LICENSE"))).toBe(false)
 		expect(canOpenAsText(dirItem())).toBe(false)

@@ -13,7 +13,8 @@ import {
 	previewType,
 	sniffAdmits,
 	sniffAdmitsFor,
-	TEXT_MAX_BYTES
+	TEXT_MAX_BYTES,
+	ENTRY_RANGE_BUFFER_CAP
 } from "@/features/drive/lib/preview.logic"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { canOpenEntry, entryAwaitsSniff } from "@/features/archive/lib/entryAccess.logic"
@@ -226,13 +227,15 @@ describe("sniffAdmits", () => {
 	})
 
 	// Text whatever the read finds, so large text above the cap; an archive's entry stays capped.
-	it("admits a .vcf at any size on the drive and a link, and a .dot only within its caps", () => {
+	it("admits a .vcf at any size on the drive and a link, up to the entry buffer in an archive, and a .dot only within its caps", () => {
 		for (const surface of ["drive", "link"] as const) {
 			expect(sniffAdmits(fileNamed("calls.vcf", 4n * 1024n * MIB), deviceProfile(), surface)).toBe(true)
 			expect(sniffAdmits(fileNamed("memo.dot", 4n * 1024n * MIB), deviceProfile(), surface)).toBe(false)
 		}
 
-		expect(sniffAdmits(fileNamed("calls.vcf", TEXT_MAX_BYTES + 1n), deviceProfile(), "entry")).toBe(false)
+		// An entry: as large text up to what the SDK worker holds to serve its ranges.
+		expect(sniffAdmits(fileNamed("calls.vcf", TEXT_MAX_BYTES + 1n), deviceProfile(), "entry")).toBe(true)
+		expect(sniffAdmits(fileNamed("calls.vcf", ENTRY_RANGE_BUFFER_CAP + 1n), deviceProfile(), "entry")).toBe(false)
 	})
 
 	// The SDK lists the package at any size on the drive; a public link's or an archive's needs an archive reader.

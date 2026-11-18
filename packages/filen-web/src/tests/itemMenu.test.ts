@@ -746,8 +746,9 @@ describe("driveItemActions — Open as text (a file nothing recognises)", () => 
 		})
 	})
 
-	it("is never offered for a file over the text size cap", () => {
-		expect(openIds(unknownFileItem("huge.bin", TEXT_MAX_BYTES + 1n), "drive")).not.toContain("openAsText")
+	// Past the text cap it opens in the large text viewer, read in ranges.
+	it("is offered for a file over the text size cap too", () => {
+		expect(openIds(unknownFileItem("huge.bin", TEXT_MAX_BYTES + 1n), "drive")).toContain("openAsText")
 	})
 
 	it("is never offered for a directory, a file of a known type or an undecryptable file", () => {

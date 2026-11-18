@@ -45,9 +45,9 @@ export interface NestedFileViewerProps {
 }
 
 // The file's viewer: the one its name picked, else the one its content read found.
-function NestedBody({ item, category }: { item: DriveItem; category: PreviewCategory | null }) {
+function NestedBody({ item, origin, category }: { item: DriveItem; origin: ByteOrigin; category: PreviewCategory | null }) {
 	const { t } = useTranslation("preview")
-	const shown = category ?? sniffedEntryCategory(item)
+	const shown = category ?? sniffedEntryCategory(item, origin)
 
 	if (shown === null) {
 		return (
@@ -133,6 +133,7 @@ export function NestedFileViewer({
 				render={() => (
 					<NestedBody
 						item={item}
+						origin={origin}
 						category={category}
 					/>
 				)}

@@ -179,11 +179,22 @@ describe("LargeTextViewer", () => {
 		expect(state.closes).toBe(1)
 	})
 
-	it("refuses an archive entry its reader can only decode whole", async () => {
-		await renderViewer({ kind: "entry", reader: "r", entry: 0 as never, size: SIZE, access: "whole", anon: false, cacheKey: "a#0" })
+	it("reads an archive entry the SDK worker holds whole in ranges, and refuses one past what it holds", async () => {
+		const entry = { kind: "entry", reader: "r", entry: 0 as never, access: "whole", anon: false, cacheKey: "a#0" } as const
 
+		await renderViewer({ ...entry, size: SIZE })
+		expect(await screen.findByText("first line")).toBeTruthy()
+		cleanup()
+
+		await renderViewer({ ...entry, size: 300 * MIB })
 		expect(await screen.findByText("This file is too large to show as text.")).toBeTruthy()
-		expect(state.opens).toBe(0)
+		expect(state.opens).toBe(1)
+	})
+
+	it("reads held bytes (an attachment) in ranges", async () => {
+		await renderViewer({ kind: "bytes", blob: new Blob(["x"]), cacheKey: "mail#att0" })
+
+		expect(await screen.findByText("first line")).toBeTruthy()
 	})
 
 	it("keeps a go to line's progress when the count it cut short ends", async () => {

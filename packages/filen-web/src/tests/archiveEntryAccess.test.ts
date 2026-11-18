@@ -8,12 +8,15 @@ import {
 	entryPreviewCategory,
 	isEncryptedEntry,
 	maxSolidSkipFor,
-	needsCostConfirm
+	needsCostConfirm,
+	sniffedEntryCategory
 } from "@/features/archive/lib/entryAccess.logic"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { driveItemMime, isLinkedEmbedItem } from "@/features/drive/lib/item"
-import { previewType, SPREADSHEET_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { ENTRY_RANGE_BUFFER_CAP, previewType, SPREADSHEET_MAX_BYTES, TEXT_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { storeOf, TEST_ARCHIVE, type EntrySpec } from "@/tests/support/archiveEntries"
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -160,5 +163,27 @@ describe("archiveEntryItem", () => {
 
 			expect(driveItemMime(item)).toBe(typed.get(extension) ?? "application/octet-stream")
 		}
+	})
+})
+
+describe("sniffedEntryCategory", () => {
+	it("opens text past its cap as large text only where the origin serves ranges", () => {
+		const large = linkedFileItem("server.log", { size: TEXT_MAX_BYTES + 1n })
+		const huge = linkedFileItem("server.log", { size: ENTRY_RANGE_BUFFER_CAP + 1n })
+		const entry = (size: bigint) =>
+			({
+				kind: "entry",
+				reader: "r",
+				entry: { archive: TEST_ARCHIVE, index: 0 },
+				size: Number(size),
+				access: "whole",
+				anon: false,
+				cacheKey: "a#0"
+			}) satisfies ByteOrigin
+
+		expect(sniffedEntryCategory(large, { kind: "bytes", blob: new Blob([]), cacheKey: "m#0" })).toBe("text")
+		expect(sniffedEntryCategory(huge, { kind: "bytes", blob: new Blob([]), cacheKey: "m#0" })).toBe("text")
+		expect(sniffedEntryCategory(large, entry(TEXT_MAX_BYTES + 1n))).toBe("text")
+		expect(sniffedEntryCategory(huge, entry(ENTRY_RANGE_BUFFER_CAP + 1n))).toBeNull()
 	})
 })

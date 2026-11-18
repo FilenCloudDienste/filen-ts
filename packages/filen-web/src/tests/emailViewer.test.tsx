@@ -37,6 +37,8 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 const { message } = vi.hoisted((): { message: { current: string | Uint8Array } } => ({ message: { current: "" } }))
 
 // A small text cap, so bodies and files past it stay small here.
+// The message's source past the text cap: read in ranges by the large text viewer.
+vi.mock("@/features/preview/components/largeTextViewer", () => ({ LargeTextViewer: () => <p>large text source</p> }))
 vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
 // The sanitizer's HTML cap, as small: HTML past it is never sent to the page.
 vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
@@ -302,7 +304,7 @@ describe("EmailViewer", () => {
 		expect(linkSaveAsks.every(uuid => uuid === ITEM.data.uuid)).toBe(true)
 	})
 
-	it("shows a cut text body under a notice, an HTML body past the cap as too large, and no source past the text cap", async () => {
+	it("shows a cut text body under a notice, an HTML body past the cap as too large, and the source past the text cap as large text", async () => {
 		const long = "y".repeat(5000)
 
 		message.current = [
@@ -332,7 +334,7 @@ describe("EmailViewer", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Source" }))
 
-		expect(await screen.findByText("This file is too large to show as text.")).toBeTruthy()
+		expect(await screen.findByText("large text source")).toBeTruthy()
 	})
 
 	it("shows Reply to only when it differs from the sender, and an international domain as written under the address", async () => {

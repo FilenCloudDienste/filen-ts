@@ -24,13 +24,13 @@ import {
 	PreviewUnsupportedState
 } from "@/features/preview/components/previewErrorState"
 import { useTextPagerSession, type TextPagerReading } from "@/features/preview/hooks/useTextPagerSession"
+import { originServesRanges } from "@/features/drive/lib/preview.logic"
 import { usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import { searchPattern } from "@/features/preview/lib/textPager/search.logic"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
-import { originRanged } from "@/lib/sdk/byteOrigin"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 
 // A text file too large to load whole, read-only in ranges (textPager.worker.ts): the command bar (File, Find with go to
@@ -476,15 +476,15 @@ function LargeTextSession({ item, alt }: { item: DriveItem; alt: string }) {
 	}
 }
 
-// Never editable. Read in ranges from any origin that can be (a drive or link file, held bytes, an archive entry its
-// reader can seek); an archive entry decoded only whole is too large to show.
+// Never editable. Read in ranges from any origin that serves them (originServesRanges); an archive entry the SDK worker
+// would have to hold whole past its buffer cap is too large to show.
 export function LargeTextViewer({ item, alt }: { item: DriveItem; alt: string }) {
 	const { t } = useTranslation("preview")
 	const origin = usePreviewOrigin(item)
 
 	useLeaveViewerFullScreen()
 
-	if (origin.kind === "entry" && !originRanged(origin)) {
+	if (!originServesRanges(origin)) {
 		return (
 			<PreviewUnsupportedState
 				item={item}

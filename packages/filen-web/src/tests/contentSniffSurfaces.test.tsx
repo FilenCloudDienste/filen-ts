@@ -95,7 +95,7 @@ describe("an ambiguous extension whose usual meaning is no kind", () => {
 			expect(screen.getByText("viewer:pdf")).toBeTruthy()
 		})
 		expect(decide).toHaveBeenCalledOnce()
-		expect(sniffedEntryCategory(item)).toBe("pdf")
+		expect(sniffedEntryCategory(item, bytesOrigin(new Blob([]), "part"))).toBe("pdf")
 	})
 
 	it("stays unknown on the negative verdict, read once", async () => {
@@ -107,7 +107,7 @@ describe("an ambiguous extension whose usual meaning is no kind", () => {
 			expect(screen.getByText("viewer:other")).toBeTruthy()
 		})
 		expect(decide).toHaveBeenCalledOnce()
-		expect(sniffedEntryCategory(other)).toBeNull()
+		expect(sniffedEntryCategory(other, bytesOrigin(new Blob([]), "part"))).toBeNull()
 	})
 
 	it("opens as text at once, reading nothing", () => {

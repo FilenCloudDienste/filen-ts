@@ -2,7 +2,7 @@ import type { AnyFile, ArchiveEntryId, EntryDownloadPhase } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { AbortableReadRange } from "@/lib/media/blockCache"
-import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { ENTRY_RANGE_BUFFER_CAP as ENTRY_RANGE_BUFFER_BYTES } from "@/features/drive/lib/preview.logic"
 import { raceAbort } from "@/lib/abort"
 
 // The SDK worker's side of the byte layer: the only worker code that knows the origin kinds. A `bytes` origin never
@@ -51,8 +51,8 @@ export interface OriginSourceDeps {
 	readEntry(record: EntryReaderRecord, entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
 }
 
-// The most an entry is buffered to serve its ranges from: the largest whole-buffer preview.
-export const ENTRY_RANGE_BUFFER_CAP = Number(PREVIEW_MAX_BYTES)
+// The most an entry is buffered to serve its ranges from (preview.logic's, which the entry gates read too).
+export const ENTRY_RANGE_BUFFER_CAP = Number(ENTRY_RANGE_BUFFER_BYTES)
 
 function tooLarge(size: number, cap: number): Error {
 	return new Error(`preview read of ${String(size)} bytes is above its cap of ${String(cap)}`)

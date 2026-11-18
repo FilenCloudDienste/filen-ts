@@ -24,6 +24,7 @@ import type { EmailAttachment, EmailMessage, EmailReading } from "@/features/pre
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
 import { SafeHtmlDocument } from "@/features/preview/components/safeHtmlDocument"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { LargeTextViewer } from "@/features/preview/components/largeTextViewer"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { detectLineEnding, type TextFile } from "@/features/preview/lib/textFile"
 import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
@@ -490,9 +491,9 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 			<div className="min-h-0 flex-1">
 				{view === "source" && message.hasSource ? (
 					item.data.size > TEXT_MAX_BYTES ? (
-						<PreviewUnsupportedState
+						<LargeTextViewer
 							item={item}
-							message={t("previewTextTooLarge")}
+							alt={title}
 						/>
 					) : (
 						<TextViewer
@@ -537,7 +538,10 @@ function MessageView({ item, message, cidUrls }: { item: DriveItem; message: Ema
 									key={index}
 									item={item}
 									attachment={attachment}
-									canOpen={sniffedEntryCategory(nested) !== null && !(forwarded && depth + 1 >= MAX_DEPTH)}
+									canOpen={
+										sniffedEntryCategory(nested, bytesOrigin(attachment.blob, nested.data.uuid)) !== null &&
+										!(forwarded && depth + 1 >= MAX_DEPTH)
+									}
 									onOpen={() => {
 										setOpened(index)
 									}}

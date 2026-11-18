@@ -16,6 +16,7 @@ import {
 	isStreamedCategory,
 	itemTypeExtension,
 	needsImageTransform,
+	ENTRY_RANGE_BUFFER_CAP,
 	opensAsLargeText,
 	previewableSiblings,
 	previewCategoryForExtension,
@@ -213,6 +214,14 @@ function opensAsText(item: DriveItem): boolean {
 	return CATEGORY_POLICY[previewType(item)].textFamily
 }
 
+// An entry of a text kind opens above its cap as large text, up to what the SDK worker holds to serve its ranges.
+function expectedCanOpenEntry(name: string, size: number): boolean {
+	const category = previewCategoryForExtension(fileTypeExtension(name, null))
+	const textFamily = category !== null && CATEGORY_POLICY[category].textFamily
+
+	return legacyCanOpenEntry(name, size) || (textFamily && size <= Number(ENTRY_RANGE_BUFFER_CAP))
+}
+
 function withinPdfCeiling(item: DriveItem): boolean {
 	const max = deviceProfile().pdfRangedMax
 
@@ -318,7 +327,7 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 			const entrySize = Number(size)
 
 			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: entrySize }]), 0), `${name} @ ${String(size)}`).toBe(
-				legacyCanOpenEntry(name, entrySize)
+				expectedCanOpenEntry(name, entrySize)
 			)
 		}
 	})
@@ -705,7 +714,9 @@ describe("the calendar and contact rows", () => {
 			expect(opensAsLargeText(category, TEXT_MAX_BYTES + 1n, deviceProfile()), name).toBe(true)
 			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe("previewable")
 			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
-			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) + 1 }]), 0), name).toBe(false)
+			// Above the text cap as large text, up to what the SDK worker holds to serve an entry's ranges.
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) + 1 }]), 0), name).toBe(true)
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(ENTRY_RANGE_BUFFER_CAP) + 1 }]), 0), name).toBe(false)
 		}
 
 		expect(isTextCategory(category)).toBe(true)

@@ -3,6 +3,9 @@ import {
 	bufferedSizeCap,
 	CATEGORY_POLICY,
 	contentSniffFor,
+	entryAdmits,
+	opensAsLargeText,
+	originServesRanges,
 	fileTypeExtension,
 	previewCategoryForExtension,
 	previewType,
@@ -14,6 +17,7 @@ import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.l
 import { deviceProfile } from "@/lib/deviceProfile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 
 // What the browser can do with one listed entry on its own: open it in a viewer, or save it. The SDK reads
 // a zip's, 7z's or RAR's file and a compressed tar's member alone; a bare tar's member or a single compressed file
@@ -50,13 +54,18 @@ export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {
 	return id !== null && gateRunsSniffer(SNIFFERS[id], "entry")
 }
 
-// The viewer an entry whose content read has run opens in, by its verdict; null when that kind does not open as an
-// entry.
-export function sniffedEntryCategory(item: DriveItem): PreviewCategory | null {
+// The viewer a file held inside another (an archive's entry, an attachment) whose content read has run opens in, by its
+// verdict; null when that kind does not open there. Text above its cap opens as large text where `origin` serves ranges.
+export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): PreviewCategory | null {
 	const category = previewType(item)
-	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, deviceProfile())
+	const profile = deviceProfile()
+	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
 
-	return cap !== null && item.data.size <= cap ? category : null
+	if (cap === null) {
+		return null
+	}
+
+	return item.data.size <= cap || (opensAsLargeText(category, item.data.size, profile) && originServesRanges(origin)) ? category : null
 }
 
 export function canOpenEntry(store: EntryStore, slot: number): boolean {
@@ -70,9 +79,8 @@ export function canOpenEntry(store: EntryStore, slot: number): boolean {
 	}
 
 	const category = entryPreviewCategory(store.name(slot))
-	const cap = category === null ? null : bufferedSizeCap(category, deviceProfile())
 
-	return cap !== null && store.size(slot) <= Number(cap)
+	return category !== null && entryAdmits(category, BigInt(store.size(slot)), deviceProfile())
 }
 
 export function isEncryptedEntry(store: EntryStore, slot: number): boolean {
