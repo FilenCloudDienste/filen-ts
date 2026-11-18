@@ -92,6 +92,8 @@ export const previewRichDicom = {
 	previewDicomTagCopy: "Copy value",
 	/** DICOM tags panel — toast after a value was copied */
 	previewDicomTagCopied: "Value copied",
+	/** DICOM tags panel — toast when a value could not be read back to copy it */
+	previewDicomTagCopyFailed: "This value couldn't be copied.",
 	/** DICOM tags panel — accessible name of the list of the file's tags */
 	previewDicomTagsLabel: "DICOM tags",
 	/** Keyboard shortcut description — the DICOM viewer's next frame */

@@ -193,10 +193,10 @@ export function DicomTagTree({
 												const copied = t("previewDicomTagCopied")
 
 												if (row.truncated) {
-													void copyTextLater(
-														loadValue(shown.path).then(value => value ?? ""),
-														copied
-													)
+													void copyTextLater(loadValue(shown.path), {
+														copied,
+														failed: t("previewDicomTagCopyFailed")
+													})
 												} else {
 													void copyText(row.value ?? "", copied)
 												}
