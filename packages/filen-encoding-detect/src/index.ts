@@ -12,7 +12,8 @@ interface Exports {
 
 const EXPORTS = ["memory", "ed_buffer", "ed_output", "ed_guess"] as const
 
-// What the detector reads of a file: chardetng settles well within it, and the scratch region never grows past it.
+// What the detector reads of a file, from just before its first non-ASCII byte: chardetng settles well within it, and the
+// scratch region never grows past it.
 export const GUESS_BYTES = 1 << 20
 
 const decoder = new TextDecoder()
@@ -40,10 +41,30 @@ export class EncodingDetector {
 		return new EncodingDetector(exportsOf(await WebAssembly.instantiate(compiled, {})))
 	}
 
-	// The legacy encoding (lower-case WHATWG name, never UTF-8) the first GUESS_BYTES of `bytes` most likely are.
-	// `last`: `bytes` is the whole file (a prefix cut inside a character is not held against an encoding).
-	guess(bytes: Uint8Array, last: boolean): string {
-		const head = bytes.subarray(0, GUESS_BYTES)
+	// The legacy encoding (lower-case WHATWG name, never UTF-8) `bytes` most likely are, judged on up to GUESS_BYTES
+	// starting just before the first non-ASCII byte; null when that holds no evidence (all ASCII, or valid UTF-8), so the
+	// caller keeps its own fallback. `last`: `bytes` is the whole file (a prefix cut inside a character is not held
+	// against an encoding).
+	guess(bytes: Uint8Array, last: boolean): string | null {
+		let start = 0
+
+		if (bytes.length > GUESS_BYTES) {
+			let first = 0
+
+			while (first < bytes.length && (bytes[first] ?? 0) < 0x80) {
+				first++
+			}
+
+			if (first === bytes.length) {
+				return null
+			}
+
+			// Everything before `first` is ASCII, so any start up to it is on a character boundary; chardetng looks back
+			// two bytes for context. Near the end the window stays full-sized.
+			start = Math.max(0, Math.min(first - 2, bytes.length - GUESS_BYTES))
+		}
+
+		const head = bytes.subarray(start, start + GUESS_BYTES)
 		const address = this.wasm.ed_buffer(head.length)
 
 		if (address === 0) {
@@ -52,12 +73,12 @@ export class EncodingDetector {
 
 		new Uint8Array(this.wasm.memory.buffer, address, head.length).set(head)
 
-		const length = this.wasm.ed_guess(head.length, last && head.length === bytes.length ? 1 : 0)
+		const length = this.wasm.ed_guess(head.length, last && start + head.length === bytes.length ? 1 : 0)
 
 		if (length < 0) {
 			throw new Error(`The encoding detection module failed (${String(length)})`)
 		}
 
-		return decoder.decode(new Uint8Array(this.wasm.memory.buffer, this.wasm.ed_output(), length))
+		return length === 0 ? null : decoder.decode(new Uint8Array(this.wasm.memory.buffer, this.wasm.ed_output(), length))
 	}
 }

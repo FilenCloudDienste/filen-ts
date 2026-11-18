@@ -10,7 +10,7 @@ pub const ERR_RANGE: i32 = -2;
 /// The request exceeds the scratch cap or memory ran out.
 pub const ERR_MEMORY: i32 = -5;
 
-/// Callers send at most the first MiB of a file; the scratch region never grows past it.
+/// Callers send at most one MiB; the scratch region never grows past it.
 pub const MAX_SCRATCH: usize = 1 << 20;
 
 #[derive(Default)]
@@ -62,15 +62,17 @@ impl Boundary {
     }
 
     /// Guesses the encoding of scratch `[0, len)`, writing its name to the output region; returns the name's
-    /// byte length or an error.
+    /// byte length (0: no guess, the bytes hold no evidence) or an error.
     pub fn guess(&mut self, len: u32, last: bool) -> i32 {
         let Some(bytes) = self.scratch.get(..length(len)) else {
             return ERR_RANGE;
         };
-        let name = crate::guess(bytes, last);
 
         self.output.clear();
-        self.output.extend_from_slice(name.as_bytes());
+
+        if let Some(name) = crate::guess(bytes, last) {
+            self.output.extend_from_slice(name.as_bytes());
+        }
 
         i32::try_from(self.output.len()).unwrap_or(ERR_MEMORY)
     }
@@ -96,6 +98,19 @@ mod tests {
             &boundary.output_bytes()[..usize::try_from(written).unwrap()],
             b"windows-1251"
         );
+    }
+
+    #[test]
+    fn has_no_guess_for_ascii() {
+        let mut boundary = Boundary::default();
+        let bytes = b"plain ascii";
+        let len = u32::try_from(bytes.len()).unwrap();
+
+        assert!(boundary.buffer(len).is_some());
+        boundary.scratch_mut()[..bytes.len()].copy_from_slice(bytes);
+
+        assert_eq!(boundary.guess(len, true), 0);
+        assert!(boundary.output_bytes().is_empty());
     }
 
     #[test]

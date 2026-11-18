@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url"
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url))
 const CRATE_DIR = `${PACKAGE_DIR}crate`
 const TARGET = "wasm32-unknown-unknown"
-const BUILT = `${CRATE_DIR}/target/${TARGET}/release/filen_encoding_detect.wasm`
+// Passed as --target-dir, so CARGO_TARGET_DIR or a configured build.target-dir cannot move the output away from BUILT.
+const TARGET_DIR = `${CRATE_DIR}/target`
+const BUILT = `${TARGET_DIR}/${TARGET}/release/filen_encoding_detect.wasm`
 
 const MISSING_RUST =
 	"cargo is not installed: install rustup (https://rustup.rs); the toolchain in rust-toolchain.toml is fetched on first use"
@@ -71,7 +73,7 @@ function same(a, b) {
 
 // Builds when sources changed and returns the module's path and size.
 export async function buildWasm() {
-	await cargo(["build", "--release", "--locked", "--target", TARGET])
+	await cargo(["build", "--release", "--locked", "--target", TARGET, "--target-dir", TARGET_DIR])
 
 	if (!same(BUILT, WASM_PATH)) {
 		mkdirSync(`${PACKAGE_DIR}dist`, { recursive: true })

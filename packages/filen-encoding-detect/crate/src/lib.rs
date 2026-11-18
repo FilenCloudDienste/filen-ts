@@ -16,22 +16,29 @@ mod wasm;
 
 /// The legacy encoding `bytes` most likely are, as its WHATWG name in lower case (`windows-1251`,
 /// `shift_jis`). `last`: the bytes are the whole file, not a prefix of it (a sequence cut at the end is
-/// then not held against an encoding).
+/// then not held against an encoding). `None` when the bytes hold no evidence: they are valid UTF-8 (all
+/// ASCII included), where chardetng would only name its generic default unscored.
 #[must_use]
-pub fn guess(bytes: &[u8], last: bool) -> String {
+pub fn guess(bytes: &[u8], last: bool) -> Option<String> {
     // ISO-2022-JP is 7-bit: valid UTF-8, so never asked about.
     let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
 
     detector.feed(bytes, last);
-    detector
-        .guess(None, Utf8Detection::Deny)
-        .name()
-        .to_ascii_lowercase()
+
+    // Allowing UTF-8 changes only the answer while the UTF-8 candidate is alive; otherwise both score the
+    // legacy candidates alike.
+    let encoding = detector.guess(None, Utf8Detection::Allow);
+
+    (encoding.name() != "UTF-8").then(|| encoding.name().to_ascii_lowercase())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::guess;
+    use super::guess as guess_some;
+
+    fn guess(bytes: &[u8], last: bool) -> String {
+        guess_some(bytes, last).expect("a legacy sample has a guess")
+    }
 
     fn encode(text: &str, encoding: &'static encoding_rs::Encoding) -> Vec<u8> {
         let (bytes, _, unmappable) = encoding.encode(text);
@@ -87,9 +94,23 @@ mod tests {
     }
 
     #[test]
-    fn never_answers_utf8() {
-        assert_ne!(guess("plain ascii".as_bytes(), true), "utf-8");
-        assert_ne!(guess("héllo wörld".as_bytes(), true), "utf-8");
+    fn has_no_guess_without_evidence() {
+        assert_eq!(guess_some(b"plain ascii", true), None);
+        assert_eq!(guess_some(b"plain ascii", false), None);
+        assert_eq!(guess_some("héllo wörld".as_bytes(), true), None);
+        assert_eq!(guess_some(b"", true), None);
+    }
+
+    #[test]
+    fn guesses_after_an_ascii_head() {
+        let mut bytes = b"-- an ASCII licence header\n".repeat(64);
+
+        bytes.extend(encode(
+            "Съешь же ещё этих мягких французских булок, да выпей чаю.",
+            encoding_rs::WINDOWS_1251,
+        ));
+
+        assert_eq!(guess(&bytes, true), "windows-1251");
     }
 
     #[test]
