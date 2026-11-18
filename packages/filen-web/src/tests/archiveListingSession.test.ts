@@ -10,7 +10,7 @@ import { packEntries, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 const { createListingCache } = await import("@/features/archive/lib/listingCache")
-const { defaultListingDeps, openListingSession } = await import("@/features/archive/lib/listingSession")
+const { defaultListingDeps, headMagicFormat, openListingSession } = await import("@/features/archive/lib/listingSession")
 
 type ListingDeps = Parameters<typeof openListingSession>[1] & object
 
@@ -196,6 +196,39 @@ describe("openListingSession", () => {
 		await vi.advanceTimersByTimeAsync(150)
 
 		expect(small.calls).toHaveLength(1)
+	})
+
+	it("lists a large zip or 7z named as a RAR at once, its head read first, and gates a real RAR", async () => {
+		const head = vi.fn((_source: unknown, _signal: AbortSignal) => Promise.resolve<ArchiveFormat | null>({ type: "zip" }))
+		const renamed = harness(nameInfo({ type: "rar", version: "rar50Plus" }))
+
+		openListingSession(source("issue.cbr", 64 * MiB), { ...renamed.deps, headFormat: head })
+		await vi.advanceTimersByTimeAsync(150)
+		expect(head).toHaveBeenCalledTimes(1)
+		expect(renamed.calls).toHaveLength(1)
+
+		head.mockResolvedValueOnce(null)
+
+		const rar = harness(nameInfo({ type: "rar", version: "rar50Plus" }))
+		const gated = openListingSession(source("issue.cbr", 64 * MiB), { ...rar.deps, headFormat: head })
+
+		await vi.advanceTimersByTimeAsync(150)
+		expect(gated.getSnapshot().phase.type).toBe("gate")
+		expect(rar.calls).toHaveLength(0)
+
+		// A small one lists at once, unread; another format's gate reads nothing either.
+		const small = harness(nameInfo({ type: "rar", version: "rar50Plus" }))
+
+		openListingSession(source("issue.cbr", MiB), { ...small.deps, headFormat: head })
+		openListingSession(source("big.tar.gz", 64 * MiB), { ...harness(nameInfo({ type: "tar", codec: "gzip" })).deps, headFormat: head })
+		await vi.advanceTimersByTimeAsync(150)
+		expect(head).toHaveBeenCalledTimes(2)
+	})
+
+	it("tells a zip's and a 7z's magic only", () => {
+		expect(headMagicFormat(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]))).toEqual({ type: "zip" })
+		expect(headMagicFormat(new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 4]))).toEqual({ type: "sevenZ" })
+		expect(headMagicFormat(new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]))).toBeNull()
 	})
 
 	it("lists a large zip-based package at once, though its name says no format", async () => {

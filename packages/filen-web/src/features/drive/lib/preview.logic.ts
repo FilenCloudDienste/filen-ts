@@ -149,8 +149,8 @@ export interface CategoryPolicy {
 	aboveCap: "refuse" | "largeText"
 	// How an archive entry opens.
 	entry: "whole" | "ranged" | "none"
-	// How a public link previews it.
-	anon: "stream" | "ranged" | "archive" | "buffer" | "none"
+	// How a public link previews it. "comic": read page by page through the public-link client's archive reader.
+	anon: "stream" | "ranged" | "archive" | "comic" | "buffer" | "none"
 	// Viewed as a decoded string.
 	textFamily: boolean
 	// Saved back through the text path.
@@ -375,15 +375,15 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindArchive",
 		assistantKind: null
 	},
-	// A comic book: the SDK lists it and reads one page at a time (comicViewer.tsx), so any size opens. Inside an archive
-	// it needs a nested reader; a public link previews none inline.
+	// A comic book: the SDK lists it and reads one page at a time (comicViewer.tsx), so any size opens, on a public link
+	// too (its reader is the public-link client's). Inside an archive it needs a nested reader.
 	comic: {
 		streamed: false,
 		ranged: true,
 		bufferCap: null,
 		aboveCap: "refuse",
 		entry: "none",
-		anon: "none",
+		anon: "comic",
 		textFamily: false,
 		editsAsText: false,
 		photo: false,
@@ -881,13 +881,15 @@ function rangedFits(policy: CategoryPolicy, size: bigint, profile: DeviceProfile
 	return max === null || size <= max
 }
 
-// A public link's inline preview (anonPreviewability): an archive is browsed apart, never previewed inline.
+// A public link's inline preview (anonPreviewability): an archive is browsed and a comic read apart (FileHero), never
+// previewed through the inline viewers.
 export function linkAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
 	const policy: CategoryPolicy = CATEGORY_POLICY[category]
 
 	switch (policy.anon) {
 		case "none":
 		case "archive":
+		case "comic":
 			return false
 		case "stream":
 			return true

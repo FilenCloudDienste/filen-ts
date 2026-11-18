@@ -17,23 +17,50 @@ import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/fe
 import { comicPages, largestSolidBlock } from "@/features/comics/lib/pages.logic"
 import { SOLID_BLOCK_READ_MAX_BYTES } from "@/features/archive/lib/entryAccess.logic"
 import { ComicPager } from "@/features/comics/components/comicPager"
+import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { Button } from "@/components/ui/button"
 
 // A comic book (.cbz, .cbr, .cb7, .cbt) in the preview overlay: listed as the archive browser lists it (its gate, its
-// password, the host's listing cache, the reader its pages are read through), then read page by page.
+// password, the host's listing cache, the reader its pages are read through), then read page by page. One with no
+// page to show is browsed as the archive it is, on request.
 export function ComicViewer({ item, variant }: { item: DriveItem; variant: DriveVariant }) {
 	const source = archiveSourceOf(item, variant)
+	const [browsing, setBrowsing] = useState<string | null>(null)
+
+	if (browsing === source.uuid) {
+		return (
+			<ArchiveBrowser
+				item={item}
+				variant={variant}
+			/>
+		)
+	}
 
 	return (
 		<ComicSourceViewer
 			key={source.uuid}
 			item={item}
 			source={source}
+			extractable
+			onBrowse={() => {
+				setBrowsing(source.uuid)
+			}}
 		/>
 	)
 }
 
-function ComicSourceViewer({ item, source }: { item: DriveItem; source: ArchiveSource }) {
+export interface ComicSourceViewerProps {
+	item: DriveItem
+	source: ArchiveSource
+	// Offers "Extract to read" for a comic too large to read page by page (an extract lands in the user's own drive).
+	extractable: boolean
+	// Shows a comic with no page to show as an archive instead; absent where none is offered.
+	onBrowse?: (() => void) | undefined
+}
+
+// A comic of any source: a drive file, or a public link's through its client (its pages read through the
+// UnauthClient's reader).
+export function ComicSourceViewer({ item, source, extractable, onBrowse }: ComicSourceViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
 	const listing = useArchiveListing(source)
@@ -116,6 +143,16 @@ function ComicSourceViewer({ item, source }: { item: DriveItem; source: ArchiveS
 			<PreviewUnsupportedState
 				item={item}
 				message={t("previewComicNoPages")}
+				secondary={
+					onBrowse === undefined ? undefined : (
+						<Button
+							variant="outline"
+							onClick={onBrowse}
+						>
+							{t("previewComicBrowseArchive")}
+						</Button>
+					)
+				}
 			/>
 		)
 	}
@@ -125,7 +162,7 @@ function ComicSourceViewer({ item, source }: { item: DriveItem; source: ArchiveS
 			<PreviewUnsupportedState
 				item={item}
 				message={t("previewComicTooLarge")}
-				secondary={<ExtractToRead source={source} />}
+				secondary={extractable ? <ExtractToRead source={source} /> : undefined}
 			/>
 		)
 	}

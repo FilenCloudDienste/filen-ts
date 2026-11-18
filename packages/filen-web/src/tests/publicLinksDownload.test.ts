@@ -95,6 +95,14 @@ describe("anonPreviewability", () => {
 		expect(anonPreviewability(linkedFileItem("photos.zip", { size: 1024n }))).toBe("archive")
 		expect(anonPreviewability(linkedFileItem("backup.tar.gz", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("archive")
 	})
+
+	// Read page by page through the public-link client's reader, by any visitor, at any size.
+	it("marks a comic book a comic, small or large", () => {
+		for (const name of ["issue.cbz", "issue.cbr", "issue.cb7", "issue.cbt"]) {
+			expect(anonPreviewability(linkedFileItem(name, { size: 1024n })), name).toBe("comic")
+			expect(anonPreviewability(linkedFileItem(name, { size: PREVIEW_MAX_BYTES * 8n })), name).toBe("comic")
+		}
+	})
 })
 
 describe("createCollectingSink", () => {

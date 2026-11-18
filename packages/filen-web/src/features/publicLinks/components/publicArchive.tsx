@@ -8,7 +8,9 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { CompressDialog } from "@/features/drive/components/compressDialog"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { ArchiveSourceBrowser } from "@/features/archive/components/archiveBrowser"
-import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { PreviewAccessModeProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { ComicSourceViewer } from "@/features/comics/components/comicViewer"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
@@ -29,6 +31,42 @@ export function PublicArchiveBrowser({ source, downloadable }: { source: Archive
 				source={source}
 			/>
 		</PreviewDownloadableProvider>
+	)
+}
+
+// A linked comic book, read page by page by any visitor through the public-link client's archive reader (its pages
+// under the anon access mode, like any other inline preview). Extract to read, and Browse as archive for one with no
+// page to show, are a signed-in visitor's, as the archive actions are.
+export function PublicComic({
+	item,
+	source,
+	linkScope,
+	downloadable,
+	onBrowse
+}: {
+	item: DriveItem
+	source: ArchiveSource
+	linkScope: string
+	downloadable: boolean
+	onBrowse: () => void
+}) {
+	const signedIn = usePublicVisitorSignedIn().data === true
+
+	return (
+		<PreviewAccessModeProvider
+			mode="anon"
+			linkScope={linkScope}
+		>
+			<PreviewDownloadableProvider downloadable={downloadable}>
+				<ComicSourceViewer
+					key={source.uuid}
+					item={item}
+					source={source}
+					extractable={signedIn && downloadable}
+					onBrowse={signedIn ? onBrowse : undefined}
+				/>
+			</PreviewDownloadableProvider>
+		</PreviewAccessModeProvider>
 	)
 }
 

@@ -20,7 +20,7 @@ import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
 import type { ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
-import { PublicArchiveActions, PublicArchiveBrowser } from "@/features/publicLinks/components/publicArchive"
+import { PublicArchiveActions, PublicArchiveBrowser, PublicComic } from "@/features/publicLinks/components/publicArchive"
 import { DownloadTooLargeNote } from "@/features/publicLinks/components/publicLinkStates"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
@@ -75,9 +75,15 @@ export function FileHero({
 	const [previewHidden, setPreviewHidden] = useState(false)
 	const [showContents, setShowContents] = useState(false)
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
-	const archiveSource = previewability === "archive" && archiveFile !== undefined ? linkedArchiveSource(item, archiveFile) : null
-	// Contents only ever open from "Browse contents", which a signed-in visitor alone is offered.
-	const pane = !previewHidden && previewability === "previewable" ? "preview" : showContents && archiveSource !== null ? "contents" : null
+	const archiveSource =
+		(previewability === "archive" || previewability === "comic") && archiveFile !== undefined
+			? linkedArchiveSource(item, archiveFile)
+			: null
+	// A comic is read inline, as a preview, through the archive's own reader.
+	const previewable = previewability === "previewable" || (previewability === "comic" && archiveSource !== null)
+	// Contents only ever open from "Browse contents" (or a comic's "Browse as archive"), which a signed-in visitor alone is
+	// offered.
+	const pane = showContents && archiveSource !== null ? "contents" : !previewHidden && previewable ? "preview" : null
 
 	function downloadError(dto: ErrorDTO): string {
 		return `${t("downloadFailed")} ${errorLabel(dto)}`
@@ -200,6 +206,16 @@ export function FileHero({
 							source={archiveSource}
 							downloadable={downloadEnabled}
 						/>
+					) : previewability === "comic" && archiveSource !== null ? (
+						<PublicComic
+							item={item}
+							source={archiveSource}
+							linkScope={linkScope}
+							downloadable={downloadEnabled}
+							onBrowse={() => {
+								setShowContents(true)
+							}}
+						/>
 					) : (
 						<PublicPreview
 							item={item}
@@ -252,7 +268,7 @@ export function FileHero({
 							}}
 						/>
 					)}
-					{previewability === "previewable" && (
+					{previewable && (
 						<Button
 							variant="outline"
 							onClick={() => {

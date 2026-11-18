@@ -239,6 +239,9 @@ describe("isArchiveCandidateName", () => {
 		"App.appx",
 		"App.msix",
 		"comic.cbr",
+		"comic.cbz",
+		"comic.CB7",
+		"comic.cbt",
 		"backup.RAR"
 	])("offers %s", name => {
 		expect(isArchiveCandidateName(name)).toBe(true)

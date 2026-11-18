@@ -47,14 +47,15 @@ export function chooseDownloadStrategy(input: {
 	return { kind: "buffered" }
 }
 
-export type AnonPreviewability = "previewable" | "too-large" | "archive" | "unpreviewable"
+export type AnonPreviewability = "previewable" | "too-large" | "archive" | "comic" | "unpreviewable"
 
 // Whether the file-view auto-loads an inline preview, by the category's `anon` policy. Video, audio and images stream at
 // any size (the service worker's range route fed by an unauthenticated range port; video and audio fall back to
 // MediaSource); a PDF or a deck is read in ranges. An image the inline route cannot serve (no allowed content type) is
 // only ever held whole, so above its cap it is too large — the view then offers download instead. A non-file /
 // undecryptable / unknown-category item is simply not previewable. An archive is never previewed inline: a signed-in
-// visitor may browse it on request, through the authed client, at any size (its listing is not a buffered read).
+// visitor may browse it on request, through the authed client, at any size (its listing is not a buffered read). A
+// comic book is read page by page at any size, by any visitor, through the public-link client's archive reader.
 // `verdict` is what a read of its content found (undefined: the recorded one).
 export function anonPreviewability(
 	item: DriveItem,
@@ -80,6 +81,8 @@ export function anonPreviewability(
 			return "unpreviewable"
 		case "archive":
 			return "archive"
+		case "comic":
+			return "comic"
 		case "stream":
 			if (category === "image" && allowedMediaContentType(item, profile) === null) {
 				const cap = bufferedSizeCap(category, profile)

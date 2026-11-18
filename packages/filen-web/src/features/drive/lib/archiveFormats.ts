@@ -335,9 +335,12 @@ export function isZipPackageName(name: string): boolean {
 
 // Whether to offer Extract: a string lookup, no SDK call. The SDK's archiveNameInfo, and the archive's
 // own bytes when it is read, decide what it is. As the SDK, the extension needs a name before it:
-// ".zip" alone is no archive's name. A package is a zip the SDK reads by its bytes.
+// ".zip" alone is no archive's name. A package or a comic book is an archive the SDK reads by its bytes.
 export function isArchiveCandidateName(name: string): boolean {
 	const extension = nameExtension(name)
 
-	return extension !== null && (ARCHIVE_NAME_EXTENSIONS.has(extension) || ZIP_PACKAGE_EXTENSIONS.has(extension))
+	return (
+		extension !== null &&
+		(ARCHIVE_NAME_EXTENSIONS.has(extension) || ZIP_PACKAGE_EXTENSIONS.has(extension) || COMIC_EXTENSIONS.has(extension))
+	)
 }

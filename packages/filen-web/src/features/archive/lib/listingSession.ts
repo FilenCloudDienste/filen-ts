@@ -11,6 +11,9 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { createEntryStore, type EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingCache } from "@/features/archive/lib/listingCache"
 import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/lib/archiveReaders"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { openByteReader } from "@/features/preview/lib/origin/byteReader"
+import { log } from "@/lib/log"
 
 // One archive's listing for the browser: which phase it is in, and the entries read so far. Each run is a
 // job of its own id, through the archive's reader for the run's password (archiveReaders.ts); the session holds the
@@ -74,6 +77,34 @@ export interface ListingDeps {
 	// Resolves when the time is up or the signal aborts, whichever comes first.
 	delay: (ms: number, signal: AbortSignal) => Promise<void>
 	nameInfo: (name: string) => ArchiveNameInfo | Promise<ArchiveNameInfo>
+	// What the archive's first bytes say it is, where only a zip's or 7z's magic matters (archiveHeadFormat); absent:
+	// the name decides.
+	headFormat?: (source: ArchiveSource, signal: AbortSignal) => Promise<ArchiveFormat | null>
+}
+
+// The format a zip's or 7z's magic names; null for any other head.
+export function headMagicFormat(head: Uint8Array): ArchiveFormat | null {
+	const starts = (magic: readonly number[]): boolean => magic.every((byte, i) => head[i] === byte)
+
+	if (starts([0x50, 0x4b, 0x03, 0x04]) || starts([0x50, 0x4b, 0x05, 0x06])) {
+		return { type: "zip" }
+	}
+
+	return starts([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) ? { type: "sevenZ" } : null
+}
+
+const HEAD_MAGIC_BYTES = 8
+
+// The archive's first bytes, read through the client its source is read through, as a format (headMagicFormat).
+async function archiveHeadFormat(source: ArchiveSource, signal: AbortSignal): Promise<ArchiveFormat | null> {
+	const origin: ByteOrigin = source.anon ? { kind: "linkedFile", file: source.file } : { kind: "file", file: source.file }
+	const reader = await openByteReader(origin, crypto.randomUUID(), { access: source.anon ? "anon" : "authed", blocks: 1 })
+
+	try {
+		return headMagicFormat(await reader.read(0, HEAD_MAGIC_BYTES, signal))
+	} finally {
+		reader.close()
+	}
 }
 
 export interface ListingSession {
@@ -128,7 +159,8 @@ export const defaultListingDeps: ListingDeps = {
 	},
 	newId: () => crypto.randomUUID(),
 	delay: abortableDelay,
-	nameInfo: name => cachedArchiveNameInfo(name) ?? archiveNameInfo(name)
+	nameInfo: name => cachedArchiveNameInfo(name) ?? archiveNameInfo(name),
+	headFormat: archiveHeadFormat
 }
 
 export function listSummaryOf(report: ListReportDTO): ListSummary {
@@ -219,6 +251,8 @@ export function openListingSession(
 	let token = 0
 	let run: Run | null = null
 	let pendingStart: AbortController | null = null
+	// The head read that tells a renamed zip from a RAR, before the gate.
+	let headRead: AbortController | null = null
 	let disposed = false
 	let costAccepted = false
 	// The reader of the accepted password, which the browser's entries read through. Nothing is read until used.
@@ -445,11 +479,48 @@ export function openListingSession(
 			return
 		}
 
-		if (gateFor(info.format ?? comicFormatOfName(source.name), source.size, isZipPackageName(source.name)) === "gate") {
-			setPhase({ type: "gate", format: info.format })
-		} else {
+		const named = info.format ?? comicFormatOfName(source.name)
+
+		if (gateFor(named, source.size, isZipPackageName(source.name)) !== "gate") {
 			scheduleStart()
+
+			return
 		}
+
+		// A RAR's gate is for its member walk: a zip or 7z named .cbr or .rar (a renamed comic) lists from its index at
+		// once. Its head tells, one read of its first chunk, made only for a RAR name above the gate.
+		if (named?.type !== "rar" || deps.headFormat === undefined) {
+			setPhase({ type: "gate", format: info.format })
+
+			return
+		}
+
+		const controller = new AbortController()
+
+		headRead = controller
+		void deps
+			.headFormat(source, controller.signal)
+			.then(
+				format => format,
+				(e: unknown) => {
+					log.warn("listingSession", "reading an archive's head failed", e)
+
+					return null
+				}
+			)
+			.then(format => {
+				if (headRead !== controller || controller.signal.aborted || disposed || snapshot.phase.type !== "resolving") {
+					return
+				}
+
+				headRead = null
+
+				if (format !== null && gateFor(format, source.size, false) === "list") {
+					scheduleStart()
+				} else {
+					setPhase({ type: "gate", format: info.format })
+				}
+			})
 	}
 
 	const resolveInfo = (): void => {
@@ -581,6 +652,8 @@ export function openListingSession(
 
 			pendingStart?.abort()
 			pendingStart = null
+			headRead?.abort()
+			headRead = null
 
 			if (run !== null) {
 				deps.cancel(run.id)
