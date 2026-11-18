@@ -3,13 +3,13 @@ import { rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { MITIGATION_PRESETS } from "./agent"
-import { LOOP_PRESETS } from "./loopHarness"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import { ensureModel, loadManifest, PACKAGE_ROOT } from "./models"
+import { list, resolveRun } from "./options"
 import { writeReport } from "./report"
-import type { EvalPreset, WorkerJob } from "./worker"
+import type { WorkerJob } from "./worker"
 
 const USAGE = `Usage: pnpm eval <command> [options]
 
@@ -34,29 +34,6 @@ tool), and the legacy harness's mitigation presets (${Object.keys(MITIGATION_PRE
   --out <dir>          Results directory (default: results/default)
   --models-dir <dir>   Model cache (default: .models)
   --fresh              Delete the selected models' previous results first`
-
-function list(value: string | undefined): string[] | undefined {
-	return value === undefined
-		? undefined
-		: value
-				.split(",")
-				.map(item => item.trim())
-				.filter(item => item.length > 0)
-}
-
-const ALL_PRESETS = [...Object.keys(LOOP_PRESETS), ...Object.keys(MITIGATION_PRESETS)] as EvalPreset[]
-
-function presets(value: string | undefined, fallback: EvalPreset[]): EvalPreset[] {
-	const names = list(value) ?? fallback
-
-	for (const name of names) {
-		if (!(ALL_PRESETS as string[]).includes(name)) {
-			throw new Error(`Unknown preset "${name}"; known: ${ALL_PRESETS.join(", ")}`)
-		}
-	}
-
-	return names as EvalPreset[]
-}
 
 function runWorker(job: WorkerJob): Promise<void> {
 	return new Promise((resolvePromise, reject) => {
@@ -130,23 +107,6 @@ async function main(): Promise<void> {
 		throw new Error(`Unknown model in ${wantedModels.join(", ")}; known: ${manifest.map(model => model.id).join(", ")}`)
 	}
 
-	const languages = list(values.languages)
-	const categories = list(values.categories)
-	const caseIds = list(values.cases)
-	const sample = Number(values.sample ?? "1")
-	const keep = <T extends { id: string; lang: string }>(items: readonly T[], extra: (item: T) => boolean): T[] =>
-		items
-			.filter(
-				item =>
-					(languages === undefined || languages.includes(item.lang)) &&
-					(caseIds === undefined || caseIds.includes(item.id)) &&
-					extra(item)
-			)
-			.filter((_, index) => index % sample === 0)
-	const suite = values.suite ?? "all"
-	const mainCases = suite === "injection" ? [] : keep(EVAL_CASES, item => categories === undefined || categories.includes(item.category))
-	const injectionCases = suite === "main" ? [] : keep(INJECTION_CASES, () => true)
-
 	if (command === "list") {
 		for (const category of CATEGORIES) {
 			const items = EVAL_CASES.filter(item => item.category === category)
@@ -176,13 +136,15 @@ async function main(): Promise<void> {
 		throw new Error(`Unknown command "${command}"\n\n${USAGE}`)
 	}
 
+	const selection = command === "run" ? resolveRun(values) : undefined
+
 	for (const model of models) {
 		const modelPath = await ensureModel({
 			model,
 			dir: modelsDir
 		})
 
-		if (command === "download") {
+		if (selection === undefined) {
 			console.log(`${model.id}: ${modelPath}`)
 
 			continue
@@ -200,13 +162,12 @@ async function main(): Promise<void> {
 			modelPath,
 			outDir,
 			main: {
-				presets: presets(values["main-presets"], ["shipped"]),
-				caseIds: mainCases.map(item => item.id)
+				presets: selection.mainPresets,
+				caseIds: selection.mainCaseIds
 			},
 			injection: {
-				// The two loops that ship; the legacy presets only when named, as research.
-				presets: presets(values.presets, ["shipped", "loop"]),
-				caseIds: injectionCases.map(item => item.id)
+				presets: selection.injectionPresets,
+				caseIds: selection.injectionCaseIds
 			}
 		})
 	}

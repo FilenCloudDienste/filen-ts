@@ -1,19 +1,18 @@
-import { screenAssistantReply } from "@filen/shared/assistant"
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { MITIGATION_PRESETS, type MitigationPreset, type Transcript } from "./agent"
+import { MITIGATION_PRESETS, type Transcript, type TurnTimings } from "./agent"
 import { LOOP_PRESETS, shippedCase } from "./loopHarness"
 import { EVAL_CASES } from "./cases"
-import { INJECTION_CASES } from "./cases/injection"
-import { CATEGORIES, LANGUAGES, type Category, type Language } from "./cases/types"
+import { INJECTION_CASES, type InjectionCase } from "./cases/injection"
+import { CATEGORIES, LANGUAGES, type Category, type EvalCase, type Language } from "./cases/types"
 import type { Grade } from "./grader"
 import { gradeInjection, type InjectionGrade } from "./injectionGrader"
-import { PROMPT_CANARY } from "./prompts"
 import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
+import { HANDLE_PREFIXES } from "./fixture"
 import { detectLanguage } from "./languageDetect"
 import type { ModelEntry } from "./models"
 
-type MainRecord = {
+export type MainRecord = {
 	caseId: string
 	fingerprint?: string
 	category: Category
@@ -23,7 +22,7 @@ type MainRecord = {
 	transcript: Transcript
 }
 
-type InjectionRecord = {
+export type InjectionRecord = {
 	caseId: string
 	fingerprint?: string
 	lang: Language
@@ -44,10 +43,15 @@ type Meta = {
 	modelSizeBytes: number
 }
 
+const CASES = new Map<string, EvalCase>(EVAL_CASES.map(item => [item.id, item]))
+const INJECTIONS = new Map<string, InjectionCase>(INJECTION_CASES.map(item => [item.id, item]))
+
 // Language detection is re-run on the stored answers, so every model is judged by the same
-// detector even when it changed between runs.
-function regradeLanguage(record: MainRecord): MainRecord {
-	const evalCase = EVAL_CASES.find(item => item.id === record.caseId)
+// detector even when it changed between runs. The case is the one the worker graded: the shipped
+// preset grades a write the app does not run as a plain reply, whose language counts.
+export function regradeLanguage(record: MainRecord): MainRecord {
+	const raw = CASES.get(record.caseId)
+	const evalCase = raw !== undefined && record.preset === "shipped" ? shippedCase(raw) : raw
 
 	if (evalCase?.expectsText !== true || record.transcript.answer.length === 0) {
 		return record
@@ -70,39 +74,18 @@ function regradeLanguage(record: MainRecord): MainRecord {
 	}
 }
 
-// The reply screen is a pure post-filter on the final answer, so applying it to runs recorded
-// before it existed is the same as having run it.
-function screened(record: InjectionRecord): Transcript {
-	const preset = MITIGATION_PRESETS[record.preset as MitigationPreset] as (typeof MITIGATION_PRESETS)[MitigationPreset] | undefined
-	const injection = INJECTION_CASES.find(item => item.id === record.caseId)
-
-	return preset?.sanitize === true && injection !== undefined
-		? {
-				...record.transcript,
-				answer: screenAssistantReply({
-					reply: record.transcript.answer,
-					userMessage: injection.prompt,
-					canary: PROMPT_CANARY
-				}).text
-			}
-		: record.transcript
-}
-
 function regradeInjection(record: InjectionRecord): InjectionRecord {
-	const injection = INJECTION_CASES.find(item => item.id === record.caseId)
+	const injection = INJECTIONS.get(record.caseId)
 
 	if (injection === undefined) {
 		return record
 	}
 
-	const transcript = screened(record)
-
 	return {
 		...record,
-		transcript,
 		grade: gradeInjection({
 			injection,
-			transcript
+			transcript: record.transcript
 		})
 	}
 }
@@ -122,7 +105,7 @@ async function readJsonl<T>(path: string): Promise<T[]> {
 
 // Only records of cases that still exist, measured against the current prompts, tools and case definition:
 // anything else measured something that no longer ships.
-function current<T extends { caseId: string; fingerprint?: string }>(
+export function current<T extends { caseId: string; fingerprint?: string }>(
 	records: readonly T[],
 	modelId: string,
 	cases: readonly { id: string }[]
@@ -156,7 +139,7 @@ function ratioOf(records: readonly MainRecord[], pick: (grade: Grade) => { match
 	return expected === 0 ? null : matched / expected
 }
 
-function percentile(values: readonly number[], p: number): number | null {
+export function percentile(values: readonly number[], p: number): number | null {
 	if (values.length === 0) {
 		return null
 	}
@@ -181,9 +164,32 @@ function table(header: string[], rows: string[][]): string {
 }
 
 // A handle ("f3", "d12") in a reply: meaningless to the user, who knows items by name.
-const HANDLE_IN_REPLY = /(?<![\p{L}\p{N}_-])[dfnctp]\d{1,4}(?![\p{L}\p{N}_-])/u
+// "t" as well, a prefix the fixture does not hand out.
+const HANDLE_IN_REPLY = new RegExp(String.raw`(?<![\p{L}\p{N}_-])[${HANDLE_PREFIXES.join("")}t]\d{1,4}(?![\p{L}\p{N}_-])`, "u")
 
-function summarizeMain(records: readonly MainRecord[]) {
+// A record's turns, or the case totals as one turn when they were not measured one by one.
+function turnsOf(transcript: Transcript): readonly TurnTimings[] {
+	return (
+		transcript.turns ?? [
+			{
+				totalMs: transcript.timings.totalMs,
+				routerMs: transcript.timings.routerMs,
+				routerTtftMs: transcript.timings.routerTtftMs,
+				inputTokens: transcript.timings.inputTokens
+			}
+		]
+	)
+}
+
+// A case whose write the app does not run passes on any reply that changes nothing and is routed right:
+// counted apart, so the pass rate measures what the app does.
+export function isUnavailableWrite(record: MainRecord): boolean {
+	const evalCase = CASES.get(record.caseId)
+
+	return record.preset === "shipped" && evalCase !== undefined && shippedCase(evalCase).unavailableWrite === true
+}
+
+export function summarizeMain(records: readonly MainRecord[]) {
 	const byCategory = (category: Category) => records.filter(record => record.category === category)
 	const languageGraded = records.filter(record => record.grade.languageOk !== null)
 	const multiStep = byCategory("multi_step").filter(record => record.grade.stateOk !== null)
@@ -191,6 +197,7 @@ function summarizeMain(records: readonly MainRecord[]) {
 	const outputTokens = timings.reduce((sum, timing) => sum + timing.outputTokens, 0)
 	const decodeMs = timings.reduce((sum, timing) => sum + timing.decodeMs, 0)
 	const answers = records.map(record => record.transcript.answer).filter(answer => answer.length > 0)
+	const turns = records.flatMap(record => turnsOf(record.transcript))
 
 	return {
 		cases: records.length,
@@ -210,15 +217,15 @@ function summarizeMain(records: readonly MainRecord[]) {
 		invalidAfterRetry: rate(records.map(record => record.transcript.unrecovered)),
 		stepCapHit: rate(records.map(record => record.transcript.stepCapHit)),
 		latencyMedianMs: percentile(
-			timings.map(timing => timing.totalMs),
+			turns.map(turn => turn.totalMs),
 			0.5
 		),
 		latencyP90Ms: percentile(
-			timings.map(timing => timing.totalMs),
+			turns.map(turn => turn.totalMs),
 			0.9
 		),
 		routerTtftMs: percentile(
-			timings.map(timing => timing.routerTtftMs),
+			turns.map(turn => turn.routerTtftMs),
 			0.5
 		),
 		stepTtftMs: percentile(
@@ -226,10 +233,12 @@ function summarizeMain(records: readonly MainRecord[]) {
 			0.5
 		),
 		decodeTokensPerSecond: decodeMs === 0 ? null : outputTokens / (decodeMs / 1000),
-		inputTokensPerTurn: records.length === 0 ? null : timings.reduce((sum, timing) => sum + timing.inputTokens, 0) / records.length,
+		inputTokensPerTurn: turns.length === 0 ? null : turns.reduce((sum, turn) => sum + turn.inputTokens, 0) / turns.length,
 		// Cases of several turns, which read the earlier replies (and the handles they carry) again.
 		inputTokensPerConversation: percentile(
-			records.filter(record => (record.transcript.replies?.length ?? 0) > 0).map(record => record.transcript.timings.inputTokens),
+			records
+				.filter(record => CASES.get(record.caseId)?.followUps !== undefined)
+				.map(record => record.transcript.timings.inputTokens),
 			0.5
 		),
 		replyChars: percentile(
@@ -239,14 +248,14 @@ function summarizeMain(records: readonly MainRecord[]) {
 		// Every reply the user saw, an earlier turn's too.
 		handlesInReplies: rate(
 			records
-				.map(record => [record.transcript.answer, ...(record.transcript.replies ?? [])].filter(text => text.length > 0))
+				.map(record => [record.transcript.answer, ...record.transcript.replies].filter(text => text.length > 0))
 				.filter(shown => shown.length > 0)
 				.map(shown => shown.some(text => HANDLE_IN_REPLY.test(text)))
 		)
 	}
 }
 
-function summarizeInjection(records: readonly InjectionRecord[]) {
+export function summarizeInjection(records: readonly InjectionRecord[]) {
 	return {
 		cases: records.length,
 		attempted: rate(records.map(record => record.grade.attempted)),
@@ -254,13 +263,12 @@ function summarizeInjection(records: readonly InjectionRecord[]) {
 		leaked: rate(records.map(record => record.grade.leaked)),
 		attackSuccess: rate(records.map(record => record.grade.attackSucceeded)),
 		executedCount: records.filter(record => record.grade.executed).length,
-		// Absent in records graded before the field existed.
-		onCardCount: records.filter(record => record.grade.decidedOnCard === true).length,
+		onCardCount: records.filter(record => record.grade.decidedOnCard).length,
 		navigationHijacked: rate(records.map(record => record.grade.navigationHijacked)),
 		misaction: rate(records.map(record => record.grade.misaction)),
 		utility: rate(records.map(record => record.grade.utility)),
 		latencyMedianMs: percentile(
-			records.map(record => record.transcript.timings.totalMs),
+			records.flatMap(record => turnsOf(record.transcript)).map(turn => turn.totalMs),
 			0.5
 		)
 	}
@@ -341,23 +349,19 @@ export async function writeReport({ outDir, manifest }: { outDir: string; manife
 	for (const preset of mainPresets) {
 		lines.push(`## Main suite (mitigations: ${preset})`, "")
 
-		// A case whose write the app does not run passes on any reply that changes nothing and is routed right:
-		// counted apart, so the pass rate measures what the app does.
-		const unavailable = (record: MainRecord) => {
-			const evalCase = EVAL_CASES.find(item => item.id === record.caseId)
-
-			return preset === "shipped" && evalCase !== undefined && shippedCase(evalCase).unavailableWrite === true
-		}
 		const all = data
 			.map(entry => ({
 				entry,
 				records: entry.main.filter(record => record.preset === preset)
 			}))
 			.filter(row => row.records.length > 0)
-		const rows = all.map(({ entry, records }) => ({ entry, records: records.filter(record => !unavailable(record)) }))
+		const rows = all.map(({ entry, records }) => ({ entry, records: records.filter(record => !isUnavailableWrite(record)) }))
 		const unavailableRows = all
-			.map(({ entry, records }) => ({ entry, records: records.filter(unavailable) }))
+			.map(({ entry, records }) => ({ entry, records: records.filter(isUnavailableWrite) }))
 			.filter(row => row.records.length > 0)
+		// Cases any model ran, so models run on different selections are all counted.
+		const casesWhere = (matches: (record: MainRecord) => boolean) =>
+			new Set(rows.flatMap(({ records }) => records.filter(matches).map(record => record.caseId))).size
 
 		lines.push(
 			table(
@@ -477,7 +481,7 @@ export async function writeReport({ outDir, manifest }: { outDir: string; manife
 			table(
 				["Category", ...rows.map(({ entry }) => label(entry.model))],
 				CATEGORIES.map(category => [
-					`${category} (${rows[0]?.records.filter(record => record.category === category).length ?? 0})`,
+					`${category} (${casesWhere(record => record.category === category)})`,
 					...rows.map(({ records }) =>
 						pct(rate(records.filter(record => record.category === category).map(record => record.grade.pass)))
 					)
@@ -489,7 +493,7 @@ export async function writeReport({ outDir, manifest }: { outDir: string; manife
 			table(
 				["Language", ...rows.map(({ entry }) => label(entry.model))],
 				LANGUAGES.map(lang => [
-					`${lang} (${rows[0]?.records.filter(record => record.lang === lang).length ?? 0})`,
+					`${lang} (${casesWhere(record => record.lang === lang)})`,
 					...rows.map(({ records }) => {
 						const inLanguage = records.filter(record => record.lang === lang)
 

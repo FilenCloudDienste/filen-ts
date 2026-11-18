@@ -472,12 +472,22 @@ export const SIMPLE_CASES: EvalCase[] = [
 		routes: ["files"],
 		calls: [
 			{
-				tool: "list_directory",
-				args: {
-					path: {
-						$includes: ["downloads"]
+				anyOf: [
+					{
+						tool: "list_directory",
+						args: {
+							path: {
+								$includes: ["downloads"]
+							}
+						}
+					},
+					{
+						tool: "list_directory",
+						args: {
+							handle: "d13"
+						}
 					}
-				}
+				]
 			}
 		],
 		answerIncludes: [["report_q3", "setup_installer", "receipt"]],
@@ -511,12 +521,22 @@ export const SIMPLE_CASES: EvalCase[] = [
 		routes: ["files"],
 		calls: [
 			{
-				tool: "list_directory",
-				args: {
-					path: {
-						$includes: ["documents"]
+				anyOf: [
+					{
+						tool: "list_directory",
+						args: {
+							path: {
+								$includes: ["documents"]
+							}
+						}
+					},
+					{
+						tool: "list_directory",
+						args: {
+							handle: "d1"
+						}
 					}
-				}
+				]
 			}
 		],
 		answerIncludes: [["tax_notes_2024"]],
@@ -642,7 +662,8 @@ export const SIMPLE_CASES: EvalCase[] = [
 		prompt: "Finde meine Steuererklarung 2024",
 		routes: ["files", "insights"],
 		calls: [{ tool: "search_items" }],
-		answerIncludes: [["steuererklärung", "steuererklarung"]],
+		// The prompt has the unaccented words with a space: only the file's own name proves the search found it.
+		answerIncludes: [["steuererklarung_2024", "2024.pdf"]],
 		expectsText: true
 	},
 	// The note or chat open on screen is "this one": n3 Meeting 2025-10-01, c2 Family.
@@ -654,7 +675,8 @@ export const SIMPLE_CASES: EvalCase[] = [
 		context: openNote("n3"),
 		routes: ["notes"],
 		calls: [{ tool: "read_note", args: { handle: "n3" } }],
-		answerIncludes: [["15 november", "november 15"]],
+		// The launch date: 15 as a whole number, however the date is written ("15th of November", "15.11.").
+		answerIncludes: [["15"]],
 		answerExcludes: BENIGN_READ_EXCLUDES.en,
 		expectsText: true
 	},
@@ -666,7 +688,7 @@ export const SIMPLE_CASES: EvalCase[] = [
 		context: openNote("n3"),
 		routes: ["notes"],
 		calls: [{ tool: "read_note", args: { handle: "n3" } }],
-		answerIncludes: [["15. november", "15 november"]],
+		answerIncludes: [["15"]],
 		answerExcludes: BENIGN_READ_EXCLUDES.de,
 		expectsText: true
 	},
@@ -1023,7 +1045,7 @@ export const MULTIPLE_CASES: EvalCase[] = [
 				}
 			}
 		],
-		answerIncludes: [["15", "november"]],
+		answerIncludes: [["15"]],
 		answerExcludes: BENIGN_READ_EXCLUDES.en,
 		expectsText: true
 	},
@@ -1062,7 +1084,7 @@ export const MULTIPLE_CASES: EvalCase[] = [
 		category: "multiple",
 		lang: "tr",
 		prompt: "Mercimek çorbası tarifinde hangi malzemeler var?",
-		routes: ["files", "notes"],
+		routes: ["files"],
 		calls: [
 			{
 				tool: "read_text_file",
@@ -1213,20 +1235,40 @@ export const PARALLEL_CASES: EvalCase[] = [
 		routes: ["files"],
 		calls: [
 			{
-				tool: "list_directory",
-				args: {
-					path: {
-						$includes: ["escola"]
+				anyOf: [
+					{
+						tool: "list_directory",
+						args: {
+							path: {
+								$includes: ["escola"]
+							}
+						}
+					},
+					{
+						tool: "list_directory",
+						args: {
+							handle: "d14"
+						}
 					}
-				}
+				]
 			},
 			{
-				tool: "list_directory",
-				args: {
-					path: {
-						$includes: ["downloads"]
+				anyOf: [
+					{
+						tool: "list_directory",
+						args: {
+							path: {
+								$includes: ["downloads"]
+							}
+						}
+					},
+					{
+						tool: "list_directory",
+						args: {
+							handle: "d13"
+						}
 					}
-				}
+				]
 			}
 		],
 		answerIncludes: [["trabalho_de_historia", "redacao_enem"]],
@@ -1462,7 +1504,7 @@ export const PARALLEL_CASES: EvalCase[] = [
 				}
 			}
 		],
-		answerIncludes: [["15", "november"]],
+		answerIncludes: [["15"]],
 		expectsText: true
 	},
 	{

@@ -102,7 +102,7 @@ export const SOURCES_CASES: EvalCase[] = [
 		category: "sources",
 		lang: "fr",
 		prompt: "Est-ce que Bewerbung_alt.pdf est dans la corbeille ?",
-		routes: ["trash", "shared", "files"],
+		routes: ["trash", "shared"],
 		calls: [
 			{
 				tool: "list_section",
@@ -111,7 +111,9 @@ export const SOURCES_CASES: EvalCase[] = [
 				}
 			}
 		],
-		answerIncludes: [["oui", "bewerbung"]],
+		// The prompt names the file, so only the answer's yes says it is there; "se trouve" is inside its negation.
+		answerIncludes: [["oui", "se trouve", "est bien", "est dans"]],
+		answerExcludes: ["n'est pas", "n’est pas", "ne se trouve pas", "non,"],
 		expectsText: true
 	},
 	{
@@ -442,7 +444,8 @@ export const SOURCES_CASES: EvalCase[] = [
 				tool: "get_transfers"
 			}
 		],
-		answerIncludes: [["62"]],
+		// The running upload's progress, or the overall progress the result leads with.
+		answerIncludes: [["62", "23"]],
 		expectsText: true
 	},
 	{
@@ -456,7 +459,8 @@ export const SOURCES_CASES: EvalCase[] = [
 				tool: "get_transfers"
 			}
 		],
-		answerIncludes: [["setup_installer"]],
+		// The one download, by name or by its failure.
+		answerIncludes: [["setup_installer", "fehlgeschlagen", "gescheitert", "verbindung"]],
 		expectsText: true
 	},
 	{
@@ -470,7 +474,7 @@ export const SOURCES_CASES: EvalCase[] = [
 				tool: "get_transfers"
 			}
 		],
-		answerIncludes: [["62"]],
+		answerIncludes: [["62", "23"]],
 		expectsText: true
 	},
 	{
@@ -834,7 +838,17 @@ export const SOURCES_CASES: EvalCase[] = [
 		lang: "en",
 		prompt: "Restore old_draft.docx from the trash",
 		routes: ["trash", "shared", "files", "organize", "answer"],
-		answerExcludes: ["has been restored", "i restored", "i've restored", "i can restore"],
+		answerExcludes: [
+			"has been restored",
+			"i restored",
+			"i've restored",
+			"i’ve restored",
+			"i can restore",
+			"have restored",
+			"was restored",
+			"been restored",
+			"is back in"
+		],
 		expectsText: true
 	},
 	{
@@ -843,6 +857,8 @@ export const SOURCES_CASES: EvalCase[] = [
 		lang: "fr",
 		prompt: "Active le mode sombre",
 		routes: ["navigation", "answer"],
+		// No tool changes a setting, so the reply is all there is to grade: it must not claim it did.
+		answerExcludes: ["c'est fait", "c’est fait", "j'ai activé", "j’ai activé", "a été activé", "est maintenant activé"],
 		expectsText: true
 	},
 	// Unread state comes with the chat list (Anna Schmidt and Website team have unread messages; the user wrote
@@ -855,7 +871,7 @@ export const SOURCES_CASES: EvalCase[] = [
 		routes: ["chats"],
 		calls: [{ tool: "list_chats" }],
 		answerIncludes: [["anna"], ["website"]],
-		answerExcludes: ["carlos", "yuki"],
+		answerExcludes: ["carlos", "yuki", "мария", "maria"],
 		expectsText: true
 	},
 	{
@@ -866,7 +882,7 @@ export const SOURCES_CASES: EvalCase[] = [
 		routes: ["chats"],
 		calls: [{ tool: "list_chats" }],
 		answerIncludes: [["anna"], ["website"]],
-		answerExcludes: ["carlos", "yuki"],
+		answerExcludes: ["carlos", "yuki", "мария", "maria"],
 		expectsText: true
 	},
 	{
@@ -876,7 +892,11 @@ export const SOURCES_CASES: EvalCase[] = [
 		prompt: "未読のメッセージはある？",
 		routes: ["chats"],
 		calls: [{ tool: "list_chats" }],
-		answerIncludes: [["anna"], ["website"]],
+		answerIncludes: [
+			["anna", "アンナ"],
+			["website", "ウェブサイト"]
+		],
+		answerExcludes: ["carlos", "yuki", "カルロス", "ユキ", "мария", "maria"],
 		expectsText: true
 	},
 	// Notes by flag: n15 Old ideas is the only archived note, n1 Groceries the only pinned one.

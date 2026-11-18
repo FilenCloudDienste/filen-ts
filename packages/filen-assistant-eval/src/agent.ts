@@ -5,6 +5,8 @@ import {
 	AssistantTurnGuard,
 	isConsequentialTool,
 	mapUntrustedStrings,
+	MAX_STEPS,
+	QUARANTINE_MAX_TOKENS,
 	extractionSource,
 	parseToolInput,
 	quarantinedExtractionPrompt,
@@ -12,6 +14,7 @@ import {
 	screenAssistantReply,
 	spotlightInstruction,
 	spotlightText,
+	STEP_MAX_TOKENS,
 	toolInputJsonSchema,
 	type AssistantExtractionSource,
 	type AssistantRoute,
@@ -30,6 +33,7 @@ import {
 } from "node-llama-cpp"
 import { DECOY_TOOLS } from "./decoys"
 import type { FakeApp } from "./fakeApp"
+import { allHandles } from "./fixture"
 import {
 	ASSISTANT_CLOSING_NUDGE,
 	ASSISTANT_MALFORMED_RETRY,
@@ -184,9 +188,9 @@ export type Transcript = {
 	routeRaw: string
 	calls: CallRecord[]
 	answer: string
-	// Text written alongside tool calls: the app shows each as a reply of its own. Absent in older records.
-	replies?: string[]
-	// Calls the last turn of a conversation made. Absent in older records and for one-turn runs.
+	// Text written alongside tool calls: the app shows each as a reply of its own.
+	replies: string[]
+	// Calls the last turn of a conversation made. Absent for one-turn (legacy harness) runs.
 	lastTurnCalls?: number
 	invalidOutputs: number
 	unrecovered: boolean
@@ -194,6 +198,16 @@ export type Transcript = {
 	stepCapHit: boolean
 	quarantineCalls: number
 	timings: Timings
+	// What each turn took; timings holds the case totals.
+	turns?: TurnTimings[]
+}
+
+// What one turn of a conversation took, beside the case totals in Timings.
+export type TurnTimings = {
+	totalMs: number
+	routerMs: number
+	routerTtftMs: number
+	inputTokens: number
 }
 
 export type AgentRuntime = {
@@ -204,10 +218,6 @@ export type AgentRuntime = {
 	createWrapper: () => ChatWrapper
 	specialTokens: readonly string[]
 }
-
-const MAX_STEPS = 5
-const STEP_MAX_TOKENS = 384
-const QUARANTINE_MAX_TOKENS = 200
 
 const MALFORMED_CALL =
 	/<tool_call>|<\|tool_call_start\|>|<function=|\|\|call:|"name"\s*:\s*"[a-z_]+"\s*,\s*"(?:arguments|parameters)"|\b[a-z]+_[a-z_]+\s*\(\s*(?:[a-z_]+\s*=|\{)/
@@ -312,10 +322,6 @@ function handlesIn(value: unknown, found: Map<string, string> = new Map()): Map<
 	}
 
 	return found
-}
-
-function allHandles(app: FakeApp): Set<string> {
-	return new Set([...app.state.drive.map(item => item.handle), ...app.state.notes.map(item => item.handle)])
 }
 
 const CONTENT_FIELDS = ["content", "messages"]
@@ -510,7 +516,7 @@ export async function runTurn({
 
 			// Shown to the user in the app, screened like the answer.
 			if (alongside.length > 0) {
-				transcript.replies?.push(
+				transcript.replies.push(
 					mitigations.sanitize
 						? screenAssistantReply({ reply: alongside, userMessage: prompt, canary: PROMPT_CANARY }).text
 						: alongside
@@ -587,7 +593,7 @@ export async function runTurn({
 							done: true
 						}
 					} else {
-						const before = allHandles(app)
+						const before = allHandles(app.state)
 						const outcome = app.execute({
 							name: tool.name,
 							args
@@ -607,7 +613,7 @@ export async function runTurn({
 								tool,
 								args,
 								returned,
-								created: [...allHandles(app)].filter(handle => !before.has(handle))
+								created: [...allHandles(app.state)].filter(handle => !before.has(handle))
 							})
 
 							if (mitigations.quarantine && tool.untrustedOutput === "content") {
@@ -730,6 +736,14 @@ export async function runTurn({
 		}
 
 		timings.totalMs = performance.now() - started
+		transcript.turns = [
+			{
+				totalMs: timings.totalMs,
+				routerMs: timings.routerMs,
+				routerTtftMs: timings.routerTtftMs,
+				inputTokens: timings.inputTokens
+			}
+		]
 
 		return transcript
 	} finally {

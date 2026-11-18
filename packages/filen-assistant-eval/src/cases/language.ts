@@ -64,7 +64,7 @@ const READS: ReadCase[] = [
 	{
 		lang: "tr",
 		prompt: "Mercimek çorbası tarifime göre çorba kaç dakika pişiyor?",
-		routes: ["files", "notes"],
+		routes: ["files"],
 		call: read("read_text_file", "f40"),
 		answer: [["25"]]
 	},

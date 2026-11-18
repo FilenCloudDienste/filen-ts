@@ -28,9 +28,10 @@ import {
 	type LlamaGrammar,
 	type LlamaModel
 } from "node-llama-cpp"
-import type { CallRecord, CallStatus, Timings, Transcript } from "./agent"
+import type { CallRecord, CallStatus, Timings, Transcript, TurnTimings } from "./agent"
 import type { EvalCase } from "./cases/types"
 import type { FakeApp } from "./fakeApp"
+import { allHandles } from "./fixture"
 import { EVAL_NOW, EVAL_TIME_ZONE, PROMPT_CANARY } from "./prompts"
 
 // The eval driving the loop the apps ship (@filen/shared/assistant runAssistantTurn): its router, guard,
@@ -292,10 +293,6 @@ export class LlamaAssistantModel implements AssistantModel {
 	}
 }
 
-function allHandles(app: FakeApp): Set<string> {
-	return new Set([...app.state.drive.map(item => item.handle), ...app.state.notes.map(item => item.handle)])
-}
-
 // AssistantToolExecutor over the fake app, checking calls as the web executor does: paths resolve to
 // handles, unknown handles come back as invalid with candidates, a tool the app does not run is refused.
 export class FakeAppExecutor implements AssistantToolExecutor {
@@ -351,7 +348,7 @@ export class FakeAppExecutor implements AssistantToolExecutor {
 	}
 
 	execute({ tool, args }: { tool: AssistantTool; args: Record<string, unknown> }): Promise<AssistantToolOutcome> {
-		const before = allHandles(this.app)
+		const before = allHandles(this.app.state)
 		const outcome = this.app.execute({ name: tool.name, args })
 
 		if (!outcome.ok) {
@@ -367,7 +364,7 @@ export class FakeAppExecutor implements AssistantToolExecutor {
 			ok: true,
 			result: outcome.result,
 			...(outcome.returned === undefined ? {} : { returned: outcome.returned }),
-			created: [...allHandles(this.app)].filter(handle => !before.has(handle))
+			created: [...allHandles(this.app.state)].filter(handle => !before.has(handle))
 		})
 	}
 }
@@ -414,10 +411,13 @@ export async function runLoopTurns({
 	const calls: CallRecord[] = []
 	const replies: string[] = []
 	const answers: string[] = []
+	const turns: TurnTimings[] = []
 	let last: Awaited<ReturnType<typeof runAssistantTurn>> | null = null
 
 	try {
 		for (const message of prompts) {
+			const turnStarted = performance.now()
+			const { routerMs, routerTtftMs, inputTokens } = model.timings
 			const offset = calls.reduce((max, call) => Math.max(max, call.step), 0)
 			const shown: string[] = []
 			const result = await runAssistantTurn({
@@ -444,6 +444,12 @@ export async function runLoopTurns({
 			// Every reply the turn showed besides its answer, which is the last one shown.
 			replies.push(...(result.reply.length > 0 ? shown.slice(0, -1) : shown))
 			answers.push(result.reply)
+			turns.push({
+				totalMs: performance.now() - turnStarted,
+				routerMs: model.timings.routerMs - routerMs,
+				routerTtftMs: model.timings.routerTtftMs - routerTtftMs,
+				inputTokens: model.timings.inputTokens - inputTokens
+			})
 			// As the web session keeps it: a turn that replied, windowed to the history budget.
 			if (result.withheld || result.reply.trim().length > 0) {
 				history = windowHistory([
@@ -474,7 +480,8 @@ export async function runLoopTurns({
 		steps: model.mainGenerations,
 		stepCapHit: last?.stepCapHit ?? false,
 		quarantineCalls: model.extractions,
-		timings: model.timings
+		timings: model.timings,
+		turns
 	}
 }
 

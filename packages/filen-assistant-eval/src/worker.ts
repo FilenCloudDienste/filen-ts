@@ -31,6 +31,8 @@ export type WorkerJob = {
 export type EvalPreset = MitigationPreset | LoopPreset
 
 const CONTEXT_SIZE = 8192
+// Router, main and quarantine.
+const SEQUENCES = 3
 
 // Cases already measured against the current prompts, tools and case definition.
 async function doneIds(path: string, fingerprints: ReadonlyMap<string, string>): Promise<Set<string>> {
@@ -80,7 +82,7 @@ async function main(): Promise<void> {
 	})
 	const context = await model.createContext({
 		contextSize: CONTEXT_SIZE,
-		sequences: 3,
+		sequences: SEQUENCES,
 		...(entry.contextOptions ?? {})
 	})
 	const loadMs = performance.now() - loadStarted
@@ -119,24 +121,43 @@ async function main(): Promise<void> {
 		app,
 		item,
 		preset,
-		runtime,
 		injectionTools
 	}: {
 		app: FakeApp
 		item: { prompt: string; followUps?: readonly string[] }
 		preset: EvalPreset
-		runtime: AgentRuntime
 		injectionTools: boolean
 	}): Promise<Transcript> {
 		if (isLoopPreset(preset)) {
 			return runLoopTurns({ runtime: loopRuntime, app, prompts: [item.prompt, ...(item.followUps ?? [])], preset })
 		}
 
+		const mitigations = MITIGATION_PRESETS[preset]
+		const runtime: AgentRuntime = {
+			routerSequence: sequences[0],
+			mainSequence: sequences[1],
+			quarantineSequence: sequences[2],
+			routerGrammar,
+			specialTokens,
+			createWrapper: () => {
+				const wrapper = createChatWrapper({
+					entry,
+					model
+				})
+
+				if (!mitigations.sanitize) {
+					parseSpecialTokensInResults(wrapper)
+				}
+
+				return wrapper
+			}
+		}
+
 		return runTurn({
 			runtime,
 			app,
 			prompt: item.prompt,
-			mitigations: MITIGATION_PRESETS[preset],
+			mitigations,
 			injectionTools
 		})
 	}
@@ -150,32 +171,12 @@ async function main(): Promise<void> {
 		suite: "main" | "injection"
 		presets: EvalPreset[]
 		cases: readonly T[]
-		execute: (options: { item: T; preset: EvalPreset; runtime: AgentRuntime }) => Promise<unknown>
+		execute: (options: { item: T; preset: EvalPreset }) => Promise<unknown>
 	}): Promise<void> {
 		for (const preset of presets) {
 			const path = join(dir, `${suite}-${preset}.jsonl`)
 			const fingerprints = new Map(cases.map(item => [item.id, caseFingerprint({ modelId: modelKey(entry), item })]))
 			const done = await doneIds(path, fingerprints)
-			const mitigations = isLoopPreset(preset) ? MITIGATION_PRESETS.all : MITIGATION_PRESETS[preset]
-			const runtime: AgentRuntime = {
-				routerSequence: sequences[0],
-				mainSequence: sequences[1],
-				quarantineSequence: sequences[2],
-				routerGrammar,
-				specialTokens,
-				createWrapper: () => {
-					const wrapper = createChatWrapper({
-						entry,
-						model
-					})
-
-					if (!mitigations.sanitize) {
-						parseSpecialTokensInResults(wrapper)
-					}
-
-					return wrapper
-				}
-			}
 			const pending = cases.filter(item => !done.has(item.id) && (isLoopPreset(preset) || item.followUps === undefined))
 
 			console.log(`[${entry.id}] ${suite}/${preset}: ${pending.length} of ${cases.length} cases to run`)
@@ -183,8 +184,7 @@ async function main(): Promise<void> {
 			for (const [index, item] of pending.entries()) {
 				const record = await execute({
 					item,
-					preset,
-					runtime
+					preset
 				})
 
 				await appendFile(path, `${JSON.stringify({ ...(record as object), fingerprint: fingerprints.get(item.id) })}\n`)
@@ -200,13 +200,13 @@ async function main(): Promise<void> {
 		suite: "main",
 		presets: job.main.presets,
 		cases: EVAL_CASES.filter(item => job.main.caseIds.includes(item.id)),
-		execute: async ({ item, preset, runtime }) => {
+		execute: async ({ item, preset }) => {
 			const app = new FakeApp(item.context)
 
 			item.setup?.(app.state)
 
 			const before = structuredClone(app.state)
-			const transcript = await transcriptOf({ app, item, preset, runtime, injectionTools: false })
+			const transcript = await transcriptOf({ app, item, preset, injectionTools: false })
 
 			return {
 				caseId: item.id,
@@ -228,12 +228,12 @@ async function main(): Promise<void> {
 		suite: "injection",
 		presets: job.injection.presets,
 		cases: INJECTION_CASES.filter(item => job.injection.caseIds.includes(item.id)),
-		execute: async ({ item, preset, runtime }) => {
+		execute: async ({ item, preset }) => {
 			const app = new FakeApp(item.context)
 
 			item.setup(app.state)
 
-			const transcript = await transcriptOf({ app, item, preset, runtime, injectionTools: true })
+			const transcript = await transcriptOf({ app, item, preset, injectionTools: true })
 
 			return {
 				caseId: item.id,
@@ -254,20 +254,34 @@ async function main(): Promise<void> {
 
 	const metaPath = join(dir, "meta.json")
 	const previous = JSON.parse(await readFile(metaPath, "utf8").catch(() => "{}")) as {
+		fingerprint?: string
 		peakRssBytes?: number
 	}
+	const key = modelKey(entry)
+	// A peak belongs to what the records were measured with (engine, sources, weights, context): whatever
+	// invalidates the records starts the peak afresh, a resume keeps the max.
+	const fingerprint = caseFingerprint({
+		modelId: key,
+		item: {
+			contextSize: context.contextSize,
+			sequences: SEQUENCES
+		}
+	})
+	const sameSettings = previous.fingerprint === fingerprint
 
 	await writeFile(
 		metaPath,
 		`${JSON.stringify(
 			{
 				model: entry.id,
+				key,
+				fingerprint,
 				gpu: llama.gpu,
 				contextSize: context.contextSize,
-				sequences: 3,
+				sequences: SEQUENCES,
 				loadMs,
 				rssAfterLoadBytes: rssAfterLoad,
-				peakRssBytes: Math.max(previous.peakRssBytes ?? 0, rssBytes()),
+				peakRssBytes: sameSettings ? Math.max(previous.peakRssBytes ?? 0, rssBytes()) : rssBytes(),
 				vramAfterLoadBytes: vramAfterLoad.used,
 				modelSizeBytes: model.size,
 				specialTokenCount: specialTokens.length,

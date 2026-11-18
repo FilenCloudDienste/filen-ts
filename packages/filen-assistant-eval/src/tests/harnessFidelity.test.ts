@@ -5,33 +5,12 @@ import type { EvalCase } from "../cases/types"
 import { FakeApp } from "../fakeApp"
 import { gradeCase } from "../grader"
 import { FakeAppExecutor, LOOP_PRESETS, shippedCase } from "../loopHarness"
+import { transcript as base } from "./helpers"
 
 // The fake app and the graders as the web app behaves: what the context grounds, how search builds its pool,
 // what a draft and an unavailable write are graded on.
 function transcript(overrides: Partial<Transcript> = {}): Transcript {
-	return {
-		route: "chats",
-		intent: "read",
-		routeRaw: "chats read",
-		calls: [],
-		answer: "Done.",
-		invalidOutputs: 0,
-		unrecovered: false,
-		steps: 1,
-		stepCapHit: false,
-		quarantineCalls: 0,
-		timings: {
-			routerMs: 0,
-			routerTtftMs: 0,
-			firstStepTtftMs: null,
-			totalMs: 0,
-			generations: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			decodeMs: 0
-		},
-		...overrides
-	}
+	return base({ route: "chats", intent: "read", routeRaw: "chats read", answer: "Done.", ...overrides })
 }
 
 describe("fake app fidelity", () => {

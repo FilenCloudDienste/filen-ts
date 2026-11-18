@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
+import { fileURLToPath } from "node:url"
 import { type } from "arktype"
 
 const repoPin = {
@@ -40,7 +41,7 @@ const manifestSchema = type({
 
 export type ModelEntry = typeof modelSchema.infer
 
-export const PACKAGE_ROOT = new URL("..", import.meta.url).pathname
+export const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url))
 
 export async function loadManifest(): Promise<ModelEntry[]> {
 	const raw: unknown = JSON.parse(await readFile(join(PACKAGE_ROOT, "models.json"), "utf8"))

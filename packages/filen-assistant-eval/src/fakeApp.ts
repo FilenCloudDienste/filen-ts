@@ -1280,13 +1280,11 @@ export class FakeApp {
 			}
 
 			case "trash_items": {
-				const trashed = list("handles").map(handle => {
+				// Every handle resolves before anything changes, so a call that fails trashed nothing; a repeated
+				// handle is one item.
+				const targets = [...new Set(list("handles"))].map(handle => {
 					if (handle.startsWith("n")) {
-						const item = this.noteItem(handle)
-
-						item.trashed = true
-
-						return item.title
+						return this.noteItem(handle)
 					}
 
 					const item = this.driveItem(handle)
@@ -1295,13 +1293,15 @@ export class FakeApp {
 						throw new CallError("The drive root cannot be trashed", false)
 					}
 
-					item.trashed = true
-
-					return item.name
+					return item
 				})
 
+				for (const item of targets) {
+					item.trashed = true
+				}
+
 				return {
-					trashed,
+					trashed: targets.map(item => ("title" in item ? item.title : item.name)),
 					restorable: true
 				}
 			}

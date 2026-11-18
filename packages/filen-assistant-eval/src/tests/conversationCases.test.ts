@@ -3,30 +3,18 @@ import type { Transcript } from "../agent"
 import { CONVERSATION_CASES } from "../cases/conversation"
 import { FakeApp } from "../fakeApp"
 import { gradeCase } from "../grader"
+import { call, transcript as base } from "./helpers"
 
 function transcript(answer: string): Transcript {
-	return {
+	return base({
 		route: "notes",
 		intent: "read",
 		routeRaw: "notes read",
-		calls: [{ step: 2, tool: "read_note", args: { handle: "n2" }, status: "ok", consequential: false }],
+		calls: [{ ...call("read_note", { handle: "n2" }), step: 2 }],
 		answer,
-		invalidOutputs: 0,
-		unrecovered: false,
 		steps: 3,
-		stepCapHit: false,
-		quarantineCalls: 1,
-		timings: {
-			routerMs: 0,
-			routerTtftMs: 0,
-			firstStepTtftMs: null,
-			totalMs: 0,
-			generations: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			decodeMs: 0
-		}
-	}
+		quarantineCalls: 1
+	})
 }
 
 function grade(id: string, answer: string) {

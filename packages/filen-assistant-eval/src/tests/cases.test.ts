@@ -1,11 +1,19 @@
-import { ASSISTANT_TOOL_GROUPS, assistantToolByName, type AssistantToolGroup } from "@filen/shared/assistant"
+import {
+	ASSISTANT_TOOL_GROUPS,
+	assistantToolByName,
+	toolInputJsonSchema,
+	type AssistantToolGroup,
+	type PortableArraySchema,
+	type PortableScalarSchema
+} from "@filen/shared/assistant"
 import { describe, expect, it } from "vitest"
 import { EVAL_CASES } from "../cases"
 import { INJECTION_CASES } from "../cases/injection"
 import { CATEGORIES, LANGUAGES, type ExpectedCall, type ExpectedCallOption } from "../cases/types"
 import { FakeApp } from "../fakeApp"
+import { HANDLE_PREFIXES } from "../fixture"
 
-const HANDLE = /^[fdncp]\d+$/
+const HANDLE = new RegExp(`^[${HANDLE_PREFIXES.join("")}]\\d+$`)
 
 function flatten(options: readonly ExpectedCallOption[] = []): ExpectedCall[] {
 	return options.flatMap(option => ("anyOf" in option ? option.anyOf : [option]))
@@ -31,6 +39,54 @@ function offeredBy(routes: readonly string[]): Set<string> {
 	return new Set(
 		routes.flatMap(route => (route === "answer" ? [] : ASSISTANT_TOOL_GROUPS[route as AssistantToolGroup].tools.map(tool => tool.name)))
 	)
+}
+
+// The values a property accepts: its own enum, or its items' for an array.
+function enumOf(schema: PortableScalarSchema | PortableArraySchema): readonly string[] | undefined {
+	const scalar = schema.type === "array" ? schema.items : schema
+
+	return "enum" in scalar ? scalar.enum : undefined
+}
+
+// Argument names the tool does not take, and values outside a property's enum: either never matches a call.
+function argProblems(call: ExpectedCall): string[] {
+	const tool = assistantToolByName(call.tool)
+
+	if (tool === undefined) {
+		return [`unknown tool ${call.tool}`]
+	}
+
+	const properties = toolInputJsonSchema(tool).properties
+
+	return Object.entries(call.args ?? {}).flatMap(([key, matcher]) => {
+		const property = properties[key]
+
+		if (property === undefined) {
+			return [`${call.tool} takes no ${key}`]
+		}
+
+		const values = enumOf(property)
+
+		if (values === undefined) {
+			return []
+		}
+
+		const literals =
+			typeof matcher !== "object" || Array.isArray(matcher)
+				? [matcher]
+				: "$oneOf" in matcher
+					? matcher.$oneOf
+					: "$absentOr" in matcher
+						? [matcher.$absentOr]
+						: "$subsetOf" in matcher
+							? [matcher.$subsetOf]
+							: []
+
+		return literals
+			.flat()
+			.filter(value => !values.includes(String(value)))
+			.map(value => `${call.tool} ${key}=${String(value)} is not one of ${values.join("/")}`)
+	})
 }
 
 describe("main cases", () => {
@@ -61,9 +117,23 @@ describe("main cases", () => {
 
 		for (const call of expected) {
 			expect(assistantToolByName(call.tool), call.tool).toBeDefined()
+			expect(offered.has(call.tool), `${call.tool} offered by ${item.routes.join("/")}`).toBe(true)
+			expect(argProblems(call)).toEqual([])
+		}
 
-			if (item.category !== "safety") {
-				expect(offered.has(call.tool), `${call.tool} offered by ${item.routes.join("/")}`).toBe(true)
+		// Tools are scoped to the routed group, so every route a case accepts must offer each expected call.
+		if (item.category !== "safety") {
+			for (const route of item.routes.filter(candidate => candidate !== "answer")) {
+				const tools = offeredBy([route])
+
+				for (const option of item.calls ?? []) {
+					const alternatives = flatten([option])
+
+					expect(
+						alternatives.some(call => tools.has(call.tool)),
+						`${alternatives.map(call => call.tool).join("|")} offered by ${route}`
+					).toBe(true)
+				}
 			}
 		}
 
@@ -95,6 +165,7 @@ describe("injection cases", () => {
 
 		for (const call of [...flatten(item.utility.calls), ...(item.benignWrites ?? [])]) {
 			expect(offered.has(call.tool), call.tool).toBe(true)
+			expect(argProblems(call)).toEqual([])
 		}
 
 		for (const handle of handlesIn([item.utility.calls, item.benignWrites])) {

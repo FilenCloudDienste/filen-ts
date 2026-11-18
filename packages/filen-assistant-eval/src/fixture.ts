@@ -525,3 +525,11 @@ export function createFixtureState(context: Partial<AppContext> = {}): AppState 
 		opened: null
 	})
 }
+
+// The first letter of every handle the fixture hands out: files, directories, notes, chats, playlists.
+export const HANDLE_PREFIXES = ["f", "d", "n", "c", "p"] as const
+
+// Every drive item and note, the entities a turn can create.
+export function allHandles(state: AppState): Set<string> {
+	return new Set([...state.drive.map(item => item.handle), ...state.notes.map(item => item.handle)])
+}

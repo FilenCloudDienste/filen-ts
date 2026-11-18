@@ -78,7 +78,7 @@ describe("FakeApp", () => {
 	it("moves items and keeps sibling names unique case-insensitively", () => {
 		const app = new FakeApp()
 
-		app.exposed.add("f1").add("f26").add("d9").add("d8")
+		app.exposed.add("f1").add("d8")
 
 		expect(
 			ok(
@@ -98,8 +98,8 @@ describe("FakeApp", () => {
 		const clash = app.execute({
 			name: "create_directory",
 			args: {
-				parent: "d8",
-				name: "2023"
+				parent: "d0",
+				name: "archive"
 			}
 		})
 
@@ -210,6 +210,7 @@ describe("FakeApp", () => {
 		)
 
 		expect(app.state.notes.find(note => note.handle === "n15")?.trashed).toBe(true)
+		expect(app.state.drive.find(item => item.handle === "f32")?.trashed).toBe(true)
 		expect(
 			app.execute({
 				name: "trash_items",
@@ -218,6 +219,222 @@ describe("FakeApp", () => {
 				}
 			}).ok
 		).toBe(false)
+	})
+
+	it("trashes nothing when one handle fails, and a repeated handle once", () => {
+		const app = new FakeApp()
+		const before = structuredClone(app.state)
+
+		app.exposed.add("f32")
+
+		expect(app.execute({ name: "trash_items", args: { handles: ["f32", "d0"] } })).toMatchObject({ ok: false, invalid: false })
+		expect(app.state).toEqual(before)
+		expect(ok(app.execute({ name: "trash_items", args: { handles: ["f32", "f32"] } }))).toEqual({
+			trashed: ["setup_installer.dmg"],
+			restorable: true
+		})
+		expect(app.state.drive.filter(item => item.trashed).map(item => item.handle)).toEqual(
+			before.drive.filter(item => item.trashed || item.handle === "f32").map(item => item.handle)
+		)
+	})
+
+	it("drafts a chat message into the chat's input and opens the chat", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("c3")
+
+		expect(ok(app.execute({ name: "draft_chat_message", args: { chat: "c3", text: "Te lo mando hoy." } }))).toMatchObject({
+			drafted: true,
+			chat: "Carlos Ruiz"
+		})
+		expect(app.state.draft).toEqual({ chat: "c3", text: "Te lo mando hoy." })
+		expect(app.state.context.screen).toBe("chat")
+		expect(app.state.opened).toBe("c3")
+	})
+
+	it("opens screens, notes, chats and playlists", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("n1").add("c1").add("p2")
+
+		expect(ok(app.execute({ name: "open_note", args: { handle: "n1" } }))).toEqual({ opened: "Groceries" })
+		expect(app.state.context.screen).toBe("note")
+		expect(app.state.opened).toBe("n1")
+		expect(ok(app.execute({ name: "open_chat", args: { handle: "c1" } }))).toEqual({ opened: "Anna Schmidt" })
+		expect(app.state.context.screen).toBe("chat")
+		expect(app.state.opened).toBe("c1")
+
+		const playlist = ok(app.execute({ name: "open_playlist", args: { handle: "p2" } })) as {
+			opened: string
+			tracks: { handle: string }[]
+		}
+
+		expect(playlist.opened).toBe("Chill")
+		expect(playlist.tracks.map(track => track.handle)).toEqual(["f17", "f22", "f23"])
+		expect(app.state.context.screen).toBe("playlist")
+		expect(app.state.opened).toBe("p2")
+		expect(ok(app.execute({ name: "open_route", args: { route: "favorites" } }))).toEqual({ opened: "favorites", contentsRead: false })
+		expect(app.state.context.screen).toBe("favorites")
+		expect(app.state.opened).toBeNull()
+	})
+
+	it("reveals an item in its directory, selected", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("f33")
+
+		expect(ok(app.execute({ name: "reveal_item", args: { handle: "f33" } }))).toEqual({ shown: "/Downloads/report_Q3.pdf" })
+		expect(app.state.context).toMatchObject({ screen: "drive", directory: "d13", selection: ["f33"] })
+	})
+
+	it("reads a chat, a text file and a note", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("c1").add("f9").add("n3")
+
+		const chat = ok(app.execute({ name: "read_chat", args: { handle: "c1", limit: 2 } })) as {
+			chat: string
+			messages: { from: string; text: string }[]
+		}
+
+		expect(chat.chat).toBe("Anna Schmidt")
+		expect(chat.messages.map(message => message.from)).toEqual(["me", "Anna Schmidt"])
+		expect(ok(app.execute({ name: "read_text_file", args: { handle: "f9" } }))).toEqual({
+			handle: "f9",
+			name: "tax_notes_2024.txt",
+			content: app.state.drive.find(item => item.handle === "f9")?.content
+		})
+		expect(ok(app.execute({ name: "read_note", args: { handle: "n3" } }))).toEqual({
+			handle: "n3",
+			title: "Meeting 2025-10-01",
+			content: "Decisions: launch moves to 15 November. Lena owns the pricing page. Next sync on 8 October."
+		})
+	})
+
+	it("lists playlists and describes the context on request", () => {
+		const app = new FakeApp()
+		const playlists = ok(app.execute({ name: "list_playlists", args: {} }))["playlists"] as { handle: string; tracks: number }[]
+
+		expect(playlists).toContainEqual({ handle: "p3", name: "Road trip", tracks: 4 })
+		expect(app.exposed.has("p5")).toBe(true)
+		expect(ok(app.execute({ name: "get_context", args: {} }))).toEqual({ context: app.describeContext() })
+	})
+
+	it("renames an item, refusing a sibling's name in any case and the root", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("f1")
+
+		expect(ok(app.execute({ name: "rename_item", args: { handle: "f1", new_name: "Telekom_Januar.pdf" } }))).toMatchObject({
+			renamed: { handle: "f1", name: "Telekom_Januar.pdf" }
+		})
+		expect(app.state.drive.find(item => item.handle === "f1")?.name).toBe("Telekom_Januar.pdf")
+		expect(app.execute({ name: "rename_item", args: { handle: "f1", new_name: "invoice_2024-03_stadtwerke.pdf" } })).toMatchObject({
+			ok: false,
+			invalid: false
+		})
+		expect(app.execute({ name: "rename_item", args: { handle: "d0", new_name: "Home" } })).toMatchObject({
+			ok: false,
+			invalid: false
+		})
+	})
+
+	it("copies items under a new handle and leaves the source in place", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("f1").add("d8")
+
+		const copied = ok(app.execute({ name: "copy_items", args: { handles: ["f1"], destination: "d8" } }))["copied"] as {
+			handle: string
+			name: string
+			path: string
+		}[]
+		const copy = copied[0]
+
+		expect(copied).toHaveLength(1)
+		expect(copy?.handle).not.toBe("f1")
+		expect(copy).toMatchObject({ name: "Invoice_2024-01_Telekom.pdf", path: "/Archive/Invoice_2024-01_Telekom.pdf" })
+		expect(app.state.drive.find(item => item.handle === copy?.handle)?.parent).toBe("d8")
+		expect(app.state.drive.find(item => item.handle === "f1")?.parent).toBe("d2")
+		expect(app.exposed.has(copy?.handle ?? "")).toBe(true)
+	})
+
+	it("sets and clears favorites", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("f1").add("f8")
+
+		expect(ok(app.execute({ name: "set_favorite", args: { handles: ["f1"], favorite: true } }))).toEqual({
+			updated: ["Invoice_2024-01_Telekom.pdf"]
+		})
+		expect(app.state.drive.find(item => item.handle === "f1")?.favorite).toBe(true)
+		ok(app.execute({ name: "set_favorite", args: { handles: ["f8"], favorite: false } }))
+		expect(app.state.drive.find(item => item.handle === "f8")?.favorite).toBe(false)
+	})
+
+	it("creates a directory under its parent and grounds its handle", () => {
+		const app = new FakeApp()
+		const created = ok(app.execute({ name: "create_directory", args: { parent: "d0", name: "Receipts" } }))["created"] as {
+			handle: string
+			path: string
+		}
+
+		expect(created.path).toBe("/Receipts")
+		expect(app.state.drive.find(item => item.handle === created.handle)).toMatchObject({
+			kind: "directory",
+			name: "Receipts",
+			parent: "d0"
+		})
+		expect(app.exposed.has(created.handle)).toBe(true)
+	})
+
+	it("creates a note and grounds its handle", () => {
+		const app = new FakeApp()
+		const created = ok(
+			app.execute({ name: "create_note", args: { title: "Packing list", type: "checklist", content: "[ ] passport" } })
+		)["created"] as { handle: string; title: string; type: string }
+
+		expect(created).toMatchObject({ title: "Packing list", type: "checklist" })
+		expect(app.state.notes.find(note => note.handle === created.handle)).toMatchObject({
+			title: "Packing list",
+			type: "checklist",
+			content: "[ ] passport",
+			trashed: false
+		})
+		expect(app.exposed.has(created.handle)).toBe(true)
+	})
+
+	it("sets each note flag it is given and leaves the others", () => {
+		const app = new FakeApp()
+		const flags = () => {
+			const note = app.state.notes.find(item => item.handle === "n2")
+
+			return { pinned: note?.pinned, favorite: note?.favorite, archived: note?.archived }
+		}
+
+		app.exposed.add("n2")
+
+		ok(app.execute({ name: "set_note_flags", args: { handle: "n2", pinned: true } }))
+		expect(flags()).toEqual({ pinned: true, favorite: false, archived: false })
+		ok(app.execute({ name: "set_note_flags", args: { handle: "n2", favorite: true } }))
+		expect(flags()).toEqual({ pinned: true, favorite: true, archived: false })
+		expect(ok(app.execute({ name: "set_note_flags", args: { handle: "n2", archived: true, pinned: false } }))).toMatchObject({
+			updated: { handle: "n2", archived: true }
+		})
+		expect(flags()).toEqual({ pinned: false, favorite: true, archived: true })
+	})
+
+	it("adds tracks to a playlist once, counting those already there", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("p1").add("f18").add("f16")
+
+		expect(ok(app.execute({ name: "add_tracks_to_playlist", args: { playlist: "p1", handles: ["f18", "f16"] } }))).toEqual({
+			added: ["Bohemian Rhapsody.mp3"],
+			alreadyThere: 1,
+			playlist: "Workout"
+		})
+		expect(app.state.playlists.find(item => item.handle === "p1")?.tracks).toEqual(["f18", "f22", "f25", "f16"])
 	})
 
 	it("describes the context with handles", () => {
