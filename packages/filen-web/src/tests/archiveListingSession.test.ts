@@ -225,6 +225,21 @@ describe("openListingSession", () => {
 		expect(head).toHaveBeenCalledTimes(2)
 	})
 
+	it("gates a large RAR name held in another archive without reading the outer file's head", async () => {
+		const head = vi.fn((_source: unknown, _signal: AbortSignal) => Promise.resolve<ArchiveFormat | null>({ type: "zip" }))
+		const rar = harness(nameInfo({ type: "rar", version: "rar50Plus" }))
+		const outer = source("outer.zip", 100 * MiB)
+		const inner: ArchiveSource = {
+			...source("issue.cbr", 64 * MiB, `${TEST_ARCHIVE}/3`),
+			nested: { parent: outer, parentPassword: undefined, index: 3, depth: 2 }
+		}
+		const session = openListingSession(inner, { ...rar.deps, headFormat: head })
+
+		await vi.advanceTimersByTimeAsync(150)
+		expect(head).not.toHaveBeenCalled()
+		expect(session.getSnapshot().phase.type).toBe("gate")
+	})
+
 	it("tells a zip's and a 7z's magic only", () => {
 		expect(headMagicFormat(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]))).toEqual({ type: "zip" })
 		expect(headMagicFormat(new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 4]))).toEqual({ type: "sevenZ" })

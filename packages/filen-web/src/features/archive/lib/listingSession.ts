@@ -488,8 +488,9 @@ export function openListingSession(
 		}
 
 		// A RAR's gate is for its member walk: a zip or 7z named .cbr or .rar (a renamed comic) lists from its index at
-		// once. Its head tells, one read of its first chunk, made only for a RAR name above the gate.
-		if (named?.type !== "rar" || deps.headFormat === undefined) {
+		// once. Its head tells, one read of its first chunk, made only for a RAR name above the gate, and only of a drive or
+		// link file: an archive held in another has no file of its own to read it from.
+		if (named?.type !== "rar" || deps.headFormat === undefined || source.nested !== null) {
 			setPhase({ type: "gate", format: info.format })
 
 			return
