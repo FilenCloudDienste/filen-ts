@@ -449,7 +449,8 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindModel3d",
 		assistantKind: null
 	},
-	// DXF drawings, read whole into the CAD worker (the cap is the text cap, so View source reuses the held bytes).
+	// DXF drawings, read whole into the CAD worker (under the text cap, so View source reuses the held bytes; a larger
+	// one opens as text instead).
 	cad: {
 		streamed: false,
 		ranged: false,
@@ -1018,7 +1019,11 @@ export function canPreview(item: DriveItem): boolean {
 export function canOpenAsText(item: DriveItem): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return base.type === "file" && !base.data.undecryptable && previewType(item) === "other"
+	const category = previewType(item)
+	// A drawing too large to draw is still text.
+	const readable = category === "other" || (category === "cad" && base.data.size > BigInt(DXF_MAX_BYTES))
+
+	return base.type === "file" && !base.data.undecryptable && readable
 }
 
 // The JS-memory ceiling for a category previewed from a whole buffer; null for none (see CATEGORY_POLICY).

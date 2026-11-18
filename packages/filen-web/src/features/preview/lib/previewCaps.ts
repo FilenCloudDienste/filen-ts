@@ -8,6 +8,7 @@ export const TEXT_CAP = 33_554_432 // 32 MiB
 // A message is parsed whole, its attachments held as Blobs beside it: real ones stay far below.
 export const EMAIL_MAX_BYTES = 67_108_864 // 64 MiB
 
-// A DXF drawing is read whole into the CAD worker. The text cap, so View source reuses the bytes the drawing was built
-// from.
-export const DXF_MAX_BYTES = TEXT_CAP
+// A DXF drawing is read whole into the CAD worker, whose parse holds about 30 times the file at its peak (measured: a
+// 32 MiB drawing peaks at 1.1 GB, a 16 MiB one at 0.65-1.0 GB with the scene's whole budget spent). Under the text cap,
+// so View source reuses the bytes the drawing was built from; a larger one opens as text.
+export const DXF_MAX_BYTES = 16_777_216 // 16 MiB

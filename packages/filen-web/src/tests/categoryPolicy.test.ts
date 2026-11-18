@@ -641,15 +641,21 @@ describe("the model3d row", () => {
 })
 
 describe("the cad row", () => {
-	it("opens a .dxf up to the text cap, on the drive, a link and in an archive", () => {
+	it("opens a .dxf up to 16 MiB, on the drive, a link and in an archive, and a larger one as text", () => {
+		const CAP = 16n * MIB
+
 		expect(previewType(fileNamed("plan.dxf", 1024n))).toBe("cad")
 		expect(previewType(fileNamed("PLAN.DXF", 1024n))).toBe("cad")
-		expect(canPreview(fileNamed("plan.dxf", TEXT_MAX_BYTES))).toBe(true)
-		expect(canPreview(fileNamed("plan.dxf", TEXT_MAX_BYTES + 1n))).toBe(false)
-		expect(anonPreviewability(fileNamed("plan.dxf", TEXT_MAX_BYTES))).toBe("previewable")
-		expect(canOpenEntry(storeOf([{ path: "plan.dxf", access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0)).toBe(true)
-		// The text cap, so View source reads the bytes the drawing was built from.
-		expect(BigInt(DXF_MAX_BYTES)).toBe(TEXT_MAX_BYTES)
+		expect(canPreview(fileNamed("plan.dxf", CAP))).toBe(true)
+		expect(canPreview(fileNamed("plan.dxf", CAP + 1n))).toBe(false)
+		expect(anonPreviewability(fileNamed("plan.dxf", CAP))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: "plan.dxf", access: DIRECT, size: Number(CAP) }]), 0)).toBe(true)
+		expect(BigInt(DXF_MAX_BYTES)).toBe(CAP)
+		// Under the text cap, so View source reads the bytes the drawing was built from.
+		expect(BigInt(DXF_MAX_BYTES)).toBeLessThanOrEqual(TEXT_MAX_BYTES)
+		expect(canOpenAsText(fileNamed("plan.dxf", CAP))).toBe(false)
+		expect(canOpenAsText(fileNamed("plan.dxf", CAP + 1n))).toBe(true)
+		expect(canOpenAsText(fileNamed("plan.dxf", TEXT_MAX_BYTES + 1n))).toBe(false)
 	})
 
 	it("reads an extensionless drawing by its stored type, and leaves DWG a download", () => {
