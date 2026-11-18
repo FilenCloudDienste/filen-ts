@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { DicomWorkerApi } from "@/features/preview/workers/dicom.worker"
 import type { DicomStatus } from "@/features/preview/lib/dicom/protocol"
-import { EXPLICIT_LE, dicomFile, grayModule, text } from "@/tests/support/dicomBytes"
+import { EXPLICIT_LE, JPEG_BASELINE, dicomFile, encapsulated, frameOffsets, grayModule, text } from "@/tests/support/dicomBytes"
 
 // The DICOM worker's own state across files: a second open on the same worker starts from nothing. The canvas, its
 // 2D context and the frame clock are stand-ins; the file, its frames and the pipeline are real.
@@ -21,6 +21,7 @@ const FakeContext = class {
 	clearRect = vi.fn()
 	drawImage = vi.fn()
 	putImageData = vi.fn()
+	getImageData = (_x: number, _y: number, width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) })
 	imageSmoothingEnabled = false
 	imageSmoothingQuality = "low"
 }
@@ -141,5 +142,49 @@ describe("the DICOM worker", () => {
 		)
 		api.play(false)
 		expect(posted.some(status => status.failure !== null)).toBe(false)
+	})
+
+	it("decodes one frame at a time, a second request waiting for the first to finish", async () => {
+		// Two 2 × 2 grey baseline JPEG frames: SOI, SOF0, SOS, EOI. The browser's decode is held open by the test.
+		const frame = Uint8Array.from([
+			0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 2, 0, 2, 1, 1, 0x11, 0, 0xff, 0xda, 0, 8, 1, 1, 0, 0, 63, 0, 0xff, 0xd9
+		])
+		const frames = [frame, frame]
+		const file = dicomFile({
+			transferSyntax: JPEG_BASELINE,
+			elements: grayModule({ rows: 2, columns: 2, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false, frames: 2 }),
+			pixelData: encapsulated(frames, frameOffsets(frames))
+		})
+		const gates: (() => void)[] = []
+
+		vi.stubGlobal(
+			"createImageBitmap",
+			() =>
+				new Promise(resolve => {
+					gates.push(() => {
+						resolve({ width: 2, height: 2, close: () => undefined })
+					})
+				})
+		)
+		shellPort()
+
+		expect(api.open({ kind: "whole", bytes: file }, { decodeBytes: 64 * 1024 * 1024 }).info?.frames).toBe(2)
+
+		const first = api.show(0)
+		const second = api.show(1)
+
+		await vi.waitFor(() => {
+			expect(gates).toHaveLength(1)
+		})
+		await frameTurn()
+		// The second has not started while the first holds its decode.
+		expect(gates).toHaveLength(1)
+		gates[0]?.()
+		await vi.waitFor(() => {
+			expect(gates).toHaveLength(2)
+		})
+		gates[1]?.()
+		expect(await first).toBe("ok")
+		expect(await second).toBe("ok")
 	})
 })

@@ -449,10 +449,24 @@ function openFailure(error: unknown): DicomOpenResult {
 	return { info: null, failure: "damaged" }
 }
 
-async function decode(state: Opened, index: number): Promise<FrameSamples> {
+// The decode in progress: the next waits for it, so no two decodes are ever weighed against the same held bytes (a
+// browser JPEG decode or a codec's first load yields to the next request while its memory is still unclaimed).
+let decoding: Promise<unknown> = Promise.resolve()
+
+function decode(state: Opened, index: number): Promise<FrameSamples> {
+	const run = decoding.then(() => decodeNow(state, index))
+
+	decoding = run.catch(() => undefined)
+
+	return run
+}
+
+async function decodeNow(state: Opened, index: number): Promise<FrameSamples> {
 	const kept = cache.get(index)
 
 	if (kept !== undefined) return kept
+	// The file changed while this waited.
+	if (opened !== state) throw new DicomFrameFailure("unsupported", "another file is open")
 
 	const { context: frameContext, fragments } = state
 
