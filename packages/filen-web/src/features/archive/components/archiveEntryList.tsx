@@ -50,6 +50,10 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 
 export interface ArchiveEntryListProps {
 	listId: string
+	// Escape goes out of this archive into the one holding it.
+	escapeLeaves: boolean
+	// A change moves focus to the list again (an archive left for the one holding it).
+	focusKey: number
 	label: string
 	// Changes with the view (another directory, search on or off), which starts at its cursor row.
 	viewKey: string
@@ -100,6 +104,8 @@ const SORT_LABEL_KEYS = {
 // hand: the row handlers never change identity, and every row's props are primitives.
 export function ArchiveEntryList({
 	listId,
+	escapeLeaves,
+	focusKey,
 	label,
 	viewKey,
 	snapshot,
@@ -207,6 +213,16 @@ export function ArchiveEntryList({
 		})
 	}, [rows.count, scrollElement])
 
+	// Shown again after an inner archive: focus back on the list, the cursor row brought into view.
+	useEffect(() => {
+		if (focusKey === 0 || scrollElement === null) {
+			return
+		}
+
+		scrollElement.focus({ preventScroll: true })
+		revealCursor()
+	}, [focusKey, scrollElement])
+
 	// The cursor row's context menu, as a right-click on it opens it and where drive's keyboard menu places it. A cursor
 	// scrolled out of the mounted rows is brought in first, its menu opening once it is.
 	function openCursorMenu(): void {
@@ -252,7 +268,7 @@ export function ArchiveEntryList({
 			return
 		}
 
-		const action = browserKeyAction(event, selection.rules.size > 0, bindings)
+		const action = browserKeyAction(event, selection.rules.size > 0, bindings, undefined, escapeLeaves)
 
 		if (action === null) {
 			return

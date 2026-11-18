@@ -5,6 +5,7 @@ import { accountQueryGet } from "@/queries/account"
 import { stringifyEnvelope } from "@filen/shared/session"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
+import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { INFLIGHT_NOTE_CONTENT_KV_KEY, inflightContentSchema, notePreviewFor } from "@/features/notes/lib/sync.logic"
@@ -76,6 +77,9 @@ interface E2eHooks {
 	kvHas: (key: string) => Promise<boolean>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
+	// Runs every preview disposer in this tab (what a sign-out or an account switch does before anything else): open
+	// archive readers close, their reads stop.
+	clearPreviews: () => void
 	// Raw (non-enveloped) client blob for handing straight to the service worker's own
 	// SW_MSG_INIT_CLIENT handshake from inside a page.evaluate callback — bigint fields survive the
 	// postMessage structured clone there, unlike the JSON-only Playwright<->page bridge dumpSession is
@@ -264,6 +268,9 @@ export function installE2eHooks(): void {
 		kvHas: key => kvHas(key),
 		setUserCombo: (actionId, combo) => setUserCombo(actionId, combo),
 		comboFor: actionId => comboFor(actionId),
+		clearPreviews: () => {
+			runPreviewDisposers()
+		},
 		rawStringifiedClient: ready(() => sdkApi.toStringified()),
 		createTestFile: ready((name, content, parentUuid = null) =>
 			sdkApi.uploadFile(parentUuid, crypto.randomUUID(), new File([content], name, { type: "text/plain" }))

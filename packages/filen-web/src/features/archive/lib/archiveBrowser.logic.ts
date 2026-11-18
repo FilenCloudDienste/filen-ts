@@ -51,6 +51,8 @@ export type BrowserKeyAction =
 	// A directory opens, a file toggles.
 	| { type: "open" }
 	| { type: "parent" }
+	// Out of an archive held in another, into the one holding it.
+	| { type: "leave" }
 	| { type: "toggle" }
 	| { type: "selectAll" }
 	| { type: "clear" }
@@ -111,19 +113,25 @@ export function defaultExtractTarget(source: Pick<ArchiveSource, "ownParent">, f
 }
 
 // What a key pressed on the list does under `combos` (the combos in effect by id, useBindings); null leaves it to the
-// overlay. Escape without a selection is never taken (it closes the overlay). The registered keys match as every
+// overlay. Escape without a selection is never taken (it closes the overlay), but in an archive held in another
+// (`leaves`), where it goes back out to the one holding it. The registered keys match as every
 // shortcut does (@filen/shared/keymap); the cursor's moves are the list's own, unmodified but for Shift, which extends
 // the selection. ArrowLeft/ArrowRight are not among them: they page the overlay.
 export function browserKeyAction(
 	event: KeyInput,
 	hasSelection: boolean,
 	combos: Readonly<Record<string, string>>,
-	mac = IS_MAC
+	mac = IS_MAC,
+	leaves = false
 ): BrowserKeyAction | null {
 	for (const [def, action] of KEY_ACTIONS) {
 		if ((action.type !== "clear" || hasSelection) && matchesCombo(event, bindingOf(combos, def, mac), mac)) {
 			return action
 		}
+	}
+
+	if (leaves && event.key === "Escape" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+		return { type: "leave" }
 	}
 
 	const move = MOVES[event.key]

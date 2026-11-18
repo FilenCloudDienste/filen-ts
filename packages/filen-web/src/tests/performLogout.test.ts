@@ -280,6 +280,7 @@ describe("performLogout", () => {
 			},
 			password: "secret",
 			lastDirPath: "",
+			costAccepted: false,
 			entries: 1
 		}
 

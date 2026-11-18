@@ -68,7 +68,22 @@ export interface EntryActionsInput {
 	downloadable: boolean
 	isOnline: boolean
 	// Browses an archive held in an entry in this one's place (W6 §6.1 A); null where none is entered.
-	onEnterArchive: ((inner: ArchiveSource) => void) | null
+	onEnterArchive: ((inner: ArchiveSource, target: EntryTarget, entered: EnteredArchive) => void) | null
+}
+
+// How an inner archive was entered, for its own browser.
+export interface EnteredArchive {
+	// Its cost was confirmed already (a solid skip, an inflate): a gate of its own lists it unasked.
+	readonly confirmed: boolean
+	// The outer archive's password, typed in to reach its encrypted entry and not proven yet: the inner listing tells
+	// whether it was right. Null when the outer listing held one already, or the entry is not encrypted.
+	readonly parentPassword: { readonly accepted: () => void; readonly rejected: () => void } | null
+}
+
+// An inner archive whose inflate waits for a confirm.
+interface InflateAsk extends EntryTarget {
+	inner: ArchiveSource
+	entered: EnteredArchive
 }
 
 // A single entry previewed or saved from the archive browser. A selection of several never comes here: it
@@ -77,10 +92,12 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 	const { t } = useTranslation(["preview", "common"])
 	const cacheScope = usePreviewCacheScope()
 	const [viewing, setViewing] = useState<ViewedEntryState | null>(null)
-	const [costAsk, setCostAsk] = useState<(EntryTarget & { intent: EntryIntent }) | null>(null)
-	const [passwordAsk, setPasswordAsk] = useState<(EntryTarget & { wrong: boolean }) | null>(null)
+	// `typed`: the outer password an inner archive's open was asked with.
+	const [costAsk, setCostAsk] = useState<(EntryTarget & { intent: EntryIntent; typed?: string | undefined }) | null>(null)
+	// `enter`: the outer archive's password, asked to reach an inner archive in an encrypted entry (never the inner one's).
+	const [passwordAsk, setPasswordAsk] = useState<(EntryTarget & { wrong: boolean; enter?: boolean }) | null>(null)
 	// An inner archive in a seekable entry above NESTED_INFLATE_CONFIRM_BYTES, waiting for its inflate to be confirmed.
-	const [inflateAsk, setInflateAsk] = useState<{ inner: ArchiveSource; size: number } | null>(null)
+	const [inflateAsk, setInflateAsk] = useState<InflateAsk | null>(null)
 	// The access question of the inner archive asked last: a newer one, or the browser going, cancels it.
 	const entering = useRef<AbortController | null>(null)
 
@@ -91,30 +108,59 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 		[]
 	)
 
-	// An archive held in the entry, opened in this one's place, no deeper than MAX_NESTED_DEPTH.
-	function entersArchive({ store, slot }: EntryTarget): boolean {
-		return onEnterArchive !== null && holdsNestedArchive(store, slot) && nestedTarget(source, undefined, store.index(slot)) !== null
+	// An archive held in the entry, opened in this one's place (`enter`), or one too deep to (`tooDeep`, past
+	// MAX_NESTED_DEPTH), which says why rather than be saved.
+	function nesting({ store, slot }: EntryTarget): "enter" | "tooDeep" | null {
+		if (onEnterArchive === null || canOpenEntry(store, slot) || !holdsNestedArchive(store, slot)) {
+			return null
+		}
+
+		return nestedTarget(source, undefined, store.index(slot)) === null ? "tooDeep" : "enter"
 	}
 
 	function offers(target: EntryTarget): EntryOffers {
 		const { store, slot } = target
 
 		return {
-			open: canOpenEntry(store, slot) || entersArchive(target),
+			open: canOpenEntry(store, slot) || nesting(target) !== null,
 			download: downloadable && isOnline && canReadEntry(store, slot)
 		}
 	}
 
-	// The inner archive opens by its entry's access kind (W6 §3.10): in this one's place when it is mapped, or seekable
-	// (its inflate confirmed above NESTED_INFLATE_CONFIRM_BYTES), else as the "Extract to open" card.
-	function enterArchive(target: EntryTarget): void {
-		const password = session()?.password()
+	// The inner archive opens by its entry's access kind (W6 §3.10): in this one's place when it is mapped or seekable,
+	// else as the "Extract to open" card. A seekable one first confirms what reaching it decodes: a gzip tar's member the
+	// block before it (the solid cost, once per session), any one its inflate above NESTED_INFLATE_CONFIRM_BYTES. An
+	// encrypted entry is read with the outer archive's password, asked first when the listing holds none.
+	function enterArchive(target: EntryTarget, typed?: string, costConfirmed = false): void {
+		const held = session()?.password()
+		const password = held ?? typed
+
+		if (password === undefined && isEncryptedEntry(target.store, target.slot)) {
+			setPasswordAsk({ ...target, wrong: false, enter: true })
+
+			return
+		}
+
 		const inner = nestedArchiveSource(source, password, target.store, target.slot)
 
 		if (inner === null || onEnterArchive === null) {
 			return
 		}
 
+		const entered: EnteredArchive = {
+			confirmed: costConfirmed,
+			parentPassword:
+				held === undefined && typed !== undefined
+					? {
+							accepted: () => {
+								session()?.acceptPassword(typed)
+							},
+							rejected: () => {
+								setPasswordAsk({ ...target, wrong: true, enter: true })
+							}
+						}
+					: null
+		}
 		const controller = new AbortController()
 
 		entering.current?.abort()
@@ -125,19 +171,16 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 					return
 				}
 
-				switch (nestedOpening(access, inner.size)) {
-					case "enter":
-						onEnterArchive(inner)
+				const opening = nestedOpening(access, inner.size)
 
-						break
-					case "confirm":
-						setInflateAsk({ inner, size: inner.size })
-
-						break
-					case "extract":
-						open(target, "open")
-
-						break
+				if (opening === "extract") {
+					open(target, "open")
+				} else if (session()?.costAccepted() !== true && needsCostConfirm(target.store, target.slot)) {
+					setCostAsk({ ...target, intent: "open", typed })
+				} else if (opening === "confirm" && !costConfirmed) {
+					setInflateAsk({ ...target, inner, entered: { ...entered, confirmed: true } })
+				} else {
+					onEnterArchive(inner, target, entered)
 				}
 			},
 			(e: unknown) => {
@@ -200,9 +243,13 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 		})
 	}
 
-	function run(target: EntryTarget, intent: EntryIntent): void {
+	function run(target: EntryTarget, intent: EntryIntent, typed?: string): void {
 		if (intent === "open") {
-			open(target)
+			if (nesting(target) === "enter") {
+				enterArchive(target, typed, true)
+			} else {
+				open(target)
+			}
 		} else {
 			download(target, session()?.password())
 		}
@@ -226,8 +273,17 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 			return
 		}
 
-		// An inner archive costs no solid read to open: one in a solid block reads only whole, so it shows its card.
-		if (intent === "open" && !canOpenEntry(target.store, target.slot) && entersArchive(target)) {
+		// An inner archive asks its reader how it reads first: one in a 7z or RAR solid block reads only whole and shows its
+		// card at no cost; one in a gzip tar is seekable, and confirms its skip then (enterArchive).
+		const nested = intent === "open" ? nesting(target) : null
+
+		if (nested === "tooDeep") {
+			toast.error(t("previewArchiveNestedTooDeep", { name: target.store.name(target.slot) }))
+
+			return
+		}
+
+		if (nested === "enter") {
 			enterArchive(target)
 
 			return
@@ -295,7 +351,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 					if (costAsk !== null) {
 						setCostAsk(null)
 						session()?.acceptCost()
-						run(costAsk, costAsk.intent)
+						run(costAsk, costAsk.intent, costAsk.typed)
 					}
 				}}
 			/>
@@ -306,7 +362,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				body={
 					inflateAsk === null
 						? ""
-						: t("previewArchiveNestedInflateBody", { name: inflateAsk.inner.name, size: formatBytes(inflateAsk.size) })
+						: t("previewArchiveNestedInflateBody", { name: inflateAsk.inner.name, size: formatBytes(inflateAsk.inner.size) })
 				}
 				confirmLabel={t("previewArchiveNestedInflateOpen")}
 				cancelLabel={t("common:cancel")}
@@ -318,13 +374,14 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				onConfirm={() => {
 					if (inflateAsk !== null) {
 						setInflateAsk(null)
-						onEnterArchive?.(inflateAsk.inner)
+						onEnterArchive?.(inflateAsk.inner, inflateAsk, inflateAsk.entered)
 					}
 				}}
 			/>
 			<ArchivePasswordPrompt
 				open={passwordAsk !== null}
-				name={passwordAsk === null ? "" : passwordAsk.store.name(passwordAsk.slot)}
+				// The outer archive's own, for an inner archive in its encrypted entry.
+				name={passwordAsk === null ? "" : passwordAsk.enter === true ? source.name : passwordAsk.store.name(passwordAsk.slot)}
 				wrong={passwordAsk?.wrong ?? false}
 				onOpenChange={next => {
 					if (!next) {
@@ -334,7 +391,12 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				onSubmit={password => {
 					if (passwordAsk !== null) {
 						setPasswordAsk(null)
-						download(passwordAsk, password)
+
+						if (passwordAsk.enter === true) {
+							enterArchive(passwordAsk, password)
+						} else {
+							download(passwordAsk, password)
+						}
 					}
 				}}
 			/>

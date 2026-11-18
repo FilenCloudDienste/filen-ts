@@ -339,10 +339,15 @@ function formatOf(input: ExtractRequestInput): ArchiveFormat | null {
 }
 
 // What every browser extract shares: macOS metadata skipped as the listing skipped it (so the greyed
-// rows are what stays behind), and the archive kept.
+// rows are what stays behind), and the archive kept. An archive held in another has no file of its own: a request for it
+// would name the outer file (and its own indexes in the outer one), so none is ever built, whatever asked.
 function baseRequest(
 	input: ExtractRequestInput
 ): Pick<ExtractRequest, "archive" | "destination" | "skipMacMetadata" | "dispose" | "formatHint"> {
+	if (input.source.nested !== null) {
+		throw new Error("an archive held in another is never extracted")
+	}
+
 	return {
 		archive: { file: input.source.file, uuid: input.source.uuid, name: input.source.name },
 		destination: input.destination,

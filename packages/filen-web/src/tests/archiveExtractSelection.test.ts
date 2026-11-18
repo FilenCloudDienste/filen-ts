@@ -449,6 +449,18 @@ describe("extract requests", () => {
 		expect(request.formatHint).toBe("single")
 	})
 
+	it("builds no request for an archive held in another, which has no file of its own", () => {
+		const inner: ArchiveSource = {
+			...SOURCE,
+			uuid: `${SOURCE.uuid}/2`,
+			nested: { parent: SOURCE, parentPassword: undefined, index: 2, depth: 2 }
+		}
+
+		expect(() =>
+			fullExtractRequest({ source: inner, info: INFO, summary: null, target: { type: "besideNewFolder" }, destination: DESTINATION })
+		).toThrow("never extracted")
+	})
+
 	it("extracts the whole archive by its read bytes", () => {
 		const request = fullExtractRequest({
 			source: SOURCE,

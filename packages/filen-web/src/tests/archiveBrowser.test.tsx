@@ -614,7 +614,14 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		const cache = createListingCache()
 		const store = storeOf(TREE)
 
-		cache.put(TEST_ARCHIVE, { store, summary: SUMMARY, password: undefined, lastDirPath: "docs", entries: store.entryCount })
+		cache.put(TEST_ARCHIVE, {
+			store,
+			summary: SUMMARY,
+			password: undefined,
+			lastDirPath: "docs",
+			costAccepted: false,
+			entries: store.entryCount
+		})
 		openListingSession.mockReturnValue(fakeSession(done(), store).session)
 		render(
 			<QueryClientProvider client={queryClient}>

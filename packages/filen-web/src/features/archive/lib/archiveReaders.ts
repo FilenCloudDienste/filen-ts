@@ -26,6 +26,9 @@ export interface NestedSource {
 	readonly depth: number
 }
 
+// Archives in all, the file's own counted first (owner decision E6, "to depth 3"). Stricter than the SDK on purpose: its
+// MAX_NESTING allows three archives nested inside the file's (four in all), so the page's cap is the one that binds, and
+// a nested open never meets the SDK's refusal.
 export const MAX_NESTED_DEPTH = 3
 
 // What a reader is opened on: a drive or public link file, or an archive nested in one. `uuid` names it in the page's

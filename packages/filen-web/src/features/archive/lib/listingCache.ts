@@ -13,6 +13,8 @@ export interface CachedListing {
 	password: string | undefined
 	// Where the browser was, "" the archive's root.
 	lastDirPath: string
+	// The session accepted a solid cost: its entries open unasked when the listing reopens.
+	costAccepted: boolean
 	// What the listing counts toward the budget.
 	entries: number
 }

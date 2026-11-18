@@ -153,10 +153,21 @@ const SOURCE: ArchiveSource = {
 }
 
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 3n }
+// A member deep in a compressed tar's (or a solid 7z's) block: reading it decodes what the block stores before it.
+const SOLID_GZIP_LATE: EntryAccess = {
+	type: "solidBlock",
+	skippedBytes: BigInt(40 * 1024 * 1024),
+	estimatedPackedBytes: BigInt(41 * 1024 * 1024),
+	blockPackedBytes: BigInt(100 * 1024 * 1024)
+}
 const MiB = 1024 * 1024
 
-function fakeSession(store: EntryStore, password?: string): ListingSession & { acceptPassword: Mock<(password: string) => void> } {
-	const snapshot: ListingSnapshot = { phase: { type: "done", summary: SUMMARY }, store, version: 0, info: INFO }
+function fakeSession(
+	store: EntryStore,
+	password?: string,
+	phase: ListingSnapshot["phase"] = { type: "done", summary: SUMMARY }
+): ListingSession & { acceptPassword: Mock<(password: string) => void> } {
+	const snapshot: ListingSnapshot = { phase, store, version: 0, info: INFO }
 	let costAccepted = false
 
 	return {
@@ -719,7 +730,9 @@ describe("an archive entry on its own", () => {
 		expect(await screen.findByRole("listbox", { name: /big\.zip/ })).toBeTruthy()
 	})
 
-	it("offers no open for an archive three deep", () => {
+	it("says why an archive three deep won't open, instead of saving it", async () => {
+		const { toast } = await import("sonner")
+
 		const deep: ArchiveSource = {
 			...SOURCE,
 			uuid: `${TEST_ARCHIVE}/0/1`,
@@ -736,6 +749,147 @@ describe("an archive entry on its own", () => {
 
 		fireEvent.doubleClick(row("inner.zip"))
 		expect(archiveEntryAccess).not.toHaveBeenCalled()
+		expect(runEntryDownload).not.toHaveBeenCalled()
+		expect(toast.error).toHaveBeenCalledWith("“inner.zip” is nested too deep to open here. Extract the outer archive to open it.")
+	})
+
+	it("confirms the skip before an archive in a gzip tar's member, then browses it", async () => {
+		const outer = fakeSession(storeOf([{ path: "late.zip", size: MiB, access: SOLID_GZIP_LATE }]))
+		const inner = fakeSession(storeOf([{ path: "a.txt", size: 3, access: DIRECT }]))
+
+		archiveEntryAccess.mockResolvedValue("seekable")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : inner))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("late.zip"))
+
+		const dialog = await screen.findByRole("alertdialog", { name: "Read part of the archive first?" })
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Open" }))
+		expect(await screen.findByRole("listbox", { name: /late\.zip/ })).toBeTruthy()
+		expect(outer.costAccepted()).toBe(true)
+	})
+
+	it("shows an archive in a 7z's solid block as its card at once, asking no cost", async () => {
+		show([{ path: "late.zip", size: MiB, access: SOLID_GZIP_LATE }])
+		archiveEntryAccess.mockResolvedValue("whole")
+
+		fireEvent.doubleClick(row("late.zip"))
+		expect(await screen.findByText(/can't be opened from inside this archive/)).toBeTruthy()
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+	})
+
+	it("asks the outer archive's password for an archive in its encrypted entry, and asks again when the SDK refuses it", async () => {
+		const outer = fakeSession(storeOf([{ path: "inner.zip", size: MiB, access: DIRECT, encrypted: true }]))
+		const refused = fakeSession(storeOf([]), undefined, { type: "needsPassword", wrong: true })
+		const opened: ArchiveSource[] = []
+
+		archiveEntryAccess.mockResolvedValue("mapped")
+		openListingSession.mockImplementation((source: ArchiveSource) => {
+			opened.push(source)
+
+			return source.nested === null ? outer : refused
+		})
+		renderBrowser()
+
+		fireEvent.doubleClick(row("inner.zip"))
+
+		const prompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+		expect(prompt.textContent).toContain("bundle.7z")
+		fireEvent.change(within(prompt).getByLabelText("Password"), { target: { value: "outer-pw" } })
+		fireEvent.click(within(prompt).getByRole("button", { name: "Unlock" }))
+
+		// The typed password is the outer one: the inner archive is read through it, and the refusal asks it again.
+		await vi.waitFor(() => {
+			expect(opened.at(-1)?.nested?.parentPassword).toBe("outer-pw")
+		})
+		expect((await screen.findByRole("dialog", { name: "Archive password" })).textContent).toMatch(/didn't open/)
+		expect(outer.acceptPassword).not.toHaveBeenCalled()
+	})
+
+	it("gives the outer listing the typed password once the inner archive lists, and keeps the outer level's session", async () => {
+		const outer = fakeSession(storeOf([{ path: "inner.zip", size: MiB, access: DIRECT, encrypted: true }]))
+		const inner = fakeSession(storeOf([{ path: "a.txt", size: 3, access: DIRECT }]))
+
+		archiveEntryAccess.mockResolvedValue("mapped")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : inner))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("inner.zip"))
+
+		const prompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+		fireEvent.change(within(prompt).getByLabelText("Password"), { target: { value: "outer-pw" } })
+		fireEvent.click(within(prompt).getByRole("button", { name: "Unlock" }))
+		expect(await screen.findByRole("listbox", { name: /inner\.zip/ })).toBeTruthy()
+		expect(outer.acceptPassword).toHaveBeenCalledWith("outer-pw")
+		// The outer level stays mounted while inside: its session goes on, never disposed and opened again.
+		expect(outer.dispose).not.toHaveBeenCalled()
+
+		fireEvent.keyDown(screen.getByRole("listbox", { name: /inner\.zip/ }), withCode({ key: "Escape" }))
+		expect(await screen.findByRole("listbox", { name: /bundle\.7z/ })).toBeTruthy()
+		expect(openListingSession.mock.calls.filter(([source]) => (source as ArchiveSource).nested === null)).toHaveLength(1)
+	})
+
+	it("lists an inner archive's own gate at once when its cost was confirmed on the way in", async () => {
+		const outer = fakeSession(storeOf([{ path: "late.zip", size: MiB, access: SOLID_GZIP_LATE }]))
+		const gated = fakeSession(storeOf([]), undefined, { type: "gate", format: { type: "zip" } })
+
+		archiveEntryAccess.mockResolvedValue("seekable")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : gated))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("late.zip"))
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Open" }))
+		await vi.waitFor(() => {
+			expect(gated.start).toHaveBeenCalled()
+		})
+	})
+
+	it("names the crossing into an inner archive for a screen reader", async () => {
+		const outer = fakeSession(storeOf([{ path: "inner.zip", size: MiB, access: DIRECT }]))
+		const inner = fakeSession(storeOf([{ path: "a.txt", size: 3, access: DIRECT }]))
+
+		archiveEntryAccess.mockResolvedValue("mapped")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : inner))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("inner.zip"))
+		await screen.findByRole("listbox", { name: /inner\.zip/ })
+		expect(screen.getByRole("navigation", { name: "Location in the archive" }).textContent).toContain("inside")
+	})
+
+	it("shows the card of an entry its read may find only media in, read whole above 64 MiB, before reading it", async () => {
+		show([{ path: "song.mod", size: 100 * MiB, access: DIRECT }])
+
+		fireEvent.doubleClick(row("song.mod"))
+		expect(await screen.findByText(/Extract the archive to play it/)).toBeTruthy()
+		expect(loadEntryBytes).not.toHaveBeenCalled()
+	})
+
+	it("says a stop came before the first file was read through, never that the archive is empty", () => {
+		openListingSession.mockReturnValue(fakeSession(storeOf([]), undefined, { type: "stopped", summary: SUMMARY }))
+		renderBrowser()
+
+		expect(screen.getByText("Stopped before the first file was read through, so nothing is listed yet.")).toBeTruthy()
+		expect(screen.queryByText("This archive is empty.")).toBeNull()
+	})
+
+	it("says how far the first file is read while nothing is listed yet", () => {
+		openListingSession.mockReturnValue(
+			fakeSession(storeOf([]), undefined, {
+				type: "reading",
+				bytesRead: 2 * MiB,
+				archiveBytes: 10 * MiB,
+				entries: 0,
+				bytesPerSecond: null,
+				etaMs: null
+			})
+		)
+		renderBrowser()
+
+		expect(screen.getByText("Reading the first file… 2 MiB of 10 MiB read so far.")).toBeTruthy()
 	})
 
 	it("previews but never saves from a link that allows no downloads", async () => {

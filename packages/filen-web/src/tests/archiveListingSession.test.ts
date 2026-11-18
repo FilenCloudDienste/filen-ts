@@ -340,6 +340,37 @@ describe("openListingSession", () => {
 		expect(session.getSnapshot().store.entryCount).toBe(1)
 	})
 
+	it("stopping inside a tar's first member keeps the stop: bytes were read, though no member was whole yet", async () => {
+		const { call, deps } = harness(nameInfo({ type: "tar", codec: "gzip" }))
+		const session = openListingSession(source("big.tar.gz", 100 * MiB), deps)
+
+		session.start()
+		call(0).emit(update("reading", { bytesRead: 1048576n }))
+		session.stop()
+		call(0).resolve(report({ format: { type: "tar", codec: "gzip" }, error: sdkError("Cancelled") }))
+		await settled()
+
+		expect(session.getSnapshot().phase.type).toBe("stopped")
+		expect(session.getSnapshot().store.entryCount).toBe(0)
+	})
+
+	it("keeps an accepted solid cost with the listing it caches, so reopening asks it no more", async () => {
+		const { call, deps } = harness()
+		const cache = createListingCache()
+
+		cache.open()
+
+		const first = openListingSession(source("a.7z", 10), deps, cache)
+
+		await vi.advanceTimersByTimeAsync(150)
+		call(0).resolve(report())
+		await settled()
+		first.acceptCost()
+		first.dispose()
+
+		expect(openListingSession(source("a.7z", 10), deps, cache).costAccepted()).toBe(true)
+	})
+
 	it("stopping before anything was read shows the gate again, which lists anew", async () => {
 		const { call, deps } = harness()
 		const session = openListingSession(source("a.zip", 10), deps)

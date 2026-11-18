@@ -231,6 +231,8 @@ interface Run {
 	token: number
 	kind: "full" | "verify"
 	store: EntryStore
+	// Archive bytes the run read, as its last update said.
+	bytesRead: number
 }
 
 // `cache` is the host's (listingCache.ts): a completed listing reopens from it, and goes into it on dispose.
@@ -254,7 +256,7 @@ export function openListingSession(
 	// The head read that tells a renamed zip from a RAR, before the gate.
 	let headRead: AbortController | null = null
 	let disposed = false
-	let costAccepted = false
+	let costAccepted = cached?.costAccepted ?? false
 	// The reader of the accepted password, which the browser's entries read through. Nothing is read until used.
 	let held: ArchiveReaderRef = deps.acquireReader(source, accepted)
 
@@ -307,9 +309,10 @@ export function openListingSession(
 
 			setPhase({ type: "done", summary }, current.store)
 		} else if (error.kind === "Cancelled") {
-			// Stopped before anything was read (while waiting for the slot, say): as if never started.
+			// Stopped before anything was read (while waiting for the slot, say): as if never started. Stopped inside a tar's
+			// first member (listed only once its data was passed) keeps the stop, which says nothing was whole yet.
 			setPhase(
-				current.store.entryCount === 0
+				current.store.entryCount === 0 && current.bytesRead === 0
 					? { type: "gate", format: report.format ?? snapshot.info?.format ?? null }
 					: { type: "stopped", summary },
 				current.store
@@ -373,6 +376,7 @@ export function openListingSession(
 
 					break
 				case "reading":
+					current.bytesRead = Number(event.update.bytesRead)
 					setPhase(readingPhase(event.update))
 
 					break
@@ -436,7 +440,8 @@ export function openListingSession(
 			reader: deps.acquireReader(source, password),
 			token,
 			kind,
-			store: kind === "full" ? createEntryStore() : snapshot.store
+			store: kind === "full" ? createEntryStore() : snapshot.store,
+			bytesRead: 0
 		}
 
 		run = current
@@ -666,6 +671,7 @@ export function openListingSession(
 					summary: { ...phase.summary, verifying: false, verifyWaiting: false, verifyError: null },
 					password: accepted,
 					lastDirPath: dirPath,
+					costAccepted,
 					entries: snapshot.store.entryCount
 				})
 			}

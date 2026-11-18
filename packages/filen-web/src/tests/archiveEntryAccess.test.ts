@@ -14,7 +14,8 @@ import {
 	NESTED_INFLATE_CONFIRM_BYTES,
 	nestedOpening,
 	sniffedEntryCategory,
-	sniffMayReadByRange
+	sniffMayReadByRange,
+	sniffOpensOnlyByAccess
 } from "@/features/archive/lib/entryAccess.logic"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
@@ -260,5 +261,12 @@ describe("archives held in an entry", () => {
 		expect(nestedOpening("seekable", NESTED_INFLATE_CONFIRM_BYTES + 1)).toBe("confirm")
 		expect(nestedOpening("whole", 10)).toBe("extract")
 		expect(nestedOpening("sequential", 10)).toBe("extract")
+	})
+})
+
+describe("entries whose read may find only media", () => {
+	it("are told by their name, with a kind whose card they show before any read", () => {
+		expect(sniffOpensOnlyByAccess("song.mod")).not.toBeNull()
+		expect(sniffOpensOnlyByAccess("notes.txt")).toBeNull()
 	})
 })

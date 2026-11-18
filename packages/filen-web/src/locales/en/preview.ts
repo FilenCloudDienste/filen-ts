@@ -722,6 +722,10 @@ export const preview = {
 	previewArchiveDuplicates_other: "{{count}} entries are left out because a later entry has the same name.",
 	/** Archive browser — the whole archive holds nothing */
 	previewArchiveEmpty: "This archive is empty.",
+	/** Archive browser, in the list's place — a tarball's first file is still being read, and a file shows only once read through; {{read}} and {{total}} are sizes */
+	previewArchiveReadingFirst: "Reading the first file… {{read}} of {{total}} read so far.",
+	/** Archive browser, in the list's place — the listing was stopped before its first file was read through, so nothing is listed (the archive isn't empty) */
+	previewArchiveStoppedBeforeFirst: "Stopped before the first file was read through, so nothing is listed yet.",
 	/** Archive browser — the directory shown holds nothing */
 	previewArchiveDirectoryEmpty: "This directory is empty.",
 	/** Archive browser search — nothing below the directory shown matches; {{query}} is the search text */
@@ -854,6 +858,13 @@ export const preview = {
 	previewArchiveNestedInflateBody: "“{{name}}” is compressed inside this archive. Browsing it unpacks all {{size}} of it first.",
 	/** Archive inside an archive, confirm dialog — browses it anyway */
 	previewArchiveNestedInflateOpen: "Browse",
+	/** Archive browser — an archive held three archives deep can't be opened here; {{name}} is the inner archive */
+	previewArchiveNestedTooDeep: "“{{name}}” is nested too deep to open here. Extract the outer archive to open it.",
+	/** Archive inside an archive — in place of the crossing glyph in the location trail, for screen readers */
+	previewArchiveNestedBoundary: "inside",
+	/** Archive entry card inside an archive held in another — the file can't be shown from here, and only the outermost archive can be extracted; {{name}} is the file */
+	previewArchiveEntryNestedCardBody:
+		"“{{name}}” can't be shown from inside an archive held in another. Extract the outermost archive to get it.",
 	/** Archive browser, inside an archive held in another — why its Extract buttons are off */
 	previewArchiveExtractNestedNote: "This archive is inside another. Extract the outer archive to get its files.",
 	/** Under an archive entry's player — the entry is compressed, so a seek decodes up to the new position */

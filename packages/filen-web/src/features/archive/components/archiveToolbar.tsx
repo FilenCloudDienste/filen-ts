@@ -55,9 +55,14 @@ function Separator() {
 	)
 }
 
+// Outer crumbs shown in full; the earlier ones fold into a "…" of their own.
+const OUTER_VISIBLE_CRUMBS = 2
+
 // Where in the archive the browser is, and its search below there.
 export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBoxRef, onNavigate, onQueryChange }: ArchiveToolbarProps) {
 	const { t } = useTranslation("preview")
+	const folded = outer.slice(0, Math.max(0, outer.length - OUTER_VISIBLE_CRUMBS))
+	const outerShown = outer.slice(folded.length)
 
 	return (
 		<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -65,7 +70,35 @@ export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBo
 				aria-label={t("previewArchiveBreadcrumbs")}
 				className="flex min-w-0 flex-1 items-center gap-0.5"
 			>
-				{outer.map(crumb => (
+				{folded.length > 0 ? (
+					<>
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("previewArchiveHiddenLevels")}
+									/>
+								}
+							>
+								<MoreHorizontalIcon />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent className="w-auto max-w-72">
+								{folded.map(crumb => (
+									<DropdownMenuItem
+										key={crumb.key}
+										onClick={crumb.onSelect}
+									>
+										<span className="min-w-0 truncate">{crumb.name}</span>
+									</DropdownMenuItem>
+								))}
+							</DropdownMenuContent>
+						</DropdownMenu>
+						<Separator />
+					</>
+				) : null}
+				{outerShown.map(crumb => (
 					<Fragment key={crumb.key}>
 						<Crumb
 							name={crumb.name}
@@ -75,13 +108,18 @@ export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBo
 						<Separator />
 					</Fragment>
 				))}
-				{/* Where the trail crosses into an archive held in another. */}
+				{/* Where the trail crosses into an archive held in another, named for a screen reader. */}
 				{outer.length > 0 ? (
-					<PackageIcon
-						aria-hidden="true"
+					<span
 						data-archive-boundary=""
-						className="size-3.5 shrink-0 text-muted-foreground"
-					/>
+						className="flex shrink-0 items-center"
+					>
+						<PackageIcon
+							aria-hidden="true"
+							className="size-3.5 text-muted-foreground"
+						/>
+						<span className="sr-only">{t("previewArchiveNestedBoundary")}</span>
+					</span>
 				) : null}
 				<Crumb
 					name={rootName}

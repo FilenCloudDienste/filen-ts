@@ -70,6 +70,26 @@ export function sniffMayReadByRange(name: string): boolean {
 	})
 }
 
+// The kind every viewer a content read may find for `name` opens by access with the same card (media, or RAW), or null
+// when some other kind may be found: such an entry read only whole or front to back shows its card before any read,
+// never buffering it for a head.
+export function sniffOpensOnlyByAccess(name: string): PreviewCategory | null {
+	const categories = sniffCandidates(fileTypeExtension(name, null)).map(candidate =>
+		candidate === null ? null : previewCategoryForExtension(candidate)
+	)
+	const first = categories[0] ?? null
+
+	if (first === null || !entryOpensByAccess(first)) {
+		return null
+	}
+
+	const raw = first === "rawImage"
+
+	return categories.every(category => category !== null && entryOpensByAccess(category) && (category === "rawImage") === raw)
+		? first
+		: null
+}
+
 // Whether the entry's viewer is picked by a content read run before it opens (ContentSniffGate), not by its name. A
 // viewer-mode read runs in the viewer its name picks.
 export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {

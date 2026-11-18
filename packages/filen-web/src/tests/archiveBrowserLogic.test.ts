@@ -100,6 +100,11 @@ describe("browserKeyAction", () => {
 		expect(act(key("Escape"), false)).toBeNull()
 	})
 
+	it("leaves an archive held in another on Escape with nothing selected, clearing a selection first", () => {
+		expect(browserKeyAction(key("Escape"), false, defaults(false), false, true)).toEqual({ type: "leave" })
+		expect(browserKeyAction(key("Escape"), true, defaults(false), false, true)).toEqual({ type: "clear" })
+	})
+
 	it("opens, toggles, goes up, selects all and focuses the search", () => {
 		expect(act(key("Enter"), false)).toEqual({ type: "open" })
 		expect(act(key(" "), false)).toEqual({ type: "toggle" })

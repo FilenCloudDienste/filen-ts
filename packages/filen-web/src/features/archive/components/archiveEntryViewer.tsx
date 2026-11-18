@@ -13,7 +13,13 @@ import { entryAccessOf, entryLeaseOrigin, leaseEntry } from "@/features/archive/
 import type { EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { ExtractToRead } from "@/features/archive/components/extractToRead"
-import { entryExtractCard, entryPlanOf, sniffMayReadByRange, type ExtractReason } from "@/features/archive/lib/entryAccess.logic"
+import {
+	entryExtractCard,
+	entryPlanOf,
+	sniffMayReadByRange,
+	sniffOpensOnlyByAccess,
+	type ExtractReason
+} from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
@@ -76,12 +82,15 @@ function EntryExtractBody({
 	extractAllowed: boolean
 }) {
 	const { t } = useTranslation("preview")
+	// Inside an archive held in another, only the outermost one extracts: the card says so, and offers nothing here.
 	const message =
-		reason === "read"
-			? t("previewArchiveEntryExtractToRead", { name })
-			: reason === "play"
-				? t("previewArchiveEntryExtractToPlayBody", { name })
-				: t("previewArchiveEntryExtractToOpenBody", { name })
+		source.nested !== null
+			? t("previewArchiveEntryNestedCardBody", { name })
+			: reason === "read"
+				? t("previewArchiveEntryExtractToRead", { name })
+				: reason === "play"
+					? t("previewArchiveEntryExtractToPlayBody", { name })
+					: t("previewArchiveEntryExtractToOpenBody", { name })
 	const label =
 		reason === "read" ? undefined : reason === "play" ? t("previewArchiveEntryExtractToPlay") : t("previewArchiveEntryExtractToOpen")
 
@@ -257,7 +266,9 @@ function ReadEntryViewer({
 	// content read found.
 	const cardFor = (category: PreviewCategory | null): ExtractReason | null =>
 		kind === null ? null : entryExtractCard(category, kind, request.size)
-	const card = cardFor(entry.category)
+	// An entry whose read may find only media (or only a RAW), read whole above the buffer cap or front to back: its card
+	// before any read, so no head read decodes the whole entry first.
+	const card = cardFor(entry.category ?? sniffOpensOnlyByAccess(request.name))
 
 	if (card !== null) {
 		return (

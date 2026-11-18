@@ -16,7 +16,7 @@ const SUMMARY: ListSummary = {
 }
 
 function listing(entries: number): CachedListing {
-	return { store: createEntryStore(), summary: SUMMARY, password: undefined, lastDirPath: "", entries }
+	return { store: createEntryStore(), summary: SUMMARY, password: undefined, lastDirPath: "", costAccepted: false, entries }
 }
 
 let cache: ListingCache
