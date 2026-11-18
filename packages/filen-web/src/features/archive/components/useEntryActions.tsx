@@ -75,7 +75,8 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 		return { open: canOpenEntry(store, slot), download: downloadable && isOnline && canReadEntry(store, slot) }
 	}
 
-	function open({ store, slot }: EntryTarget): void {
+	// `extractToRead`: its block is too large to read from here (E3), so it opens as the card offering to extract.
+	function open({ store, slot }: EntryTarget, extractToRead = false): void {
 		const request = entryRequest(source, store, slot)
 		// Its content read picks the viewer once it opens.
 		const awaitsSniff = entryAwaitsSniff(store, slot)
@@ -88,7 +89,7 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 		setViewing({
 			store,
 			slot,
-			entry: { request, category, modified: store.modified(slot), encrypted: isEncryptedEntry(store, slot) },
+			entry: { request, category, modified: store.modified(slot), encrypted: isEncryptedEntry(store, slot), extractToRead },
 			password: session()?.password()
 		})
 	}
@@ -140,9 +141,13 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 			return
 		}
 
-		// A solid block above E3's ceiling: no cost covers reading it from here.
+		// A solid block above E3's ceiling: no cost covers reading it from here. Opened, its card offers the extract.
 		if (extractsToRead(target.store, target.slot)) {
-			toast.error(t("previewArchiveEntryExtractToRead", { name: target.store.name(target.slot) }))
+			if (intent === "open") {
+				open(target, true)
+			} else {
+				toast.error(t("previewArchiveEntryExtractToRead", { name: target.store.name(target.slot) }))
+			}
 
 			return
 		}

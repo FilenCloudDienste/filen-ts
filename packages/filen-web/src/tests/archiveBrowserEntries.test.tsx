@@ -333,7 +333,7 @@ describe("an archive entry on its own", () => {
 		expect(loadEntryBytes.mock.calls[0]?.[0]).toMatchObject({ params: { maxSolidSkip: 5 * MiB } })
 	})
 
-	it("sends a file of a solid block above 512 MiB to extracting: no cost dialog, nothing read", async () => {
+	it("shows a file of a solid block above 512 MiB as the card offering to extract: no cost dialog, nothing read", async () => {
 		const { toast } = await import("sonner")
 
 		show([
@@ -351,7 +351,9 @@ describe("an archive entry on its own", () => {
 
 		fireEvent.doubleClick(row("deep.md"))
 
-		expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Extract the archive to read it"))
+		expect(await screen.findByText(/Extract the archive to read it/)).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Extract to read" })).toBeTruthy()
+		expect(toast.error).not.toHaveBeenCalled()
 		expect(screen.queryByRole("alertdialog")).toBeNull()
 		expect(loadEntryBytes).not.toHaveBeenCalled()
 		expect(runEntryDownload).not.toHaveBeenCalled()

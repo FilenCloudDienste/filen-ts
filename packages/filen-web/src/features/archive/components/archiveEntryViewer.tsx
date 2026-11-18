@@ -11,7 +11,8 @@ import { isArchivePasswordError, type EntryRequest } from "@/features/archive/li
 import { entryAccessOf, entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import type { EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { CATEGORY_POLICY } from "@/features/drive/lib/preview.logic"
-import { PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import { ExtractToRead } from "@/features/archive/components/extractToRead"
 import { entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
@@ -24,6 +25,8 @@ export interface ViewedEntry {
 	// NaN when absent.
 	modified: number
 	encrypted: boolean
+	// In a solid block too large to read from here (E3): its card offers to extract the archive instead.
+	extractToRead?: boolean
 }
 
 export interface ArchiveEntryViewerProps {
@@ -41,11 +44,42 @@ export interface ArchiveEntryViewerProps {
 	readAhead: boolean
 }
 
-// One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
+// One entry shown in the archive browser's place: read through the archive's reader, or, packed in a solid block too
+// large to read from here (E3), the card offering to extract the archive.
+export function ArchiveEntryViewer(props: ArchiveEntryViewerProps) {
+	return props.entry.extractToRead === true ? <EntryExtractCard {...props} /> : <ReadEntryViewer {...props} />
+}
+
+function EntryExtractCard({ archiveUuid, entry, onBack, listing }: ArchiveEntryViewerProps) {
+	const { t } = useTranslation("preview")
+	const { request } = entry
+	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
+
+	return (
+		<NestedFileViewer
+			item={item}
+			origin={entryLeaseOrigin("", request.params.archive, request.anon, request.params.entry.index, request.size)}
+			category={entry.category}
+			references={null}
+			backLabel={t("previewArchiveEntryBack")}
+			onBack={onBack}
+			onDownload={null}
+			replacement={
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewArchiveEntryExtractToRead", { name: request.name })}
+					secondary={<ExtractToRead source={listing.source} />}
+				/>
+			}
+		/>
+	)
+}
+
+// One entry read and shown in the archive browser's place, read-only, with the viewers a drive file of its kind
 // gets. Its bytes come through the entry's origin, a lease on the archive's reader for each password tried (the
 // listing's own reader for its password), cached like a file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
 // again.
-export function ArchiveEntryViewer({
+function ReadEntryViewer({
 	archiveUuid,
 	entry,
 	password: listingPassword,
@@ -157,7 +191,7 @@ export function ArchiveEntryViewer({
 			item={item}
 			origin={origin}
 			category={entry.category}
-			references={entryReferences(listing.source, listing.store, request.params.entry.index, password, access)}
+			references={entryReferences(listing.source, listing.store, request.params.entry.index, password, access, () => readAhead)}
 			backLabel={t("previewArchiveEntryBack")}
 			onBack={onBack}
 			onDownload={onDownload}

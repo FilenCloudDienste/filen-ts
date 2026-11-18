@@ -40,6 +40,40 @@ describe("entryReferences", () => {
 		expect(entryListing(SOURCE, store, root).files.map(([name]) => name)).toEqual(["mesh.obj", "mesh.mtl", "tarred.png"])
 	})
 
+	it("reads no texture a cost the user accepted does not cover: above E3's block, or before a solid cost was accepted", async () => {
+		const { entryReferences } = await import("@/features/archive/lib/entryReferences")
+		const solid = (skipped: number, block: number) =>
+			({
+				type: "solidBlock",
+				skippedBytes: BigInt(skipped),
+				estimatedPackedBytes: BigInt(skipped + 10),
+				blockPackedBytes: BigInt(block)
+			}) as const
+		const store = storeOf([
+			{ path: "mesh.obj", index: 0, access: solid(0, 100), size: 10 },
+			{ path: "first.png", index: 1, access: solid(0, 100), size: 10 },
+			{ path: "later.png", index: 2, access: solid(20, 100), size: 10 },
+			{ path: "huge.png", index: 3, access: solid(0, 513 * 1024 * 1024), size: 10 }
+		])
+		const resolver = (accepted: boolean) => {
+			const resolve = entryReferences(SOURCE, store, 0, undefined, "authed", () => accepted)(linkedFileItem("mesh.obj"))
+
+			if (resolve === null) throw new Error("no resolver")
+
+			return resolve
+		}
+		const asking = resolver(false)
+
+		expect(await asking("first.png")).toMatchObject({ status: "found" })
+		expect(await asking("later.png")).toEqual({ status: "unreadable" })
+		expect(await asking("huge.png")).toEqual({ status: "unreadable" })
+
+		const accepted = resolver(true)
+
+		expect(await accepted("later.png")).toMatchObject({ status: "found" })
+		expect(await accepted("huge.png")).toEqual({ status: "unreadable" })
+	})
+
 	it("resolves nothing for an entry no longer listed", async () => {
 		const { entryReferences } = await import("@/features/archive/lib/entryReferences")
 

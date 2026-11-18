@@ -6,8 +6,6 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
-import { extractArchiveTo } from "@/features/drive/lib/archiveActions"
-import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { archiveSourceOf, type ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { useArchiveListing } from "@/features/archive/components/useArchiveListing"
 import { readsWholeArchive } from "@/features/archive/lib/archiveBrowser.logic"
@@ -17,6 +15,7 @@ import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/fe
 import { comicPages, largestSolidBlock } from "@/features/comics/lib/pages.logic"
 import { SOLID_BLOCK_READ_MAX_BYTES } from "@/features/archive/lib/entryAccess.logic"
 import { ComicPager } from "@/features/comics/components/comicPager"
+import { ExtractToRead } from "@/features/archive/components/extractToRead"
 import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { Button } from "@/components/ui/button"
 
@@ -174,41 +173,5 @@ export function ComicSourceViewer({ item, source, extractable, onBrowse }: Comic
 			pages={pages}
 			session={listing.session}
 		/>
-	)
-}
-
-// The comic into a directory of the user's drive, picked first; the extract then runs on with its own card.
-function ExtractToRead({ source }: { source: ArchiveSource }) {
-	const { t } = useTranslation(["preview", "archive", "common"])
-	const isOnline = useIsOnline()
-	const [open, setOpen] = useState(false)
-
-	return (
-		<>
-			<Button
-				variant="outline"
-				disabled={!isOnline}
-				title={isOnline ? undefined : t("common:offlineActionDisabled")}
-				onClick={() => {
-					setOpen(true)
-				}}
-			>
-				{t("previewComicExtractToRead")}
-			</Button>
-			{open ? (
-				<MoveTargetDialog
-					mode="pick"
-					items={[]}
-					pickLabels={{ title: t("archive:archiveExtractPickTitle"), confirm: t("archive:archiveExtractPickConfirm") }}
-					startsWork
-					onPick={destination => {
-						void extractArchiveTo(source, destination)
-					}}
-					onClose={() => {
-						setOpen(false)
-					}}
-				/>
-			) : null}
-		</>
 	)
 }
