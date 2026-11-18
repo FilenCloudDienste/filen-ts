@@ -26,13 +26,14 @@ export function useMermaidScope(): MermaidScope {
 	return scope
 }
 
-// A diagram's source as the frame draws it in the app's theme, once `enabled` (until then "waiting"; a source the
-// filter refuses or that is too long never waits). Without a scope it waits for good.
+// A diagram's source as the frame draws it in the app's theme, once `enabled` (until then "waiting", its source not even
+// looked at). Without a scope it waits for good.
 export function useMermaidDiagram(scope: MermaidScope | null, text: string, enabled: boolean): MermaidDiagramState {
 	const { theme } = useTheme()
 	const mermaidTheme = resolveTheme(theme) === "dark" ? "dark" : "default"
-	const verdict = mermaidSourceVerdict(text)
-	const source = verdict.kind === "render" ? verdict.source : null
+	// Judged only once wanted: a document's far and unasked fences cost nothing.
+	const verdict = enabled ? mermaidSourceVerdict(text) : null
+	const source = verdict?.kind === "render" ? verdict.source : null
 	const key = `${mermaidTheme}\0${source ?? ""}`
 	const [result, setResult] = useState<{ readonly key: string; readonly outcome: MermaidOutcome } | null>(null)
 
@@ -52,11 +53,15 @@ export function useMermaidDiagram(scope: MermaidScope | null, text: string, enab
 		}
 	}, [enabled, scope, source, mermaidTheme, key])
 
+	if (verdict === null) {
+		return { status: "waiting" }
+	}
+
 	if (verdict.kind !== "render") {
 		return { status: verdict.kind }
 	}
 
-	if (!enabled || scope === null) {
+	if (scope === null) {
 		return { status: "waiting" }
 	}
 

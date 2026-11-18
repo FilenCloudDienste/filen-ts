@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { mermaidSourceVerdict } from "@/features/preview/lib/mermaidSource.logic"
-import { MERMAID_MAX_TEXT } from "@/mermaidFrame/config"
+import { MERMAID_MAX_EDGES, MERMAID_MAX_TEXT } from "@/mermaidFrame/config"
 
 // The page's filter in front of the diagram frame: no directive or front-matter configuration reaches it, and a
 // diagram naming images, icons, links or callbacks is refused rather than drawn half.
@@ -64,5 +64,29 @@ describe("mermaidSourceVerdict", () => {
 
 		expect(mermaidSourceVerdict(big)).toEqual({ kind: "tooComplex" })
 		expect(mermaidSourceVerdict("a".repeat(MERMAID_MAX_TEXT)).kind).toBe("render")
+	})
+
+	it("caps every diagram type's edges, not only a flowchart's", () => {
+		const lines = (count: number, line: (index: number) => string): string =>
+			Array.from({ length: count }, (_, index) => line(index)).join("\n")
+
+		for (const [type, edge] of [
+			["flowchart TD", (index: number) => `  n${String(index)} --> n${String(index + 1)}`],
+			["stateDiagram-v2", (index: number) => `  s${String(index)} --> s${String(index + 1)}`],
+			["classDiagram", (index: number) => `  C${String(index)} <|-- C${String(index + 1)}`],
+			["erDiagram", (index: number) => `  E${String(index)} ||--o{ E${String(index + 1)} : has`],
+			["sequenceDiagram", (index: number) => `  A${String(index)} ->> B : hi`],
+			["gitGraph", () => "  commit"]
+		] as const) {
+			expect(mermaidSourceVerdict(`${type}\n${lines(MERMAID_MAX_EDGES, edge)}`).kind, type).toBe("render")
+			expect(mermaidSourceVerdict(`${type}\n${lines(MERMAID_MAX_EDGES + 1, edge)}`), type).toEqual({ kind: "tooComplex" })
+		}
+	})
+
+	it("judges a run of blank lines in linear time", () => {
+		const started = performance.now()
+
+		expect(mermaidSourceVerdict(`graph TD\n${"\n".repeat(49_000)}A --> B`).kind).toBe("render")
+		expect(performance.now() - started).toBeLessThan(200)
 	})
 })

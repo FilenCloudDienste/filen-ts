@@ -134,7 +134,7 @@ describe("Mermaid fences in the file preview", () => {
 		expect(renderSpy).toHaveBeenCalledWith(`graph TD; A${String(MERMAID_AUTO_RENDER_LIMIT)}-->B\n`, "dark")
 	})
 
-	it("names a diagram that loads images or links, with its source on request, and never draws it", () => {
+	it("names a diagram that loads images or links once it comes near, with its source on request, and never draws it", async () => {
 		render(
 			<PreviewMarkdown
 				text={'```mermaid\ngraph TD; A-->B\nclick A href "https://example.com"\n```'}
@@ -143,7 +143,12 @@ describe("Mermaid fences in the file preview", () => {
 			{ wrapper }
 		)
 
-		expect(screen.getByText("This diagram uses images or links, which previews don't load.")).toBeTruthy()
+		// Far away it is not even judged.
+		expect(screen.queryByText("This diagram uses images or links, which previews don't load.")).toBeNull()
+
+		bringNear(0)
+
+		expect(await screen.findByText("This diagram uses images or links, which previews don't load.")).toBeTruthy()
 		fireEvent.click(screen.getByRole("button", { name: "Show source" }))
 		expect(screen.getByText(/click A href/)).toBeTruthy()
 		expect(renderSpy).not.toHaveBeenCalled()
