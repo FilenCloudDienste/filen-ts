@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { BLOCK_BYTES } from "@filen/shared/videos"
-import { CHECKPOINT_LINES, countLines, LineIndex, MAX_CHECKPOINTS, SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
+import {
+	CHECKPOINT_LINES,
+	countLines,
+	LineIndex,
+	MAX_CHECKPOINTS,
+	readStretches,
+	SCAN_BYTES
+} from "@/features/preview/lib/textPager/index.logic"
 import { pagerEncoding, type PagerEncoding, type PagerSource } from "@/features/preview/lib/textPager/rows.logic"
 
 // Lines "0\n", "1\n", … : line n (1-based) holds the number n - 1.
@@ -161,5 +168,42 @@ describe("textPager line index", () => {
 		expect(index.lines).toBe(2)
 		expect(await index.lineAt(source, 2 * BLOCK_BYTES - 1)).toBe(2)
 		expect(await index.lineStart(source, 2)).toBe(BLOCK_BYTES + 1)
+	})
+
+	it("keeps one stretch read in flight ahead, and calls it off when the reader stops early", async () => {
+		const size = 4 * SCAN_BYTES
+		const started: number[] = []
+		const aborted: number[] = []
+		const pending = new Map<number, () => void>()
+		const source = {
+			size,
+			scan: (start: number, end: number, signal: AbortSignal) => {
+				started.push(start)
+				signal.addEventListener("abort", () => {
+					aborted.push(start)
+				})
+
+				return new Promise<Uint8Array>(resolve => {
+					pending.set(start, () => {
+						resolve(new Uint8Array(end - start))
+					})
+				})
+			}
+		}
+		const stretches = readStretches(source, 0, new AbortController().signal)
+		const first = stretches.next()
+
+		// Asked for one, both the first and the next are in flight.
+		expect(started).toEqual([0, SCAN_BYTES])
+		pending.get(0)?.()
+		expect((await first).value?.base).toBe(0)
+
+		const second = stretches.next()
+
+		expect(started).toEqual([0, SCAN_BYTES, 2 * SCAN_BYTES])
+		pending.get(SCAN_BYTES)?.()
+		await second
+		await stretches.return(undefined)
+		expect(aborted).toContain(2 * SCAN_BYTES)
 	})
 })

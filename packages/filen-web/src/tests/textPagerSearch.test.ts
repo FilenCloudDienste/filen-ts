@@ -138,7 +138,8 @@ describe("textPager search", () => {
 		const { end } = await search(bytes, "zz", { source, signal: abort.signal })
 
 		expect(end).toBe("stopped")
-		expect(reads).toHaveLength(1)
+		// The first stretch, and the one read ahead while it was searched.
+		expect(reads).toHaveLength(2)
 	})
 
 	it("hands every stretch to the line index in order", async () => {

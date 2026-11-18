@@ -60,6 +60,7 @@ export function useTextPagerSession(item: DriveItem): TextPagerSession {
 	const [failure, setFailure] = useState<{ readonly generation: number; readonly dto: ErrorDTO } | null>(null)
 	const [shownAnyway, setShownAnyway] = useState<number | null>(null)
 	const [chosen, setChosen] = useState<{ readonly generation: number; readonly label: string | null }>({ generation: 0, label: null })
+	const [detected, setDetected] = useState<{ readonly generation: number; readonly label: string } | null>(null)
 	const [reading, setReading] = useState<{
 		readonly generation: number
 		readonly detected: string
@@ -121,32 +122,63 @@ export function useTextPagerSession(item: DriveItem): TextPagerSession {
 		}
 	}, [owned, generation, access])
 
+	// The encoding the file reads as, once: its first block's copy (a legacy file's, for the guess) is dropped after.
 	useEffect(() => {
-		if (owned === null || open === null || !readable) {
+		if (owned === null || open === null || !readable || detected?.generation === generation) {
 			return
 		}
 
 		let live = true
+		const { unicode, head } = open
 		const detect = async (): Promise<string> =>
-			open.unicode ??
-			(open.head === null ? null : await guessLegacyEncoding(open.head, open.head.length >= size)) ??
+			unicode ??
+			(head === null ? null : await guessLegacyEncoding(head, head.length >= size)) ??
 			legacyEncodingForLanguage(navigator.languages[0] ?? null)
 
-		void detect()
-			.then(async detected => {
-				const use = label ?? detected
-				const { start } = await owned.run(remote => remote.use(use))
+		void detect().then(
+			found => {
+				if (!live) {
+					return
+				}
 
-				if (live) setReading({ generation, detected, label: use, start })
-			})
-			.catch((error: unknown) => {
+				setDetected({ generation, label: found })
+				setOpened(previous => (previous === null ? previous : { ...previous, value: { ...previous.value, head: null } }))
+			},
+			(error: unknown) => {
 				if (live) failOpen(error)
-			})
+			}
+		)
 
 		return () => {
 			live = false
 		}
-	}, [owned, generation, open, readable, label, size])
+	}, [owned, generation, open, readable, detected, size])
+
+	const detectedLabel = detected?.generation === generation ? detected.label : null
+
+	useEffect(() => {
+		if (owned === null || detectedLabel === null) {
+			return
+		}
+
+		let live = true
+		const use = label ?? detectedLabel
+
+		void owned
+			.run(remote => remote.use(use))
+			.then(
+				({ start }) => {
+					if (live) setReading({ generation, detected: detectedLabel, label: use, start })
+				},
+				(error: unknown) => {
+					if (live) failOpen(error)
+				}
+			)
+
+		return () => {
+			live = false
+		}
+	}, [owned, generation, detectedLabel, label])
 
 	if (worker.status === "failed") {
 		return { status: "error", dto: worker.dto, retry: worker.restart }

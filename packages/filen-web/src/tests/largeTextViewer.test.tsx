@@ -80,6 +80,15 @@ vi.mock("@/lib/workers/ownedWorker", async importOriginal => ({
 		return worker
 	}
 }))
+const guesses = vi.hoisted(() => ({ calls: 0 }))
+
+vi.mock("@/features/preview/lib/encodingGuess", () => ({
+	guessLegacyEncoding: () => {
+		guesses.calls++
+
+		return Promise.resolve("windows-1251")
+	}
+}))
 vi.mock("@/features/preview/workers/textPager.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: () => Promise.resolve() } }))
 vi.mock("@/features/preview/lib/origin/rangeSource", () => ({
@@ -234,5 +243,18 @@ describe("LargeTextViewer", () => {
 			await Promise.resolve()
 		})
 		expect(await screen.findByText("1/4+")).toBeTruthy()
+	})
+
+	it("guesses a legacy file's encoding once, from the first block's copy", async () => {
+		const unicode = state.open
+
+		state.open = { text: true, executable: false, unicode: null, head: new Uint8Array([0xcf, 0xf0, 0xe8]) }
+		guesses.calls = 0
+		await renderViewer()
+
+		expect(await screen.findByText("first line")).toBeTruthy()
+		expect(screen.getByRole("button", { name: /Encoding: Windows-1251/ })).toBeTruthy()
+		expect(guesses.calls).toBe(1)
+		state.open = unicode
 	})
 })

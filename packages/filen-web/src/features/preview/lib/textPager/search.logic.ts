@@ -1,17 +1,11 @@
-import { SCAN_BYTES, type PagerScanSource } from "@/features/preview/lib/textPager/index.logic"
-import {
-	boundaryBefore,
-	decodeSpan,
-	legacyCharLength,
-	previousBreak,
-	type PagerEncoding
-} from "@/features/preview/lib/textPager/rows.logic"
+import { readStretches, type PagerScanSource } from "@/features/preview/lib/textPager/index.logic"
+import { decodeSpan, legacyCharLength, type PagerEncoding } from "@/features/preview/lib/textPager/rows.logic"
 
 // Find in a text file too large to hold: the file is read once from its start in block-aligned stretches past the
-// cache, each decoded up to its last line break (the rest is searched with the next stretch). A stretch with no break
-// at all (a line longer than a stretch) is searched up to a character boundary and keeps only the last
-// `query.length - 1` units for the next, so a match across the cut is found once. At most MATCH_CAP matches are kept,
-// as their byte offsets and line numbers (160 KB); the text is never kept.
+// cache, one in flight ahead, and decoded as a stream (a character cut by a stretch's end is finished by the next).
+// Each stretch's text is searched alone; a match across two stretches is found in the previous text's last
+// `query.length - 1` units joined to the start of the next. At most MATCH_CAP matches are kept, as their byte offsets and
+// line numbers (160 KB); the text is never kept, and nothing but a stretch and its text is held while it is searched.
 
 export const MATCH_CAP = 10_000
 
@@ -63,41 +57,55 @@ export class MatchList {
 	}
 }
 
-// Where each decoded unit came from: walks bytes as the decoder did, so a match's unit index becomes its byte offset.
-// Exact for UTF-8 (WHATWG's maximal-subpart error handling), UTF-16, UTF-32 and single-byte encodings; a malformed
-// multi-byte legacy sequence may shift offsets until the stretch ends (legacy characters are counted by decoding them).
+// Bytes read so far, as the decoder took them: a few kept from the previous stretch (the units a match across it may
+// start in, and a character it cut) and the stretch itself, so neither is ever copied into the other.
+interface Segment {
+	readonly base: number
+	readonly bytes: Uint8Array
+}
+
 // A legacy run decoded at once while walking to a match.
 const LEGACY_RUN_BYTES = 4096
 
+// Where each decoded unit came from: walks bytes as the decoder did, so a match's unit index becomes its byte offset.
+// Exact for UTF-8 (WHATWG's maximal-subpart error handling), UTF-16, UTF-32, single-byte encodings and legacy ones
+// (counted by decoding their characters); a malformed legacy sequence may shift offsets until the stretch ends. Units
+// count from the first segment's start.
 class UnitWalker {
 	private unit = 0
-	private byte = 0
-	private readonly bytes: Uint8Array
+	private byte: number
+	private readonly segments: readonly Segment[]
+	private readonly end: number
 	private readonly encoding: PagerEncoding
 
-	public constructor(bytes: Uint8Array, encoding: PagerEncoding) {
-		this.bytes = bytes
+	public constructor(segments: readonly Segment[], encoding: PagerEncoding) {
+		const last = segments.at(-1)
+
+		this.segments = segments
+		this.byte = segments[0]?.base ?? 0
+		this.end = last === undefined ? this.byte : last.base + last.bytes.length
 		this.encoding = encoding
 	}
 
-	// The byte where unit `target` starts; targets never decrease.
+	// The file offset where unit `target` starts; targets never decrease.
 	public to(target: number): number {
 		const { encoding } = this
+		const origin = this.segments[0]?.base ?? 0
 
 		if (encoding.kind === "single") {
-			return target
+			return origin + target
 		}
 
 		if (encoding.kind === "utf16") {
-			return target * 2
+			return origin + target * 2
 		}
 
 		if (encoding.kind === "multi") {
 			return this.legacyTo(target)
 		}
 
-		while (this.unit < target && this.byte < this.bytes.length) {
-			const [length, units] = this.step()
+		while (this.unit < target && this.byte < this.end) {
+			const [length, units] = encoding.kind === "utf32" ? this.utf32Step() : utf8Step(at => this.byteAt(at), this.byte)
 
 			this.byte += length
 			this.unit += units
@@ -106,56 +114,85 @@ class UnitWalker {
 		return this.byte
 	}
 
-	// A legacy character may decode to two units (GB18030 and Big5 HKSCS past the Basic Multilingual Plane, Big5's
-	// pointers that give two code points), so units are counted by decoding: a run of characters at a time, then one
-	// character at a time inside the run that holds the target.
-	private legacyTo(target: number): number {
-		const { bytes, encoding } = this
+	private byteAt(at: number): number | undefined {
+		for (const segment of this.segments) {
+			if (at >= segment.base && at < segment.base + segment.bytes.length) {
+				return segment.bytes[at - segment.base]
+			}
+		}
 
-		while (this.unit < target && this.byte < bytes.length) {
+		return undefined
+	}
+
+	// Bytes [from, to): a view inside one segment, a copy (of a character or so) across two.
+	private span(from: number, to: number): Uint8Array {
+		for (const segment of this.segments) {
+			if (from >= segment.base && to <= segment.base + segment.bytes.length) {
+				return segment.bytes.subarray(from - segment.base, to - segment.base)
+			}
+		}
+
+		const out = new Uint8Array(Math.max(0, Math.min(to, this.end) - from))
+
+		for (let index = 0; index < out.length; index++) out[index] = this.byteAt(from + index) ?? 0
+
+		return out
+	}
+
+	private segmentEnd(at: number): number {
+		const segment = this.segments.find(each => at >= each.base && at < each.base + each.bytes.length)
+
+		return segment === undefined ? this.end : segment.base + segment.bytes.length
+	}
+
+	private utf32Step(): [number, number] {
+		const bytes = this.span(this.byte, this.byte + 4)
+		const point = bytes.length < 4 ? 0 : new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, this.encoding.littleEndian)
+
+		return [4, point > 0xffff && point <= 0x10ffff ? 2 : 1]
+	}
+
+	// A legacy character may decode to two units (GB18030 and Big5 HKSCS past the Basic Multilingual Plane, Big5's
+	// pointers that give two code points), so units are counted by decoding: a run of characters inside one segment at a
+	// time, then one character at a time inside the run that holds the target.
+	private legacyTo(target: number): number {
+		const { encoding } = this
+		const charLength = (at: number): number => legacyCharLength(this.span(at, at + 2), 0, encoding.label)
+
+		while (this.unit < target && this.byte < this.end) {
+			const limit = Math.min(this.segmentEnd(this.byte), this.byte + LEGACY_RUN_BYTES)
 			let end = this.byte
 
-			while (end < bytes.length && end - this.byte < LEGACY_RUN_BYTES) end += legacyCharLength(bytes, end, encoding.label)
+			while (end < limit && end + charLength(end) <= limit) end += charLength(end)
 
-			const units = decodeSpan(bytes.subarray(this.byte, Math.min(end, bytes.length)), encoding).length
+			const units = end > this.byte ? decodeSpan(this.span(this.byte, end), encoding).length : 0
 
-			if (this.unit + units <= target) {
-				this.byte = Math.min(end, bytes.length)
+			if (end > this.byte && this.unit + units <= target) {
+				this.byte = end
 				this.unit += units
 
 				continue
 			}
 
-			while (this.unit < target && this.byte < end) {
-				const length = legacyCharLength(bytes, this.byte, encoding.label)
+			// The target is inside the run, or a character straddles two segments: one character at a time.
+			const stop = Math.max(end, this.byte + 1)
 
-				this.unit += decodeSpan(bytes.subarray(this.byte, this.byte + length), encoding).length
+			while (this.unit < target && this.byte < stop) {
+				const length = charLength(this.byte)
+
+				this.unit += decodeSpan(this.span(this.byte, this.byte + length), encoding).length
 				this.byte += length
 			}
 		}
 
 		return this.byte
 	}
-
-	// The next character's bytes and the units it decodes to.
-	private step(): [number, number] {
-		const { bytes, byte, encoding } = this
-
-		if (encoding.kind === "utf32") {
-			const point =
-				byte + 4 > bytes.length ? 0 : new DataView(bytes.buffer, bytes.byteOffset + byte, 4).getUint32(0, encoding.littleEndian)
-
-			return [4, point > 0xffff && point <= 0x10ffff ? 2 : 1]
-		}
-
-		return utf8Step(bytes, byte)
-	}
 }
 
-// One UTF-8 decoder step: a valid sequence, or the bytes one U+FFFD stands for (the maximal subpart of a sequence; the
-// byte that broke it starts the next step).
-function utf8Step(bytes: Uint8Array, at: number): [number, number] {
-	const lead = bytes[at] ?? 0
+// One UTF-8 decoder step at `at`: a valid sequence, or the bytes one U+FFFD stands for (the maximal subpart of a
+// sequence; the byte that broke it starts the next step).
+function utf8Step(byteAt: (at: number) => number | undefined, at: number): [number, number] {
+	const lead = byteAt(at) ?? 0
 	let needed: number
 	let lower = 0x80
 	let upper = 0xbf
@@ -177,7 +214,7 @@ function utf8Step(bytes: Uint8Array, at: number): [number, number] {
 	}
 
 	for (let seen = 1; seen <= needed; seen++) {
-		const next = bytes[at + seen]
+		const next = byteAt(at + seen)
 
 		if (next === undefined || next < lower || next > upper) {
 			return [seen, 1]
@@ -221,13 +258,16 @@ export interface SearchOptions {
 
 export type SearchEnd = "done" | "capped" | "stopped"
 
-function concat(head: Uint8Array, tail: Uint8Array): Uint8Array {
-	const out = new Uint8Array(head.length + tail.length)
+// Decodes stretches in order as one stream.
+function streamDecoder(encoding: PagerEncoding): (bytes: Uint8Array, last: boolean) => string {
+	if (encoding.kind === "utf32") {
+		// Stretches end on unit boundaries (the text starts on one, stretches are block-aligned): each decodes alone.
+		return bytes => decodeSpan(bytes.subarray(0, bytes.length - (bytes.length % 4)), encoding)
+	}
 
-	out.set(head)
-	out.set(tail, head.length)
+	const decoder = new TextDecoder(encoding.label, { ignoreBOM: true })
 
-	return out
+	return (bytes, last) => decoder.decode(bytes, { stream: !last })
 }
 
 // Fills `matches` with every match of `query` (no line breaks in it) from the text's start, in file order.
@@ -235,69 +275,83 @@ export async function searchText(options: SearchOptions): Promise<SearchEnd> {
 	const { source, encoding, query, matches, signal } = options
 	const pattern = searchPattern(query, options.caseSensitive)
 	const newline = String.fromCharCode(encoding.newline)
-	// Bytes before `at` not searched yet: a line's start, or a long line's last few units.
-	let carry: Uint8Array | null = null
-	let at = encoding.start
-	// Breaks before the stretch.
+	const decode = streamDecoder(encoding)
+	// The previous text's last units, where a match across the stretches may start, and the bytes they and a character
+	// the decoder still holds came from; breaks before them.
+	let carry = ""
+	let kept: Segment = { base: encoding.start, bytes: new Uint8Array(0) }
 	let lines = 0
 
-	while (at < source.size) {
-		if (signal.aborted) {
-			return "stopped"
+	for await (const { bytes, base } of readStretches(source, encoding.start, signal)) {
+		options.onBytes?.(bytes, base)
+
+		const last = base + bytes.length >= source.size
+		const text = decode(bytes, last)
+		const walker = new UnitWalker([kept, { base, bytes }], encoding)
+		// Units before `text`: the carry's.
+		const offset = carry.length
+		let counted = 0
+		let breaks = lines
+
+		const take = (index: number): boolean => {
+			breaks += countChar(text, newline, counted, Math.max(counted, index - offset))
+			counted = Math.max(counted, index - offset)
+
+			return matches.push(walker.to(index), breaks + 1)
 		}
 
-		const end = Math.min(source.size, (Math.floor(at / SCAN_BYTES) + 1) * SCAN_BYTES)
-		// Rejects once `signal` aborts.
-		const read = await source.scan(at, end, signal)
+		// Across the two stretches: matches starting in the carry, found in it joined to the text's first units.
+		if (carry.length > 0) {
+			const joined = carry + text.slice(0, query.length - 1)
 
-		options.onBytes?.(read, at)
+			for (const match of joined.matchAll(pattern)) {
+				if (match.index < offset && match.index + match[0].length > offset && !take(match.index)) {
+					return "capped"
+				}
+			}
+		}
 
-		const bytes: Uint8Array = carry === null ? read : concat(carry, read)
-		const base: number = at - (carry === null ? 0 : carry.length)
-		const last = end >= source.size
-		const lastBreak: number = last ? -1 : previousBreak(bytes, base, base, base + bytes.length, encoding)
-		const cut: number = last
-			? bytes.length
-			: lastBreak !== -1
-				? lastBreak - base + encoding.unit
-				: boundaryBefore(bytes, bytes.length, encoding)
-		const text = decodeSpan(bytes.subarray(0, cut), encoding)
-		const walker = new UnitWalker(bytes, encoding)
-		let counted = 0
-
-		pattern.lastIndex = 0
-
-		for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
-			lines += countChar(text, newline, counted, match.index)
-			counted = match.index
-
-			if (!matches.push(base + walker.to(match.index), lines + 1)) {
+		for (const match of text.matchAll(pattern)) {
+			if (!take(offset + match.index)) {
 				return "capped"
 			}
 		}
 
-		lines += countChar(text, newline, counted, text.length)
+		lines = breaks + countChar(text, newline, counted, text.length)
+
+		if (signal.aborted) {
+			return "stopped"
+		}
+
+		options.onProgress?.(base + bytes.length)
 
 		if (last) {
 			break
 		}
 
-		if (lastBreak !== -1) {
-			carry = bytes.slice(cut)
-		} else {
-			// The units a match across the cut could start in; never the low half of a surrogate pair.
-			let keep = Math.max(0, text.length - (query.length - 1))
+		// The units a match across the next stretch could start in; never the low half of a surrogate pair.
+		let keep = Math.max(0, text.length - (query.length - 1))
 
-			if (keep > 0 && keep < text.length && (text.charCodeAt(keep) & 0xfc00) === 0xdc00) {
-				keep--
-			}
-
-			carry = bytes.slice(walker.to(keep))
+		if (keep > 0 && keep < text.length && (text.charCodeAt(keep) & 0xfc00) === 0xdc00) {
+			keep--
 		}
 
-		at = end
-		options.onProgress?.(end)
+		const from = walker.to(offset + keep)
+
+		carry = text.slice(keep)
+		kept = { base: from, bytes: from >= base ? bytes.slice(from - base) : concatTail(kept, bytes, from) }
 	}
 
 	return matches.capped ? "capped" : "done"
+}
+
+// Bytes from `from` (inside the kept bytes) to the stretch's end: only when a query outlasts a whole stretch's text.
+function concatTail(kept: Segment, bytes: Uint8Array, from: number): Uint8Array {
+	const head = kept.bytes.subarray(from - kept.base)
+	const out = new Uint8Array(head.length + bytes.length)
+
+	out.set(head)
+	out.set(bytes, head.length)
+
+	return out
 }

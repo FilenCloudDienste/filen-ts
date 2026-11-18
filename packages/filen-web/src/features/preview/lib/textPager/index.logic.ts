@@ -10,8 +10,9 @@ export const CHECKPOINT_LINES = 4096
 export const CHECKPOINT_BYTES = BLOCK_BYTES
 export const MAX_CHECKPOINTS = 65_536
 
-// What a scan reads at a time, block-aligned so every block is downloaded once: two of them, one request.
-export const SCAN_BYTES = 2 * BLOCK_BYTES
+// What a scan reads at a time, block-aligned so every block is downloaded once. With one more in flight ahead, a scan
+// holds two of them besides the cache.
+export const SCAN_BYTES = BLOCK_BYTES
 
 // The breaks in bytes[from, to) (file offsets; `bytes` start at `base`).
 export function countBreaks(bytes: Uint8Array, base: number, from: number, to: number, encoding: PagerEncoding): number {
@@ -63,8 +64,47 @@ export function stretchEnd(at: number, size: number): number {
 	return Math.min(size, (Math.floor(at / SCAN_BYTES) + 1) * SCAN_BYTES)
 }
 
-// Counts lines from the frontier until `done` or the file's end, a block-aligned stretch at a time; `onProgress` hears
-// how far it has read.
+// The file's block-aligned stretches from `from` to its end, in order, with the next one's read in flight while one is
+// used. Stopping early calls off that read; `signal` calls off both.
+export async function* readStretches(
+	source: PagerScanSource,
+	from: number,
+	signal: AbortSignal
+): AsyncGenerator<{ readonly bytes: Uint8Array; readonly base: number }, void, undefined> {
+	const ahead = new AbortController()
+	const both = AbortSignal.any([signal, ahead.signal])
+	const read = (at: number): Promise<Uint8Array> | null => {
+		if (at >= source.size) {
+			return null
+		}
+
+		const pending = source.scan(at, stretchEnd(at, source.size), both)
+
+		// A read ahead nobody waits for (stopped early) must not surface.
+		pending.catch(() => undefined)
+
+		return pending
+	}
+	let at = from
+	let next = read(at)
+
+	try {
+		while (next !== null) {
+			const current = next
+			const base = at
+
+			at = stretchEnd(at, source.size)
+			next = read(at)
+
+			yield { bytes: await current, base }
+		}
+	} finally {
+		ahead.abort()
+	}
+}
+
+// Counts lines from the frontier until `done` or the file's end, a block-aligned stretch at a time with the next in
+// flight; `onProgress` hears how far it has read.
 export async function countLines(
 	index: LineIndex,
 	source: PagerScanSource,
@@ -72,18 +112,25 @@ export async function countLines(
 	signal: AbortSignal,
 	onProgress: (scanned: number) => void
 ): Promise<void> {
-	while (!index.complete && !done(index) && !signal.aborted) {
-		const at = index.frontier
-		const end = stretchEnd(at, source.size)
+	const finished = (): boolean => index.complete || done(index) || signal.aborted
 
-		index.feed(await source.scan(at, end, signal), at)
+	if (finished()) {
+		return
+	}
+
+	for await (const { bytes, base } of readStretches(source, index.frontier, signal)) {
+		index.feed(bytes, base)
 
 		// The frontier reaches every stretch's end; a scan that made none would never end.
-		if (index.frontier <= at) {
-			throw new Error(`line count stuck at ${String(at)}`)
+		if (index.frontier < base + bytes.length) {
+			throw new Error(`line count stuck at ${String(index.frontier)}`)
 		}
 
-		onProgress(end)
+		onProgress(base + bytes.length)
+
+		if (finished()) {
+			return
+		}
 	}
 }
 
