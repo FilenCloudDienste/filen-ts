@@ -23,7 +23,18 @@ const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF] = FIXTURE_FILES["rich-model
 const [LONE_OBJ] = FIXTURE_FILES["rich-models-lone"]
 const [MODELS_ZIP, MODELS_LOCKED_ZIP] = FIXTURE_FILES["rich-models-archive"]
 const [PLAN_DXF] = FIXTURE_FILES["rich-cad"]
-const [DICOM_CT, DICOM_CINE, DICOM_JLS, DICOM_J2K, DICOM_COLOR, DICOM_DEFLATE] = FIXTURE_FILES["rich-dicom"]
+const [
+	DICOM_CT,
+	DICOM_CINE,
+	DICOM_JLS,
+	DICOM_J2K,
+	DICOM_COLOR,
+	DICOM_DEFLATE,
+	DICOM_HTJ2K,
+	DICOM_LOSSLESS,
+	DICOM_PALETTE,
+	DICOM_BIG_ENDIAN
+] = FIXTURE_FILES["rich-dicom"]
 
 async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
@@ -394,12 +405,17 @@ test("a DICOM image is drawn in a worker, its frames stepped and played, its tag
 	await dialog.getByRole("button", { name: "Pause", exact: true }).click()
 	await closePreview(page)
 
-	// The compressed frames (JPEG-LS, JPEG 2000, a colour baseline JPEG) and a deflated data set.
+	// The compressed frames (JPEG-LS, JPEG 2000, HTJ2K, lossless JPEG, a colour baseline JPEG), a deflated data set, a
+	// palette and a big-endian CT.
 	for (const [name, summary] of [
 		[DICOM_JLS, "MR · 96×96"],
 		[DICOM_J2K, "MR · 96×96"],
+		[DICOM_HTJ2K, "MR · 96×96"],
+		[DICOM_LOSSLESS, "MR · 96×96"],
 		[DICOM_COLOR, "XC · 96×96"],
-		[DICOM_DEFLATE, "CT · 128×128"]
+		[DICOM_DEFLATE, "CT · 128×128"],
+		[DICOM_PALETTE, "US · 64×64"],
+		[DICOM_BIG_ENDIAN, "CT · 128×128"]
 	] as const) {
 		await itemRow(listbox, name).dblclick()
 		await expectDicomImage(dialog, summary)

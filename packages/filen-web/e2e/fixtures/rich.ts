@@ -6,7 +6,18 @@ import { appDatabase, walDatabase } from "./richSqlite"
 import { RICH_GEO_JSON, RICH_GEO_KML, placesKmz, rideGpx } from "./richGeo"
 import { RICH_MODELS_PASSWORD, checkerPng, cubeStl, meshMtl, meshObj, modelGlb, modelsZip, print3mf } from "./richModels"
 import { planDxf } from "./richCad"
-import { richCine, richColor, richCt, richDeflate, richJ2k, richJls } from "./richDicom"
+import {
+	richBigEndian,
+	richCine,
+	richColor,
+	richCt,
+	richDeflate,
+	richHtj2k,
+	richJ2k,
+	richJls,
+	richLossless,
+	richPalette
+} from "./richDicom"
 import { scenarioModule } from "./scenarios"
 
 // The rich viewers' files (preview-rich.spec.ts): fonts from the office package's own assets, SQLite databases written
@@ -34,8 +45,20 @@ export const RICH_SCENARIOS = scenarioModule(
 		// The OBJ trio as archive entries, its texture in a subdirectory; the second archive encrypted.
 		"rich-models-archive": ["rich-models.zip", "rich-models-locked.zip"],
 		"rich-cad": ["rich-plan.dxf"],
-		// A CT (native, signed 12 in 16), an RLE cine, JPEG-LS, JPEG 2000, a colour baseline JPEG and a deflated CT.
-		"rich-dicom": ["rich-ct.dcm", "rich-cine.dcm", "rich-jls.dcm", "rich-j2k.dcm", "rich-color.dcm", "rich-deflate.dcm"]
+		// A CT (native, signed 12 in 16), an RLE cine, JPEG-LS, JPEG 2000, a colour baseline JPEG, a deflated CT, HTJ2K,
+		// lossless JPEG, PALETTE COLOR and a big-endian CT.
+		"rich-dicom": [
+			"rich-ct.dcm",
+			"rich-cine.dcm",
+			"rich-jls.dcm",
+			"rich-j2k.dcm",
+			"rich-color.dcm",
+			"rich-deflate.dcm",
+			"rich-htj2k.dcm",
+			"rich-lossless.dcm",
+			"rich-palette.dcm",
+			"rich-big-endian.dcm"
+		]
 	},
 	() => ({
 		"rich-font.ttf": { generate: () => gunzipSync(readFileSync(`${FONTS}Arimo-Regular.ttf.gz`)) },
@@ -70,6 +93,10 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-jls.dcm": { generate: richJls },
 		"rich-j2k.dcm": { generate: richJ2k },
 		"rich-color.dcm": { generate: richColor },
-		"rich-deflate.dcm": { generate: richDeflate }
+		"rich-deflate.dcm": { generate: richDeflate },
+		"rich-htj2k.dcm": { generate: richHtj2k },
+		"rich-lossless.dcm": { generate: richLossless },
+		"rich-palette.dcm": { generate: richPalette },
+		"rich-big-endian.dcm": { generate: richBigEndian }
 	})
 )
