@@ -149,6 +149,10 @@ jobs:
       group: filen-shared-tests-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
+    env:
+      # The tests' time bounds are set on developer machines; these runners' CPUs are slower. A complexity
+      # regression still exceeds the scaled bounds.
+      FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -341,9 +345,66 @@ jobs:
         with:
           path: ~/.cache/electron
           key: ${{ steps.electron-cache.outputs.cache-primary-key }}
+      # Under Xvfb the Electron utilityProcess case of nativeTransfersAddon.test.ts runs, not skips. Electron's sandbox
+      # needs unprivileged user namespaces, which Ubuntu 24.04 restricts through AppArmor.
+      - name: Prepare the display
+        run: |
+          sudo apt-get ${APT_NET} update
+          sudo apt-get ${APT_NET} install --yes --no-install-recommends xvfb
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Test
         working-directory: packages/filen-desktop
-        run: pnpm test
+        run: xvfb-run --auto-servernum pnpm test
+  # The suites that load the shipped macOS code: the Swift addon, built here, and the sync addon in Electron.
+  test-desktop-macos:
+    needs: changes
+    if: needs.changes.outputs.filen-desktop == 'true' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: filen-desktop-macos-tests-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # The release's Xcode, so the addon is built by the compiler that ships it.
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: '26.5'
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Identify the Electron release
+        id: electron
+        run: echo "version=$(node -p "require('./packages/filen-desktop/package.json').dependencies?.electron ?? require('./packages/filen-desktop/package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
+      - name: Restore the Electron download
+        id: electron-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
+      - name: Install dependencies
+        working-directory: packages/filen-desktop
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Save the Electron download
+        if: steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
+      - name: Build the macOS addon
+        working-directory: packages/filen-desktop
+        run: node scripts/buildMacAddon.ts --dev
+      # With CI set both suites fail rather than skip when the addon or Electron is missing.
+      - name: Test
+        working-directory: packages/filen-desktop
+        run: pnpm exec vitest run src/tests/macAddonLoad.test.ts src/tests/nativeTransfersAddon.test.ts
   test-mobile:
     needs: changes
     if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
