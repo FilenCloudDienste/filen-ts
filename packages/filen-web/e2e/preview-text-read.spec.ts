@@ -386,8 +386,8 @@ test("a notebook shows its cells, highlighted code and outputs, and loads nothin
 	await expect(dialog.getByText("In [4]:", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(dialog.getByRole("heading", { name: "E2E notebook" })).toBeVisible()
 	await expect(dialog.getByText(NOTEBOOK_STREAM_TEXT)).toBeVisible()
-	// Highlighted as the editor would: the keyword is a span of its own.
-	await expect(dialog.locator("pre.fo-code-static span", { hasText: "def" })).toHaveCount(1)
+	// Highlighted as the editor would (near the viewport, on idle): the keyword is a span of its own.
+	await expect(dialog.locator("pre code.fo-code-static span", { hasText: "def" })).toHaveCount(1)
 	await expect(dialog.locator('img[src^="blob:"]')).toHaveCount(1)
 
 	const frame = page.frameLocator('iframe[title="HTML output"]')
