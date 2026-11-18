@@ -483,6 +483,29 @@ describe("the tags", () => {
 		expect(tagLevel(header.dataSet, [series?.index ?? -1, 1], decoder).rows[0]).toMatchObject({ tag: "(0020,000E)", value: "1.2.4" })
 	})
 
+	it("reads an implicit VR value whose dictionary entry allows US or SS by Pixel Representation", () => {
+		const int16 = (value: number) => new Uint8Array(Int16Array.of(value).buffer)
+		const rows = (signed: boolean) => {
+			const file = dicomFile({
+				transferSyntax: IMPLICIT_LE,
+				elements: [
+					us(0x00280103, signed ? 1 : 0),
+					binary(0x00280106, "SS", int16(-5)),
+					us(0x00281101, 256, 0, 16),
+					binary(0x00281201, "OW", new Uint8Array(4))
+				]
+			})
+			const header = readHeader(memorySource(file), { decodeBytes: DECODE })
+
+			return new Map(tagLevel(header.dataSet, [], textOf(header.dataSet, null)).rows.map(row => [row.tag, row]))
+		}
+
+		expect(rows(true).get("(0028,0106)")).toMatchObject({ vr: "SS", value: "-5" })
+		expect(rows(false).get("(0028,0106)")).toMatchObject({ vr: "US", value: "65531" })
+		expect(rows(false).get("(0028,1101)")).toMatchObject({ vr: "US", value: "256\\0\\16" })
+		expect(rows(false).get("(0028,1201)")).toMatchObject({ vr: "OW", value: null })
+	})
+
 	it("reads an item's text by its own character set, else its parent's", () => {
 		const latin = Uint8Array.from([0x4d, 0xfc, 0x6c, 0x6c, 0x65, 0x72])
 		const file = dicomFile({

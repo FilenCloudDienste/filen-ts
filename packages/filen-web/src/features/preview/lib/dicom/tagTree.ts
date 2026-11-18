@@ -79,12 +79,20 @@ export function textOf(dataSet: DataSet, parent: DicomText | null): DicomText {
 	return declared === undefined && parent !== null ? parent : dicomText(declared)
 }
 
-function vrOf(element: Element): string {
+// An element's VR: the file's own (explicit VR), else the dictionary's. Where the dictionary allows more than one, US
+// or SS follows Pixel Representation (the values the pixels hold, PS3.5 A.1) and any other takes its first.
+function vrOf(element: Element, signed: boolean): string {
 	if (element.vr !== undefined) return element.vr
 
 	const entry = dictionaryEntry(element.tag)
 
-	return entry === null ? "UN" : entry.vr
+	if (entry === null) return "UN"
+
+	const alternatives = entry.vr.split("/")
+
+	if (alternatives.includes("US") && alternatives.includes("SS")) return signed ? "SS" : "US"
+
+	return alternatives[0] ?? "UN"
 }
 
 function held(dataSet: DataSet, element: Element): boolean {
@@ -162,8 +170,8 @@ function valueOf(dataSet: DataSet, element: Element, vr: string, text: DicomText
 	return null
 }
 
-function elementRow(dataSet: DataSet, element: Element, text: DicomText): DicomTagRow {
-	const vr = vrOf(element)
+function elementRow(dataSet: DataSet, element: Element, text: DicomText, signed: boolean): DicomTagRow {
+	const vr = vrOf(element, signed)
 	const isPrivate = isPrivateTag(element.tag)
 	const entry = isPrivate ? null : dictionaryEntry(element.tag)
 
@@ -187,6 +195,7 @@ function sortedElements(dataSet: DataSet): Element[] {
 export function tagLevel(root: DataSet, path: readonly number[], rootText: DicomText): DicomTagLevel {
 	let dataSet: DataSet = root
 	let text = rootText
+	const signed = root.elements["x00280103"] !== undefined && root.uint16("x00280103") === 1
 	let items: Element[] | null = null
 
 	for (const index of path) {
@@ -225,7 +234,7 @@ export function tagLevel(root: DataSet, path: readonly number[], rootText: Dicom
 	const elements = sortedElements(dataSet)
 
 	return {
-		rows: elements.slice(0, TAG_ROWS_MAX).map(element => elementRow(dataSet, element, text)),
+		rows: elements.slice(0, TAG_ROWS_MAX).map(element => elementRow(dataSet, element, text, signed)),
 		more: Math.max(0, elements.length - TAG_ROWS_MAX)
 	}
 }
