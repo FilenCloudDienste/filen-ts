@@ -7,7 +7,7 @@ import {
 	MERMAID_TIMEOUT_MS,
 	MermaidHost,
 	mermaidFrameDocument,
-	mermaidSvgBlob,
+	mermaidSvgUrl,
 	type MermaidOutcome
 } from "@/features/preview/lib/mermaidFrame"
 import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
@@ -87,18 +87,18 @@ describe("the diagram frame's document", () => {
 	})
 })
 
-describe("mermaidSvgBlob", () => {
-	it("takes an SVG document's root within the size cap, and nothing else", async () => {
-		const blob = mermaidSvgBlob(SVG)
+describe("mermaidSvgUrl", () => {
+	it("takes an SVG document's root within the size cap as a data: URL (never a blob: URL of the app's origin), and nothing else", () => {
+		const url = mermaidSvgUrl(SVG)
 
-		expect(blob?.type).toBe("image/svg+xml")
-		expect(await blob?.text()).toBe(SVG)
-		expect(mermaidSvgBlob(`\n  ${SVG}`)).not.toBeNull()
-		expect(mermaidSvgBlob('<html><svg xmlns="http://www.w3.org/2000/svg"></svg></html>')).toBeNull()
-		expect(mermaidSvgBlob("<svgx></svgx>")).toBeNull()
-		expect(mermaidSvgBlob(`<svg>${"x".repeat(MERMAID_MAX_SVG_BYTES)}</svg>`)).toBeNull()
+		expect(url?.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true)
+		expect(decodeURIComponent(url?.slice("data:image/svg+xml;charset=utf-8,".length) ?? "")).toBe(SVG)
+		expect(mermaidSvgUrl(`\n  ${SVG}`)).not.toBeNull()
+		expect(mermaidSvgUrl('<html><svg xmlns="http://www.w3.org/2000/svg"></svg></html>')).toBeNull()
+		expect(mermaidSvgUrl("<svgx></svgx>")).toBeNull()
+		expect(mermaidSvgUrl(`<svg>${"x".repeat(MERMAID_MAX_SVG_BYTES)}</svg>`)).toBeNull()
 		// Characters under the cap, bytes over it.
-		expect(mermaidSvgBlob(`<svg>${"é".repeat(MERMAID_MAX_SVG_BYTES / 2)}</svg>`)).toBeNull()
+		expect(mermaidSvgUrl(`<svg>${"é".repeat(MERMAID_MAX_SVG_BYTES / 2)}</svg>`)).toBeNull()
 	})
 })
 
@@ -142,7 +142,7 @@ describe("MermaidHost", () => {
 		const result = await outcome
 
 		expect(result.kind).toBe("svg")
-		expect(result.kind === "svg" ? await result.svg.text() : null).toBe(SVG)
+		expect(result.kind === "svg" ? result.url : null).toBe(mermaidSvgUrl(SVG))
 	})
 
 	it("refuses an answer that is not an SVG picture", async () => {

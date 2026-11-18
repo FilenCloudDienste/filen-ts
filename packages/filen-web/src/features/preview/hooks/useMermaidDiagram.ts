@@ -10,7 +10,7 @@ export type MermaidDiagramState =
 	| { readonly status: "refused" }
 	| { readonly status: "tooComplex" }
 	| { readonly status: "failed" }
-	| { readonly status: "svg"; readonly svg: Blob }
+	| { readonly status: "svg"; readonly url: string }
 
 // A viewer's diagram scope, released when the viewer goes.
 export function useMermaidScope(): MermaidScope {
@@ -69,5 +69,5 @@ export function useMermaidDiagram(scope: MermaidScope | null, text: string, enab
 		return { status: "pending" }
 	}
 
-	return result.outcome.kind === "svg" ? { status: "svg", svg: result.outcome.svg } : { status: result.outcome.kind }
+	return result.outcome.kind === "svg" ? { status: "svg", url: result.outcome.url } : { status: result.outcome.kind }
 }

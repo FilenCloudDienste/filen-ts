@@ -71,7 +71,7 @@ beforeEach(() => {
 	vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:diagram", revokeObjectURL: () => undefined }))
 	renderSpy = vi
 		.spyOn(MermaidHost.prototype, "render")
-		.mockResolvedValue({ kind: "svg", svg: new Blob([SVG], { type: "image/svg+xml" }) })
+		.mockResolvedValue({ kind: "svg", url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SVG)}` })
 })
 
 afterEach(() => {
@@ -101,6 +101,8 @@ describe("Mermaid fences in the file preview", () => {
 
 		const image = await screen.findByRole("img", { name: "Mermaid diagram" })
 
+		// A data: URL, never a blob: URL of the app's origin.
+		expect(image.getAttribute("src")?.startsWith("data:image/svg+xml")).toBe(true)
 		// Out of the flow until it has loaded: the placeholder keeps its place till then.
 		expect(image.className).toContain("absolute")
 		expect(screen.getByRole("status")).toBeTruthy()

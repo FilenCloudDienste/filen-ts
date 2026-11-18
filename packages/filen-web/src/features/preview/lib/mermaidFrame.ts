@@ -17,7 +17,9 @@ import type { MermaidJob, MermaidTheme } from "@/mermaidFrame/config"
 export const MERMAID_TIMEOUT_MS = 5000
 export const MERMAID_MAX_SVG_BYTES = 10 * 1024 * 1024
 
-export type MermaidOutcome = { readonly kind: "svg"; readonly svg: Blob } | { readonly kind: "failed" } | { readonly kind: "tooComplex" }
+// `url`: the drawing as a data: URL (an opened "image in a new tab" is then an opaque-origin document, never one of the
+// app's origin, as a blob: URL minted by the page would be).
+export type MermaidOutcome = { readonly kind: "svg"; readonly url: string } | { readonly kind: "failed" } | { readonly kind: "tooComplex" }
 
 const FrameMessage = type({ ready: "true" }).or({ id: "number", svg: "string" }).or({ id: "number", error: "'failed' | 'tooComplex'" })
 
@@ -40,15 +42,14 @@ export function mermaidFrameDocument(scriptUrl: string): string {
 	)
 }
 
-// The frame's answer as a picture: an SVG document's root, within the size cap. Anything else is not shown.
-export function mermaidSvgBlob(svg: string): Blob | null {
-	if (svg.length > MERMAID_MAX_SVG_BYTES || !SVG_ROOT.test(svg)) {
+// The frame's answer as a picture: an SVG document's root, within the size cap, as a data: URL. Anything else is not
+// shown.
+export function mermaidSvgUrl(svg: string): string | null {
+	if (svg.length > MERMAID_MAX_SVG_BYTES || !SVG_ROOT.test(svg) || new TextEncoder().encode(svg).length > MERMAID_MAX_SVG_BYTES) {
 		return null
 	}
 
-	const blob = new Blob([svg], { type: "image/svg+xml" })
-
-	return blob.size > MERMAID_MAX_SVG_BYTES ? null : blob
+	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
 interface Frame {
@@ -168,9 +169,9 @@ export class MermaidHost {
 				return
 			}
 
-			const svg = mermaidSvgBlob(message.svg)
+			const url = mermaidSvgUrl(message.svg)
 
-			this.pending.settle(svg === null ? { kind: "failed" } : { kind: "svg", svg })
+			this.pending.settle(url === null ? { kind: "failed" } : { kind: "svg", url })
 		}
 		// The frame's document loads once; a second load is the frame navigating itself.
 		const onLoad = (): void => {

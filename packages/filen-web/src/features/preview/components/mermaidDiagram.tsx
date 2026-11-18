@@ -2,10 +2,9 @@ import { useContext, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { MarkdownPre } from "@/features/preview/components/markdownRenderer"
-import { BlobImage } from "@/features/preview/components/zoomableImage"
+import { ZoomableImage } from "@/features/preview/components/zoomableImage"
 import { useMermaidDiagram, useMermaidScope, type MermaidDiagramState } from "@/features/preview/hooks/useMermaidDiagram"
 import { MERMAID_AUTO_RENDER_LIMIT, MermaidScopeContext } from "@/features/preview/lib/mermaidScope"
-import { useObjectUrl } from "@/lib/useObjectUrl"
 
 // Mermaid diagrams as the preview shows them: a markdown file's fences (drawn when they come near, the first 50 of a
 // document on their own and the rest on request) and a .mmd file's one diagram, zoomable.
@@ -68,26 +67,23 @@ function Rendering({ source }: { source: string }) {
 	)
 }
 
-function InlineSvg({ svg, source }: { svg: Blob; source: string }) {
+function InlineSvg({ url, source }: { url: string; source: string }) {
 	const { t } = useTranslation("preview")
-	const url = useObjectUrl(svg)
 	const [loaded, setLoaded] = useState(false)
 
 	return (
 		<div className="relative">
 			{loaded ? null : <Rendering source={source} />}
-			{url === null ? null : (
-				<img
-					src={url}
-					alt={t("previewMermaidAlt")}
-					draggable={false}
-					onLoad={() => {
-						setLoaded(true)
-					}}
-					// Laid out only once loaded: until then the placeholder holds its place.
-					className={loaded ? "mb-3 h-auto max-w-full" : "pointer-events-none absolute top-0 left-0 h-auto max-w-full opacity-0"}
-				/>
-			)}
+			<img
+				src={url}
+				alt={t("previewMermaidAlt")}
+				draggable={false}
+				onLoad={() => {
+					setLoaded(true)
+				}}
+				// Laid out only once loaded: until then the placeholder holds its place.
+				className={loaded ? "mb-3 h-auto max-w-full" : "pointer-events-none absolute top-0 left-0 h-auto max-w-full opacity-0"}
+			/>
 		</div>
 	)
 }
@@ -164,7 +160,7 @@ export function MermaidFence({ source, ordinal: ownOrdinal }: { source: string; 
 		<div ref={ref}>
 			{state.status === "svg" ? (
 				<InlineSvg
-					svg={state.svg}
+					url={state.url}
 					source={source}
 				/>
 			) : (
@@ -185,8 +181,8 @@ export function MermaidFileDiagram({ source }: { source: string }) {
 
 	if (state.status === "svg") {
 		return (
-			<BlobImage
-				blob={state.svg}
+			<ZoomableImage
+				url={state.url}
 				alt={t("previewMermaidAlt")}
 			/>
 		)

@@ -339,12 +339,12 @@ test("Mermaid diagrams draw in their frame and nothing they name is ever fetched
 	// The frame's first start parses mermaid: drawn within the viewer budget.
 	await expect(surface.getByRole("img", { name: "Mermaid diagram" })).toHaveCount(MERMAID_DRAWN, { timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(surface.getByText("This diagram uses images or links, which previews don't load.")).toHaveCount(MERMAID_REFUSED)
-	// Each drawing is a picture of the frame's SVG, never markup in the page.
+	// Each drawing is a picture of the frame's SVG (a data: URL), never markup in the page.
 	expect(
 		await surface
 			.getByRole("img", { name: "Mermaid diagram" })
 			.evaluateAll(images => images.map(image => image.getAttribute("src")?.slice(0, 5)))
-	).toEqual(Array.from({ length: MERMAID_DRAWN }, () => "blob:"))
+	).toEqual(Array.from({ length: MERMAID_DRAWN }, () => "data:"))
 	await expect(surface.locator("svg foreignObject")).toHaveCount(0)
 
 	await surface.getByRole("button", { name: "Show source" }).first().click()
