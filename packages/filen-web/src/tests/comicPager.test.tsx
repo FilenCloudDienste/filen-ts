@@ -19,6 +19,7 @@ vi.mock("@/lib/sdk/client", () => {
 		sdkApi: {
 			openArchiveReader: () => Promise.resolve(),
 			closeArchiveReader: () => Promise.resolve(),
+			archiveReaderHeldBytes: () => Promise.resolve(0),
 			leaseArchiveEntry: (id: string, _reader: string, plan: EntryReadPlan) => {
 				leases.set(id, plan)
 

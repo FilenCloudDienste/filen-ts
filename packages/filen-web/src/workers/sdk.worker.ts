@@ -148,7 +148,7 @@ import {
 } from "@/workers/searchEngine"
 import { createListBatcher } from "@/workers/archiveListPacker"
 import { createArchiveReaders } from "@/workers/archiveReaders"
-import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
+import { readAheadBudget, type EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import { readAudioMetadata as parseAudioMetadata, type AudioMetadataDeps, type AudioMetadataResult } from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
@@ -963,6 +963,10 @@ function requireClient(): Client {
 // the injectClient case, which can adopt a new client without an explicit logout ever running.
 function adoptClient(next: Client): void {
 	freeSocketListener() // a listener bound to the outgoing client must not outlive it
+	// Archive readers and their leases name the outgoing account's archives.
+	clearEntryReaders()
+	entryLeaseReaders.clear()
+	archiveReaders.clear()
 	client?.free()
 	client = next
 	clearDirectoryCache()
@@ -990,6 +994,7 @@ function detachClient(): Client | null {
 	videoIndexUnsubscribe = null
 	// Archive readers name archives this session opened.
 	clearEntryReaders()
+	entryLeaseReaders.clear()
 	archiveReaders.clear()
 	return prev
 }
@@ -1057,8 +1062,12 @@ const archiveReaders = createArchiveReaders({
 
 			throw e
 		}
-	}
+	},
+	aheadBudget: () => readAheadBudget(clientConfig.archiveRetainedBudget)
 })
+
+// The reader each entry lease reads through, by lease id.
+const entryLeaseReaders = new Map<string, string>()
 
 // The anon sibling of withUnauth for the public-link (linked-item) surface: runs an op against an
 // UnauthClient, but PREFERS the live authed session's getUnauthed() when a visitor happens to be
@@ -3141,15 +3150,17 @@ const api = {
 	closeArchiveReader(id: string): void {
 		archiveReaders.close(id)
 	},
+	// What the reader holds decoded ahead: above a little, the page closes it at once rather than let it linger.
+	archiveReaderHeldBytes(id: string): number {
+		return archiveReaders.heldBytes(id)
+	},
 	// One entry of the reader `readerId`, read whole as `plan` says, named by the origins `id` builds; `events` hears
-	// its reads (a Comlink proxy).
+	// its reads (a Comlink proxy). On a closed reader its reads fail as cancelled.
 	leaseArchiveEntry(id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents): void {
-		const anon = archiveReaders.anon(readerId)
+		const anon = archiveReaders.anon(readerId) ?? false
 
-		if (anon === undefined) {
-			throw new Error("archive reader is closed")
-		}
-
+		entryLeaseReaders.set(id, readerId)
+		archiveReaders.lease(readerId)
 		registerEntryReader(id, {
 			anon,
 			read: (entry, size, signal) =>
@@ -3174,7 +3185,14 @@ const api = {
 		})
 	},
 	releaseArchiveEntry(id: string): void {
+		const readerId = entryLeaseReaders.get(id)
+
+		entryLeaseReaders.delete(id)
 		releaseEntryReader(id)
+
+		if (readerId !== undefined) {
+			archiveReaders.unlease(readerId)
+		}
 	},
 	// The origin calls below take the asking surface's `access` and refuse, a second time after the page, an origin a
 	// public link's surface may not read.

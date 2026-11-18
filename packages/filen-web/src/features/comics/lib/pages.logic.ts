@@ -11,10 +11,6 @@ import { IMAGE_FORMATS } from "@/features/preview/lib/imageFormat"
 export type ComicLayout = "single" | "spread"
 export type ComicDirection = "ltr" | "rtl"
 
-// Above this much of the archive in one solid block, every page past the first would decode most of it: the comic is
-// extracted to read (owner decision E3; measured, never lowered without the owner).
-export const COMIC_SOLID_BLOCK_MAX_BYTES = 512 * 1024 * 1024
-
 // An entry's path from the archive's root.
 function pathOf(store: EntryStore, slot: number): string {
 	const dir = store.dirPath(store.parent(slot))
@@ -39,14 +35,14 @@ export function comicPages(store: EntryStore): number[] {
 	return pages.map(page => page.slot)
 }
 
-// The largest solid block a page lies in, by the archive bytes reaching its last page (estimatedPackedBytes); 0 when
-// no page is in one.
+// The largest solid block a page lies in, in archive bytes; 0 when no page is in one. Above SOLID_BLOCK_READ_MAX_BYTES
+// the comic is extracted to read (E3).
 export function largestSolidBlock(store: EntryStore, pages: readonly number[]): number {
 	let largest = 0
 
 	for (const slot of pages) {
 		if (accessOfFlags(store.flags(slot)) === ENTRY_ACCESS.solidBlock) {
-			largest = Math.max(largest, store.solidEstimated(slot))
+			largest = Math.max(largest, store.solidBlock(slot))
 		}
 	}
 

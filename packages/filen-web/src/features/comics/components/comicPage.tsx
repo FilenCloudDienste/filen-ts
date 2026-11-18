@@ -4,6 +4,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
+import { entryReadPlan } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { PreviewByteOriginProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
@@ -13,6 +14,8 @@ export interface ComicPageProps {
 	store: EntryStore
 	slot: number
 	password: string | undefined
+	// The session accepted a solid cost: a solid block's page reads the pages after it ahead.
+	readAhead: boolean
 	// The page's image turned out wider than tall: a two-page scan, shown alone in a spread.
 	onLandscape: () => void
 	// Its checksum proved the password it was read with.
@@ -23,14 +26,14 @@ export interface ComicPageProps {
 
 // One page of a comic: W2's image viewer over the page's entry, read through a lease on the archive's reader (the
 // listing's own, for its password), cached like a file's under the entry's key.
-export function ComicPage({ source, store, slot, password, onLandscape, onVerified, onFailed, onCancelWait }: ComicPageProps) {
+export function ComicPage({ source, store, slot, password, readAhead, onLandscape, onVerified, onFailed, onCancelWait }: ComicPageProps) {
 	const [leaseBase] = useState(() => crypto.randomUUID())
 	const [waiting, setWaiting] = useState(false)
 	const container = useRef<HTMLDivElement>(null)
 	const leaseId = `${leaseBase}:${String(slot)}:${password ?? ""}`
-	const origin = entryLeaseOrigin(leaseId, source.file, source.anon, store, slot)
+	const origin = entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot))
 	const item = archiveEntryItem(source.uuid, store.index(slot), store.name(slot), store.size(slot), store.modified(slot))
-	const leaseRequest = useEffectEvent(() => ({ store, slot, password }))
+	const leaseRequest = useEffectEvent(() => ({ plan: entryReadPlan(store, slot, readAhead), password }))
 	const phase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
 	})
@@ -47,8 +50,7 @@ export function ComicPage({ source, store, slot, password, onLandscape, onVerifi
 			file: source.file,
 			anon: source.anon,
 			password: request.password,
-			store: request.store,
-			slot: request.slot,
+			plan: request.plan,
 			events: {
 				phase: next => {
 					phase(next === "waitingForWorker")

@@ -803,10 +803,10 @@ export const preview = {
 	/** Solid archive cost dialog title (a solid 7z or RAR, a compressed tarball) — opening or saving one file means reading the files stored before it first; asked once while the archive is open */
 	previewArchiveEntryCostTitle: "Read part of the archive first?",
 	/** Solid archive cost dialog body, opening; {{name}} is the file, {{download}} roughly how much of the archive is downloaded, {{skipped}} how much of the files stored before it is decoded and thrown away. Later files are not asked about again while the archive stays open */
-	previewArchiveEntryCostOpenBody:
+	previewArchiveEntryCostOnceOpenBody:
 		"This archive stores its files together. Opening “{{name}}” downloads about {{download}} of it and unpacks {{skipped}} of the files stored before it. Files further in cost more. You won't be asked again while this archive is open.",
 	/** Solid archive cost dialog body, saving; same placeholders as the opening one */
-	previewArchiveEntryCostDownloadBody:
+	previewArchiveEntryCostOnceDownloadBody:
 		"This archive stores its files together. Saving “{{name}}” downloads about {{download}} of it and unpacks {{skipped}} of the files stored before it. Files further in cost more. You won't be asked again while this archive is open.",
 	/** Solid archive cost dialog — opens the file anyway */
 	previewArchiveEntryCostOpen: "Open",
@@ -834,6 +834,8 @@ export const preview = {
 	previewComicSpread: "Two-page spread",
 	/** Comic reader — toggle reading right to left (manga) */
 	previewComicRightToLeft: "Right to left",
+	/** Toast — the file lies in a solid block of the archive too large to read it from here (above 512 MiB); {{name}} is the file */
+	previewArchiveEntryExtractToRead: "“{{name}}” is packed with too much of the archive to read here. Extract the archive to read it.",
 	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */
 	previewArchiveEntryDownloadUnsupported: "A single file can't be saved from this archive here. Extract it to your drive instead.",
 

@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
+import { log } from "@/lib/log"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { EntryReadPlan, PackedEntryBatch } from "@/lib/sdk/archiveListing"
@@ -9,7 +10,7 @@ import type { ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
 import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/lib/archiveReaders"
 import type { EntryReaderEvents } from "@/workers/originSource"
 import { listSummaryOf, type ListSummary } from "@/features/archive/lib/listingSession"
-import { canReadEntry, entryKey, entryReadPlan } from "@/features/archive/lib/entryAccess.logic"
+import { canReadEntry, entryKey, lonePlan, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 
 // One archive opened for listing and for reading its entries, through the SDK's archive reader it shares with every
@@ -80,23 +81,25 @@ export const defaultArchiveHandleDeps: ArchiveHandleDeps = {
 		void sdkApi.releaseJob(jobId)
 	},
 	leaseEntry: (leaseId, readerId, plan, events) => {
-		void sdkApi.leaseArchiveEntry(leaseId, readerId, plan, Comlink.proxy(events))
+		sdkApi.leaseArchiveEntry(leaseId, readerId, plan, Comlink.proxy(events)).catch((e: unknown) => {
+			log.warn("archiveHandle", "leasing an entry failed", e)
+		})
 	},
 	releaseLease: leaseId => {
-		void sdkApi.releaseArchiveEntry(leaseId)
+		sdkApi.releaseArchiveEntry(leaseId).catch((e: unknown) => {
+			log.warn("archiveHandle", "releasing an entry lease failed", e)
+		})
 	},
 	newId: () => crypto.randomUUID()
 }
 
-// The origin the lease `leaseId` (leaseEntry) names the listed entry at `slot` by.
-export function entryLeaseOrigin(leaseId: string, file: AnyFile, anon: boolean, store: EntryStore, slot: number): ByteOrigin {
-	const index = store.index(slot)
-
+// The origin the lease `leaseId` (leaseEntry) names the archive's entry `index` by.
+export function entryLeaseOrigin(leaseId: string, file: AnyFile, anon: boolean, index: number, size: number): ByteOrigin {
 	return {
 		kind: "entry",
 		reader: leaseId,
 		entry: { archive: file.uuid, index },
-		size: store.size(slot),
+		size,
 		access: "whole",
 		anon,
 		cacheKey: entryKey(file.uuid, index)
@@ -108,19 +111,19 @@ export interface EntryLeaseRequest {
 	readonly file: AnyFile
 	readonly anon: boolean
 	readonly password: string | undefined
-	readonly store: EntryStore
-	readonly slot: number
+	// How its whole read goes (entryReadPlan, lonePlan).
+	readonly plan: EntryReadPlan
 	readonly events: EntryReaderEvents
 }
 
-// Leases the listed entry at `slot` as `leaseId`, read whole through the reader of its archive and password as its
-// listing plans (entryReadPlan), holding a reference on that reader until released. Comlink delivers calls in order,
-// so the origin reads at once. Returns the release.
+// Leases an entry as `leaseId`, read whole through the reader of its archive and password as `plan` says, holding a
+// reference on that reader until released. Comlink delivers calls in order, so the origin reads at once. Returns the
+// release.
 export function leaseEntry(request: EntryLeaseRequest, deps: ArchiveHandleDeps = defaultArchiveHandleDeps): () => void {
 	const reader = deps.acquireReader(request.file, request.anon, request.password)
 	let leased = true
 
-	deps.leaseEntry(request.leaseId, reader.id, entryReadPlan(request.store, request.slot), request.events)
+	deps.leaseEntry(request.leaseId, reader.id, request.plan, request.events)
 
 	return () => {
 		if (leased) {
@@ -247,12 +250,21 @@ export function acquireArchiveHandle(
 			}
 
 			const leaseId = `${reader.id}:${deps.newId()}`
+			const index = store.index(slot)
+			const size = store.size(slot)
 			const release = leaseEntry(
-				{ leaseId, file, anon: reader.anon, password: reader.password, store, slot, events: events ?? NO_EVENTS },
+				{
+					leaseId,
+					file,
+					anon: reader.anon,
+					password: reader.password,
+					plan: lonePlan(index, size, maxSolidSkipFor(store, slot)),
+					events: events ?? NO_EVENTS
+				},
 				deps
 			)
 
-			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file, reader.anon, store, slot), release })
+			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file, reader.anon, index, size), release })
 		},
 		release: () => {
 			if (released) {

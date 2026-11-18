@@ -14,7 +14,8 @@ import { readsWholeArchive } from "@/features/archive/lib/archiveBrowser.logic"
 import { ArchiveReading, ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
-import { COMIC_SOLID_BLOCK_MAX_BYTES, comicPages, largestSolidBlock } from "@/features/comics/lib/pages.logic"
+import { comicPages, largestSolidBlock } from "@/features/comics/lib/pages.logic"
+import { SOLID_BLOCK_READ_MAX_BYTES } from "@/features/archive/lib/entryAccess.logic"
 import { ComicPager } from "@/features/comics/components/comicPager"
 import { Button } from "@/components/ui/button"
 
@@ -119,7 +120,7 @@ function ComicSourceViewer({ item, source }: { item: DriveItem; source: ArchiveS
 		)
 	}
 
-	if (largestSolidBlock(store, pages) > COMIC_SOLID_BLOCK_MAX_BYTES) {
+	if (largestSolidBlock(store, pages) > SOLID_BLOCK_READ_MAX_BYTES) {
 		return (
 			<PreviewUnsupportedState
 				item={item}

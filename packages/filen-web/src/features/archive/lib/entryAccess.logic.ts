@@ -3,8 +3,9 @@ import {
 	ENTRY_ACCESS,
 	ENTRY_FLAG,
 	ENTRY_KIND,
-	READ_AHEAD_MAX_BYTES,
 	READ_AHEAD_MAX_ENTRIES,
+	archiveRetainedBudget,
+	readAheadBudget,
 	type EntryReadPlan
 } from "@/lib/sdk/archiveListing"
 import {
@@ -98,24 +99,41 @@ export function isEncryptedEntry(store: EntryStore, slot: number): boolean {
 export interface EntryCost {
 	// Decoded and thrown away before the entry's first byte.
 	skippedBytes: number
-	// Archive bytes fetched to reach the entry's end, an estimate.
+	// Archive bytes fetched to reach the end of what the read brings (the entry, and the files read ahead with it), an
+	// estimate.
 	estimatedBytes: number
 }
 
-// What a solid block's entry costs beyond itself (a solid 7z's or RAR's file, a compressed tar's member); null for
-// any other entry. A compressed tar's estimatedBytes is approximate: up to one compressed block of its codec and a
-// fetch's 1 MiB rounding off.
-export function entryCost(store: EntryStore, slot: number): EntryCost | null {
+// Above this much of the archive in one solid block, a file deep in it decodes most of the block: it is extracted to
+// read (owner decision E3; measured, never lowered without the owner). Accepting a cost never covers one.
+export const SOLID_BLOCK_READ_MAX_BYTES = 512 * 1024 * 1024
+
+// The entry lies in a solid block too large to read alone (SOLID_BLOCK_READ_MAX_BYTES).
+export function extractsToRead(store: EntryStore, slot: number): boolean {
+	return accessOfFlags(store.flags(slot)) === ENTRY_ACCESS.solidBlock && store.solidBlock(slot) > SOLID_BLOCK_READ_MAX_BYTES
+}
+
+// What reading a solid block's entry costs beyond itself (a solid 7z's or RAR's file, a compressed tar's member), with
+// the files `plan` reads ahead with it; null for any other entry. A compressed tar's estimate is approximate: up to one
+// compressed block of its codec and a fetch's 1 MiB rounding off.
+export function entryCost(store: EntryStore, slot: number, plan?: EntryReadPlan): EntryCost | null {
 	if (accessOfFlags(store.flags(slot)) !== ENTRY_ACCESS.solidBlock) {
 		return null
 	}
 
-	return { skippedBytes: store.solidSkipped(slot), estimatedBytes: store.solidEstimated(slot) }
+	const last = plan?.window.at(-1)
+	const lastSlot = last === undefined ? -1 : store.slotOfIndex(last.index)
+
+	return {
+		skippedBytes: store.solidSkipped(slot),
+		estimatedBytes: Math.max(store.solidEstimated(slot), lastSlot === -1 ? 0 : store.solidEstimated(lastSlot))
+	}
 }
 
-// A solid block's first file costs nothing beyond itself; any later one is confirmed first.
+// A solid block's first file costs nothing beyond itself, and before a cost was accepted reads nothing ahead; any
+// later one is confirmed first.
 export function needsCostConfirm(store: EntryStore, slot: number): boolean {
-	return (entryCost(store, slot)?.skippedBytes ?? 0) > 0
+	return store.solidSkipped(slot) > 0 && accessOfFlags(store.flags(slot)) === ENTRY_ACCESS.solidBlock
 }
 
 // Exactly the skip the listing stated, the cost the user accepted: the SDK refuses a larger one before
@@ -124,23 +142,43 @@ export function maxSolidSkipFor(store: EntryStore, slot: number): number {
 	return entryCost(store, slot)?.skippedBytes ?? 0
 }
 
-// Index steps a window looks past the entry for the files after it (directories and left-out entries between them).
+// Index steps a window looks past the entry for the files after it (directories between them).
 const WINDOW_SCAN = 256
 
-// How the entry is read whole: alone, or, a solid block's, in one pass with the files its block stores right after
-// it, up to the read-ahead a reader keeps (READ_AHEAD_MAX_ENTRIES files, READ_AHEAD_MAX_BYTES), so reading them in
-// turn decodes the block once per window rather than once per file. The pass may throw away what its last file's
-// listed skip says, no more: within one block that is all it decodes before that file.
-export function entryReadPlan(store: EntryStore, slot: number): EntryReadPlan {
+// The bytes a window may read ahead on this device: half the retained budget the client was built with.
+export function deviceReadAheadBytes(): number {
+	return readAheadBudget(archiveRetainedBudget(deviceProfile().mobile))
+}
+
+// The entry read alone.
+export function lonePlan(index: number, size: number, maxSolidSkip: number): EntryReadPlan {
+	return { maxSolidSkip, window: [{ index, size }], windowSkip: maxSolidSkip }
+}
+
+// How the entry is read whole: alone, or, once the session accepted a solid cost (`readAhead`), a solid block's entry
+// in one pass with the files its block stores right after it, up to READ_AHEAD_MAX_ENTRIES files and `aheadBytes`, so
+// reading them in turn decodes the block once per window rather than once per file. The pass may throw away the
+// entry's own skip and what lies between the window's files, no more. A slot no longer in the store (a relist) reads
+// alone.
+export function entryReadPlan(
+	store: EntryStore,
+	slot: number,
+	readAhead: boolean,
+	aheadBytes: number = deviceReadAheadBytes()
+): EntryReadPlan {
 	const index = store.index(slot)
 	const maxSolidSkip = maxSolidSkipFor(store, slot)
-	const window = [{ index, size: store.size(slot) }]
-	let windowSkip = maxSolidSkip
+	const plan = lonePlan(index, store.size(slot), maxSolidSkip)
 
-	if (accessOfFlags(store.flags(slot)) !== ENTRY_ACCESS.solidBlock) {
-		return { maxSolidSkip, window, windowSkip }
+	if (!readAhead || accessOfFlags(store.flags(slot)) !== ENTRY_ACCESS.solidBlock) {
+		return plan
 	}
 
+	const window = [...plan.window]
+	const block = store.solidBlock(slot)
+	let windowSkip = maxSolidSkip
+	// Where the window's last file ends in the block's decoded output.
+	let end = store.solidSkipped(slot) + store.size(slot)
 	let bytes = 0
 
 	for (let next = index + 1; next <= index + WINDOW_SCAN && window.length <= READ_AHEAD_MAX_ENTRIES; next++) {
@@ -150,23 +188,41 @@ export function entryReadPlan(store: EntryStore, slot: number): EntryReadPlan {
 			continue
 		}
 
-		// Another block (its skip starts over), or an entry read some other way: the window ends.
-		if (!canReadEntry(store, at) || accessOfFlags(store.flags(at)) !== ENTRY_ACCESS.solidBlock || store.solidSkipped(at) < windowSkip) {
+		const skipped = store.solidSkipped(at)
+
+		// Another block (its skip starts over, at 0 for its first file), or an entry read some other way: the window ends.
+		if (
+			!canReadEntry(store, at) ||
+			accessOfFlags(store.flags(at)) !== ENTRY_ACCESS.solidBlock ||
+			store.solidBlock(at) !== block ||
+			skipped === 0 ||
+			skipped < end
+		) {
 			break
 		}
 
 		const size = store.size(at)
 
-		if (bytes + size > READ_AHEAD_MAX_BYTES) {
+		if (bytes + size > aheadBytes) {
 			break
 		}
 
 		bytes += size
-		windowSkip = store.solidSkipped(at)
+		// What lies between the last file and this one (entries the listing left out) is decoded and thrown away.
+		windowSkip += skipped - end
+		end = skipped + size
 		window.push({ index: next, size })
 	}
 
 	return { maxSolidSkip, window, windowSkip }
+}
+
+// The plan for the archive's entry `index` from its listing (entryReadPlan); read alone when the store no longer lists
+// it (a relist replaced it).
+export function entryPlanOf(store: EntryStore, index: number, size: number, maxSolidSkip: number, readAhead: boolean): EntryReadPlan {
+	const slot = store.slotOfIndex(index)
+
+	return slot === -1 ? lonePlan(index, size, maxSolidSkip) : entryReadPlan(store, slot, readAhead)
 }
 
 // The preview cache's key for an entry, and the uuid its stand-in item carries.

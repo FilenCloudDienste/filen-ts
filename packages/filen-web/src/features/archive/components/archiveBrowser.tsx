@@ -634,6 +634,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 					}
 					onBack={entries.closeViewer}
 					listing={{ source, store }}
+					readAhead={listing.session()?.costAccepted() === true}
 				/>
 				{entries.dialogs}
 			</>

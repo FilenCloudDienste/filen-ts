@@ -1,14 +1,17 @@
 import type { AnyFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { registerPreviewDisposer } from "@/lib/workers/previewDisposers"
+import { log } from "@/lib/log"
 
 // The page's side of the SDK worker's archive readers: one per archive, client and password, shared by every caller
-// (the browser's listing, the entries it opens, a save, an iWork preview). Each acquire holds a reference; once the
-// last is released the reader lingers a little, so a viewer closed and the next one opened (a page turn, a step back
-// to the listing and into the next file) find the index and the decoder states it holds, then closes. Sign-out
+// (the browser's listing, the entries it opens, a save, an iWork preview, a comic). Each acquire holds a reference;
+// once the last is released a reader holding more than a little read ahead closes at once, and any other lingers a
+// while, so a viewer closed and the next one opened find the index and the decoder states the SDK keeps for it. Sign-out
 // closes every one at once.
 
 export const READER_LINGER_MS = 30_000
+// Above this much held read ahead, a reader nobody holds closes at once rather than linger.
+export const READER_CLOSE_AT_ONCE_BYTES = 4 * 1024 * 1024
 
 export interface ArchiveReaderRef {
 	// The worker's reader id.
@@ -24,17 +27,24 @@ export interface ArchiveReaderRef {
 export interface ArchiveReaderPageDeps {
 	open: (id: string, file: AnyFile, anon: boolean, password: string | undefined) => void
 	close: (id: string) => void
+	heldBytes: (id: string) => Promise<number>
 	newId: () => string
 	linger: (close: () => void) => () => void
 }
 
 export const defaultArchiveReaderPageDeps: ArchiveReaderPageDeps = {
+	// A refused open (signed out meanwhile) shows on the reader's first read, as a cancel.
 	open: (id, file, anon, password) => {
-		void sdkApi.openArchiveReader(id, file, anon, password)
+		sdkApi.openArchiveReader(id, file, anon, password).catch((e: unknown) => {
+			log.warn("archiveReaders", "opening a reader failed", e)
+		})
 	},
 	close: id => {
-		void sdkApi.closeArchiveReader(id)
+		sdkApi.closeArchiveReader(id).catch((e: unknown) => {
+			log.warn("archiveReaders", "closing a reader failed", e)
+		})
 	},
+	heldBytes: id => sdkApi.archiveReaderHeldBytes(id).catch(() => 0),
 	newId: () => crypto.randomUUID(),
 	linger: close => {
 		const timer = setTimeout(close, READER_LINGER_MS)
@@ -138,11 +148,26 @@ export function acquireArchiveReader(
 			reader.refs -= 1
 
 			if (reader.refs === 0) {
-				reader.cancelLinger = deps.linger(() => {
-					reader.cancelLinger = null
+				const linger = (): void => {
+					reader.cancelLinger = deps.linger(() => {
+						reader.cancelLinger = null
 
-					if (reader.refs === 0) {
+						if (reader.refs === 0) {
+							closeReader(reader, deps)
+						}
+					})
+				}
+
+				void deps.heldBytes(reader.id).then(held => {
+					// Acquired again meanwhile, or closed: nothing to decide.
+					if (reader.refs > 0 || reader.closed || reader.cancelLinger !== null) {
+						return
+					}
+
+					if (held > READER_CLOSE_AT_ONCE_BYTES) {
 						closeReader(reader, deps)
+					} else {
+						linger()
 					}
 				})
 			}

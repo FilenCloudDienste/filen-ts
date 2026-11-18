@@ -14,6 +14,8 @@ import {
 	canReadEntry,
 	entryCost,
 	entryKey,
+	entryReadPlan,
+	extractsToRead,
 	entryAwaitsSniff,
 	entryPreviewCategory,
 	isEncryptedEntry,
@@ -138,6 +140,13 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 			return
 		}
 
+		// A solid block above E3's ceiling: no cost covers reading it from here.
+		if (extractsToRead(target.store, target.slot)) {
+			toast.error(t("previewArchiveEntryExtractToRead", { name: target.store.name(target.slot) }))
+
+			return
+		}
+
 		// Bytes already held cost nothing to show again; once the session accepted a cost, its later entries are asked
 		// no more (each stays bounded by its own listed skip).
 		const held = intent === "open" && getPreviewBytes(cacheScope, entryKey(source.uuid, target.store.index(target.slot))) !== undefined
@@ -163,7 +172,16 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 		return true
 	}
 
-	const cost = costAsk === null ? null : entryCost(costAsk.store, costAsk.slot)
+	// What the read after a yes fetches: an open reads the block's next files ahead with it (the session will have
+	// accepted a cost), a save the entry alone.
+	const cost =
+		costAsk === null
+			? null
+			: entryCost(
+					costAsk.store,
+					costAsk.slot,
+					costAsk.intent === "open" ? entryReadPlan(costAsk.store, costAsk.slot, true) : undefined
+				)
 
 	const dialogs = (
 		<>
@@ -174,7 +192,7 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 				body={
 					costAsk === null || cost === null
 						? ""
-						: t(costAsk.intent === "open" ? "previewArchiveEntryCostOpenBody" : "previewArchiveEntryCostDownloadBody", {
+						: t(costAsk.intent === "open" ? "previewArchiveEntryCostOnceOpenBody" : "previewArchiveEntryCostOnceDownloadBody", {
 								name: costAsk.store.name(costAsk.slot),
 								download: formatBytes(cost.estimatedBytes),
 								skipped: formatBytes(cost.skippedBytes)

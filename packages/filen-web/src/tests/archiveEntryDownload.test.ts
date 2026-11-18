@@ -34,6 +34,7 @@ vi.mock("@/lib/sdk/client", () => {
 				return Promise.resolve()
 			},
 			closeArchiveReader: () => Promise.resolve(),
+			archiveReaderHeldBytes: () => Promise.resolve(0),
 			downloadReaderEntry: (
 				readerId: string,
 				transferId: string,

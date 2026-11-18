@@ -107,10 +107,26 @@ export interface PackedSolidCosts {
 	skipped: Float64Array
 	// Its estimatedPackedBytes: archive bytes fetched to reach the entry's end.
 	estimated: Float64Array
+	// Its blockPackedBytes: the archive bytes of the whole solid block it lies in.
+	block: Float64Array
 }
 
-// Most bytes, and entries, a reader keeps decoded ahead of their read.
-export const READ_AHEAD_MAX_BYTES = 32 * 1024 * 1024
+// What every archive reader keeps between its calls in the SDK (indexes, chunks, decoder checkpoints), process-wide:
+// the SDK's own 48 MiB for a browser, half on a phone or tablet, whose tab is killed far sooner.
+export const ARCHIVE_RETAINED_BUDGET_BYTES = 48 * 1024 * 1024
+export const MOBILE_ARCHIVE_RETAINED_BUDGET_BYTES = 24 * 1024 * 1024
+
+export function archiveRetainedBudget(mobile: boolean): number {
+	return mobile ? MOBILE_ARCHIVE_RETAINED_BUDGET_BYTES : ARCHIVE_RETAINED_BUDGET_BYTES
+}
+
+// Entries decoded ahead of their read, held in JS across every reader of the page: half the retained budget the
+// client was built with (24 MiB, 12 MiB on a phone or tablet), so the two together stay within 1.5 times it.
+export function readAheadBudget(retainedBudget: number | undefined): number {
+	return Math.floor((retainedBudget ?? ARCHIVE_RETAINED_BUDGET_BYTES) / 2)
+}
+
+// Most files a window reads ahead of the asked one.
 export const READ_AHEAD_MAX_ENTRIES = 16
 
 // One entry's whole read, as the page planned it from its listing.
@@ -118,8 +134,9 @@ export interface EntryReadPlan {
 	// The listed skip the entry needs; 0 for one that needs none.
 	readonly maxSolidSkip: number
 	// The entry and the files its solid block stores right after it, in archive order: read in one pass when the entry
-	// is read only so. Just the entry for any other.
+	// is read only so. Just the entry for any other, and before the session accepted a solid cost.
 	readonly window: readonly { readonly index: number; readonly size: number }[]
-	// The skip the window's pass needs: its last entry's listed skip.
+	// What the window's pass may decode and throw away in all: the entry's own skip and whatever lies between the
+	// window's files (left-out entries).
 	readonly windowSkip: number
 }

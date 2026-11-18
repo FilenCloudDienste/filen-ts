@@ -13,7 +13,9 @@ import type {
 } from "@filen/sdk-rs"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { liftError } from "@/lib/sdk/jobErrors"
-import { READ_AHEAD_MAX_BYTES, READ_AHEAD_MAX_ENTRIES, type EntryReadPlan } from "@/lib/sdk/archiveListing"
+import { raceAbort } from "@/lib/abort"
+import { log } from "@/lib/log"
+import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
 
 // The SDK's archive readers this worker holds, one per archive and password the page opened. A reader reads its
 // archive's index once and serves every listing, download and entry read after it from what it holds (the index, a
@@ -24,9 +26,16 @@ import { READ_AHEAD_MAX_BYTES, READ_AHEAD_MAX_ENTRIES, type EntryReadPlan } from
 //   page costs about the page);
 // - a solid block's entry (a solid 7z's, a solid RAR's, another compressed tar's member) through an ordered pass over
 //   it and the files stored after it, the window the page planned: those it decoded anyway are kept for their own
-//   read, so a run of entries read one after another decodes the block about once per window instead of once per
-//   entry;
+//   read (and a save), so a run of entries read one after another decodes the block about once per window;
 // - anything else through a checked download of the entry alone.
+//
+// Lifetimes: a reader opens on its first call, under a controller of its own that every waiter shares (one leaving
+// cancels nothing for the others; the last one leaving cancels the opening). Every call runs under the reader's own
+// signal too, which closing it aborts, so nothing keeps fetching after a close or sign-out. A closed reader is freed
+// only once its last call settled: wasm-bindgen refuses to free a value a pending call still borrows.
+
+// A reader with no lease for this long gives up what it read ahead: the user left the entry viewer, not a page turn.
+export const READ_AHEAD_IDLE_MS = 10_000
 
 export type ReaderLike = Pick<
 	ArchiveReader,
@@ -50,6 +59,9 @@ export interface OpenedReader {
 
 export interface ArchiveReaderDeps {
 	open: (request: ReaderOpenRequest) => Promise<OpenedReader>
+	// What every reader may hold decoded ahead, in all (readAheadBudget).
+	aheadBudget: () => number
+	setTimer?: (run: () => void, ms: number) => () => void
 }
 
 export interface EntryReadEvents {
@@ -58,28 +70,53 @@ export interface EntryReadEvents {
 	failed: (error: unknown) => void
 }
 
+interface Ahead {
+	readonly bytes: Uint8Array
+	readonly checked: boolean
+}
+
+interface Opening {
+	readonly promise: Promise<OpenedReader>
+	readonly controller: AbortController
+	readonly listeners: Set<(update: ListUpdate) => void>
+	waiters: number
+}
+
 interface ReaderRecord {
+	readonly id: string
 	readonly archive: AnyFile
 	readonly anon: boolean
 	readonly password: string | undefined
+	// Aborted by close: every call's work stops.
+	readonly lifetime: AbortController
 	opened: OpenedReader | null
-	opening: Promise<OpenedReader> | null
+	opening: Opening | null
 	closed: boolean
+	released: boolean
+	// Calls borrowing the reader.
+	pending: number
 	readonly access: Map<number, EntryByteAccess["type"]>
-	readonly ahead: Map<number, Uint8Array>
-	aheadBytes: number
-	// Entries a running read may bring along (its window), by index: a read of one waits for it instead of decoding it
+	readonly ahead: Map<number, Ahead>
+	// Entries a running read will bring along (its window), by index: a read of one waits for it instead of decoding it
 	// again.
 	readonly passes: Map<number, Promise<unknown>>
+	leases: number
+	cancelIdle: (() => void) | null
 }
 
 export interface ArchiveReaders {
 	register: (id: string, archive: AnyFile, anon: boolean, password: string | undefined) => void
 	has: (id: string) => boolean
 	anon: (id: string) => boolean | undefined
+	// Never throws: a reader that a call still borrows is freed once the call settles.
 	close: (id: string) => void
-	// Sign-out: every reader goes.
+	// Sign-out and an account switch: every reader goes.
 	clear: () => void
+	// A lease of an entry starts or ends: read-ahead is kept while one is held, and a while after.
+	lease: (id: string) => void
+	unlease: (id: string) => void
+	// What it holds decoded ahead, in bytes; 0 for none or a closed one.
+	heldBytes: (id: string) => number
 	list: (
 		id: string,
 		onBatch: ((entries: ArchiveEntry[]) => void) | null,
@@ -132,8 +169,13 @@ export function entryBuffer(size: number): { writer: WritableStream<Uint8Array>;
 	}
 }
 
-function closedError(): Error {
-	return new Error("archive reader is closed")
+// A read of a closed reader (sign-out, the archive left): the page shows it as a cancel, not a failure.
+export function readerClosed(): Error {
+	const error = new Error("archive reader is closed")
+
+	error.name = "Cancelled"
+
+	return error
 }
 
 function settle(report: EntryDownloadReport): boolean {
@@ -144,114 +186,214 @@ function settle(report: EntryDownloadReport): boolean {
 	return report.checked
 }
 
+function defaultTimer(run: () => void, ms: number): () => void {
+	const timer = setTimeout(run, ms)
+
+	return () => {
+		clearTimeout(timer)
+	}
+}
+
 export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 	const records = new Map<string, ReaderRecord>()
+	const setTimer = deps.setTimer ?? defaultTimer
+	// Every reader's read-ahead, oldest first, charged to one budget.
+	const aheadOrder = new Map<string, { record: ReaderRecord; index: number; bytes: number }>()
+	let aheadTotal = 0
 
 	const require = (id: string): ReaderRecord => {
 		const record = records.get(id)
 
 		if (record === undefined || record.closed) {
-			throw closedError()
+			throw readerClosed()
 		}
 
 		return record
 	}
 
-	const dispose = (record: ReaderRecord): void => {
-		record.closed = true
-		record.ahead.clear()
-		record.aheadBytes = 0
-		record.access.clear()
+	const dropAhead = (record: ReaderRecord, index: number): Ahead | undefined => {
+		const held = record.ahead.get(index)
+
+		if (held !== undefined) {
+			record.ahead.delete(index)
+			aheadOrder.delete(`${record.id}#${String(index)}`)
+			aheadTotal -= held.bytes.length
+		}
+
+		return held
+	}
+
+	const clearAhead = (record: ReaderRecord): void => {
+		for (const index of [...record.ahead.keys()]) {
+			dropAhead(record, index)
+		}
+	}
+
+	const keepAhead = (record: ReaderRecord, index: number, held: Ahead): void => {
+		const budget = deps.aheadBudget()
+
+		if (record.closed || held.bytes.length > budget) {
+			return
+		}
+
+		dropAhead(record, index)
+
+		for (const { record: owner, index: kept } of aheadOrder.values()) {
+			if (aheadTotal + held.bytes.length <= budget) {
+				break
+			}
+
+			dropAhead(owner, kept)
+		}
+
+		record.ahead.set(index, held)
+		aheadOrder.set(`${record.id}#${String(index)}`, { record, index, bytes: held.bytes.length })
+		aheadTotal += held.bytes.length
+	}
+
+	// Frees the reader once: never while a call borrows it, never throwing.
+	const releaseIfIdle = (record: ReaderRecord): void => {
+		if (!record.closed || record.released || record.pending > 0 || record.opened === null) {
+			return
+		}
+
+		record.released = true
 
 		const opened = record.opened
 
 		record.opened = null
 
-		if (opened !== null) {
-			opened.reader.close()
+		try {
 			opened.release()
+		} catch (e) {
+			log.warn("archiveReaders", "freeing a reader failed", e)
 		}
 	}
 
-	// Opens the reader on first use; later callers share the opening. One that fails (a password the index needs, a
-	// cancel) is dropped, so the next call opens again.
-	const ensureOpen = async (
-		record: ReaderRecord,
-		onUpdate: (update: ListUpdate) => void,
-		managedFuture: ManagedFuture
-	): Promise<ReaderLike> => {
-		if (record.opened !== null) {
-			return record.opened.reader
+	const dispose = (record: ReaderRecord): void => {
+		record.closed = true
+		record.cancelIdle?.()
+		record.cancelIdle = null
+		clearAhead(record)
+		record.access.clear()
+		record.lifetime.abort(readerClosed())
+		record.opening?.controller.abort(readerClosed())
+
+		try {
+			record.opened?.reader.close()
+		} catch (e) {
+			log.warn("archiveReaders", "closing a reader failed", e)
 		}
 
-		if (record.opening === null) {
-			const opening = deps.open({ archive: record.archive, anon: record.anon, password: record.password, onUpdate, managedFuture })
+		releaseIfIdle(record)
+	}
 
-			record.opening = opening
-			opening.then(
-				opened => {
-					record.opening = null
-
-					// Closed while it opened: nobody holds it.
-					if (record.closed) {
-						opened.reader.close()
-						opened.release()
-					} else {
-						record.opened = opened
-					}
-				},
-				() => {
-					if (record.opening === opening) {
-						record.opening = null
-					}
+	const startOpening = (record: ReaderRecord): Opening => {
+		const controller = new AbortController()
+		const listeners = new Set<(update: ListUpdate) => void>()
+		const promise = deps.open({
+			archive: record.archive,
+			anon: record.anon,
+			password: record.password,
+			onUpdate: update => {
+				for (const listener of listeners) {
+					listener(update)
 				}
-			)
-		}
+			},
+			managedFuture: { abortSignal: AbortSignal.any([controller.signal, record.lifetime.signal]) }
+		})
+		const opening: Opening = { promise, controller, listeners, waiters: 0 }
 
-		const opened = await record.opening
+		promise.then(
+			opened => {
+				if (record.opening === opening) {
+					record.opening = null
+				}
 
-		if (record.closed) {
-			throw closedError()
-		}
+				record.opened = opened
 
-		return opened.reader
+				// Closed while it opened: nobody holds it.
+				if (record.closed) {
+					try {
+						opened.reader.close()
+					} catch (e) {
+						log.warn("archiveReaders", "closing a reader failed", e)
+					}
+
+					releaseIfIdle(record)
+				}
+			},
+			() => {
+				if (record.opening === opening) {
+					record.opening = null
+				}
+			}
+		)
+
+		return opening
 	}
 
-	const keepAhead = (record: ReaderRecord, index: number, bytes: Uint8Array): void => {
-		if (record.closed || bytes.length > READ_AHEAD_MAX_BYTES) {
-			return
-		}
-
-		const previous = record.ahead.get(index)
-
-		if (previous !== undefined) {
-			record.aheadBytes -= previous.length
-			record.ahead.delete(index)
-		}
-
-		// Oldest first: a Map iterates in insertion order.
-		for (const [held, kept] of record.ahead) {
-			if (record.aheadBytes + bytes.length <= READ_AHEAD_MAX_BYTES && record.ahead.size < READ_AHEAD_MAX_ENTRIES) {
-				break
+	// Opens the reader on first use; every caller waits on the one opening with its own cancel and hears its progress.
+	// An opening every waiter left is cancelled; a caller arriving after that opens again.
+	const ensureOpen = async (record: ReaderRecord, onUpdate: (update: ListUpdate) => void, signal: AbortSignal): Promise<ReaderLike> => {
+		for (;;) {
+			if (record.closed) {
+				throw readerClosed()
 			}
 
-			record.ahead.delete(held)
-			record.aheadBytes -= kept.length
-		}
+			if (record.opened !== null) {
+				return record.opened.reader
+			}
 
-		record.ahead.set(index, bytes)
-		record.aheadBytes += bytes.length
+			record.opening ??= startOpening(record)
+
+			const opening = record.opening
+
+			opening.waiters += 1
+			opening.listeners.add(onUpdate)
+
+			try {
+				return (await raceAbort(opening.promise, signal)).reader
+			} catch (e) {
+				// The opening was given up by the others, not by this caller: open again.
+				if (!signal.aborted && opening.controller.signal.aborted && records.get(record.id) === record) {
+					continue
+				}
+
+				throw e
+			} finally {
+				opening.listeners.delete(onUpdate)
+				opening.waiters -= 1
+
+				if (opening.waiters === 0 && record.opening === opening) {
+					opening.controller.abort(readerClosed())
+					record.opening = null
+				}
+			}
+		}
 	}
 
-	const takeAhead = (record: ReaderRecord, index: number): Uint8Array | undefined => {
-		const held = record.ahead.get(index)
+	// A call on the reader, under the caller's signal and the reader's own, counted so a close frees it only after.
+	const borrow = async <T>(
+		record: ReaderRecord,
+		signal: AbortSignal,
+		onUpdate: (update: ListUpdate) => void,
+		run: (reader: ReaderLike, signal: AbortSignal) => Promise<T>
+	): Promise<T> => {
+		const reader = await ensureOpen(record, onUpdate, signal)
 
-		if (held !== undefined) {
-			record.ahead.delete(index)
-			record.aheadBytes -= held.length
+		if (record.closed) {
+			throw readerClosed()
 		}
 
-		return held
+		record.pending += 1
+
+		try {
+			return await run(reader, AbortSignal.any([signal, record.lifetime.signal]))
+		} finally {
+			record.pending -= 1
+			releaseIfIdle(record)
+		}
 	}
 
 	const accessOf = async (
@@ -283,12 +425,11 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		plan: EntryReadPlan,
 		events: EntryReadEvents,
 		signal: AbortSignal
-	): Promise<{ bytes: Uint8Array; checked: boolean }> => {
+	): Promise<Ahead> => {
 		const buffers = new Map<number, ReturnType<typeof entryBuffer>>()
 		const sizes = new Map(plan.window.map(item => [item.index, item.size]))
 		let phase: EntryDownloadPhase | null = null
-
-		const pass = reader.readEntries({
+		const report = await reader.readEntries({
 			entries: plan.window.map(item => ({ archive: entry.archive, index: item.index })),
 			writerFor: (id, stated) => {
 				const buffer = entryBuffer(stated === undefined ? (sizes.get(id.index) ?? 0) : Number(stated))
@@ -306,24 +447,23 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 			},
 			managedFuture: { abortSignal: signal }
 		})
-
-		const report = await pass
+		const checked = report.error === undefined && report.checked
 
 		for (const [index, buffer] of buffers) {
 			if (index !== entry.index && buffer.closed()) {
-				keepAhead(record, index, buffer.take())
+				keepAhead(record, index, { bytes: buffer.take(), checked })
 			}
 		}
 
 		const own = buffers.get(entry.index)
 
-		// The asked entry came whole: a failure after it (past the window's first entry) costs only the rest.
 		if (own?.closed() === true) {
+			// The asked entry came whole: a failure after it costs only the rest, but may be damage worth knowing of.
 			if (report.error !== undefined) {
-				liftError(report.error)
+				log.warn("archiveReaders", "a read-ahead pass ended early after its entry", liftError(report.error))
 			}
 
-			return { bytes: own.take(), checked: report.error === undefined && report.checked }
+			return { bytes: own.take(), checked }
 		}
 
 		if (report.error !== undefined) {
@@ -333,56 +473,69 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		throw new Error("an archive pass ended before its entry")
 	}
 
-	const readEntry = async (
+	const readEntry = (
 		record: ReaderRecord,
 		entry: ArchiveEntryId,
 		size: number,
 		plan: EntryReadPlan,
 		events: EntryReadEvents,
-		signal: AbortSignal
-	): Promise<{ bytes: Uint8Array; checked: boolean }> => {
-		const reader = await ensureOpen(
+		signal: AbortSignal,
+		// The read turned out to bring only its own entry: the files it marked are no one's to wait for.
+		unmark: () => void
+	): Promise<Ahead> =>
+		borrow(
 			record,
+			signal,
 			update => {
 				events.phase(update.phase)
 			},
-			{ abortSignal: signal }
+			async (reader, combined) => {
+				const access = await accessOf(record, reader, entry, combined)
+
+				// A gzip tar's member decodes on from where the read before it stopped. A tar has no checksum of its members.
+				if (access === "seekable" && reader.format?.type === "tar") {
+					unmark()
+
+					const buffer = entryBuffer(size)
+
+					events.phase("reading")
+					await reader.readEntryRange({
+						entry,
+						start: 0,
+						end: size,
+						writer: buffer.writer,
+						managedFuture: { abortSignal: combined }
+					})
+
+					return { bytes: buffer.take(), checked: false }
+				}
+
+				if (access === "sequential" || (access === "whole" && plan.window.length > 1)) {
+					return readWindow(record, reader, entry, plan, events, combined)
+				}
+
+				unmark()
+
+				const buffer = entryBuffer(size)
+				let phase: EntryDownloadPhase | null = null
+				const checked = settle(
+					await reader.downloadEntry({
+						entry,
+						writer: buffer.writer,
+						maxSolidSkip: plan.maxSolidSkip,
+						onUpdate: update => {
+							if (update.phase !== phase) {
+								phase = update.phase
+								events.phase(update.phase)
+							}
+						},
+						managedFuture: { abortSignal: combined }
+					})
+				)
+
+				return { bytes: buffer.take(), checked }
+			}
 		)
-		const access = await accessOf(record, reader, entry, signal)
-
-		// A gzip tar's member decodes on from where the read before it stopped. A tar has no checksum of its members.
-		if (access === "seekable" && reader.format?.type === "tar") {
-			const buffer = entryBuffer(size)
-
-			events.phase("reading")
-			await reader.readEntryRange({ entry, start: 0, end: size, writer: buffer.writer, managedFuture: { abortSignal: signal } })
-
-			return { bytes: buffer.take(), checked: false }
-		}
-
-		if (access === "sequential" || (access === "whole" && plan.window.length > 1)) {
-			return readWindow(record, reader, entry, plan, events, signal)
-		}
-
-		const buffer = entryBuffer(size)
-		let phase: EntryDownloadPhase | null = null
-		const checked = settle(
-			await reader.downloadEntry({
-				entry,
-				writer: buffer.writer,
-				maxSolidSkip: plan.maxSolidSkip,
-				onUpdate: update => {
-					if (update.phase !== phase) {
-						phase = update.phase
-						events.phase(update.phase)
-					}
-				},
-				managedFuture: { abortSignal: signal }
-			})
-		)
-
-		return { bytes: buffer.take(), checked }
-	}
 
 	return {
 		register: (id, archive, anon, password) => {
@@ -391,16 +544,21 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 			}
 
 			records.set(id, {
+				id,
 				archive,
 				anon,
 				password,
+				lifetime: new AbortController(),
 				opened: null,
 				opening: null,
 				closed: false,
+				released: false,
+				pending: 0,
 				access: new Map(),
 				ahead: new Map(),
-				aheadBytes: 0,
-				passes: new Map()
+				passes: new Map(),
+				leases: 0,
+				cancelIdle: null
 			})
 		},
 		has: id => records.get(id)?.closed === false,
@@ -422,54 +580,139 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				dispose(record)
 			}
 		},
-		list: async (id, onBatch, onUpdate, managedFuture) => {
-			const record = require(id)
-			const reader = await ensureOpen(record, onUpdate, managedFuture)
+		lease: id => {
+			const record = records.get(id)
 
-			return reader.list({ ...(onBatch !== null ? { onEntriesBatch: onBatch } : {}), onUpdate, managedFuture })
+			if (record !== undefined) {
+				record.leases += 1
+				record.cancelIdle?.()
+				record.cancelIdle = null
+			}
+		},
+		unlease: id => {
+			const record = records.get(id)
+
+			if (record === undefined) {
+				return
+			}
+
+			record.leases = Math.max(0, record.leases - 1)
+
+			if (record.leases === 0 && record.cancelIdle === null) {
+				record.cancelIdle = setTimer(() => {
+					record.cancelIdle = null
+
+					if (record.leases === 0) {
+						clearAhead(record)
+					}
+				}, READ_AHEAD_IDLE_MS)
+			}
+		},
+		heldBytes: id => {
+			const record = records.get(id)
+			let total = 0
+
+			for (const held of record?.ahead.values() ?? []) {
+				total += held.bytes.length
+			}
+
+			return total
+		},
+		list: (id, onBatch, onUpdate, managedFuture) => {
+			const record = require(id)
+
+			return borrow(record, managedFuture.abortSignal ?? new AbortController().signal, onUpdate, (reader, signal) =>
+				reader.list({
+					...(onBatch !== null ? { onEntriesBatch: onBatch } : {}),
+					onUpdate,
+					managedFuture: { ...managedFuture, abortSignal: signal }
+				})
+			)
 		},
 		download: async (id, entry, writer, maxSolidSkip, onProgress, managedFuture) => {
 			const record = require(id)
-			const reader = await ensureOpen(
+			// Read ahead already (a solid block's file a pass brought): saved from what is held.
+			const held = dropAhead(record, entry.index)
+
+			if (held !== undefined) {
+				const w = writer.getWriter()
+
+				onProgress({ phase: "reading", bytesWritten: 0 })
+				await w.write(held.bytes)
+				await w.close()
+				onProgress({ phase: "done", bytesWritten: held.bytes.length })
+
+				return { bytesWritten: BigInt(held.bytes.length), bytesRead: 0n, checked: held.checked, error: undefined }
+			}
+
+			return borrow(
 				record,
+				managedFuture.abortSignal ?? new AbortController().signal,
 				update => {
 					onProgress({ phase: update.phase, bytesWritten: 0 })
 				},
-				managedFuture
+				(reader, signal) =>
+					reader.downloadEntry({
+						entry,
+						writer,
+						maxSolidSkip,
+						onUpdate: (update: EntryDownloadUpdate) => {
+							onProgress({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
+						},
+						managedFuture: { ...managedFuture, abortSignal: signal }
+					})
 			)
-
-			return reader.downloadEntry({
-				entry,
-				writer,
-				maxSolidSkip,
-				onUpdate: (update: EntryDownloadUpdate) => {
-					onProgress({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
-				},
-				managedFuture
-			})
 		},
 		readWhole: async (id, entry, size, plan, events, signal) => {
 			const record = require(id)
-			let held = takeAhead(record, entry.index)
 
-			// A pass already on its way to it: its bytes come with that pass.
-			const running = held === undefined ? record.passes.get(entry.index) : undefined
+			// Read ahead already, or on its way in a running read: from there. A read that failed or was cancelled
+			// leaves it to the first waiter to read again, which marks it for the rest.
+			for (;;) {
+				const held = dropAhead(record, entry.index)
 
-			if (running !== undefined) {
-				await running.catch(() => undefined)
-				held = takeAhead(record, entry.index)
+				if (held !== undefined) {
+					if (held.checked) {
+						events.verified()
+					}
+
+					return held.bytes
+				}
+
+				const running = record.passes.get(entry.index)
+
+				if (running === undefined) {
+					break
+				}
+
+				await raceAbort(
+					running.catch(() => undefined),
+					signal
+				)
+
+				if (record.closed) {
+					throw readerClosed()
+				}
 			}
 
-			if (held !== undefined) {
-				return held
+			let marked: number[] = plan.window.length > 1 ? plan.window.map(item => item.index).filter(index => index !== entry.index) : []
+			let reading: Promise<Ahead> | null = null
+			const unmark = (): void => {
+				for (const index of marked) {
+					if (record.passes.get(index) === reading) {
+						record.passes.delete(index)
+					}
+				}
+
+				marked = []
 			}
 
-			const reading = readEntry(record, entry, size, plan, events, signal)
+			reading = readEntry(record, entry, size, plan, events, signal, unmark)
 			// Marked before the read's first await: a read of a file after it, asked meanwhile, waits for what it brings.
-			const marked = plan.window.filter(item => item.index !== entry.index && !record.passes.has(item.index))
+			marked = marked.filter(index => !record.passes.has(index))
 
-			for (const item of marked) {
-				record.passes.set(item.index, reading)
+			for (const index of marked) {
+				record.passes.set(index, reading)
 			}
 
 			try {
@@ -485,11 +728,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 
 				throw e
 			} finally {
-				for (const item of marked) {
-					if (record.passes.get(item.index) === reading) {
-						record.passes.delete(item.index)
-					}
-				}
+				unmark()
 			}
 		}
 	}

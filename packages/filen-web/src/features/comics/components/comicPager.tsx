@@ -8,7 +8,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingSession } from "@/features/archive/lib/listingSession"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
-import { entryCost, entryKey, needsCostConfirm } from "@/features/archive/lib/entryAccess.logic"
+import { entryCost, entryKey, entryReadPlan, needsCostConfirm } from "@/features/archive/lib/entryAccess.logic"
 import { isArchivePasswordError } from "@/features/archive/lib/entryDownload"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
@@ -149,13 +149,12 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 					file: source.file,
 					anon: source.anon,
 					password: readWith,
-					store,
-					slot,
+					plan: entryReadPlan(store, slot, session()?.costAccepted() === true),
 					events: { phase: () => undefined, verified: () => undefined, failed: () => undefined }
 				})
 			)
 
-			return loadOriginBytes(entryLeaseOrigin(leaseId, source.file, source.anon, store, slot), token, {
+			return loadOriginBytes(entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot)), token, {
 				access,
 				cap: store.size(slot),
 				scope: cacheScope,
@@ -195,7 +194,8 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 	}
 
 	const costSlot = costAsk === null ? undefined : pages[costAsk]
-	const cost = costSlot === undefined ? null : entryCost(store, costSlot)
+	// What the read after a yes fetches: the page and the ones read ahead with it.
+	const cost = costSlot === undefined ? null : entryCost(store, costSlot, entryReadPlan(store, costSlot, true))
 	const forward = (): void => {
 		show(viewIndex + 1)
 	}
@@ -223,6 +223,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 									store={store}
 									slot={slot}
 									password={password}
+									readAhead={session()?.costAccepted() === true}
 									onLandscape={() => {
 										setLandscape(previous => (previous.has(position) ? previous : new Set([...previous, position])))
 									}}
@@ -322,7 +323,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 				body={
 					costSlot === undefined || cost === null
 						? ""
-						: t("previewArchiveEntryCostOpenBody", {
+						: t("previewArchiveEntryCostOnceOpenBody", {
 								name: store.name(costSlot),
 								download: formatBytes(cost.estimatedBytes),
 								skipped: formatBytes(cost.skippedBytes)

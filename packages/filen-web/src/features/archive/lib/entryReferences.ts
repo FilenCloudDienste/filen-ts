@@ -6,6 +6,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryRequest, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
+import { entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
 
 // An archive entry's references, from the archive's own listing: its directory and the directories below it. An entry
 // the SDK cannot read alone (a bare tar's member) is listed as not readable. Each one is read through a lease of its own
@@ -34,10 +35,17 @@ async function readEntry(
 ) {
 	const leaseId = crypto.randomUUID()
 	const file = request.params.archive
-	const slot = store.slotOfIndex(request.params.entry.index)
-	const release = leaseEntry({ leaseId, file, anon: request.anon, password, store, slot, events: NO_EVENTS })
+	const { index } = request.params.entry
+	const release = leaseEntry({
+		leaseId,
+		file,
+		anon: request.anon,
+		password,
+		plan: entryPlanOf(store, index, request.size, request.params.maxSolidSkip, false),
+		events: NO_EVENTS
+	})
 
-	return await readOrigin(entryLeaseOrigin(leaseId, file, request.anon, store, slot), access, cap, signal).finally(release)
+	return await readOrigin(entryLeaseOrigin(leaseId, file, request.anon, index, request.size), access, cap, signal).finally(release)
 }
 
 // `index`: the viewed entry's index in the archive.

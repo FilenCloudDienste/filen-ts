@@ -36,6 +36,7 @@ vi.mock("@/lib/sdk/client", () => ({
 			return Promise.resolve()
 		},
 		closeArchiveReader: () => Promise.resolve(),
+		archiveReaderHeldBytes: () => Promise.resolve(0),
 		listArchiveReader: (readerId: string, id: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) =>
 			new Promise<ListReportDTO>(resolve => {
 				calls.push({ id, params, password: readerPasswords.get(readerId), emit: onEvent, resolve })

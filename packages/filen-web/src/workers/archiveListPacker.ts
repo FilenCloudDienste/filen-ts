@@ -30,6 +30,7 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 	const parentOf = new Map<string, number>()
 	let solidSkipped: Float64Array | null = null
 	let solidEstimated: Float64Array | null = null
+	let solidBlock: Float64Array | null = null
 	let solidInBatch = false
 	let archive = ""
 	let count = 0
@@ -51,10 +52,11 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 		return found
 	}
 
-	function setSolid(i: number, skipped: number, estimated: number): void {
-		if (solidSkipped !== null && solidEstimated !== null) {
+	function setSolid(i: number, skipped: number, estimated: number, block: number): void {
+		if (solidSkipped !== null && solidEstimated !== null && solidBlock !== null) {
 			solidSkipped[i] = skipped
 			solidEstimated[i] = estimated
+			solidBlock[i] = block
 		}
 	}
 
@@ -112,15 +114,17 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 			if (!solidInBatch) {
 				solidSkipped ??= new Float64Array(flushAt)
 				solidEstimated ??= new Float64Array(flushAt)
+				solidBlock ??= new Float64Array(flushAt)
 				// Positions before this one hold an earlier batch's values.
 				solidSkipped.fill(0, 0, i)
 				solidEstimated.fill(0, 0, i)
+				solidBlock.fill(0, 0, i)
 				solidInBatch = true
 			}
 
-			setSolid(i, Number(entry.access.skippedBytes), Number(entry.access.estimatedPackedBytes))
+			setSolid(i, Number(entry.access.skippedBytes), Number(entry.access.estimatedPackedBytes), Number(entry.access.blockPackedBytes))
 		} else if (solidInBatch) {
-			setSolid(i, 0, 0)
+			setSolid(i, 0, 0, 0)
 		}
 
 		if (entry.kind.type === "symlink") {
@@ -156,8 +160,12 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 			links,
 			stored,
 			solid:
-				solidInBatch && solidSkipped !== null && solidEstimated !== null
-					? { skipped: solidSkipped.slice(0, count), estimated: solidEstimated.slice(0, count) }
+				solidInBatch && solidSkipped !== null && solidEstimated !== null && solidBlock !== null
+					? {
+							skipped: solidSkipped.slice(0, count),
+							estimated: solidEstimated.slice(0, count),
+							block: solidBlock.slice(0, count)
+						}
 					: null
 		}
 

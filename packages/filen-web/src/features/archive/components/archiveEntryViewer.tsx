@@ -9,6 +9,7 @@ import { entryReferences } from "@/features/archive/lib/entryReferences"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { isArchivePasswordError, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
+import { entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
@@ -33,6 +34,8 @@ export interface ArchiveEntryViewerProps {
 	onBack: () => void
 	// The archive's listing, where the entry's references (a model's textures) are found.
 	listing: { source: ArchiveSource; store: EntryStore }
+	// The session accepted a solid cost: a solid block's entry reads the files after it ahead.
+	readAhead: boolean
 }
 
 // One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
@@ -46,7 +49,8 @@ export function ArchiveEntryViewer({
 	onPasswordAccepted,
 	onDownload,
 	onBack,
-	listing
+	listing,
+	readAhead
 }: ArchiveEntryViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const [password, setPassword] = useState(listingPassword)
@@ -59,8 +63,7 @@ export function ArchiveEntryViewer({
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
 	// One lease per password tried; the viewer below remounts with it.
 	const leaseId = `${readerBase}:${String(attempt)}`
-	const slot = listing.store.slotOfIndex(request.params.entry.index)
-	const origin = entryLeaseOrigin(leaseId, request.params.archive, request.anon, listing.store, slot)
+	const origin = entryLeaseOrigin(leaseId, request.params.archive, request.anon, request.params.entry.index, request.size)
 	const onPhase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
 	})
@@ -75,7 +78,11 @@ export function ArchiveEntryViewer({
 			setAsk({ wrong: dto.kind === "ArchiveWrongPassword" || password !== undefined })
 		}
 	})
-	const leaseRequest = useEffectEvent(() => ({ request, password, store: listing.store, slot }))
+	const leaseRequest = useEffectEvent(() => ({
+		request,
+		password,
+		plan: entryPlanOf(listing.store, request.params.entry.index, request.size, request.params.maxSolidSkip, readAhead)
+	}))
 	const access = usePreviewAccessMode()
 
 	// A layout effect: it runs before the viewer's own effects start reading through the lease.
@@ -87,8 +94,7 @@ export function ArchiveEntryViewer({
 			file: opened.request.params.archive,
 			anon: opened.request.anon,
 			password: opened.password,
-			store: opened.store,
-			slot: opened.slot,
+			plan: opened.plan,
 			events: {
 				phase: phase => {
 					onPhase(phase === "waitingForWorker")

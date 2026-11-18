@@ -41,6 +41,7 @@ vi.mock("@/lib/sdk/client", async () => {
 
 				return Promise.resolve()
 			},
+			archiveReaderHeldBytes: () => Promise.resolve(0),
 			leaseArchiveEntry: (id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents) => {
 				leases.set(id, { readerId, plan, events })
 
@@ -321,6 +322,7 @@ describe("an archive entry on its own", () => {
 
 		const dialog = await screen.findByRole("alertdialog")
 
+		// One file: nothing to read ahead, so what it fetches is its own estimate.
 		expect(dialog.textContent).toMatch(/downloads about 2(\.0)? MiB of it and unpacks 5(\.0)? MiB/)
 		expect(dialog.textContent).toContain("You won't be asked again while this archive is open.")
 		expect(loadEntryBytes).not.toHaveBeenCalled()
@@ -329,6 +331,30 @@ describe("an archive entry on its own", () => {
 
 		expect(await screen.findByText("markdown: hi!")).toBeTruthy()
 		expect(loadEntryBytes.mock.calls[0]?.[0]).toMatchObject({ params: { maxSolidSkip: 5 * MiB } })
+	})
+
+	it("sends a file of a solid block above 512 MiB to extracting: no cost dialog, nothing read", async () => {
+		const { toast } = await import("sonner")
+
+		show([
+			{
+				path: "deep.md",
+				size: 3,
+				access: {
+					type: "solidBlock",
+					skippedBytes: BigInt(5 * MiB),
+					estimatedPackedBytes: BigInt(6 * MiB),
+					blockPackedBytes: BigInt(513 * MiB)
+				}
+			}
+		])
+
+		fireEvent.doubleClick(row("deep.md"))
+
+		expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Extract the archive to read it"))
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(loadEntryBytes).not.toHaveBeenCalled()
+		expect(runEntryDownload).not.toHaveBeenCalled()
 	})
 
 	it("asks once per listing session: a later solid entry opens unasked, still bounded by its own skip", async () => {

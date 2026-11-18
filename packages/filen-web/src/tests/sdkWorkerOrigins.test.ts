@@ -173,6 +173,16 @@ describe("sdk worker origin range ports", () => {
 		await unlease(reader.id)
 	})
 
+	it("closes the previous account's readers and leases when another client is adopted", async () => {
+		await lease("reader-switch")
+		expect(Array.from(await api.downloadOriginBytes(entryOrigin("reader-switch"), "authed", 10, "o5a"))).toEqual(CONTENT)
+		await api.injectClient("other" as unknown as StringifiedClient)
+
+		await expect(api.downloadOriginBytes(entryOrigin("reader-switch"), "authed", 10, "o5")).rejects.toThrow("closed")
+		expect(fakeReader.close).toHaveBeenCalled()
+		await unlease("reader-switch")
+	})
+
 	it("refuses an entry whose reader is closed", async () => {
 		await expect(openPort(entryOrigin("closed"), "o4")).rejects.toThrow("closed")
 	})

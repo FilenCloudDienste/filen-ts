@@ -73,6 +73,10 @@ function waitingUpdate(phase: ListUpdate["phase"]): ListJobEvent {
 	}
 }
 
+async function settle(): Promise<void> {
+	await new Promise(resolve => setTimeout(resolve, 0))
+}
+
 // Every test starts with no reader open.
 afterEach(() => {
 	runPreviewDisposers()
@@ -85,6 +89,8 @@ function harness() {
 	const leases = new Map<string, { readerId: string; plan: EntryReadPlan; events: EntryReaderEvents }>()
 	const opened = new Map<string, { anon: boolean; password: string | undefined }>()
 	const lingers: (() => void)[] = []
+	// What the worker says a released reader holds read ahead.
+	const held = { bytes: 0 }
 	const newId = (): string => {
 		ids += 1
 
@@ -98,6 +104,7 @@ function harness() {
 			opened.delete(id)
 		}),
 		newId,
+		heldBytes: () => Promise.resolve(held.bytes),
 		linger: close => {
 			lingers.push(close)
 
@@ -134,14 +141,16 @@ function harness() {
 		return found
 	}
 
-	// The lingering readers close now.
-	function lapse(): void {
+	// The lingering readers close now, once the held-bytes answers that decide to linger came.
+	async function lapse(): Promise<void> {
+		await settle()
+
 		for (const close of lingers.splice(0)) {
 			close()
 		}
 	}
 
-	return { deps, pageDeps, list, leases, opened, lapse }
+	return { deps, pageDeps, list, leases, opened, lapse, held }
 }
 
 describe("acquireArchiveHandle", () => {
@@ -279,7 +288,7 @@ describe("acquireArchiveHandle", () => {
 
 		first.release()
 		second.release()
-		lapse()
+		await lapse()
 		// The lease still holds the reader: a new handle joins it.
 		const third = opened(fileOrigin(), deps)
 
@@ -291,7 +300,7 @@ describe("acquireArchiveHandle", () => {
 
 		expect(again.id).toBe(first.id)
 		again.release()
-		lapse()
+		await lapse()
 		expect(pageDeps.close).toHaveBeenCalledWith(first.id)
 
 		// The last reference lapsed: the next acquire opens it afresh.
@@ -302,7 +311,18 @@ describe("acquireArchiveHandle", () => {
 		other.release()
 		if (locked.type === "opened") locked.handle.release()
 		if (linked.type === "opened") linked.handle.release()
-		lapse()
+		await lapse()
+	})
+
+	it("closes a reader nobody holds at once when it holds more than 4 MiB read ahead", async () => {
+		const { deps, pageDeps, held } = harness()
+		const handle = opened(fileOrigin(), deps)
+
+		held.bytes = 5 * 1024 * 1024
+		handle.release()
+		await settle()
+
+		expect(pageDeps.close).toHaveBeenCalledWith(handle.id)
 	})
 
 	it("closes every reader at sign-out, and refuses a lease afterwards", async () => {

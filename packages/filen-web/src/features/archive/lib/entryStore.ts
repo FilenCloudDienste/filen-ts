@@ -44,6 +44,8 @@ export interface EntryStore {
 	// A solid block's entry's skippedBytes and estimatedPackedBytes (accessOfFlags tells it is one); 0 otherwise.
 	solidSkipped: (slot: number) => number
 	solidEstimated: (slot: number) => number
+	// The archive bytes of the solid block it lies in; 0 for an entry in none.
+	solidBlock: (slot: number) => number
 	// Per directory node.
 	dirParent: (id: number) => number
 	dirName: (id: number) => string
@@ -81,6 +83,7 @@ interface EntryChunk {
 	// Allocated by the chunk's first solid block entry.
 	solidSkipped: Float64Array | null
 	solidEstimated: Float64Array | null
+	solidBlock: Float64Array | null
 }
 
 const NO_CHILDREN: readonly number[] = []
@@ -95,7 +98,8 @@ function newChunk(): EntryChunk {
 		modified: new Float64Array(ENTRY_CHUNK),
 		parent: new Int32Array(ENTRY_CHUNK),
 		solidSkipped: null,
-		solidEstimated: null
+		solidEstimated: null,
+		solidBlock: null
 	}
 }
 
@@ -244,12 +248,15 @@ export function createEntryStore(): EntryStore {
 			if (batch.solid !== null) {
 				const skipped = batch.solid.skipped[i] ?? 0
 				const estimated = batch.solid.estimated[i] ?? 0
+				const block = batch.solid.block[i] ?? 0
 
-				if (skipped > 0 || estimated > 0) {
+				if (skipped > 0 || estimated > 0 || block > 0) {
 					chunk.solidSkipped ??= new Float64Array(ENTRY_CHUNK)
 					chunk.solidEstimated ??= new Float64Array(ENTRY_CHUNK)
+					chunk.solidBlock ??= new Float64Array(ENTRY_CHUNK)
 					chunk.solidSkipped[offset] = skipped
 					chunk.solidEstimated[offset] = estimated
+					chunk.solidBlock[offset] = block
 				}
 			}
 
@@ -371,6 +378,7 @@ export function createEntryStore(): EntryStore {
 		storedPath: slot => storedPaths.get(slot),
 		solidSkipped: slot => chunkOf(slot).solidSkipped?.[slot & CHUNK_MASK] ?? 0,
 		solidEstimated: slot => chunkOf(slot).solidEstimated?.[slot & CHUNK_MASK] ?? 0,
+		solidBlock: slot => chunkOf(slot).solidBlock?.[slot & CHUNK_MASK] ?? 0,
 		dirParent: id => dirParents[id] ?? -1,
 		dirName: id => dirNames[id] ?? "",
 		dirEntrySlot: id => dirEntrySlots[id] ?? -1,
