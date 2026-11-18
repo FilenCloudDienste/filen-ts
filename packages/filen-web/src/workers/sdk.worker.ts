@@ -688,31 +688,6 @@ async function probeRead(size: number, read: AbortableReadRange, tier: ProbeTier
 	}
 }
 
-// Serves `file`'s decrypted ranges through `c` on `port` until the reader closes it or
-// cancelPreviewDownload(previewToken) aborts every read. `release` runs once the port has shut down and
-// every read on `c` has settled: a handle is never freed under a call still running on it.
-function serveRangePort(
-	port: MessagePort,
-	c: Pick<Client, "downloadFileToWriter">,
-	file: AnyFile,
-	previewToken: string,
-	release?: () => void
-): void {
-	const controller = new AbortController()
-
-	controller.signal.addEventListener(
-		"abort",
-		() => {
-			if (previewAborts.get(previewToken) === controller) {
-				previewAborts.delete(previewToken)
-			}
-		},
-		{ once: true }
-	)
-	registerPreviewAbort(previewToken, controller)
-	exposeTrackedRangePort(port, (start, end, signal) => readFileRange(c, file, start, end, signal), controller, release)
-}
-
 // Serves `read` on `port` until `lifetime` aborts. `release` runs once the port has shut down and no read is still
 // running, so a handle is never freed under a call still running on it.
 function exposeTrackedRangePort(port: MessagePort, read: AbortableReadRange, lifetime: AbortController, release?: () => void): void {
@@ -871,38 +846,42 @@ function joinOriginServe(origin: ByteOrigin, previewToken: string): { source: Or
 	}
 }
 
-// Serves `file`'s decrypted blocks into the PDF engine's sync range `buffer` (lib/media/syncRangeServe.ts) through `c`,
-// until the engine closes it, the page releases `readerLock`, or cancelPreviewDownload(previewToken) aborts it.
-// `client` is checked on every read, so one after sign-out fails at once instead of reaching a freed handle.
-function serveSyncRangeFor(
+// Serves `origin`'s ranges on `port` under `previewToken` (openOriginRangePort and the file ports that delegate to it):
+// ports under one token share its cancel and one source per origin; each lives until its reader closes it.
+function serveOriginRangePort(port: MessagePort, origin: ByteOrigin, previewToken: string): void {
+	const { source, lifetime, done } = joinOriginServe(origin, previewToken)
+
+	exposeTrackedRangePort(port, source.read, lifetime, done)
+}
+
+// Serves `origin`'s blocks into a PDF engine's sync range `buffer` (lib/media/syncRangeServe.ts) until the engine closes
+// it, the page releases `readerLock`, or cancelPreviewDownload(previewToken) aborts it. An origin read whole has none.
+function serveOriginSyncRange(
 	buffer: SharedArrayBuffer,
 	port: MessagePort,
-	c: () => Pick<Client, "downloadFileToWriter">,
-	file: AnyFile,
+	origin: ByteOrigin,
 	previewToken: string,
-	readerLock: string,
-	release?: () => void
+	readerLock: string
 ): void {
-	const controller = new AbortController()
+	if (originWhole(origin)) {
+		throw new Error("an origin read whole has no sync range")
+	}
 
-	controller.signal.addEventListener(
-		"abort",
-		() => {
-			if (previewAborts.get(previewToken) === controller) {
-				previewAborts.delete(previewToken)
-			}
-		},
-		{ once: true }
-	)
-	registerPreviewAbort(previewToken, controller)
+	const { source, lifetime, done } = joinOriginServe(origin, previewToken)
+
 	serveFileSyncRange(buffer, port, {
-		read: (start, end, signal) => readFileRange(c(), file, start, end, signal),
-		length: Number(file.size),
-		lifetime: controller,
+		read: source.read,
+		length: source.size,
+		lifetime,
 		readerLock,
-		...(release === undefined ? {} : { release }),
+		release: done,
 		...("locks" in navigator ? { locks: navigator.locks } : {})
 	})
+
+	// Cancelled ahead of the call: nothing was served.
+	if (lifetime.signal.aborted) {
+		done()
+	}
 }
 
 // The shared frame of both audio-metadata entry points: the abort registry, the cover thumbnail's decode
@@ -2614,31 +2593,16 @@ const api = {
 	},
 	// The anon mirror of openRangePort below: serves a linked file's ranges to the remux worker, so a
 	// logged-out visitor streams media through MediaSource (the service worker's bundle has no
-	// UnauthClient). The client handle lives as long as the port and is freed when it shuts down.
+	// UnauthClient). Served as a linkedFile origin: its client handle lives as long as the port, freed once it shut down.
 	openLinkedRangePortAnon(port: MessagePort, file: AnyFile, previewToken: string): void {
-		const unauth = linkedUnauthClient()
-
-		serveRangePort(port, unauth, file, previewToken, () => {
-			unauth.free()
-		})
+		serveOriginRangePort(port, { kind: "linkedFile", file }, previewToken)
 	},
 	// The anon mirror of openSyncRange below, for a PDF behind a public link: the client handle lives as long as the
 	// bridge and is freed once it has shut down.
 	openLinkedSyncRangeAnon(buffer: SharedArrayBuffer, port: MessagePort, file: AnyFile, previewToken: string, readerLock: string): void {
-		const unauth = linkedUnauthClient()
-
-		serveSyncRangeFor(
-			buffer,
-			port,
-			() => unauth,
-			file,
-			previewToken,
-			readerLock,
-			() => {
-				unauth.free()
-			}
-		)
+		serveOriginSyncRange(buffer, port, { kind: "linkedFile", file }, previewToken, readerLock)
 	},
+
 	// The anon mirror of fetchRawPreview above, for a RAW behind a public link.
 	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
 		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
@@ -3133,16 +3097,18 @@ const api = {
 	// ── Range port ───────────────────────────────────────────────────────────
 	// Serves `file`'s decrypted byte ranges on `port` (lib/media/rangePort) for a reader in another
 	// worker, so playback reads go straight from here to the remuxer. Lives until the reader closes the
-	// port or cancelPreviewDownload(previewToken) aborts every read on it.
+	// port or cancelPreviewDownload(previewToken) aborts every port of the token. The byte layer's file origin
+	// (openOriginRangePort) serves it; downloadFileBytes stays its own, for the progress its cancel reads.
 	openRangePort(port: MessagePort, file: AnyFile, previewToken: string): void {
-		serveRangePort(port, requireClient(), file, previewToken)
+		requireClient()
+		serveOriginRangePort(port, { kind: "file", file }, previewToken)
 	},
 	// Serves `file`'s decrypted blocks into a PDF engine's sync range `buffer` (lib/media/syncRange.ts): the engine
 	// reads them synchronously from the buffer, this worker writes them and reads ahead. The page holds `readerLock`
 	// while the engine lives.
 	openSyncRange(buffer: SharedArrayBuffer, port: MessagePort, file: AnyFile, previewToken: string, readerLock: string): void {
 		requireClient()
-		serveSyncRangeFor(buffer, port, requireClient, file, previewToken, readerLock)
+		serveOriginSyncRange(buffer, port, { kind: "file", file }, previewToken, readerLock)
 	},
 	// ── Byte origins (lib/sdk/byteOrigin.ts) ─────────────────────────────────
 	// Opens the archive `archive` for reads under the caller's `id`: through the public-link client when `anon`, else
@@ -3217,10 +3183,7 @@ const api = {
 	// origin; each lives until its reader closes it.
 	openOriginRangePort(port: MessagePort, origin: ByteOrigin, access: OriginAccess, previewToken: string): void {
 		requireOriginAccess(origin, access)
-
-		const { source, lifetime, done } = joinOriginServe(origin, previewToken)
-
-		exposeTrackedRangePort(port, source.read, lifetime, done)
+		serveOriginRangePort(port, origin, previewToken)
 	},
 	// openSyncRange for an origin read by ranges; a whole one is transferred to the engine instead.
 	openOriginSyncRange(
@@ -3232,26 +3195,7 @@ const api = {
 		readerLock: string
 	): void {
 		requireOriginAccess(origin, access)
-
-		if (originWhole(origin)) {
-			throw new Error("an origin read whole has no sync range")
-		}
-
-		const { source, lifetime, done } = joinOriginServe(origin, previewToken)
-
-		serveFileSyncRange(buffer, port, {
-			read: source.read,
-			length: source.size,
-			lifetime,
-			readerLock,
-			release: done,
-			...("locks" in navigator ? { locks: navigator.locks } : {})
-		})
-
-		// Cancelled ahead of the call: nothing was served.
-		if (lifetime.signal.aborted) {
-			done()
-		}
+		serveOriginSyncRange(buffer, port, origin, previewToken, readerLock)
 	},
 	// An origin's whole bytes, at most `cap`, transferred back and never kept here (the page's loadOriginBytes caches
 	// them). Cancelled by its token.
