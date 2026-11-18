@@ -94,6 +94,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	torrent: "drivePreviewKindTorrent",
 	email: "drivePreviewKindEmail",
 	notebook: "drivePreviewKindNotebook",
+	mailbox: "drivePreviewKindMailbox",
 	subtitle: "drivePreviewKindSubtitle",
 	calendar: "drivePreviewKindCalendar",
 	contact: "drivePreviewKindContact",
@@ -317,6 +318,7 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"torrent",
 	"email",
 	"notebook",
+	"mailbox",
 	"subtitle",
 	"calendar",
 	"contact",
@@ -452,7 +454,8 @@ describe("precedence tiers", () => {
 			mkd: "markdown",
 			gpx: "geo",
 			kml: "geo",
-			cbr: "comic"
+			cbr: "comic",
+			mbox: "mailbox"
 		})
 
 		for (const [extension, winner] of Object.entries(overlaps)) {
@@ -462,8 +465,9 @@ describe("precedence tiers", () => {
 
 	it("derives code from every grammar but the binary ones, keeping the shared code set", () => {
 		const derived = codeLanguageExtensions().filter(extension => !CODE_FILE_EXTENSIONS.has(extension))
-		// Kept by an earlier tier (GPX and KML by the geo viewer), or code already (TypeScript's module and CommonJS sources).
-		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts", "gpx", "kml"])
+		// Kept by an earlier tier (GPX and KML by the geo viewer, mbox by the mailbox viewer), or code already (TypeScript's
+		// module and CommonJS sources).
+		const settled = new Set(["svg", "md", "markdown", "mkd", "mts", "cts", "gpx", "kml", "mbox"])
 
 		expect(CODE_DERIVATION_EXCLUSIONS).toEqual(new Set(["mo", "sig", "pgp", "p", "z80"]))
 		expect(CODE_EXTENSIONS.size).toBe(CODE_FILE_EXTENSIONS.size + derived.length - CODE_DERIVATION_EXCLUSIONS.size)
@@ -474,8 +478,8 @@ describe("precedence tiers", () => {
 
 		const newlyCode = derived.filter(extension => !CODE_DERIVATION_EXCLUSIONS.has(extension) && !settled.has(extension))
 
-		// 179 grammar extensions routed nowhere before, less .mkd (Markdown) and the five binary ones.
-		expect(newlyCode).toHaveLength(179 - 1 - 5)
+		// 179 grammar extensions routed nowhere before, less .mkd (Markdown), .mbox (mailbox) and the five binary ones.
+		expect(newlyCode).toHaveLength(179 - 1 - 1 - 5)
 
 		for (const extension of newlyCode) {
 			expect(previewCategoryForExtension(extension), extension).toBe("code")
@@ -730,6 +734,20 @@ describe("the notebook row", () => {
 		expect(isTextCategory("notebook")).toBe(true)
 		expect(CATEGORY_POLICY.notebook.editsAsText).toBe(true)
 		expect(previewKindLabelKey("notebook")).toBe("drivePreviewKindNotebook")
+	})
+})
+
+describe("the mailbox row", () => {
+	// Read in ranges at any size on the drive and a link; an archive's entry whole up to the email cap; read-only.
+	it("opens a mailbox at any size, inside an archive up to 64 MiB, never as text", () => {
+		expect(previewType(fileNamed("inbox.mbox", 1024n))).toBe("mailbox")
+		expect(canPreview(fileNamed("inbox.mbox", 50n * 1024n * MIB))).toBe(true)
+		expect(anonPreviewability(fileNamed("inbox.mbox", 50n * 1024n * MIB))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: "inbox.mbox", access: DIRECT, size: Number(64n * MIB) }]), 0)).toBe(true)
+		expect(canOpenEntry(storeOf([{ path: "inbox.mbox", access: DIRECT, size: Number(64n * MIB) + 1 }]), 0)).toBe(false)
+		expect(isTextCategory("mailbox")).toBe(false)
+		expect(CATEGORY_POLICY.mailbox.editsAsText).toBe(false)
+		expect(previewKindLabelKey("mailbox")).toBe("drivePreviewKindMailbox")
 	})
 })
 

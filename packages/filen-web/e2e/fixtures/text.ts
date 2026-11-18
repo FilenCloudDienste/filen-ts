@@ -296,6 +296,13 @@ export const MERMAID_MARKDOWN_TEXT = [
 
 export const MERMAID_FILE_TEXT = "flowchart LR\n  Read --> Draw --> Show\n"
 
+// A mailbox of three messages; the second's body holds a quoted "From " line.
+export const MAILBOX_SUBJECTS = ["E2E first", "E2E second", "E2E third"] as const
+const MAILBOX_TEXT = MAILBOX_SUBJECTS.map(
+	(subject, index) =>
+		`From sender${String(index)}@example.com Mon Nov 16 09:1${String(index)}:00 2026\nFrom: Sender ${String(index)} <sender${String(index)}@example.com>\nSubject: ${subject}\nDate: Mon, 16 Nov 2026 09:1${String(index)}:00 +0000\n\nBody of ${subject}\n>From a quoted line\n\n`
+).join("")
+
 export const TEXT_SCENARIOS = scenarioModule(
 	{
 		"preview-text-legacy": ["cyrillic-notes.txt"],
@@ -306,7 +313,8 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"preview-binary-info": ["e2e-tool", "e2e-setup.exe", "e2e-disc.iso"],
 		"preview-email": ["e2e-message.eml"],
 		"preview-notebook": ["e2e-analysis.ipynb"],
-		"preview-mermaid": ["e2e-diagrams.md", "e2e-flow.mmd"]
+		"preview-mermaid": ["e2e-diagrams.md", "e2e-flow.mmd"],
+		"preview-mailbox": ["e2e-inbox.mbox"]
 	},
 	() => ({
 		"cyrillic-notes.txt": { buffer: encodeSingleByte(LEGACY_CYRILLIC_TEXT, "windows-1251"), mimeType: "text/plain" },
@@ -327,6 +335,7 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"e2e-message.eml": { buffer: Buffer.from(EMAIL_TEXT, "utf8"), mimeType: "message/rfc822" },
 		"e2e-analysis.ipynb": { buffer: Buffer.from(NOTEBOOK_TEXT, "utf8"), mimeType: "application/x-ipynb+json" },
 		"e2e-diagrams.md": { buffer: Buffer.from(MERMAID_MARKDOWN_TEXT, "utf8"), mimeType: "text/markdown" },
-		"e2e-flow.mmd": { buffer: Buffer.from(MERMAID_FILE_TEXT, "utf8"), mimeType: "application/octet-stream" }
+		"e2e-flow.mmd": { buffer: Buffer.from(MERMAID_FILE_TEXT, "utf8"), mimeType: "application/octet-stream" },
+		"e2e-inbox.mbox": { buffer: Buffer.from(MAILBOX_TEXT, "utf8"), mimeType: "application/mbox" }
 	})
 )

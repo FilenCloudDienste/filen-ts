@@ -377,8 +377,8 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("email")
 	})
 
-	it("reads a mailbox as code (its grammar), geo files as maps, and a notebook as one", () => {
-		expect(previewType(fileNamed("inbox.mbox"))).toBe("code")
+	it("reads a mailbox as one, geo files as maps, and a notebook as one", () => {
+		expect(previewType(fileNamed("inbox.mbox"))).toBe("mailbox")
 		expect(previewType(fileNamed("tracks.gpx"))).toBe("geo")
 		expect(previewType(fileNamed("map.geojson"))).toBe("geo")
 		expect(previewType(fileNamed("analysis.ipynb"))).toBe("notebook")
@@ -426,7 +426,7 @@ describe("previewType — extension category map", () => {
 
 			expect(itemTypeExtension(item), mime).toBe(extension)
 			const category: Record<string, string> = {
-				mbox: "code",
+				mbox: "mailbox",
 				vtt: "subtitle",
 				srt: "subtitle",
 				ics: "calendar",

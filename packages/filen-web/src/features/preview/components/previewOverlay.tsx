@@ -94,6 +94,7 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { EmailViewer } from "@/features/preview/components/emailViewer"
+import { MailboxViewer } from "@/features/preview/components/mailboxViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
 import { NotebookViewer } from "@/features/preview/components/notebookViewer"
@@ -3048,6 +3049,8 @@ function PreviewBody({
 			return <TorrentViewer item={item} />
 		case "email":
 			return <EmailViewer item={item} />
+		case "mailbox":
+			return <MailboxViewer item={item} />
 		case "binaryInfo":
 			return <BinaryInfoViewer item={item} />
 		case "sqlite":

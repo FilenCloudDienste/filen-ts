@@ -58,6 +58,7 @@ export type PreviewCategory =
 	| "dicom"
 	| "torrent"
 	| "email"
+	| "mailbox"
 	| "subtitle"
 	| "calendar"
 	| "contact"
@@ -578,6 +579,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindContact",
 		assistantKind: "document"
 	},
+	// Read in ranges, its messages found as the list needs them; a message opens in the email viewer. Held whole only as
+	// an archive's entry, up to the email cap.
+	mailbox: {
+		streamed: false,
+		ranged: true,
+		bufferCap: BigInt(EMAIL_MAX_BYTES),
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "ranged",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindMailbox",
+		assistantKind: null
+	},
 	// Its headers read in ranges (a handful of small reads); never run, mounted or extracted.
 	binaryInfo: {
 		streamed: false,
@@ -644,7 +661,7 @@ export const CODE_DERIVATION_EXCLUSIONS: ReadonlySet<string> = new Set([
 ])
 
 // Text a save must never write back: a message or a mailbox is evidence, kept byte for byte.
-export const VIEW_ONLY_TEXT_EXTENSIONS: ReadonlySet<string> = new Set(["eml", "mbox"])
+export const VIEW_ONLY_TEXT_EXTENSIONS: ReadonlySet<string> = new Set(["eml"])
 
 // Every extension a grammar highlights (@filen/office/core/code), and the shared code set, some of which have no
 // grammar (Makefile, .bat, .ps). An extension an earlier tier lists keeps that tier's category.
@@ -696,6 +713,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[DICOM_EXTENSIONS, "dicom"],
 	[["torrent"], "torrent"],
 	[["eml", "msg"], "email"],
+	[["mbox"], "mailbox"],
 	[["md", "markdown", "mkd"], "markdown"],
 	[["ipynb"], "notebook"],
 	// A `.sub` is MicroDVD text until a read of its head finds VobSub images (no kind).

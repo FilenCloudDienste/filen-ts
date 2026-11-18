@@ -7,7 +7,7 @@ vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
 	EMAIL_MAX_HTML_CHARS: 2048
 }))
 
-const { rasterImageType, readEmail, readEmailNames } = await import("@/features/preview/lib/emailReading")
+const { rasterImageType, readEmail, readEmailNames, readHeaderSummary } = await import("@/features/preview/lib/emailReading")
 import { outlookMessage } from "@/tests/fixtures/outlookMessage"
 import { msgBytes } from "@filen/office/testing/msg"
 
@@ -321,5 +321,20 @@ describe("readEmail", () => {
 		).toMatchObject({ replyTo: ["Desk <desk@y.io>"] })
 		expect(await read({ sender: ["Anna", "anna@x.io"], replyToNames: "Desk; Other" })).toMatchObject({ replyTo: ["Desk", "Other"] })
 		expect(await read({ sender: ["Anna", "anna@x.io"], replyToNames: "Anna" })).toMatchObject({ replyTo: [] })
+	})
+
+	it("reads a header block alone for a mailbox's list row", async () => {
+		expect(
+			await readHeaderSummary(
+				encode(
+					CRLF([
+						'From: "Anna" <anna@example.com>',
+						"Subject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe?=",
+						"Date: Mon, 16 Nov 2026 09:14:00 +0000"
+					])
+				)
+			)
+		).toMatchObject({ from: "Anna <anna@example.com>", subject: "Grüße" })
+		expect(await readHeaderSummary(encode("not: a\u0000header"))).toMatchObject({ from: null, subject: null })
 	})
 })

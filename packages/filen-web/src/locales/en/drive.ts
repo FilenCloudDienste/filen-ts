@@ -688,6 +688,8 @@ export const drive = {
 	/** Info panel — Kind row value: an e-mail message (.eml) */
 	drivePreviewKindEmail: "Email message",
 	drivePreviewKindNotebook: "Notebook",
+	/** Info panel — Kind row value: a mailbox file (.mbox) */
+	drivePreviewKindMailbox: "Mailbox",
 	/** Info dialog "Kind" value — a subtitle file */
 	drivePreviewKindSubtitle: "Subtitles",
 	/** Info dialog "Kind" value — a calendar file (ics) */

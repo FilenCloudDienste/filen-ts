@@ -14,6 +14,7 @@ import {
 	EMAIL_REMOTE,
 	EMAIL_SUBJECT,
 	NOTEBOOK_STREAM_TEXT,
+	MAILBOX_SUBJECTS,
 	ISO_VOLUME,
 	TORRENT_INFOHASH,
 	TORRENT_TRACKER,
@@ -38,6 +39,7 @@ const [TOOL, SETUP, DISC] = FIXTURE_FILES["preview-binary-info"]
 const [MESSAGE] = FIXTURE_FILES["preview-email"]
 const [NOTEBOOK] = FIXTURE_FILES["preview-notebook"]
 const [DIAGRAMS, FLOW] = FIXTURE_FILES["preview-mermaid"]
+const [MAILBOX] = FIXTURE_FILES["preview-mailbox"]
 const NEVER_RUN = "Never run. Read from the file's headers only."
 const NO_PREVIEW = "Preview isn't available for this file type yet."
 
@@ -400,6 +402,33 @@ test("a notebook shows its cells, highlighted code and outputs, and loads nothin
 	await close(page)
 
 	expect(remote).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("a mailbox lists its messages from its ranges and opens one in the email viewer", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-mailbox")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, MAILBOX).dblclick()
+
+	const list = dialog.getByRole("list", { name: "Messages" })
+
+	await expect(dialog.getByText("3 messages", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(list.getByText(MAILBOX_SUBJECTS[1])).toBeVisible()
+
+	await list.getByText(MAILBOX_SUBJECTS[1]).click()
+	await expect(dialog.getByRole("heading", { name: MAILBOX_SUBJECTS[1] })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	// The quoted line is unquoted once.
+	await expect(dialog.getByText("From a quoted line")).toBeVisible()
+	await close(page)
+
 	expect(foreign).toEqual([])
 	expect(cspBlocked).toEqual([])
 	expect(cspViolations).toEqual([])

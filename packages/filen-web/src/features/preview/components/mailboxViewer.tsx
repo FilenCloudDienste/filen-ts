@@ -1,0 +1,365 @@
+import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
+import * as Comlink from "comlink"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { ArrowLeftIcon } from "lucide-react"
+import type { DriveItem } from "@/features/drive/lib/item"
+import { EmailViewer } from "@/features/preview/components/emailViewer"
+import {
+	PreviewErrorState,
+	PreviewLoading,
+	PreviewNotTextState,
+	PreviewUnsupportedState
+} from "@/features/preview/components/previewErrorState"
+import { useTextPagerSession, type TextPager } from "@/features/preview/hooks/useTextPagerSession"
+import { PreviewByteOriginProvider, usePreviewOrigin } from "@/features/preview/lib/accessMode"
+import { embeddedFileItem } from "@/features/preview/lib/embeddedFileItem"
+import type { EmailHeaderSummary } from "@/features/preview/lib/emailReading"
+import type { MboxCount } from "@/features/preview/lib/textPager/mbox.logic"
+import type { MboxMessage } from "@/features/preview/workers/textPager.worker"
+import { bytesOrigin } from "@/lib/sdk/byteOrigin"
+import { originServesRanges } from "@/features/drive/lib/preview.logic"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { formatDateTime } from "@/lib/formatDate"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { log } from "@/lib/log"
+import { Button } from "@/components/ui/button"
+import { cn } from "@filen/shared"
+
+// A mailbox (F1): its messages listed on the left, found only as far as the list is scrolled ("≥ N messages" until the
+// end, Count all on request), and the one chosen on the right in the email viewer; on a narrow screen the message
+// replaces the list, with a way back. Read in ranges in the pager worker, whatever the file's size.
+
+const ROW_HEIGHT = 56
+const OVERSCAN = 20
+// Messages found beyond the last row in view, so scrolling rarely waits on the scan.
+const SCAN_AHEAD = 200
+
+type Rows = ReadonlyMap<number, EmailHeaderSummary>
+type Opened =
+	| { readonly status: "pending"; readonly index: number }
+	| { readonly status: "ok"; readonly index: number; readonly blob: Blob }
+	| { readonly status: "tooLarge" | "failed"; readonly index: number }
+
+function MessageRow({ row, selected, onOpen }: { row: EmailHeaderSummary | undefined; selected: boolean; onOpen: () => void }) {
+	const { t } = useTranslation("preview")
+	const date = row?.date === null || row === undefined ? null : Date.parse(row.date)
+
+	return (
+		<button
+			type="button"
+			aria-current={selected ? "true" : undefined}
+			onClick={onOpen}
+			className={cn(
+				"flex size-full flex-col justify-center gap-0.5 border-b border-border/50 px-3 text-left text-sm hover:bg-accent",
+				selected ? "bg-accent" : null
+			)}
+		>
+			<span className="flex min-w-0 items-baseline justify-between gap-2">
+				<bdi className="min-w-0 truncate font-medium">{row === undefined ? "" : (row.from ?? t("previewMailboxNoSender"))}</bdi>
+				<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+					{date === null || Number.isNaN(date) ? (row?.date ?? "") : formatDateTime(date)}
+				</span>
+			</span>
+			<bdi className="min-w-0 truncate text-muted-foreground">
+				{row === undefined ? "" : (row.subject ?? t("previewMailboxNoSubject"))}
+			</bdi>
+		</button>
+	)
+}
+
+function MessagePane({ item, opened }: { item: DriveItem; opened: Opened | null }) {
+	const { t } = useTranslation("preview")
+
+	if (opened === null) {
+		return <p className="flex size-full items-center justify-center p-6 text-sm text-muted-foreground">{t("previewMailboxChoose")}</p>
+	}
+
+	switch (opened.status) {
+		case "pending":
+			return <PreviewLoading />
+		case "failed":
+			return <PreviewErrorState message={t("previewMailboxMessageFailed")} />
+		case "tooLarge":
+			return (
+				<PreviewUnsupportedState
+					item={item}
+					message={t("previewMailboxMessageTooLarge")}
+				/>
+			)
+		case "ok": {
+			const message = embeddedFileItem(
+				`${item.data.uuid}#msg${String(opened.index)}`,
+				`message-${String(opened.index + 1)}.eml`,
+				opened.blob.size,
+				Number.NaN
+			)
+
+			return (
+				<PreviewByteOriginProvider
+					key={opened.index}
+					origin={bytesOrigin(opened.blob, message.data.uuid)}
+				>
+					<EmailViewer item={message} />
+				</PreviewByteOriginProvider>
+			)
+		}
+	}
+}
+
+function MailboxReader({ item, pager }: { item: DriveItem; pager: TextPager }) {
+	const { t } = useTranslation("preview")
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const [count, setCount] = useState<MboxCount>({ count: 0, complete: false, capped: false, scanned: 0 })
+	const [rows, setRows] = useState<Rows>(new Map())
+	const [counting, setCounting] = useState(false)
+	const [opened, setOpened] = useState<Opened | null>(null)
+	const virtualizer = useVirtualizer({
+		count: count.count,
+		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
+		estimateSize: () => ROW_HEIGHT,
+		overscan: OVERSCAN
+	})
+	const range = virtualizer.getVirtualItems()
+	const first = range[0]?.index ?? 0
+	const last = range.at(-1)?.index ?? 0
+	// Messages wanted found: the rows in view and SCAN_AHEAD beyond.
+	const want = last + SCAN_AHEAD
+
+	useEffect(() => {
+		let live = true
+
+		if (count.complete || count.count >= want) {
+			return
+		}
+
+		pager
+			.run(remote => remote.mboxEnsure(want))
+			.then(
+				found => {
+					if (live) setCount(found)
+				},
+				(e: unknown) => {
+					log.error("preview", "scanning a mailbox failed", e)
+				}
+			)
+
+		return () => {
+			live = false
+		}
+	}, [pager, want, count.complete, count.count])
+
+	useEffect(() => {
+		let live = true
+		const from = Math.max(0, first - OVERSCAN)
+		const to = Math.min(count.count, last + OVERSCAN + 1)
+
+		if (to <= from) {
+			return
+		}
+
+		pager
+			.run(remote => remote.mboxRows(from, to - from))
+			.then(
+				read => {
+					if (!live) return
+
+					// Only the rows near the view are kept on the page; the worker keeps more.
+					const next = new Map<number, EmailHeaderSummary>()
+
+					read.forEach((row, offset) => {
+						if (row !== null) next.set(from + offset, row)
+					})
+					setRows(next)
+				},
+				(e: unknown) => {
+					log.error("preview", "reading a mailbox's rows failed", e)
+				}
+			)
+
+		return () => {
+			live = false
+		}
+	}, [pager, first, last, count.count])
+
+	const open = (index: number): void => {
+		setOpened({ status: "pending", index })
+		pager
+			.run(async (remote): Promise<MboxMessage> => await remote.mboxMessage(index))
+			.then(
+				message => {
+					setOpened(current =>
+						current?.index !== index
+							? current
+							: message.status === "ok"
+								? { status: "ok", index, blob: new Blob([message.bytes], { type: "message/rfc822" }) }
+								: { status: message.status === "tooLarge" ? "tooLarge" : "failed", index }
+					)
+				},
+				(e: unknown) => {
+					log.error("preview", "reading a mailbox message failed", e)
+					setOpened(current => (current?.index === index ? { status: "failed", index } : current))
+				}
+			)
+	}
+
+	const countAll = (): void => {
+		setCounting(true)
+		pager
+			.run(remote =>
+				remote.mboxCountAll(
+					Comlink.proxy((progress: MboxCount) => {
+						setCount(progress)
+					})
+				)
+			)
+			.then(
+				counted => {
+					setCount(counted)
+					setCounting(false)
+				},
+				(e: unknown) => {
+					log.error("preview", "counting a mailbox failed", e)
+					setCounting(false)
+				}
+			)
+	}
+
+	const summary =
+		count.complete && !count.capped
+			? t("previewMailboxCount", { count: count.count })
+			: t("previewMailboxAtLeast", { count: count.count })
+
+	return (
+		<div className="flex size-full overflow-hidden">
+			<div
+				className={cn(
+					"flex min-w-0 flex-col border-r border-border md:w-80 md:shrink-0",
+					opened === null ? "w-full" : "hidden md:flex"
+				)}
+			>
+				<div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3 text-xs text-muted-foreground">
+					<span className="tabular-nums">{summary}</span>
+					{count.complete ? null : counting ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-7 px-2 text-xs"
+							onClick={() => {
+								void pager.run(remote => remote.mboxStop())
+							}}
+						>
+							{t("previewMailboxStop")}
+						</Button>
+					) : (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-7 px-2 text-xs"
+							onClick={countAll}
+						>
+							{t("previewMailboxCountAll")}
+						</Button>
+					)}
+				</div>
+				<div
+					ref={setScrollElement}
+					role="list"
+					aria-label={t("previewMailboxList")}
+					className="min-h-0 flex-1 overflow-y-auto"
+				>
+					<div
+						className="relative w-full"
+						style={{ height: virtualizer.getTotalSize() }}
+					>
+						{range.map(entry => (
+							<div
+								key={entry.index}
+								role="listitem"
+								className="absolute top-0 left-0 w-full"
+								style={{ height: ROW_HEIGHT, transform: `translateY(${String(entry.start)}px)` }}
+							>
+								<MessageRow
+									row={rows.get(entry.index)}
+									selected={opened?.index === entry.index}
+									onOpen={() => {
+										open(entry.index)
+									}}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+			</div>
+			<div className={cn("min-w-0 flex-1 flex-col", opened === null ? "hidden md:flex" : "flex")}>
+				{opened === null ? null : (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="m-1 self-start md:hidden"
+						onClick={() => {
+							setOpened(null)
+						}}
+					>
+						<ArrowLeftIcon className="size-4" />
+						{t("previewMailboxBack")}
+					</Button>
+				)}
+				<div className="min-h-0 flex-1">
+					<MessagePane
+						item={item}
+						opened={opened}
+					/>
+				</div>
+			</div>
+		</div>
+	)
+}
+
+function MailboxSession({ item }: { item: DriveItem }) {
+	const session = useTextPagerSession(item)
+
+	switch (session.status) {
+		case "pending":
+			return <PreviewLoading />
+		case "error":
+			return (
+				<PreviewErrorState
+					message={errorLabel(session.dto)}
+					onRetry={session.retry}
+				/>
+			)
+		case "notText":
+			return (
+				<PreviewNotTextState
+					item={item}
+					onShowAnyway={session.showAnyway}
+				/>
+			)
+		case "ready":
+			return (
+				<MailboxReader
+					item={item}
+					pager={session.reading.pager}
+				/>
+			)
+	}
+}
+
+// Read in ranges from any origin that serves them (originServesRanges, as the large text viewer); else too large.
+export function MailboxViewer({ item }: { item: DriveItem }) {
+	const { t } = useTranslation("preview")
+	const origin = usePreviewOrigin(item)
+
+	if (!originServesRanges(origin)) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewTextTooLarge")}
+			/>
+		)
+	}
+
+	return <MailboxSession item={item} />
+}

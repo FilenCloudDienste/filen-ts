@@ -443,3 +443,28 @@ export async function readEmailNames(bytes: Uint8Array<ArrayBuffer>): Promise<Em
 			: readMsgMessage(parsed.message, parsed.replyTo, (attachment, index) => ({ name: msgName(attachment, index) })))
 	}
 }
+
+export interface EmailHeaderSummary {
+	readonly from: string | null
+	readonly subject: string | null
+	// ISO 8601, or the header as written when it does not parse; null for none.
+	readonly date: string | null
+}
+
+// A message's header block (bytes up to its blank line) read for a list row: sender, subject and date only, shown as the
+// viewer shows them. Bounded by the block (the caller's cap) and postal-mime's header limit.
+export async function readHeaderSummary(block: Uint8Array): Promise<EmailHeaderSummary> {
+	const bytes = new Uint8Array(block.length + 4)
+
+	bytes.set(block)
+	bytes.set([13, 10, 13, 10], block.length)
+
+	try {
+		const email = await PostalMime.parse(bytes, { maxNestingDepth: 1, maxPartCount: 1 })
+		const from = email.from === undefined ? null : (addresses([email.from], { left: 1, omitted: 0 })[0] ?? null)
+
+		return { from: from === "" ? null : from, subject: display(email.subject), date: display(email.date) }
+	} catch {
+		return { from: null, subject: null, date: null }
+	}
+}
