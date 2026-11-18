@@ -69,6 +69,8 @@ import { NPM_LICENSE_OVERRIDES, NPM_NOT_SHIPPED } from "../src/features/settings
 const OUTPUT = "src/features/settings/thirdPartyNotices.gen.ts"
 const WORKSPACE_FILE = "../../pnpm-workspace.yaml"
 const FILEN_TS_REPOSITORY = "https://github.com/FilenCloudDienste/filen-ts"
+// Patches are named by their git blob, whatever branch or tag still has the file.
+const FILEN_TS_BLOBS = "https://api.github.com/repos/FilenCloudDienste/filen-ts/git/blobs"
 
 type Ecosystem = "npm" | "rust" | "vendored"
 
@@ -102,7 +104,7 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 			continue
 		}
 
-		const described = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY)
+		const described = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY, { root: "../..", url: FILEN_TS_BLOBS })
 		const license = NPM_LICENSE_OVERRIDES.get(name)
 		// A package naming no license keeps the text it ships; the override only names that text's SPDX id.
 		const entry = described !== null && license !== undefined && described.license === "UNKNOWN" ? { ...described, license } : described

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -441,16 +442,21 @@ export function finalizeNotices<E extends string>(
  * entry lists its own texts in order), and like texts side by side are what deflate's 32 KiB window can match, so the
  * shipped payload compresses smaller.
  */
-export function sortNoticeTexts<E extends string>(payload: { texts: string[]; notices: NoticeEntry<E>[] }): {
+export function sortNoticeTexts<E extends string>(payload: {
+	texts: string[]
+	notices: NoticeEntry<E>[]
+}): {
 	texts: string[]
 	notices: NoticeEntry<E>[]
 } {
-	const order = payload.texts.map((_, index) => index).sort((a, b) => {
-		const x = payload.texts[a] ?? ""
-		const y = payload.texts[b] ?? ""
+	const order = payload.texts
+		.map((_, index) => index)
+		.sort((a, b) => {
+			const x = payload.texts[a] ?? ""
+			const y = payload.texts[b] ?? ""
 
-		return x < y ? -1 : x > y ? 1 : 0
-	})
+			return x < y ? -1 : x > y ? 1 : 0
+		})
 	const moved = new Map(order.map((from, to) => [from, to]))
 
 	return {
@@ -664,14 +670,34 @@ export function workspacePatches(workspaceFile: string): Map<string, string> {
 	return patches
 }
 
+/** A file's git blob id: the SHA-1 of "blob <size>\0" and its bytes, what git names its content by. */
+export function gitBlobId(path: string): string {
+	const bytes = readFileSync(path)
+
+	return createHash("sha1")
+		.update(`blob ${String(bytes.length)}\0`)
+		.update(bytes)
+		.digest("hex")
+}
+
+/** Where a patch is named exactly, by its git blob, for as long as any build that shipped it is deployed. */
+export interface PatchBlobs {
+	// The directory the workspace's patch paths are relative to (the repository root).
+	readonly root: string
+	// The URL prefix the blob id is appended to.
+	readonly url: string
+}
+
 /**
  * The notice for an npm package installed at `dir`, or null when its manifest cannot be read. A package pnpm patches
- * leads with the patch it ships with (MPL-2.0 and the LGPL ask that recipients learn where the modified source is).
+ * leads with the patch it ships with (MPL-2.0 and the LGPL ask that recipients learn where the modified source is):
+ * by path, and with `blobs` by its git blob too, which stays exact once the file changes or leaves the default branch.
  */
 export function npmPackageNotice(
 	pkg: { name: string; version: string; dir: string },
 	patches: ReadonlyMap<string, string>,
-	repository: string
+	repository: string,
+	blobs?: PatchBlobs
 ): CollectedNotice<"npm"> | null {
 	const { name, version, dir } = pkg
 	const id = `${name}@${version}`
@@ -697,15 +723,20 @@ export function npmPackageNotice(
 	})
 	const patch = patches.get(id) ?? patches.get(name)
 
-	return patch === undefined
-		? entry
-		: {
-				...entry,
-				terms: [
-					`Modified: ${name} ${version} as published, with the patch ${patch} from the filen-ts repository (${repository}) applied. That patch is the whole of the change to its source.`,
-					...entry.terms
-				]
-			}
+	if (patch === undefined) {
+		return entry
+	}
+
+	const blob = blobs === undefined ? null : gitBlobId(join(blobs.root, patch))
+	const pointer = blob === null ? "" : `: git blob ${blob}, at ${blobs?.url ?? ""}/${blob}`
+
+	return {
+		...entry,
+		terms: [
+			`Modified: ${name} ${version} as published, with the patch ${patch} from the filen-ts repository (${repository}) applied${pointer}. That patch is the whole of the change to its source.`,
+			...entry.terms
+		]
+	}
 }
 
 /** A third-party crate locked in a Cargo.lock. */

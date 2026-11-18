@@ -8,6 +8,7 @@ import {
 	describeLicensing,
 	crateSourceDir,
 	finalizeNotices,
+	gitBlobId,
 	lockedCrates,
 	npmPackageNotice,
 	poolLicenseTexts,
@@ -18,6 +19,9 @@ import {
 	workspacePatches,
 	type PoolableNotice
 } from "@filen/shared/tooling"
+
+// `printf "diff\n" | git hash-object --stdin`.
+const GIT_BLOB_OF_DIFF = "e7794243bf97797747391c277f2adf2098484682"
 
 const APACHE =
 	"Apache License\nVersion 2.0, January 2004\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\nAPPENDIX: How to apply the Apache License to your work."
@@ -61,7 +65,10 @@ describe("describeLicensing", () => {
 			"LICENSE-ZLIB": "This software is provided as-is."
 		})
 
-		expect(describeLicensing(dir, "MIT AND Zlib").terms.sort()).toEqual(["Permission is hereby granted.", "This software is provided as-is."])
+		expect(describeLicensing(dir, "MIT AND Zlib").terms.sort()).toEqual([
+			"Permission is hereby granted.",
+			"This software is provided as-is."
+		])
 	})
 
 	it("describes nothing without a directory", () => {
@@ -288,11 +295,17 @@ describe("crateSourceDir", () => {
 describe("workspacePatches and npmPackageNotice", () => {
 	it("reads patchedDependencies and names the patch in the notice of a patched package", () => {
 		const workspace = packageDir({
-			"pnpm-workspace.yaml": "packages:\n  - packages/*\npatchedDependencies:\n  # why\n  'pkg@1.0.0': patches/pkg@1.0.0.patch\n  other: patches/other.patch\nallowBuilds:\n  x: true\n"
+			"pnpm-workspace.yaml":
+				"packages:\n  - packages/*\npatchedDependencies:\n  # why\n  'pkg@1.0.0': patches/pkg@1.0.0.patch\n  other: patches/other.patch\nallowBuilds:\n  x: true\n"
 		})
 		const patches = workspacePatches(join(workspace, "pnpm-workspace.yaml"))
 		const dir = packageDir({
-			"package.json": JSON.stringify({ name: "pkg", version: "1.0.0", license: "MIT", repository: { type: "git", url: "git+https://github.com/o/pkg.git" } }),
+			"package.json": JSON.stringify({
+				name: "pkg",
+				version: "1.0.0",
+				license: "MIT",
+				repository: { type: "git", url: "git+https://github.com/o/pkg.git" }
+			}),
 			LICENSE: "Copyright (c) Someone\n\nPermission is hereby granted."
 		})
 
@@ -311,6 +324,17 @@ describe("workspacePatches and npmPackageNotice", () => {
 				"Permission is hereby granted."
 			]
 		})
+		// Named by its git blob too, from the root the patch paths are relative to.
+		writeFileSync(join(workspace, "patches-file.patch"), "diff\n")
+		expect(
+			npmPackageNotice({ name: "pkg", version: "1.0.0", dir }, new Map([["pkg", "patches-file.patch"]]), "https://repo", {
+				root: workspace,
+				url: "https://blobs"
+			})?.terms[0]
+		).toBe(
+			`Modified: pkg 1.0.0 as published, with the patch patches-file.patch from the filen-ts repository (https://repo) applied: git blob ${GIT_BLOB_OF_DIFF}, at https://blobs/${GIT_BLOB_OF_DIFF}. That patch is the whole of the change to its source.`
+		)
+		expect(gitBlobId(join(workspace, "patches-file.patch"))).toBe(GIT_BLOB_OF_DIFF)
 		expect(() => npmPackageNotice({ name: "pkg", version: "2.0.0", dir }, patches, "https://repo")).toThrow(/run pnpm install/)
 		expect(npmPackageNotice({ name: "pkg", version: "1.0.0", dir: join(dir, "missing") }, patches, "https://repo")).toBeNull()
 	})
