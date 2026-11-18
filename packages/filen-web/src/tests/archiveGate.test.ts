@@ -9,7 +9,9 @@ describe("gateFor", () => {
 		expect(gateFor({ type: "sevenZ" }, BIG, false)).toBe("list")
 	})
 
-	it("gates a tar, a single compressed file and an unknown format above 8 MiB", () => {
+	it("gates a tar, a RAR, a single compressed file and an unknown format above 8 MiB", () => {
+		expect(gateFor({ type: "rar", version: "rar50Plus" }, UNGATED_MAX_BYTES + 1, false)).toBe("gate")
+		expect(gateFor({ type: "rar", version: "rar15To40" }, UNGATED_MAX_BYTES, false)).toBe("list")
 		expect(gateFor({ type: "tar", codec: "gzip" }, BIG, false)).toBe("gate")
 		expect(gateFor({ type: "tar", codec: undefined }, UNGATED_MAX_BYTES + 1, false)).toBe("gate")
 		expect(gateFor({ type: "single", codec: "zstd" }, UNGATED_MAX_BYTES + 1, false)).toBe("gate")

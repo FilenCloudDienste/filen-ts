@@ -43,7 +43,7 @@ const BASE_URL = e2eBaseUrl()
 // creating a scratch directory and uploading its own files. Provisioning was the only reason those
 // specs ever took the lock.
 const READ_SPECS =
-	/\/(archive-browse|archive-dialogs|auth|boot|bootCost|ebookLayout|nativeImageDecode|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|keymap|narrow-viewport|no-coi|no-opfs|pdf-print|preview-iwork|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
+	/\/(archive-browse|archive-dialogs|archive-rar|auth|boot|bootCost|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|ebookLayout|keymap|narrow-viewport|nativeImageDecode|no-coi|no-opfs|pdf-print|preview-iwork|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
 // Own surfaces, own limits: notes hits the free plan's 10-note cap, chats the conversation-create rate
 // limiter. Neither touches the drive lock, but both race THEMSELVES, so each owns a serial lane.
 const NOTES_SPEC = /\/notes\.spec\.ts$/

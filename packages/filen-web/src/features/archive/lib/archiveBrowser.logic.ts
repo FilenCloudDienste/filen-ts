@@ -430,7 +430,8 @@ export function canExtractSelection(phase: ListingPhase, entryCount: number): bo
 	}
 }
 
-// A zip's or 7z's listing reads only its index, so its progress says nothing worth a bar.
+// A zip's or 7z's listing reads only its index, so its progress says nothing worth a bar. A RAR's reads through the
+// archive header by header, as a tar's does, so it gets one.
 export function readsWholeArchive(format: ArchiveFormat | null): boolean {
 	return format?.type !== "zip" && format?.type !== "sevenZ"
 }

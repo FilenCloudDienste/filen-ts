@@ -405,6 +405,7 @@ describe("phases", () => {
 		expect(readsWholeArchive({ type: "zip" })).toBe(false)
 		expect(readsWholeArchive({ type: "sevenZ" })).toBe(false)
 		expect(readsWholeArchive({ type: "tar", codec: undefined })).toBe(true)
+		expect(readsWholeArchive({ type: "rar", version: "rar50Plus" })).toBe(true)
 		expect(readsWholeArchive(null)).toBe(true)
 	})
 })

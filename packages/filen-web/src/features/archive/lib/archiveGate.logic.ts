@@ -1,8 +1,9 @@
 import type { ArchiveFormat } from "@filen/sdk-rs"
 
 // Whether opening an archive lists it at once or waits behind the gate. A zip's or 7z's listing reads only
-// its index; a tar's or a single compressed file's downloads the whole file, so only a small one lists at
-// once. An unknown format (null) is gated: its bytes may well be a tar. A zip-based package (`zipByName`, an .apk) is a
+// its index; a tar's or a single compressed file's downloads the whole file, and a RAR's reads the header before
+// each member, which in an archive of small members (a comic's pages) is every chunk of it, so only a small one of
+// those lists at once. An unknown format (null) is gated: its bytes may well be a tar. A zip-based package (`zipByName`, an .apk) is a
 // zip the SDK's name table does not list, unless the SDK detected another format: that format's gate applies.
 export type ArchiveGate = "list" | "gate"
 

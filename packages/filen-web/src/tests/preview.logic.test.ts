@@ -302,12 +302,12 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`source.${ext}`))).toBe("code")
 	})
 
-	// An unknown extension with no mime hint lands here. rar and pkg have the archive icon but no reader.
+	// An unknown extension with no mime hint lands here. pkg has the archive icon but no reader.
 	it.each(["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"])("%s -> binaryInfo", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("binaryInfo")
 	})
 
-	it.each(["msi", "rar", "pkg"])("%s -> other", ext => {
+	it.each(["msi", "pkg"])("%s -> other", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("other")
 	})
 

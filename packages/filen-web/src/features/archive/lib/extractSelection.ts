@@ -14,7 +14,7 @@ import { isSelected, type Selection } from "@/features/archive/lib/selection"
 import { dirRef } from "@/features/archive/lib/sortedChildren"
 
 // The browser's selection as extract calls. Which entries an extract names depends on the format: a
-// zip's or 7z's directory entry brings everything below it, a tar's only what it stores after it.
+// zip's, 7z's or RAR's directory entry brings everything below it, a tar's only what it stores after it.
 
 export type ResolvedSelection =
 	| { kind: "all" }
@@ -39,9 +39,10 @@ export type ExtractTarget = { type: "besideNewFolder" } | { type: "beside" } | {
 
 type FormatType = ArchiveFormat["type"]
 
-// A zip's or 7z's directory entry brings its whole subtree.
+// A zip's, 7z's or RAR's directory entry brings its whole subtree: the SDK checks the selection against the archive's
+// index (a RAR's member table) before anything is created.
 function bringsSubtree(format: FormatType | null): boolean {
-	return format === "zip" || format === "sevenZ"
+	return format === "zip" || format === "sevenZ" || format === "rar"
 }
 
 function isFileKind(kind: number): boolean {

@@ -116,13 +116,13 @@ describe("resolveSelection", () => {
 		expect(resolved.linkTargetsAdded).toBe(0)
 	})
 
-	it("names every entry below a directory the paths only imply", () => {
+	it.each(["sevenZ", "rar"] as const)("names every entry below a directory the paths only imply (%s)", format => {
 		const store = storeOf([
 			{ path: "a/x", size: 3 },
 			{ path: "a/b/y", size: 5 },
 			{ path: "a/b/", index: 2 }
 		])
-		const resolved = entries(resolveSelection(store, select(store, [dirRef(dirOf(store, "a"))]), 0, "sevenZ"))
+		const resolved = entries(resolveSelection(store, select(store, [dirRef(dirOf(store, "a"))]), 0, format))
 
 		// a/b has its own entry, which brings a/b/y.
 		expect(resolved.indexes).toEqual([0, 2])

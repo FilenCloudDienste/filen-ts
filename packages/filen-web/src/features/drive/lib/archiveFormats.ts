@@ -276,11 +276,14 @@ export function buildCompressFormat(choice: FormatChoiceId, options: FormatOptio
 	}
 }
 
-// The last extension of every name the SDK reads as an archive (filen-sdk-rs fs/archive/format.rs,
-// EXTENSIONS): each multi-part one (".tar.gz") ends in one of these too. Lowercase, without the dot.
+// The last extension of every name the SDK reads as an archive (filen-sdk-rs fs/archive/format.rs, EXTENSIONS and
+// RAR_EXTENSIONS, a comic book archive being a renamed RAR): each multi-part one (".tar.gz") ends in one of these too.
+// Lowercase, without the dot.
 export const ARCHIVE_NAME_EXTENSIONS: ReadonlySet<string> = new Set([
 	"zip",
 	"7z",
+	"rar",
+	"cbr",
 	"tar",
 	"tgz",
 	"tbz",

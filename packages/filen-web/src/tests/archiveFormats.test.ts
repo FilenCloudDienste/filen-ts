@@ -237,12 +237,14 @@ describe("isArchiveCandidateName", () => {
 		"Package.1.0.nupkg",
 		"ext.vsix",
 		"App.appx",
-		"App.msix"
+		"App.msix",
+		"comic.cbr",
+		"backup.RAR"
 	])("offers %s", name => {
 		expect(isArchiveCandidateName(name)).toBe(true)
 	})
 
-	it.each(["photos", "photos.rar", "photos.tb2", "photo.jpg", "zip", "photos.", "archive.zip.txt", "photos.gzip", ".zip", ".7Z"])(
+	it.each(["photos", ".rar", "photos.tb2", "photo.jpg", "zip", "photos.", "archive.zip.txt", "photos.gzip", ".zip", ".7Z"])(
 		"does not offer %s",
 		name => {
 			expect(isArchiveCandidateName(name)).toBe(false)
@@ -260,7 +262,27 @@ describe("isArchiveCandidateName", () => {
 
 	it("holds the last extension of each name the SDK reads as an archive", () => {
 		expect([...ARCHIVE_NAME_EXTENSIONS].sort()).toEqual(
-			["zip", "7z", "tar", "tgz", "tbz", "tbz2", "txz", "tlz", "tzst", "gz", "bz2", "xz", "lzma", "lz", "lz4", "br", "zst"].sort()
+			[
+				"zip",
+				"7z",
+				"rar",
+				"cbr",
+				"tar",
+				"tgz",
+				"tbz",
+				"tbz2",
+				"txz",
+				"tlz",
+				"tzst",
+				"gz",
+				"bz2",
+				"xz",
+				"lzma",
+				"lz",
+				"lz4",
+				"br",
+				"zst"
+			].sort()
 		)
 	})
 })
