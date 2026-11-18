@@ -30,6 +30,11 @@ import {
 	linksTar,
 	lockedZip,
 	manyLinksZip,
+	nestedDeepZip,
+	nestedHugeZip,
+	nestedLockedZip,
+	nestedTarGz,
+	nestedTarZst,
 	nestedZip,
 	noteTxtGz,
 	smallTarGz,
@@ -81,6 +86,14 @@ export const CORE_SCENARIOS = scenarioModule(
 		"archive-gate-stop": ["e2e-arc-gate-stop.tar.gz"],
 		// Archives inside an archive.
 		"archive-nested": ["e2e-arc-nested.zip"],
+		// Its cases: past the depth cap, an inflate past 256 MiB, an encrypted entry, a tar's skip, a tar read front to back.
+		"archive-nested-cases": [
+			"e2e-arc-nested-deep.zip",
+			"e2e-arc-nested-huge.zip",
+			"e2e-arc-nested-locked.zip",
+			"e2e-arc-nested.tar.gz",
+			"e2e-arc-nested.tar.zst"
+		],
 		"archive-report": ["e2e-arc-many-links.zip"],
 		"archive-huge": ["e2e-arc-100k.zip"],
 		"archive-bulk": ["e2e-bulk-a.zip", "e2e-bulk-b.zip", "e2e-bulk-c.zip"],
@@ -154,6 +167,12 @@ export const CORE_SCENARIOS = scenarioModule(
 		"e2e-arc-gate-next.zip": { generate: gateNextZip },
 		"e2e-arc-gate-stop.tar.gz": { generate: gateStopTarGz },
 		"e2e-arc-nested.zip": { buffer: nestedZip(), mimeType: "application/zip" },
+		"e2e-arc-nested-deep.zip": { buffer: nestedDeepZip(), mimeType: "application/zip" },
+		// 257 MiB of zeros built off disk, a few hundred KiB once deflated.
+		"e2e-arc-nested-huge.zip": { generate: nestedHugeZip },
+		"e2e-arc-nested-locked.zip": { buffer: nestedLockedZip(), mimeType: "application/zip" },
+		"e2e-arc-nested.tar.gz": { generate: nestedTarGz },
+		"e2e-arc-nested.tar.zst": { buffer: nestedTarZst(), mimeType: "application/zstd" },
 		"e2e-arc-many-links.zip": { buffer: manyLinksZip(), mimeType: "application/zip" },
 		"e2e-arc-100k.zip": { generate: hundredKZip },
 		"e2e-bulk-a.zip": { buffer: bulkZip("a"), mimeType: "application/zip" },

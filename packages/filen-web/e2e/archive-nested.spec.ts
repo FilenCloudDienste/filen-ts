@@ -1,9 +1,10 @@
-import { test, expect } from "./fixtures"
-import { expectRows, openArchive } from "./helpers/archive"
-import { NESTED_TEXTS } from "./helpers/archiveFixtures"
+import { test, expect, settleLeases } from "./fixtures"
+import { archivePasswordPrompt, expectRows, openArchive } from "./helpers/archive"
+import { NESTED_TEXTS, nestedZip, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
-import { bootTo } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles } from "./helpers/listing"
+import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { observeEgest } from "./helpers/requests"
 
 // Archives inside an archive (W6 §6.1 A, fixtures in helpers/archiveFixtures.ts): a zip and a tar stored in a zip, and a
@@ -71,5 +72,124 @@ test.describe("archives inside an archive", () => {
 
 		await browser.close()
 		expect(cspViolations).toEqual([])
+	})
+})
+
+const [DEEP, HUGE, LOCKED, IN_TAR_GZ, IN_TAR_ZST] = FIXTURE_FILES["archive-nested-cases"]
+
+test.describe("archives inside an archive: their cases", () => {
+	test("a fourth archive deep says why it won't open, and nothing is saved", async ({ page }) => {
+		await bootTo(page)
+
+		const { listbox } = await openFixtureRows(page, "archive-nested-cases")
+		const browser = await openArchive(page, listbox, DEEP)
+
+		await browser.into("l2.zip")
+		await browser.into("l3.zip")
+		await browser.row("l4.zip").dblclick()
+		await expect(page.getByText("“l4.zip” is nested too deep to open here. Extract the outer archive to open it.")).toBeVisible()
+		await expect(browser.list).toHaveAccessibleName("Contents of l3.zip")
+		await browser.close()
+	})
+
+	test("an inner archive inflating past 256 MiB is confirmed first", async ({ page }) => {
+		await bootTo(page)
+
+		const { listbox } = await openFixtureRows(page, "archive-nested-cases")
+		const browser = await openArchive(page, listbox, HUGE)
+
+		await browser.row("huge.zip").dblclick()
+
+		const confirm = page.getByRole("alertdialog", { name: "Unpack this archive first?" })
+
+		await expect(confirm).toContainText(/257 MiB/)
+		await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
+		await expect(confirm).toHaveCount(0)
+		await expect(browser.list).toHaveAccessibleName(`Contents of ${HUGE}`)
+		await browser.close()
+	})
+
+	test("an inner archive in an encrypted entry asks the outer archive's password, then opens", async ({ page }) => {
+		await bootTo(page)
+
+		const { listbox } = await openFixtureRows(page, "archive-nested-cases")
+		const browser = await openArchive(page, listbox, LOCKED)
+
+		await browser.row("inner.zip").dblclick()
+
+		const prompt = archivePasswordPrompt(page)
+
+		await expect(prompt).toContainText(LOCKED)
+		await prompt.getByLabel("Password", { exact: true }).fill(ZIPCRYPTO_PASSWORD)
+		await prompt.getByRole("button", { name: "Unlock", exact: true }).click()
+		await expect(browser.list).toHaveAccessibleName("Contents of inner.zip")
+		await browser.row("secret.txt").dblclick()
+		await expect(browser.overlay.getByText(NESTED_TEXTS.zip.trim(), { exact: false }).first()).toBeVisible()
+		await browser.close()
+	})
+
+	test("an inner archive deep in a .tar.gz confirms what reaching it decodes, then opens", async ({ page }) => {
+		await bootTo(page)
+
+		const { listbox } = await openFixtureRows(page, "archive-nested-cases")
+		const browser = await openArchive(page, listbox, IN_TAR_GZ)
+
+		await browser.row("inner.zip").dblclick()
+
+		const confirm = page.getByRole("alertdialog", { name: "Read part of the archive first?" })
+
+		await confirm.getByRole("button", { name: "Open", exact: true }).click()
+		await expect(browser.list).toHaveAccessibleName("Contents of inner.zip")
+		await expectRows(browser.list, ["inside.txt"])
+		await browser.close()
+	})
+
+	test("an inner archive in a .tar.zst, read only front to back, shows the card offering to extract", async ({ page }) => {
+		await bootTo(page)
+
+		const { listbox } = await openFixtureRows(page, "archive-nested-cases")
+		const browser = await openArchive(page, listbox, IN_TAR_ZST)
+
+		await browser.row("inner.zip").dblclick()
+		await expect(browser.overlay.getByText(/can't be opened from inside this archive/)).toBeVisible()
+		await expect(browser.overlay.getByRole("button", { name: "Extract to open", exact: true })).toBeVisible()
+		await browser.close()
+	})
+})
+
+test.describe("archives inside an archive on a public link", () => {
+	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account")
+
+	test("the owner browses into a zip held in a linked zip", async ({ page }) => {
+		const runId = crypto.randomUUID()
+		const scratchName = `e2e-nested-link-${runId}`
+		const archiveName = `e2e-nested-${runId}.zip`
+
+		await bootTo(page)
+
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadFiles(page, [{ name: archiveName, mimeType: "application/zip", buffer: nestedZip() }], listbox)
+
+			const dialog = await openLinkDialog(page, listbox, archiveName)
+			const url = await createLink(dialog)
+
+			await closeLinkDialog(page, dialog)
+			await settleLeases(page)
+			await page.goto(url)
+			await page.getByRole("button", { name: "Browse contents", exact: true }).click({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+			const list = page.getByRole("listbox", { name: /^Contents of / })
+			const crumbs = page.getByRole("navigation", { name: "Location in the archive", exact: true })
+
+			await list.getByRole("option", { name: /^trip/ }).dblclick()
+			await list.getByRole("option", { name: /^inner\.zip/ }).dblclick()
+			await expect(list).toHaveAccessibleName("Contents of inner.zip")
+			await expect(crumbs.getByRole("button")).toHaveText([archiveName, "trip", "inner.zip"])
+		} finally {
+			await bootTo(page).catch(() => undefined)
+			await trashScratchDirectory(page, scratchName)
+		}
 	})
 })

@@ -1,4 +1,4 @@
-import { crc32, deflateRawSync, gzipSync } from "node:zlib"
+import { crc32, deflateRawSync, gzipSync, zstdCompressSync } from "node:zlib"
 
 // Deterministic archive builders for the archive e2e specs: the shared fixture tree's archives
 // (setup/fixtures.setup.ts uploads them) and the small ones the write specs upload into their own
@@ -446,6 +446,51 @@ export function nestedZip(): Buffer {
 		{ name: "trip/inner.tar", data: innerTar, method: "stored" },
 		{ name: "trip/packed.zip", data: packed }
 	])
+}
+
+// The nested cases (archive-nested.spec.ts): four archives one inside the next, past the page's depth of three.
+export function nestedDeepZip(): Buffer {
+	const l4 = buildZip([{ name: "a.txt", data: "four deep\n" }])
+	const l3 = buildZip([{ name: "l4.zip", data: l4, method: "stored" }])
+	const l2 = buildZip([{ name: "l3.zip", data: l3, method: "stored" }])
+
+	return buildZip([{ name: "l2.zip", data: l2, method: "stored" }])
+}
+
+// An inner zip of more than 256 MiB (its zeros stored), deflated in the outer one to a few hundred KiB: opening it
+// inflates all of it, which is confirmed first.
+export const NESTED_HUGE_ZEROS_BYTES = 257 * 1024 * 1024
+
+export function nestedHugeZip(): Buffer {
+	return buildZip([
+		{ name: "huge.zip", data: buildZip([{ name: "zeros.bin", data: Buffer.alloc(NESTED_HUGE_ZEROS_BYTES), method: "stored" }]) }
+	])
+}
+
+// A zip stored under ZipCrypto (ZIPCRYPTO_PASSWORD) in a zip that lists without a password.
+export function nestedLockedZip(): Buffer {
+	const inner = buildZip([{ name: "secret.txt", data: NESTED_TEXTS.zip }])
+
+	return buildZip([{ name: "inner.zip", data: inner, method: "stored", zipCrypto: ZIPCRYPTO_PASSWORD }])
+}
+
+// A zip after 2 MiB of incompressible bytes in a .tar.gz: reaching it decodes what the tar stores before it.
+export function nestedTarGz(): Buffer {
+	return gzip(
+		buildTar([
+			{ name: "pad.bin", data: prng(0xa11)(2 * 1024 * 1024) },
+			{ name: "inner.zip", data: nestedInnerZip() }
+		])
+	)
+}
+
+// A zip in a .tar.zst, whose members read only front to back: it shows the "Extract to open" card.
+export function nestedTarZst(): Buffer {
+	return zstdCompressSync(buildTar([{ name: "inner.zip", data: nestedInnerZip() }]))
+}
+
+function nestedInnerZip(): Buffer {
+	return buildZip([{ name: "inside.txt", data: NESTED_TEXTS.zip }])
 }
 
 export function gateNextZip(): Buffer {

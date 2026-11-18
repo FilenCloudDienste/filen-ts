@@ -140,7 +140,7 @@ async function seedOncePerContext(page: Page, session: string): Promise<void> {
 test.describe("comic books and sign-out", () => {
 	test.use({ injectSession: false })
 
-	test("a sign-out in another tab closes an open comic: nothing of it is read after", async ({ page, context }) => {
+	test("an in-tab clear, then a sign-out in another tab, close an open comic: nothing of it is read after", async ({ page, context }) => {
 		const session = readHarvestedSession()
 
 		test.skip(session === null, "no injected session (e2e credentials not configured)")
@@ -157,6 +157,15 @@ test.describe("comic books and sign-out", () => {
 		await itemRow(listbox, CBZ).dblclick()
 		await expect(pageImage(page, 1)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
+		const egest = observeEgest(context)
+
+		// The in-tab clear a sign-out and an account switch begin with: the comic's reader closes, nothing more is read.
+		await page.evaluate(() => {
+			window.__filenE2E.clearPreviews()
+		})
+		await expect(page.getByRole("dialog")).toBeVisible()
+
+		const afterClear = egest.requests()
 		const other = await context.newPage()
 
 		await seedOncePerContext(other, session)
@@ -170,12 +179,10 @@ test.describe("comic books and sign-out", () => {
 
 		// The broadcast reloads the reading tab onto the sign-in form: the comic and the pages it held are gone with it.
 		await expect(page.getByText(SIGN_IN_HEADING)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-
-		const egest = observeEgest(context)
-
 		await expect(page.getByRole("dialog")).toHaveCount(0)
 		await expect(pageImage(page, 1)).toHaveCount(0)
-		expect(egest.requests()).toBe(0)
+		// Counted from before the clear and the reload: no chunk was fetched for the comic after either.
+		expect(egest.requests()).toBe(afterClear)
 		await other.close()
 	})
 })

@@ -19,6 +19,7 @@ interface E2eHooks {
 	kvHas: (key: string) => Promise<boolean>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
+	clearPreviews: () => void
 	rawStringifiedClient: () => Promise<unknown>
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<unknown>
 	deleteTestNoteByUuid: (uuid: string) => Promise<void>
