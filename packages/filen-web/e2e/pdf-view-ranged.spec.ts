@@ -256,10 +256,16 @@ function reopenChunks(layout: ReturnType<typeof writeResidentPdf>, shown: number
 // 20 pages of one 16 MiB image each (fixtures/largeFiles.ts): viewed in turn, pdf.js reads past the desktop's 256 MiB resident
 // limit. Once those reads settle the viewer opens the document again (a new pdf.js worker, the old one going once the
 // new one shows), on the page and at the zoom it was showing, and the new document reads only what is near the view.
-test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page }, testInfo) => {
+test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page, browserName }, testInfo) => {
 	// Linux WebKit runs pdf.js without OffscreenCanvas (@filen/office's pdfDocumentParams): with it, plain pdf.js on these
 	// pages kept 1.4 GB by page 1, 2.6 GB by page 12 and 3.2 GB by page 20 in its web process, and 1.9 GB after the
 	// document was destroyed; without it 0.3, 0.6 and 0.7 GB. Chromium: 0.2, 0.5 and 0.7 GB.
+	// Playwright's WebKit reports a macOS user agent on every host, so on the Linux CI runner the app takes it for Safari,
+	// keeps OffscreenCanvas on, and the web process is killed before the 256 MiB the reopen waits for is read.
+	test.skip(
+		browserName === "webkit",
+		"Playwright's Linux WebKit claims a macOS user agent, so the Linux WebKit pdf.js setting is not applied"
+	)
 	// The write lane's 900s holds the scratch directory's brackets; on top of them a 320 MiB upload (its own budget)
 	// and twenty 16-megapixel page renders.
 	test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + 300_000)
