@@ -122,7 +122,7 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 		setAttempt(previous => previous + 1)
 	}
 
-	// Its package cannot be opened from here yet (a public link's, or one inside an archive).
+	// Its package cannot be opened from here yet: one inside an archive.
 	if (archiveHandleRefusal(origin) !== null) {
 		return (
 			<PreviewUnsupportedState

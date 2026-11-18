@@ -26,7 +26,7 @@ interface Call {
 const MiB = 1024 * 1024
 
 function source(name: string, size: number, uuid = TEST_ARCHIVE): ArchiveSource {
-	return { file: { uuid } as unknown as AnyFile, uuid: uuid as UuidStr, name, size, ownParent: null }
+	return { file: { uuid } as unknown as AnyFile, uuid: uuid as UuidStr, name, size, anon: false, ownParent: null }
 }
 
 function nameInfo(format: ArchiveFormat | null): ArchiveNameInfo {
@@ -35,11 +35,19 @@ function nameInfo(format: ArchiveFormat | null): ArchiveNameInfo {
 
 function harness(info: ArchiveNameInfo | Promise<ArchiveNameInfo> = nameInfo({ type: "zip" })) {
 	const calls: Call[] = []
+	const passwords = new Map<string, string | undefined>()
 	let ids = 0
 	const deps: ListingDeps = {
-		listArchive: vi.fn((id: string, params: ListJobParams, password: string | undefined, onEvent: (event: ListJobEvent) => void) => {
+		acquireReader: vi.fn((_file: AnyFile, anon: boolean, password: string | undefined) => {
+			const id = `reader:${password ?? ""}`
+
+			passwords.set(id, password)
+
+			return { id, anon, password, isOpen: () => true, release: () => undefined }
+		}),
+		listArchive: vi.fn((readerId: string, id: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => {
 			return new Promise<ListReportDTO>((resolve, reject) => {
-				calls.push({ id, params, password, emit: onEvent, resolve, reject })
+				calls.push({ id, params, password: passwords.get(readerId), emit: onEvent, resolve, reject })
 			})
 		}),
 		cancel: vi.fn<(id: string) => void>(),
@@ -141,7 +149,7 @@ describe("openListingSession", () => {
 
 		await vi.advanceTimersByTimeAsync(1)
 
-		expect(call(0).params).toEqual({ archive: zip.file, skipMacMetadata: true, keepReportEntries: false, deliverEntries: true })
+		expect(call(0).params).toEqual({ keepReportEntries: false, deliverEntries: true })
 		expect(call(0).password).toBeUndefined()
 	})
 

@@ -2,21 +2,21 @@ import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
-import { originKey, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
-import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
+import type { EntryReadPlan, PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import type { ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
+import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/lib/archiveReaders"
 import type { EntryReaderEvents } from "@/workers/originSource"
-import { registerPreviewDisposer } from "@/lib/workers/previewDisposers"
 import { listSummaryOf, type ListSummary } from "@/features/archive/lib/listingSession"
-import { canReadEntry, entryKey, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
+import { canReadEntry, entryKey, entryReadPlan } from "@/features/archive/lib/entryAccess.logic"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 
-// One archive opened for listing and for reading its entries, shared by every viewer of the same archive. Until the
-// SDK has archive readers, a handle lists through listArchive and reads an entry whole through an entry reader
-// (openEntryReader), so each call reads the archive's index again; its callers stay as they are once it holds one.
+// One archive opened for listing and for reading its entries, through the SDK's archive reader it shares with every
+// other caller of the same archive and password (archiveReaders.ts): the index is read once, and an entry read
+// after another reuses what the reader holds.
 
-// An entry's origin, holding a reference to its handle until released.
+// An entry's origin, holding a reference to its reader until released.
 export interface LeasedOrigin {
 	readonly origin: ByteOrigin
 	readonly release: () => void
@@ -29,6 +29,7 @@ export interface ArchiveListOptions {
 }
 
 export interface ArchiveHandle {
+	// The reader's id.
 	readonly id: string
 	// Lists every entry into `onBatch`; rejects with the listing's error (ErrorWithDTO), or Cancelled once `signal` aborts.
 	list(onBatch: (batch: PackedEntryBatch) => void, options: ArchiveListOptions): Promise<ListSummary>
@@ -37,40 +38,29 @@ export interface ArchiveHandle {
 	findByPath(store: EntryStore, path: string): number | null
 	// The origin a viewer reads the listed entry at `slot` through; `events` hears its reads.
 	origin(store: EntryStore, slot: number, events?: EntryReaderEvents): Promise<LeasedOrigin>
-	// Drops this reference; the archive closes with the last one.
+	// Drops this reference; the reader closes once the last is gone.
 	release(): void
 }
 
-// What opening an archive gave: its handle, or why it cannot be opened yet (a public link's archive, or one inside
-// another, needs the SDK's archive reader).
+// What opening an archive gave: its handle, or why it cannot be opened (one inside another archive, or bytes the page
+// holds, need the SDK's nested reader).
 export type ArchiveHandleResult =
 	{ readonly type: "opened"; readonly handle: ArchiveHandle } | { readonly type: "refused"; readonly reason: "needsArchiveReader" }
 
 export type ArchiveRefusal = Extract<ArchiveHandleResult, { type: "refused" }>["reason"]
 
-// Why `origin`'s archive cannot be opened yet; null when it can. Only a drive file opens before the SDK has archive
-// readers.
+// Why `origin`'s archive cannot be opened; null when it can: a drive file, or a public link's.
 export function archiveHandleRefusal(origin: ByteOrigin): ArchiveRefusal | null {
-	return origin.kind === "file" ? null : "needsArchiveReader"
+	return origin.kind === "file" || origin.kind === "linkedFile" ? null : "needsArchiveReader"
 }
 
 export interface ArchiveHandleDeps {
-	listArchive: (
-		jobId: string,
-		params: ListJobParams,
-		password: string | undefined,
-		onEvent: (event: ListJobEvent) => void
-	) => Promise<ListReportDTO>
+	acquireReader: (file: AnyFile, anon: boolean, password: string | undefined) => ArchiveReaderRef
+	listArchive: (readerId: string, jobId: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => Promise<ListReportDTO>
 	cancelJob: (jobId: string) => void
 	releaseJob: (jobId: string) => void
-	openEntryReader: (
-		readerId: string,
-		archive: AnyFile,
-		password: string | undefined,
-		solidSkips: ReadonlyMap<number, number>,
-		events: EntryReaderEvents
-	) => void
-	releaseEntryReader: (readerId: string) => void
+	leaseEntry: (leaseId: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents) => void
+	releaseLease: (leaseId: string) => void
 	newId: () => string
 }
 
@@ -81,33 +71,65 @@ const NO_EVENTS: EntryReaderEvents = {
 }
 
 export const defaultArchiveHandleDeps: ArchiveHandleDeps = {
-	listArchive: (jobId, params, password, onEvent) => sdkApi.listArchive(jobId, params, password, Comlink.proxy(onEvent)),
+	acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password),
+	listArchive: (readerId, jobId, params, onEvent) => sdkApi.listArchiveReader(readerId, jobId, params, Comlink.proxy(onEvent)),
 	cancelJob: jobId => {
 		void sdkApi.cancelTransfer(jobId)
 	},
 	releaseJob: jobId => {
 		void sdkApi.releaseJob(jobId)
 	},
-	openEntryReader: (readerId, archive, password, solidSkips, events) => {
-		void sdkApi.openEntryReader(readerId, archive, password, solidSkips, Comlink.proxy(events))
+	leaseEntry: (leaseId, readerId, plan, events) => {
+		void sdkApi.leaseArchiveEntry(leaseId, readerId, plan, Comlink.proxy(events))
 	},
-	releaseEntryReader: readerId => {
-		void sdkApi.releaseEntryReader(readerId)
+	releaseLease: leaseId => {
+		void sdkApi.releaseArchiveEntry(leaseId)
 	},
 	newId: () => crypto.randomUUID()
 }
 
-// One open archive and everything reading through it: the handles acquired on it and the leases they gave out.
-interface OpenArchive {
-	readonly id: string
-	readonly key: string
-	readonly file: AnyFile
-	refs: number
-	readonly leases: Set<() => void>
-	unregister: () => void
+// The origin the lease `leaseId` (leaseEntry) names the listed entry at `slot` by.
+export function entryLeaseOrigin(leaseId: string, file: AnyFile, anon: boolean, store: EntryStore, slot: number): ByteOrigin {
+	const index = store.index(slot)
+
+	return {
+		kind: "entry",
+		reader: leaseId,
+		entry: { archive: file.uuid, index },
+		size: store.size(slot),
+		access: "whole",
+		anon,
+		cacheKey: entryKey(file.uuid, index)
+	}
 }
 
-const openArchives = new Map<string, OpenArchive>()
+export interface EntryLeaseRequest {
+	readonly leaseId: string
+	readonly file: AnyFile
+	readonly anon: boolean
+	readonly password: string | undefined
+	readonly store: EntryStore
+	readonly slot: number
+	readonly events: EntryReaderEvents
+}
+
+// Leases the listed entry at `slot` as `leaseId`, read whole through the reader of its archive and password as its
+// listing plans (entryReadPlan), holding a reference on that reader until released. Comlink delivers calls in order,
+// so the origin reads at once. Returns the release.
+export function leaseEntry(request: EntryLeaseRequest, deps: ArchiveHandleDeps = defaultArchiveHandleDeps): () => void {
+	const reader = deps.acquireReader(request.file, request.anon, request.password)
+	let leased = true
+
+	deps.leaseEntry(request.leaseId, reader.id, entryReadPlan(request.store, request.slot), request.events)
+
+	return () => {
+		if (leased) {
+			leased = false
+			deps.releaseLease(request.leaseId)
+			reader.release()
+		}
+	}
+}
 
 // Lowercases A–Z only: the match a name spelled differently in case gets, whatever its other letters.
 function asciiLower(value: string): string {
@@ -167,15 +189,6 @@ function findByPath(store: EntryStore, path: string): number | null {
 	return match
 }
 
-function closeArchive(open: OpenArchive): void {
-	openArchives.delete(open.key)
-	open.unregister()
-
-	for (const release of [...open.leases]) {
-		release()
-	}
-}
-
 // The archive `origin` names, opened (or joined, when open already) under `password`; refused (archiveHandleRefusal),
 // never thrown at the caller.
 export function acquireArchiveHandle(
@@ -183,58 +196,28 @@ export function acquireArchiveHandle(
 	password: string | undefined,
 	deps: ArchiveHandleDeps = defaultArchiveHandleDeps
 ): ArchiveHandleResult {
-	const refusal = archiveHandleRefusal(origin)
-
-	if (refusal !== null || origin.kind !== "file") {
-		return { type: "refused", reason: refusal ?? "needsArchiveReader" }
+	if (origin.kind !== "file" && origin.kind !== "linkedFile") {
+		return { type: "refused", reason: "needsArchiveReader" }
 	}
 
-	const key = `${origin.kind}:${originKey(origin)}`
-	let open = openArchives.get(key)
-
-	if (open === undefined) {
-		const created: OpenArchive = { id: deps.newId(), key, file: origin.file, refs: 0, leases: new Set(), unregister: () => undefined }
-
-		created.unregister = registerPreviewDisposer("archiveHandle", () => {
-			created.unregister = () => undefined
-			closeArchive(created)
-		})
-		openArchives.set(key, created)
-		open = created
-	}
-
-	const archive = open
+	const file = origin.file
+	const reader = deps.acquireReader(file, origin.kind === "linkedFile", password)
 	let released = false
 
-	archive.refs += 1
-
-	const unref = (): void => {
-		archive.refs -= 1
-
-		if (archive.refs === 0 && openArchives.get(archive.key) === archive) {
-			closeArchive(archive)
-		}
-	}
-
 	const handle: ArchiveHandle = {
-		id: archive.id,
+		id: reader.id,
 		list: (onBatch, { signal, onWaiting }) => {
 			const jobId = deps.newId()
 			const cancel = (): void => {
 				deps.cancelJob(jobId)
 			}
-			const listed = deps.listArchive(
-				jobId,
-				{ archive: archive.file, skipMacMetadata: true, deliverEntries: true, keepReportEntries: false },
-				password,
-				event => {
-					if (event.type === "entries") {
-						onBatch(event.batch)
-					} else {
-						onWaiting?.(event.update.phase === "waitingForWorker")
-					}
+			const listed = deps.listArchive(reader.id, jobId, { deliverEntries: true, keepReportEntries: false }, event => {
+				if (event.type === "entries") {
+					onBatch(event.batch)
+				} else {
+					onWaiting?.(event.update.phase === "waitingForWorker")
 				}
-			)
+			})
 
 			// An abort before the job started cancels it as soon as it does.
 			if (signal.aborted) {
@@ -259,41 +242,17 @@ export function acquireArchiveHandle(
 		},
 		findByPath,
 		origin: (store, slot, events) => {
-			if (released || openArchives.get(archive.key) !== archive) {
+			if (released || !reader.isOpen()) {
 				return Promise.reject(new Error("the archive handle is closed"))
 			}
 
-			const index = store.index(slot)
-			const readerId = `${archive.id}:${deps.newId()}`
-			let leased = true
+			const leaseId = `${reader.id}:${deps.newId()}`
+			const release = leaseEntry(
+				{ leaseId, file, anon: reader.anon, password: reader.password, store, slot, events: events ?? NO_EVENTS },
+				deps
+			)
 
-			const end = (): void => {
-				if (!leased) {
-					return
-				}
-
-				leased = false
-				archive.leases.delete(end)
-				deps.releaseEntryReader(readerId)
-				unref()
-			}
-
-			archive.refs += 1
-			archive.leases.add(end)
-			deps.openEntryReader(readerId, archive.file, password, new Map([[index, maxSolidSkipFor(store, slot)]]), events ?? NO_EVENTS)
-
-			return Promise.resolve({
-				origin: {
-					kind: "entry",
-					reader: readerId,
-					entry: { archive: archive.file.uuid, index },
-					size: store.size(slot),
-					access: "whole",
-					anon: false,
-					cacheKey: entryKey(archive.file.uuid, index)
-				},
-				release: end
-			})
+			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file, reader.anon, store, slot), release })
 		},
 		release: () => {
 			if (released) {
@@ -301,7 +260,7 @@ export function acquireArchiveHandle(
 			}
 
 			released = true
-			unref()
+			reader.release()
 		}
 	}
 

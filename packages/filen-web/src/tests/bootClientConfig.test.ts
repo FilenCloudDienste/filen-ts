@@ -55,6 +55,7 @@ describe("bootSdk client config", () => {
 			fileIoMemoryBudget: 128 * FULL_CHUNK_BYTES,
 			rateLimitPerSec: 640,
 			archiveCodecMemBudget: 512 * MIB,
+			archiveRetainedBudget: 48 * MIB,
 			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 		expect(useBootStore.getState().phase).toBe("ready")
@@ -68,6 +69,7 @@ describe("bootSdk client config", () => {
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES),
 			archiveCodecMemBudget: 128 * MIB,
+			archiveRetainedBudget: 48 * MIB,
 			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 	})
@@ -81,6 +83,7 @@ describe("bootSdk client config", () => {
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES),
 			archiveCodecMemBudget: 64 * MIB,
+			archiveRetainedBudget: 48 * MIB,
 			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 		expect(useBootStore.getState().phase).toBe("ready")
@@ -94,6 +97,7 @@ describe("bootSdk client config", () => {
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig({ preset: "batterySaver" }),
 			archiveCodecMemBudget: 128 * MIB,
+			archiveRetainedBudget: 48 * MIB,
 			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 	})

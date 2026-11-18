@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile, ArchiveEntryId } from "@filen/sdk-rs"
 import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import {
@@ -28,19 +28,24 @@ function fakeClient() {
 	return { client, readRange, release }
 }
 
+// Every lease's whole read.
+const readEntry = vi.fn((_entry: ArchiveEntryId, size: number, _signal: AbortSignal) => Promise.resolve(content.slice(0, size)))
+
+beforeEach(() => {
+	readEntry.mockClear()
+})
+
 function record(anon = false): EntryReaderRecord {
-	return { anon, archive: file, password: undefined, maxSolidSkip: () => 0 }
+	return { anon, read: readEntry }
 }
 
 function setUp(records: Record<string, EntryReaderRecord> = {}) {
 	const session = fakeClient()
 	const linked = fakeClient()
-	const readEntry = vi.fn((_record: EntryReaderRecord, _entry: ArchiveEntryId, size: number) => Promise.resolve(content.slice(0, size)))
 	const deps: OriginSourceDeps = {
 		session: () => session.client,
 		linked: () => linked.client,
-		entryReader: id => records[id],
-		readEntry
+		entryReader: id => records[id]
 	}
 
 	return { session, linked, readEntry, deps }

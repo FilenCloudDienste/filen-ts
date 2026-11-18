@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
+import type { AnyFile, ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
@@ -10,9 +10,11 @@ import { isZipPackageName } from "@/features/drive/lib/archiveFormats"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { createEntryStore, type EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingCache } from "@/features/archive/lib/listingCache"
+import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/lib/archiveReaders"
 
 // One archive's listing for the browser: which phase it is in, and the entries read so far. Each run is a
-// job of its own id, taking the page's archive slot as any archive job does.
+// job of its own id, through the archive's reader for the run's password (archiveReaders.ts); the session holds the
+// reader of the password it accepted, so the entries the browser opens read from the index the listing left.
 
 export type ListingPhase =
 	| { type: "resolving" }
@@ -64,12 +66,8 @@ export interface ListingSnapshot {
 }
 
 export interface ListingDeps {
-	listArchive: (
-		id: string,
-		params: ListJobParams,
-		password: string | undefined,
-		onEvent: (event: ListJobEvent) => void
-	) => Promise<ListReportDTO>
+	acquireReader: (file: AnyFile, anon: boolean, password: string | undefined) => ArchiveReaderRef
+	listArchive: (readerId: string, id: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => Promise<ListReportDTO>
 	cancel: (id: string) => void
 	release: (id: string) => void
 	newId: () => string
@@ -116,7 +114,8 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export const defaultListingDeps: ListingDeps = {
-	listArchive: (id, params, password, onEvent) => sdkApi.listArchive(id, params, password, Comlink.proxy(onEvent)),
+	acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password),
+	listArchive: (readerId, id, params, onEvent) => sdkApi.listArchiveReader(readerId, id, params, Comlink.proxy(onEvent)),
 	cancel: id => {
 		void sdkApi.cancelTransfer(id)
 	},
@@ -192,6 +191,7 @@ function isPasswordError(error: ErrorDTO): boolean {
 // left undelivered.
 interface Run {
 	id: string
+	reader: ArchiveReaderRef
 	token: number
 	kind: "full" | "verify"
 	store: EntryStore
@@ -216,6 +216,20 @@ export function openListingSession(
 	let run: Run | null = null
 	let pendingStart: AbortController | null = null
 	let disposed = false
+	// The reader of the accepted password, which the browser's entries read through. Nothing is read until used.
+	let held: ArchiveReaderRef = deps.acquireReader(source.file, source.anon, accepted)
+
+	// The session reads through the accepted password's reader from now on.
+	const holdAccepted = (): void => {
+		if (disposed || held.password === accepted) {
+			return
+		}
+
+		const previous = held
+
+		held = deps.acquireReader(source.file, source.anon, accepted)
+		previous.release()
+	}
 
 	const publish = (next: Omit<ListingSnapshot, "version">): void => {
 		if (disposed) {
@@ -330,14 +344,9 @@ export function openListingSession(
 
 		try {
 			const report = await deps.listArchive(
+				current.reader.id,
 				current.id,
-				{
-					archive: source.file,
-					skipMacMetadata: true,
-					keepReportEntries: false,
-					deliverEntries: current.kind === "full"
-				},
-				password,
+				{ keepReportEntries: false, deliverEntries: current.kind === "full" },
 				onEvent
 			)
 
@@ -359,14 +368,21 @@ export function openListingSession(
 
 			run = null
 
+			const error = asErrorDTO(e)
+
 			if (current.kind === "verify" && password !== undefined) {
-				settleVerify(null, asErrorDTO(e), password)
+				settleVerify(null, error, password)
+			} else if (isPasswordError(error)) {
+				// The reader's opening refused it: a 7z or RAR whose index is encrypted.
+				setPhase({ type: "needsPassword", wrong: error.kind === "ArchiveWrongPassword" || password !== undefined }, current.store)
 			} else {
-				setPhase({ type: "failed", error: asErrorDTO(e), summary: null })
+				setPhase({ type: "failed", error, summary: null })
 			}
 		} finally {
 			// Only once the call settled: a released id would orphan a run still winding down.
 			deps.release(current.id)
+			holdAccepted()
+			current.reader.release()
 		}
 	}
 
@@ -376,7 +392,13 @@ export function openListingSession(
 
 		token += 1
 
-		const current: Run = { id: deps.newId(), token, kind, store: kind === "full" ? createEntryStore() : snapshot.store }
+		const current: Run = {
+			id: deps.newId(),
+			reader: deps.acquireReader(source.file, source.anon, password),
+			token,
+			kind,
+			store: kind === "full" ? createEntryStore() : snapshot.store
+		}
 
 		run = current
 
@@ -527,6 +549,7 @@ export function openListingSession(
 			}
 
 			accepted = password
+			holdAccepted()
 
 			const summary = summaryOfPhase(snapshot.phase)
 
@@ -567,6 +590,7 @@ export function openListingSession(
 			run = null
 			accepted = undefined
 			listeners.clear()
+			held.release()
 		}
 	}
 }

@@ -1,6 +1,7 @@
 import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 import { kvPreference } from "@/lib/storage/preference"
+import { pdfMemoryConstrained } from "@/features/preview/lib/pdfLimits"
 
 // Advanced settings → memory one archive job's codecs may use. Like the transfer preset, the wasm
 // client reads it only when it is built, so a change applies at the next page load. Its own key, so a
@@ -30,8 +31,15 @@ export const { get: getArchivePreferences, set: setArchivePreferences } = kvPref
 	fallback: DEFAULT_ARCHIVE_PREFERENCES
 })
 
-export function buildArchiveClientConfig(prefs: ArchivePreferences): JsClientConfig {
+// What every archive reader keeps between its calls (indexes, chunks, decoder checkpoints), process-wide: the SDK's
+// own 48 MiB for a browser, half on a phone or tablet, whose tab is killed far sooner. Past it a reader gives up the
+// least recently used of what it holds and reads it again when next asked.
+export const ARCHIVE_RETAINED_BUDGET_MIB = 48
+export const MOBILE_ARCHIVE_RETAINED_BUDGET_MIB = 24
+
+export function buildArchiveClientConfig(prefs: ArchivePreferences, mobile: boolean = pdfMemoryConstrained()): JsClientConfig {
 	return {
-		archiveCodecMemBudget: prefs.codecMemoryMib * MIB
+		archiveCodecMemBudget: prefs.codecMemoryMib * MIB,
+		archiveRetainedBudget: (mobile ? MOBILE_ARCHIVE_RETAINED_BUDGET_MIB : ARCHIVE_RETAINED_BUDGET_MIB) * MIB
 	}
 }

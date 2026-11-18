@@ -31,14 +31,11 @@ export interface EntryReaderEvents {
 	failed(error: ErrorDTO): void
 }
 
-// An archive opened for entry reads: the archive file, the client that may read it and the password it took.
+// An entry lease (an origin's `reader`): one entry of an archive reader, read whole through it.
 export interface EntryReaderRecord {
 	readonly anon: boolean
-	readonly archive: AnyFile
-	readonly password: string | undefined
-	// The solid skip the user accepted for this entry (0 for one that skips nothing).
-	maxSolidSkip(entry: ArchiveEntryId): number
-	readonly events?: EntryReaderEvents
+	// The entry's whole decoded bytes, checked against its checksum where the archive has one, under `signal`.
+	read(entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
 }
 
 export interface OriginSourceDeps {
@@ -47,8 +44,6 @@ export interface OriginSourceDeps {
 	// A public link's client, freed by its release.
 	linked(): FileReadClient
 	entryReader(id: string): EntryReaderRecord | undefined
-	// An entry's whole decoded bytes, its checksum verified, under `signal`.
-	readEntry(record: EntryReaderRecord, entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
 }
 
 // The most an entry is buffered to serve its ranges from (preview.logic's, which the entry gates read too).
@@ -79,9 +74,8 @@ function fileSource(client: FileReadClient, file: AnyFile): OriginSource {
 	}
 }
 
-// Until the SDK reads entries by range, an entry's ranges come from one checked whole read, made on the first range
-// read and held for the source's life. Each range is a copy: the reader receives it transferred.
-function entrySource(deps: OriginSourceDeps, record: EntryReaderRecord, entry: ArchiveEntryId, size: number): OriginSource {
+// An entry's ranges come from one checked whole read, made on the first range read and held for the source's life. Each range is a copy: the reader receives it transferred.
+function entrySource(record: EntryReaderRecord, entry: ArchiveEntryId, size: number): OriginSource {
 	const lifetime = new AbortController()
 	let held: Promise<Uint8Array> | null = null
 	const whole = (): Promise<Uint8Array> => {
@@ -89,7 +83,7 @@ function entrySource(deps: OriginSourceDeps, record: EntryReaderRecord, entry: A
 			const load =
 				size > ENTRY_RANGE_BUFFER_CAP
 					? Promise.reject(tooLarge(size, ENTRY_RANGE_BUFFER_CAP))
-					: deps.readEntry(record, entry, size, lifetime.signal)
+					: record.read(entry, size, lifetime.signal)
 
 			held = load
 			// A failed load is not kept: the next read tries again.
@@ -121,7 +115,7 @@ function entrySource(deps: OriginSourceDeps, record: EntryReaderRecord, entry: A
 				return raceAbort(held, signal).then(bytes => bytes.slice())
 			}
 
-			return deps.readEntry(record, entry, size, AbortSignal.any([signal, lifetime.signal]))
+			return record.read(entry, size, AbortSignal.any([signal, lifetime.signal]))
 		},
 		release: () => {
 			lifetime.abort(released())
@@ -148,7 +142,7 @@ export function originSource(o: ByteOrigin, deps: OriginSourceDeps): OriginSourc
 				throw new Error("archive reader belongs to the other client")
 			}
 
-			return entrySource(deps, record, o.entry, o.size)
+			return entrySource(record, o.entry, o.size)
 		}
 		case "bytes":
 			throw new Error("a bytes origin is read on the page, never in the SDK worker")
@@ -169,7 +163,7 @@ export function originFile(o: ByteOrigin): { readonly anon: boolean; readonly fi
 	}
 }
 
-// Archives opened for entry reads, by reader id.
+// Entry leases, by the id an origin names them by.
 const entryReaders = new Map<string, EntryReaderRecord>()
 
 // `id` is the caller's own, so an origin naming it can be built before this registration lands.

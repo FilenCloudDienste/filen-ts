@@ -1,4 +1,12 @@
-import { accessOfFlags, ENTRY_ACCESS, ENTRY_FLAG, ENTRY_KIND } from "@/lib/sdk/archiveListing"
+import {
+	accessOfFlags,
+	ENTRY_ACCESS,
+	ENTRY_FLAG,
+	ENTRY_KIND,
+	READ_AHEAD_MAX_BYTES,
+	READ_AHEAD_MAX_ENTRIES,
+	type EntryReadPlan
+} from "@/lib/sdk/archiveListing"
 import {
 	bufferedSizeCap,
 	CATEGORY_POLICY,
@@ -114,6 +122,51 @@ export function needsCostConfirm(store: EntryStore, slot: number): boolean {
 // fetching any of the block. Never null, which would allow any skip.
 export function maxSolidSkipFor(store: EntryStore, slot: number): number {
 	return entryCost(store, slot)?.skippedBytes ?? 0
+}
+
+// Index steps a window looks past the entry for the files after it (directories and left-out entries between them).
+const WINDOW_SCAN = 256
+
+// How the entry is read whole: alone, or, a solid block's, in one pass with the files its block stores right after
+// it, up to the read-ahead a reader keeps (READ_AHEAD_MAX_ENTRIES files, READ_AHEAD_MAX_BYTES), so reading them in
+// turn decodes the block once per window rather than once per file. The pass may throw away what its last file's
+// listed skip says, no more: within one block that is all it decodes before that file.
+export function entryReadPlan(store: EntryStore, slot: number): EntryReadPlan {
+	const index = store.index(slot)
+	const maxSolidSkip = maxSolidSkipFor(store, slot)
+	const window = [{ index, size: store.size(slot) }]
+	let windowSkip = maxSolidSkip
+
+	if (accessOfFlags(store.flags(slot)) !== ENTRY_ACCESS.solidBlock) {
+		return { maxSolidSkip, window, windowSkip }
+	}
+
+	let bytes = 0
+
+	for (let next = index + 1; next <= index + WINDOW_SCAN && window.length <= READ_AHEAD_MAX_ENTRIES; next++) {
+		const at = store.slotOfIndex(next)
+
+		if (at === -1 || store.kind(at) !== ENTRY_KIND.file) {
+			continue
+		}
+
+		// Another block (its skip starts over), or an entry read some other way: the window ends.
+		if (!canReadEntry(store, at) || accessOfFlags(store.flags(at)) !== ENTRY_ACCESS.solidBlock || store.solidSkipped(at) < windowSkip) {
+			break
+		}
+
+		const size = store.size(at)
+
+		if (bytes + size > READ_AHEAD_MAX_BYTES) {
+			break
+		}
+
+		bytes += size
+		windowSkip = store.solidSkipped(at)
+		window.push({ index: next, size })
+	}
+
+	return { maxSolidSkip, window, windowSkip }
 }
 
 // The preview cache's key for an entry, and the uuid its stand-in item carries.

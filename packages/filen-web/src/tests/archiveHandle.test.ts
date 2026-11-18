@@ -1,14 +1,17 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile, ListUpdate, UuidStr } from "@filen/sdk-rs"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
 import type { EntryReaderEvents } from "@/workers/originSource"
+import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
+import type { ArchiveReaderPageDeps } from "@/features/archive/lib/archiveReaders"
 import { packEntries, storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 const { acquireArchiveHandle, archiveHandleRefusal } = await import("@/features/archive/lib/archiveHandle")
+const { acquireArchiveReader } = await import("@/features/archive/lib/archiveReaders")
 const { runPreviewDisposers } = await import("@/lib/workers/previewDisposers")
 const { createEntryStore } = await import("@/features/archive/lib/entryStore")
 
@@ -70,41 +73,55 @@ function waitingUpdate(phase: ListUpdate["phase"]): ListJobEvent {
 	}
 }
 
+// Every test starts with no reader open.
+afterEach(() => {
+	runPreviewDisposers()
+})
+
+let ids = 0
+
 function harness() {
 	const lists: ListCall[] = []
-	const readers = new Map<string, { index: number; skip: number; events: EntryReaderEvents }>()
-	let ids = 0
-	const deps: Deps = {
-		listArchive: vi.fn(
-			(jobId: string, params: ListJobParams, _password: string | undefined, onEvent: (event: ListJobEvent) => void) => {
-				return new Promise<ListReportDTO>(resolve => {
-					lists.push({ jobId, params, emit: onEvent, resolve })
-				})
+	const leases = new Map<string, { readerId: string; plan: EntryReadPlan; events: EntryReaderEvents }>()
+	const opened = new Map<string, { anon: boolean; password: string | undefined }>()
+	const lingers: (() => void)[] = []
+	const newId = (): string => {
+		ids += 1
+
+		return `id-${String(ids)}`
+	}
+	const pageDeps: ArchiveReaderPageDeps = {
+		open: vi.fn((id: string, _file: AnyFile, anon: boolean, password: string | undefined) => {
+			opened.set(id, { anon, password })
+		}),
+		close: vi.fn((id: string) => {
+			opened.delete(id)
+		}),
+		newId,
+		linger: close => {
+			lingers.push(close)
+
+			return () => {
+				lingers.splice(lingers.indexOf(close), 1)
 			}
-		),
+		}
+	}
+	const deps: Deps = {
+		acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password, pageDeps),
+		listArchive: vi.fn((_readerId: string, jobId: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => {
+			return new Promise<ListReportDTO>(resolve => {
+				lists.push({ jobId, params, emit: onEvent, resolve })
+			})
+		}),
 		cancelJob: vi.fn<(jobId: string) => void>(),
 		releaseJob: vi.fn<(jobId: string) => void>(),
-		openEntryReader: vi.fn(
-			(
-				readerId: string,
-				_archive: AnyFile,
-				_password: string | undefined,
-				skips: ReadonlyMap<number, number>,
-				events: EntryReaderEvents
-			) => {
-				const [entry] = skips
-
-				readers.set(readerId, { index: entry?.[0] ?? -1, skip: entry?.[1] ?? -1, events })
-			}
-		),
-		releaseEntryReader: vi.fn((readerId: string) => {
-			readers.delete(readerId)
+		leaseEntry: vi.fn((leaseId: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents) => {
+			leases.set(leaseId, { readerId, plan, events })
 		}),
-		newId: () => {
-			ids += 1
-
-			return `id-${String(ids)}`
-		}
+		releaseLease: vi.fn((leaseId: string) => {
+			leases.delete(leaseId)
+		}),
+		newId
 	}
 
 	function list(i: number): ListCall {
@@ -117,7 +134,14 @@ function harness() {
 		return found
 	}
 
-	return { deps, list, readers }
+	// The lingering readers close now.
+	function lapse(): void {
+		for (const close of lingers.splice(0)) {
+			close()
+		}
+	}
+
+	return { deps, pageDeps, list, leases, opened, lapse }
 }
 
 describe("acquireArchiveHandle", () => {
@@ -138,7 +162,7 @@ describe("acquireArchiveHandle", () => {
 			}
 		)
 
-		expect(list(0).params).toMatchObject({ deliverEntries: true, keepReportEntries: false, skipMacMetadata: true })
+		expect(list(0).params).toEqual({ deliverEntries: true, keepReportEntries: false })
 		list(0).emit(waitingUpdate("waitingForWorker"))
 		list(0).emit(waitingUpdate("reading"))
 
@@ -208,8 +232,8 @@ describe("acquireArchiveHandle", () => {
 		handle.release()
 	})
 
-	it("leases an entry's whole-read origin through its own entry reader, released with the lease", async () => {
-		const { deps, readers } = harness()
+	it("leases an entry's whole-read origin on the archive's reader, planned from its listing, released with the lease", async () => {
+		const { deps, leases } = harness()
 		const handle = opened(fileOrigin(), deps)
 		const store = storeOf([{ path: "preview.jpg", index: 7, size: 2048, access: DIRECT }])
 		const lease = await handle.origin(store, 0)
@@ -222,56 +246,76 @@ describe("acquireArchiveHandle", () => {
 			anon: false,
 			cacheKey: `${TEST_ARCHIVE}#7`
 		})
-		expect(readers.size).toBe(1)
-		expect([...readers.values()][0]).toMatchObject({ index: 7, skip: 0 })
+		expect(leases.size).toBe(1)
+		expect([...leases.values()][0]).toMatchObject({
+			readerId: handle.id,
+			plan: { maxSolidSkip: 0, window: [{ index: 7, size: 2048 }] }
+		})
 
 		lease.release()
 		lease.release()
-		expect(readers.size).toBe(0)
-		expect(deps.releaseEntryReader).toHaveBeenCalledTimes(1)
+		expect(leases.size).toBe(0)
+		expect(deps.releaseLease).toHaveBeenCalledTimes(1)
 		handle.release()
 	})
 
-	it("shares one archive per file and keeps it open while a lease holds it", async () => {
-		const { deps } = harness()
+	it("shares one reader per file, client and password, kept while a lease holds it and a little after", async () => {
+		const { deps, pageDeps, opened: open, lapse } = harness()
 		const first = opened(fileOrigin(), deps)
 		const second = opened(fileOrigin(), deps)
 		const other = opened(fileOrigin("other-0000-0000-0000-000000000000"), deps)
+		const locked = acquireArchiveHandle(fileOrigin(), "pw", deps)
+		const linked = acquireArchiveHandle({ kind: "linkedFile", file: { uuid: TEST_ARCHIVE } as unknown as AnyFile }, undefined, deps)
 		const store = storeOf([{ path: "preview.jpg", access: DIRECT }])
 
 		expect(second.id).toBe(first.id)
 		expect(other.id).not.toBe(first.id)
+		expect(locked.type === "opened" && locked.handle.id).not.toBe(first.id)
+		expect(linked.type === "opened" && linked.handle.id).not.toBe(first.id)
+		expect(open.get(first.id)).toEqual({ anon: false, password: undefined })
+		expect(linked.type === "opened" && open.get(linked.handle.id)).toEqual({ anon: true, password: undefined })
 
 		const lease = await first.origin(store, 0)
 
 		first.release()
 		second.release()
-		// The lease still holds the archive: a new handle joins it.
+		lapse()
+		// The lease still holds the reader: a new handle joins it.
 		const third = opened(fileOrigin(), deps)
 
 		expect(third.id).toBe(first.id)
 		lease.release()
 		third.release()
-		other.release()
+		// Released, it lingers: an acquire meanwhile joins it.
+		const again = opened(fileOrigin(), deps)
 
-		// The last reference closed it: the next acquire opens it afresh.
+		expect(again.id).toBe(first.id)
+		again.release()
+		lapse()
+		expect(pageDeps.close).toHaveBeenCalledWith(first.id)
+
+		// The last reference lapsed: the next acquire opens it afresh.
 		const fresh = opened(fileOrigin(), deps)
 
 		expect(fresh.id).not.toBe(first.id)
 		fresh.release()
+		other.release()
+		if (locked.type === "opened") locked.handle.release()
+		if (linked.type === "opened") linked.handle.release()
+		lapse()
 	})
 
-	it("closes every archive and lease at sign-out, and refuses a lease afterwards", async () => {
-		const { deps, readers } = harness()
+	it("closes every reader at sign-out, and refuses a lease afterwards", async () => {
+		const { deps, opened: open } = harness()
 		const handle = opened(fileOrigin(), deps)
 		const store = storeOf([{ path: "preview.jpg", access: DIRECT }])
 
 		await handle.origin(store, 0)
-		expect(readers.size).toBe(1)
+		expect(open.size).toBe(1)
 
 		runPreviewDisposers()
 
-		expect(readers.size).toBe(0)
+		expect(open.size).toBe(0)
 		await expect(handle.origin(store, 0)).rejects.toThrow("closed")
 		// A new acquire opens the archive afresh.
 		const reopened = opened(fileOrigin(), deps)
@@ -279,12 +323,12 @@ describe("acquireArchiveHandle", () => {
 		expect(reopened.id).not.toBe(handle.id)
 		handle.release()
 		reopened.release()
+		runPreviewDisposers()
 	})
 
-	it("refuses every origin but a drive file before the SDK has archive readers, without throwing", () => {
+	it("refuses an archive inside another, or bytes the page holds, without throwing", () => {
 		const { deps } = harness()
 		const others: ByteOrigin[] = [
-			{ kind: "linkedFile", file: { uuid: TEST_ARCHIVE } as unknown as AnyFile },
 			{
 				kind: "entry",
 				reader: "r",

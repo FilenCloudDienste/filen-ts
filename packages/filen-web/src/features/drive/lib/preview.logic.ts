@@ -375,7 +375,7 @@ export const CATEGORY_POLICY = {
 		assistantKind: null
 	},
 	// The SDK lists the package and reads the one rendering it carries (iworkPreview.ts), so any size opens. Inside an
-	// archive, or on a public link, the package needs an archive reader the SDK does not have yet.
+	// archive the package needs a nested reader, which no entry opens yet; a public link previews none inline.
 	iwork: {
 		streamed: false,
 		ranged: true,

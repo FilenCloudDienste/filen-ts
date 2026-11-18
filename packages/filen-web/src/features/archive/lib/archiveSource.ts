@@ -15,6 +15,8 @@ export interface ArchiveSource {
 	uuid: UuidStr
 	name: string
 	size: number
+	// A public link's file: read through the public-link client, never the session's.
+	anon: boolean
 	// The own directory the archive sits in (null the drive root), which "next to the archive" extracts
 	// into; undefined when it has none to offer (shared with the user, linked, a chat's, in the trash).
 	ownParent: string | null | undefined
@@ -31,7 +33,7 @@ function ownParentOf(uuid: string, parent: string, variant: DriveVariant, rootUu
 	return normalizeParentUuid(parent, rootUuid)
 }
 
-function fileSource(item: DriveItem, ownParent: string | null | undefined, file?: AnyFile): ArchiveSource {
+function fileSource(item: DriveItem, ownParent: string | null | undefined, anon: boolean, file?: AnyFile): ArchiveSource {
 	switch (item.type) {
 		case "file":
 		case "sharedFile":
@@ -41,6 +43,7 @@ function fileSource(item: DriveItem, ownParent: string | null | undefined, file?
 				uuid: item.data.uuid,
 				name: driveItemName(item),
 				size: Number(item.data.size),
+				anon,
 				ownParent
 			}
 		case "directory":
@@ -51,11 +54,11 @@ function fileSource(item: DriveItem, ownParent: string | null | undefined, file?
 }
 
 export function archiveSourceOf(item: DriveItem, variant: DriveVariant, rootUuid: string = currentRootUuid()): ArchiveSource {
-	return fileSource(item, ownParentOf(item.data.uuid, item.data.parent, variant, rootUuid))
+	return fileSource(item, ownParentOf(item.data.uuid, item.data.parent, variant, rootUuid), false)
 }
 
 // A public link's or a chat's archive, shown through its drive-shaped stand-in: never in a directory of
 // the user's own. `file` is the SDK's own linked file when the caller holds it.
 export function linkedArchiveSource(item: DriveItem, file?: AnyFile): ArchiveSource {
-	return fileSource(item, undefined, file)
+	return fileSource(item, undefined, true, file)
 }

@@ -69,6 +69,7 @@ const SOURCE: ArchiveSource = {
 	uuid: ARCHIVE_UUID,
 	name: "photos.zip",
 	size: 1000,
+	anon: false,
 	ownParent: "parent-uuid"
 }
 

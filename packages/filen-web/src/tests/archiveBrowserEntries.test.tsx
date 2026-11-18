@@ -7,6 +7,7 @@ import { onlineManager, QueryClientProvider } from "@tanstack/react-query"
 import type { AnyFile, EntryAccess, EntryDownloadPhase } from "@filen/sdk-rs"
 import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 import type { EntryReaderEvents } from "@/workers/originSource"
+import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { ArchiveNameInfo } from "@/workers/sdk.worker"
 import "@/lib/i18n"
 
@@ -24,54 +25,57 @@ const { openListingSession, runEntryDownload, loadEntryBytes } = vi.hoisted(() =
 // answers with the bytes and whether their checksum matched, and the reader's events hear its phases and outcome.
 vi.mock("@/lib/sdk/client", async () => {
 	const { asErrorDTO } = await import("@/lib/sdk/errors")
-	const readers = new Map<
-		string,
-		{ archive: AnyFile; password: string | undefined; solidSkips: ReadonlyMap<number, number>; events: EntryReaderEvents }
-	>()
+	const readers = new Map<string, { archive: AnyFile; password: string | undefined }>()
+	const leases = new Map<string, { readerId: string; plan: EntryReadPlan; events: EntryReaderEvents }>()
 
 	return {
 		sdkApi: {
 			cancelPreviewDownload: vi.fn(() => Promise.resolve()),
-			openEntryReader: (
-				id: string,
-				archive: AnyFile,
-				password: string | undefined,
-				solidSkips: ReadonlyMap<number, number>,
-				events: EntryReaderEvents
-			) => {
-				readers.set(id, { archive, password, solidSkips, events })
+			openArchiveReader: (id: string, archive: AnyFile, _anon: boolean, password: string | undefined) => {
+				readers.set(id, { archive, password })
 
 				return Promise.resolve()
 			},
-			releaseEntryReader: (id: string) => {
+			closeArchiveReader: (id: string) => {
 				readers.delete(id)
 
 				return Promise.resolve()
 			},
-			downloadOriginBytes: async (origin: ByteOrigin, _access: OriginAccess, _cap: number, token: string): Promise<Uint8Array> => {
-				const reader = origin.kind === "entry" ? readers.get(origin.reader) : undefined
+			leaseArchiveEntry: (id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents) => {
+				leases.set(id, { readerId, plan, events })
 
-				if (origin.kind !== "entry" || reader === undefined) {
+				return Promise.resolve()
+			},
+			releaseArchiveEntry: (id: string) => {
+				leases.delete(id)
+
+				return Promise.resolve()
+			},
+			downloadOriginBytes: async (origin: ByteOrigin, _access: OriginAccess, _cap: number, token: string): Promise<Uint8Array> => {
+				const lease = origin.kind === "entry" ? leases.get(origin.reader) : undefined
+				const reader = lease === undefined ? undefined : readers.get(lease.readerId)
+
+				if (origin.kind !== "entry" || lease === undefined || reader === undefined) {
 					throw new Error("archive reader is closed")
 				}
 
 				const request = {
-					params: { archive: reader.archive, entry: origin.entry, maxSolidSkip: reader.solidSkips.get(origin.entry.index) ?? 0 },
+					params: { archive: reader.archive, entry: origin.entry, maxSolidSkip: lease.plan.maxSolidSkip },
 					size: origin.size
 				}
 
 				try {
 					const { bytes, checked } = (await loadEntryBytes(request, reader.password, token, (phase: EntryDownloadPhase) => {
-						reader.events.phase(phase)
+						lease.events.phase(phase)
 					})) as { bytes: Uint8Array; checked: boolean }
 
 					if (checked) {
-						reader.events.verified()
+						lease.events.verified()
 					}
 
 					return bytes
 				} catch (e) {
-					reader.events.failed(asErrorDTO(e))
+					lease.events.failed(asErrorDTO(e))
 
 					throw e
 				}
@@ -140,6 +144,7 @@ const SOURCE: ArchiveSource = {
 	uuid: TEST_ARCHIVE,
 	name: "bundle.7z",
 	size: 10 * 1024 * 1024,
+	anon: false,
 	ownParent: null
 }
 

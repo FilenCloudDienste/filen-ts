@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Remote } from "comlink"
-import type { AnyFile, DownloadArchiveEntryParams, EntryDownloadReport, StringifiedClient } from "@filen/sdk-rs"
+import type { AnyFile, EntryDownloadReport, ReaderDownloadEntryParams, StringifiedClient } from "@filen/sdk-rs"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
 import type { RangePortApi } from "@/lib/media/rangePort"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
@@ -14,21 +14,30 @@ interface WriterParams {
 	managedFuture: { abortSignal: AbortSignal }
 }
 
-const { exposed, fakeClient, fakeUnauth } = vi.hoisted(() => {
+const { exposed, fakeClient, fakeReader, fakeUnauth } = vi.hoisted(() => {
 	const fakeUnauth = {
 		downloadFileToWriter: vi.fn<(params: WriterParams) => Promise<void>>(),
 		writeEmbeddedPreview: vi.fn(),
 		free: vi.fn()
 	}
 
+	const fakeReader = {
+		format: { type: "zip" },
+		entryByteAccess: vi.fn(() => Promise.resolve({ type: "whole", size: 10n })),
+		downloadEntry: vi.fn<(params: ReaderDownloadEntryParams) => Promise<EntryDownloadReport>>(),
+		close: vi.fn(),
+		free: vi.fn()
+	}
+
 	return {
 		exposed: new Map<"api", unknown>(),
 		fakeUnauth,
+		fakeReader,
 		fakeClient: {
 			root: () => ({ uuid: "root" }),
 			getUnauthed: () => fakeUnauth,
 			downloadFileToWriter: vi.fn<(params: WriterParams) => Promise<void>>(),
-			downloadArchiveEntry: vi.fn<(params: DownloadArchiveEntryParams, password?: string) => Promise<EntryDownloadReport>>(),
+			openArchiveReader: vi.fn((_params: unknown, _password?: string) => Promise.resolve(fakeReader)),
 			free: vi.fn()
 		}
 	}
@@ -50,7 +59,6 @@ vi.mock("comlink", () => ({
 
 await import("@/workers/sdk.worker")
 
-const { registerEntryReader, releaseEntryReader } = await import("@/workers/originSource")
 const api = exposed.get("api") as Remote<SdkWorkerApi>
 const CONTENT = Array.from({ length: 10 }, (_, i) => i)
 
@@ -78,6 +86,20 @@ function settle(): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, 0))
 }
 
+const NO_EVENTS = { phase: () => undefined, verified: () => undefined, failed: () => undefined }
+const PLAN = { maxSolidSkip: 0, window: [{ index: 2, size: 10 }], windowSkip: 0 }
+
+// A lease `id` on a reader of its own over a 100-byte archive.
+async function lease(id: string, password?: string): Promise<void> {
+	await api.openArchiveReader(`${id}-reader`, fileOf(100), false, password)
+	await api.leaseArchiveEntry(id, `${id}-reader`, PLAN, NO_EVENTS)
+}
+
+async function unlease(id: string): Promise<void> {
+	await api.releaseArchiveEntry(id)
+	await api.closeArchiveReader(`${id}-reader`)
+}
+
 function entryOrigin(reader: string, access: "whole" | "mapped" = "whole"): ByteOrigin {
 	return {
 		kind: "entry",
@@ -94,7 +116,7 @@ beforeEach(async () => {
 	await api.injectClient("session" as unknown as StringifiedClient)
 	fakeClient.downloadFileToWriter.mockImplementation(serveContent)
 	fakeUnauth.downloadFileToWriter.mockImplementation(serveContent)
-	fakeClient.downloadArchiveEntry.mockImplementation(async params => {
+	fakeReader.downloadEntry.mockImplementation(async params => {
 		const w = params.writer.getWriter()
 
 		await w.write(new Uint8Array(CONTENT))
@@ -138,17 +160,17 @@ describe("sdk worker origin range ports", () => {
 
 	it("serves an entry's ranges from one checked whole read shared by the token's ports", async () => {
 		const reader = { id: "reader-1" }
-		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
+		await lease(reader.id)
 		const first = await openPort(entryOrigin(reader.id), "o3")
 		const second = await openPort(entryOrigin(reader.id), "o3")
 
 		expect(Array.from(await first.read(0, 3, 1))).toEqual([0, 1, 2])
 		expect(Array.from(await second.read(7, 10, 1))).toEqual([7, 8, 9])
-		expect(fakeClient.downloadArchiveEntry).toHaveBeenCalledTimes(1)
-		expect(fakeClient.downloadArchiveEntry.mock.calls[0]?.[0]).toMatchObject({ maxSolidSkip: 0, entry: { index: 2 } })
+		expect(fakeReader.downloadEntry).toHaveBeenCalledTimes(1)
+		expect(fakeReader.downloadEntry.mock.calls[0]?.[0]).toMatchObject({ maxSolidSkip: 0, entry: { index: 2 } })
 
 		await api.cancelPreviewDownload("o3")
-		releaseEntryReader(reader.id)
+		await unlease(reader.id)
 	})
 
 	it("refuses an entry whose reader is closed", async () => {
@@ -186,22 +208,22 @@ describe("sdk worker whole origin reads", () => {
 
 	it("reads an entry whole through the checked entry download", async () => {
 		const reader = { id: "reader-2" }
-		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: "pw", maxSolidSkip: () => 0 })
+		await lease(reader.id, "pw")
 
 		expect(Array.from(await api.downloadOriginBytes(entryOrigin(reader.id), "authed", 10, "w3"))).toEqual(CONTENT)
-		expect(fakeClient.downloadArchiveEntry.mock.calls[0]?.[1]).toBe("pw")
-		releaseEntryReader(reader.id)
+		expect(fakeClient.openArchiveReader.mock.calls[0]?.[1]).toBe("pw")
+		await unlease(reader.id)
 	})
 
 	it("has no sync range for an origin read whole and no ranged embedded preview for an entry", async () => {
 		const { port1 } = new MessageChannel()
 		const reader = { id: "reader-3" }
-		registerEntryReader(reader.id, { anon: false, archive: fileOf(100), password: undefined, maxSolidSkip: () => 0 })
+		await lease(reader.id)
 
 		await expect(
 			api.openOriginSyncRange(new SharedArrayBuffer(8), port1, entryOrigin(reader.id), "authed", "s1", "lock")
 		).rejects.toThrow("read whole")
 		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "authed", "r1")).rejects.toThrow("file origin")
-		releaseEntryReader(reader.id)
+		await unlease(reader.id)
 	})
 })

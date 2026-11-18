@@ -3,8 +3,6 @@ import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { EntryJobParams, EntryProgress } from "@/workers/sdk.worker"
-import type { EntryReaderEvents } from "@/workers/originSource"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import {
 	isPickerCancelled,
 	pipeToPickedFile,
@@ -20,12 +18,15 @@ import { toastTransferStarted } from "@/features/transfers/lib/transferStartToas
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { canReadEntry, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
+import { acquireArchiveReader } from "@/features/archive/lib/archiveReaders"
 
-// One archive entry saved or loaded on its own, through the SDK's downloadArchiveEntry. Never for a
-// selection: each call reads the archive's first chunk and index again, so several entries extract.
+// One archive entry saved on its own, through the archive's reader (archiveReaders.ts): with the index the browser's
+// listing left it, only the entry is read. Never for a selection, which extracts.
 
 export interface EntryRequest {
 	params: EntryJobParams
+	// A public link's archive, read through the public-link client.
+	anon: boolean
 	name: string
 	// As listed.
 	size: number
@@ -44,6 +45,7 @@ export function entryRequest(source: ArchiveSource, store: EntryStore, slot: num
 			entry: { archive: source.uuid, index: store.index(slot) },
 			maxSolidSkip: maxSolidSkipFor(store, slot)
 		},
+		anon: source.anon,
 		name: store.name(slot),
 		size: store.size(slot)
 	}
@@ -155,6 +157,23 @@ function progressProxy(report: EntryDownloadReporters): (progress: EntryProgress
 	})
 }
 
+// Through the reader of the entry's archive under `password`, held for the call.
+async function downloadThroughReader(
+	request: EntryRequest,
+	transferId: string,
+	password: string | undefined,
+	writable: WritableStream<Uint8Array>,
+	report: EntryDownloadReporters
+): Promise<boolean> {
+	const reader = acquireArchiveReader(request.params.archive, request.anon, password)
+
+	try {
+		return await sdkApi.downloadReaderEntry(reader.id, transferId, request.params, writable, progressProxy(report))
+	} finally {
+		reader.release()
+	}
+}
+
 // Through the service worker (streamProducerToSw), so a download that fails before its first byte (a wrong
 // password) leaves no failed download in the browser.
 function downloadEntryViaSw(
@@ -165,7 +184,7 @@ function downloadEntryViaSw(
 	report: EntryDownloadReporters
 ): Promise<boolean> {
 	return streamProducerToSw(save, transferId, request.size, writable =>
-		sdkApi.downloadArchiveEntry(transferId, request.params, password, Comlink.transfer(writable, [writable]), progressProxy(report))
+		downloadThroughReader(request, transferId, password, Comlink.transfer(writable, [writable]), report)
 	)
 }
 
@@ -180,7 +199,7 @@ async function downloadEntryViaFsa(
 	let checked = false
 
 	await pipeToPickedFile(save, async transferred => {
-		checked = await sdkApi.downloadArchiveEntry(transferId, request.params, password, transferred, progressProxy(report))
+		checked = await downloadThroughReader(request, transferId, password, transferred, report)
 	})
 
 	return checked
@@ -194,34 +213,5 @@ export const defaultEntryDownloadDeps: RunEntryDownloadDeps = {
 	store: useTransfersStore.getState(),
 	announceStart: name => {
 		toastTransferStarted({ direction: "download", name, count: 1, noun: "items" })
-	}
-}
-
-// The origin a viewer reads `request`'s entry through: the entry reader `readerId` (openEntryReader), read whole,
-// cached under `cacheKey` (its stand-in item's uuid).
-export function entryOrigin(request: EntryRequest, readerId: string, cacheKey: string): ByteOrigin {
-	return { kind: "entry", reader: readerId, entry: request.params.entry, size: request.size, access: "whole", anon: false, cacheKey }
-}
-
-// Opens the entry reader `readerId` for `request`'s archive, allowing its entry the solid skip the user accepted.
-// Comlink delivers calls in order, so an origin naming it can be read at once. Returns the release.
-export function openEntryReader(
-	request: EntryRequest,
-	readerId: string,
-	password: string | undefined,
-	events: EntryReaderEvents
-): () => void {
-	const { params } = request
-
-	void sdkApi.openEntryReader(
-		readerId,
-		params.archive,
-		password,
-		new Map([[params.entry.index, params.maxSolidSkip]]),
-		Comlink.proxy(events)
-	)
-
-	return () => {
-		void sdkApi.releaseEntryReader(readerId)
 	}
 }

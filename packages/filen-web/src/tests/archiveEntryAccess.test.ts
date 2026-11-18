@@ -99,6 +99,7 @@ describe("entryRequest", () => {
 		uuid: TEST_ARCHIVE,
 		name: "a.7z",
 		size: 1,
+		anon: false,
 		ownParent: null
 	}
 
@@ -110,6 +111,7 @@ describe("entryRequest", () => {
 
 		expect(entryRequest(source, store, 0)).toEqual({
 			params: { archive: source.file, entry: { archive: TEST_ARCHIVE, index: 7 }, maxSolidSkip: 0 },
+			anon: false,
 			name: "a.txt",
 			size: 12
 		})

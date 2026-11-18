@@ -7,7 +7,8 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryReferences } from "@/features/archive/lib/entryReferences"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
-import { entryOrigin, isArchivePasswordError, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import { isArchivePasswordError, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
@@ -35,8 +36,8 @@ export interface ArchiveEntryViewerProps {
 }
 
 // One entry shown in the archive browser's place, read-only, with the viewers a drive file of its kind
-// gets. Its bytes come through the entry's origin, an entry reader opened for each password tried, cached like a
-// file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
+// gets. Its bytes come through the entry's origin, a lease on the archive's reader for each password tried (the
+// listing's own reader for its password), cached like a file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
 // again.
 export function ArchiveEntryViewer({
 	archiveUuid,
@@ -56,9 +57,10 @@ export function ArchiveEntryViewer({
 	const [readerBase] = useState(() => crypto.randomUUID())
 	const { request } = entry
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
-	// One reader per password tried; the viewer below remounts with it.
-	const readerId = `${readerBase}:${String(attempt)}`
-	const origin = entryOrigin(request, readerId, item.data.uuid)
+	// One lease per password tried; the viewer below remounts with it.
+	const leaseId = `${readerBase}:${String(attempt)}`
+	const slot = listing.store.slotOfIndex(request.params.entry.index)
+	const origin = entryLeaseOrigin(leaseId, request.params.archive, request.anon, listing.store, slot)
 	const onPhase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
 	})
@@ -73,25 +75,33 @@ export function ArchiveEntryViewer({
 			setAsk({ wrong: dto.kind === "ArchiveWrongPassword" || password !== undefined })
 		}
 	})
-	const readerRequest = useEffectEvent(() => ({ request, password }))
+	const leaseRequest = useEffectEvent(() => ({ request, password, store: listing.store, slot }))
 	const access = usePreviewAccessMode()
 
-	// A layout effect: it runs before the viewer's own effects start reading through the reader.
+	// A layout effect: it runs before the viewer's own effects start reading through the lease.
 	useLayoutEffect(() => {
-		const opened = readerRequest()
+		const opened = leaseRequest()
 
-		return openEntryReader(opened.request, readerId, opened.password, {
-			phase: phase => {
-				onPhase(phase === "waitingForWorker")
-			},
-			verified: () => {
-				onVerified()
-			},
-			failed: dto => {
-				onFailed(dto)
+		return leaseEntry({
+			leaseId,
+			file: opened.request.params.archive,
+			anon: opened.request.anon,
+			password: opened.password,
+			store: opened.store,
+			slot: opened.slot,
+			events: {
+				phase: phase => {
+					onPhase(phase === "waitingForWorker")
+				},
+				verified: () => {
+					onVerified()
+				},
+				failed: dto => {
+					onFailed(dto)
+				}
 			}
 		})
-	}, [readerId])
+	}, [leaseId])
 
 	return (
 		<NestedFileViewer

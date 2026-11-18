@@ -19,9 +19,19 @@ import type {
 	ListArchiveParams,
 	ListReport,
 	ListUpdate,
+	OpenArchiveReaderParams,
 	StringifiedClient
 } from "@filen/sdk-rs"
-import type { CompressJobEvent, EntryJobParams, EntryProgress, ExtractJobEvent, ListJobEvent, SdkWorkerApi } from "@/workers/sdk.worker"
+import type {
+	CompressJobEvent,
+	EntryJobParams,
+	EntryProgress,
+	ExtractJobEvent,
+	ListJobEvent,
+	ListJobParams,
+	SdkWorkerApi
+} from "@/workers/sdk.worker"
+import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import { getCachedDir } from "@/features/drive/lib/cache"
 import { liveSdkError, sdkErrorDTO } from "@/tests/support/sdkError"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -51,6 +61,7 @@ const { exposed, fakeClient, helpers } = vi.hoisted(() => ({
 		extractArchiveEntries: vi.fn<(params: ExtractArchiveEntriesParams & Signals, password?: Password) => Promise<ExtractReport>>(),
 		listArchive: vi.fn<(params: ListArchiveParams & Signals, password?: Password) => Promise<ListReport>>(),
 		downloadArchiveEntry: vi.fn<(params: DownloadArchiveEntryParams & Signals, password?: Password) => Promise<EntryDownloadReport>>(),
+		openArchiveReader: vi.fn<(params: OpenArchiveReaderParams, password?: Password) => Promise<unknown>>(),
 		archiveCodecMemBudget: vi.fn(() => 128n * 1024n * 1024n),
 		free: vi.fn()
 	},
@@ -234,7 +245,43 @@ beforeEach(async () => {
 	fakeClient.extractArchiveEntries.mockResolvedValue(EXTRACT_REPORT)
 	fakeClient.listArchive.mockResolvedValue(LIST_REPORT)
 	fakeClient.getDirOptional.mockResolvedValue(DEST_DIR)
+	// A reader's calls reach the client's own listing and entry download mocks, with the password it was opened under.
+	fakeClient.openArchiveReader.mockImplementation((_params, password) =>
+		Promise.resolve({
+			format: { type: "zip" },
+			list: (params: ListArchiveParams & Signals) => fakeClient.listArchive(params, password),
+			downloadEntry: (params: DownloadArchiveEntryParams & Signals) => fakeClient.downloadArchiveEntry(params, password),
+			entryByteAccess: () => Promise.resolve({ type: "whole", size: 0n }),
+			close: vi.fn(),
+			free: vi.fn()
+		})
+	)
 })
+
+// A listing through a reader of its own, opened under `password`.
+async function listThroughReader(
+	jobId: string,
+	params: ListJobParams,
+	password: string | undefined,
+	onEvent: (event: ListJobEvent) => void
+): Promise<ListReportDTO> {
+	await api.openArchiveReader(`reader-${jobId}`, ARCHIVE, false, password)
+
+	return api.listArchiveReader(`reader-${jobId}`, jobId, params, onEvent)
+}
+
+// An entry saved through a reader of its own, opened under `password`.
+async function downloadThroughReader(
+	transferId: string,
+	params: EntryJobParams,
+	password: string | undefined,
+	writer: WritableStream<Uint8Array>,
+	onUpdate: (progress: EntryProgress) => void
+): Promise<boolean> {
+	await api.openArchiveReader(`reader-${transferId}`, params.archive, false, password)
+
+	return api.downloadReaderEntry(`reader-${transferId}`, transferId, params, writer, onUpdate)
+}
 
 function compressParams(
 	overrides: Partial<Parameters<SdkWorkerApi["compressItems"]>[1]> = {}
@@ -481,12 +528,7 @@ describe("sdk worker archives", () => {
 			return Promise.resolve(LIST_REPORT)
 		})
 
-		const slim = await api.listArchive(
-			"list",
-			{ archive: ARCHIVE, skipMacMetadata: undefined, deliverEntries: true, keepReportEntries: false },
-			"",
-			onEvent
-		)
+		const slim = await listThroughReader("list", { deliverEntries: true, keepReportEntries: false }, "", onEvent)
 		const events = onEvent.mock.calls.map(([event]) => event)
 
 		expect(events.map(event => event.type)).toEqual(["entries", "update", "update", "entries"])
@@ -516,16 +558,11 @@ describe("sdk worker archives", () => {
 	it("lists without entries when none are wanted, and keeps the report's on request", async () => {
 		const onEvent = vi.fn<(event: ListJobEvent) => void>()
 
-		const kept = await api.listArchive(
-			"list-kept",
-			{ archive: ARCHIVE, skipMacMetadata: false, deliverEntries: false, keepReportEntries: true },
-			"pw",
-			onEvent
-		)
+		const kept = await listThroughReader("list-kept", { deliverEntries: false, keepReportEntries: true }, "pw", onEvent)
 
 		expect(kept.entries).toEqual([ENTRY])
 		expect(lastCall(fakeClient.listArchive)[0]).not.toHaveProperty("onEntriesBatch")
-		expect(lastCall(fakeClient.listArchive)[0]).toMatchObject({ skipMacMetadata: false })
+		expect(lastCall(fakeClient.openArchiveReader)[0]).toMatchObject({ archive: ARCHIVE, skipMacMetadata: true })
 		expect(lastCall(fakeClient.listArchive)[1]).toBe("pw")
 		expect(onEvent).not.toHaveBeenCalled()
 
@@ -533,12 +570,7 @@ describe("sdk worker archives", () => {
 	})
 
 	it("frees a job's pause once, however often it is released", async () => {
-		await api.listArchive(
-			"release",
-			{ archive: ARCHIVE, skipMacMetadata: undefined, deliverEntries: true, keepReportEntries: false },
-			undefined,
-			() => undefined
-		)
+		await listThroughReader("release", { deliverEntries: true, keepReportEntries: false }, undefined, () => undefined)
 
 		const pause = lastCall(fakeClient.listArchive)[0].managedFuture.pauseSignal
 
@@ -593,11 +625,17 @@ describe("sdk worker archive entries", () => {
 		return { phase: vi.fn<(phase: EntryDownloadPhase) => void>(), verified: vi.fn(), failed: vi.fn<(error: ErrorDTO) => void>() }
 	}
 
-	// A preview's whole read of PARAMS's entry: an entry reader opened for it, read through its origin under `token`.
+	// A preview's whole read of PARAMS's entry: a reader opened and the entry leased on it, read through its origin under `token`.
 	function loadEntry(size: number, password: string | undefined, token: string, events = entryEvents()): Promise<Uint8Array> {
 		const reader = `reader-${token}`
 
-		void api.openEntryReader(reader, PARAMS.archive, password, new Map([[PARAMS.entry.index, PARAMS.maxSolidSkip]]), events)
+		void api.openArchiveReader(reader, PARAMS.archive, false, password)
+		void api.leaseArchiveEntry(
+			reader,
+			reader,
+			{ maxSolidSkip: PARAMS.maxSolidSkip, window: [{ index: PARAMS.entry.index, size }], windowSkip: PARAMS.maxSolidSkip },
+			events
+		)
 
 		return api.downloadOriginBytes(
 			{ kind: "entry", reader, entry: PARAMS.entry, size, access: "whole", anon: false, cacheKey: reader },
@@ -666,18 +704,18 @@ describe("sdk worker archive entries", () => {
 		const { writer, received } = sink()
 		const onUpdate = vi.fn<(progress: EntryProgress) => void>()
 
-		await api.downloadArchiveEntry("entry-1", PARAMS, "", writer, onUpdate)
+		await downloadThroughReader("entry-1", PARAMS, "", writer, onUpdate)
 
 		const [params, password] = lastCall(fakeClient.downloadArchiveEntry)
 
-		expect(params).toMatchObject({ archive: ARCHIVE, entry: PARAMS.entry, maxSolidSkip: 4096 })
+		expect(params).toMatchObject({ entry: PARAMS.entry, maxSolidSkip: 4096 })
 		expect(params.managedFuture.abortSignal).toBeInstanceOf(AbortSignal)
 		expect(password).toBeUndefined()
 		expect(received).toEqual([1, 2, 3])
 		expect(onUpdate).toHaveBeenNthCalledWith(1, { phase: "waitingForWorker", bytesWritten: 1 })
 		expect(onUpdate).toHaveBeenCalledTimes(4)
 
-		await api.downloadArchiveEntry("entry-2", { ...PARAMS, maxSolidSkip: 0 }, "pw", sink().writer, () => undefined)
+		await downloadThroughReader("entry-2", { ...PARAMS, maxSolidSkip: 0 }, "pw", sink().writer, () => undefined)
 
 		expect(lastCall(fakeClient.downloadArchiveEntry)[0].maxSolidSkip).toBe(0)
 		expect(lastCall(fakeClient.downloadArchiveEntry)[1]).toBe("pw")
@@ -688,7 +726,7 @@ describe("sdk worker archive entries", () => {
 
 		fakeClient.downloadArchiveEntry.mockResolvedValue({ ...DONE, checked: false, error: wrong })
 
-		await expect(api.downloadArchiveEntry("entry-3", PARAMS, "nope", sink().writer, () => undefined)).rejects.toEqual(
+		await expect(downloadThroughReader("entry-3", PARAMS, "nope", sink().writer, () => undefined)).rejects.toEqual(
 			sdkErrorDTO("ArchiveWrongPassword", "Error of kind ArchiveWrongPassword")
 		)
 		expect(wrong.freed).toHaveBeenCalledTimes(1)
@@ -697,11 +735,11 @@ describe("sdk worker archive entries", () => {
 	it("takes an unverified entry (a 7z without CRCs) as complete, saying it was not checked", async () => {
 		fakeClient.downloadArchiveEntry.mockResolvedValue({ ...DONE, checked: false })
 
-		await expect(api.downloadArchiveEntry("entry-4", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(false)
+		await expect(downloadThroughReader("entry-4", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(false)
 
 		fakeClient.downloadArchiveEntry.mockResolvedValue(DONE)
 
-		await expect(api.downloadArchiveEntry("entry-4b", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(true)
+		await expect(downloadThroughReader("entry-4b", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(true)
 
 		fakeClient.downloadArchiveEntry.mockImplementationOnce(async params => {
 			const writer = params.writer.getWriter()
@@ -724,7 +762,7 @@ describe("sdk worker archive entries", () => {
 		fakeClient.downloadArchiveEntry.mockClear()
 		fakeClient.downloadArchiveEntry.mockReturnValue(running.promise)
 
-		const download = api.downloadArchiveEntry("entry-5", PARAMS, undefined, sink().writer, () => undefined)
+		const download = downloadThroughReader("entry-5", PARAMS, undefined, sink().writer, () => undefined)
 
 		await vi.waitFor(() => {
 			expect(fakeClient.downloadArchiveEntry).toHaveBeenCalled()

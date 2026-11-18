@@ -15,11 +15,9 @@ import init, {
 	type Client,
 	type AnyFile,
 	type AnyItemWithContext,
-	type ArchiveEntry,
 	type ArchiveEntryId,
 	type ArchiveFormat,
 	type ArchiveLevels,
-	type DownloadArchiveEntryParams,
 	type EntryDownloadPhase,
 	type EntryDownloadReport,
 	type CompressFormat,
@@ -149,6 +147,8 @@ import {
 	type SearchSnapshotDTO
 } from "@/workers/searchEngine"
 import { createListBatcher } from "@/workers/archiveListPacker"
+import { createArchiveReaders } from "@/workers/archiveReaders"
+import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import { readAudioMetadata as parseAudioMetadata, type AudioMetadataDeps, type AudioMetadataResult } from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
@@ -449,9 +449,8 @@ export interface ExtractEntriesJobParams {
 
 export type ExtractJobEvent = { type: "update"; update: ExtractJobUpdate } | { type: "topLevelBatch"; items: ExtractedTopLevelItem[] }
 
+// What a reader's listing delivers (the reader was opened skipping macOS metadata).
 export interface ListJobParams {
-	archive: AnyFile
-	skipMacMetadata: boolean | undefined
 	// false leaves the entries out altogether, as a relist that only checks a password does.
 	deliverEntries: boolean
 	// The batches carried every entry already; the report repeats up to 10 000 of them.
@@ -472,45 +471,6 @@ export interface EntryJobParams {
 export interface EntryProgress {
 	phase: EntryDownloadPhase
 	bytesWritten: number
-}
-
-function entryDownloadParams(
-	params: EntryJobParams,
-	writer: WritableStream<Uint8Array>,
-	onUpdate: (progress: EntryProgress) => void
-): Omit<DownloadArchiveEntryParams, "managedFuture"> {
-	return {
-		archive: params.archive,
-		entry: params.entry,
-		writer,
-		maxSolidSkip: params.maxSolidSkip,
-		onUpdate: update => {
-			onUpdate({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
-		}
-	}
-}
-
-// A writer filling one buffer of the entry's listed size, made by the first byte (a load waiting for the
-// archive slot holds none); a larger entry fails rather than grow it. `take` is what arrived.
-function entryBuffer(size: number): { writer: WritableStream<Uint8Array>; take: () => Uint8Array } {
-	let out: Uint8Array | null = null
-	let offset = 0
-
-	return {
-		writer: new WritableStream<Uint8Array>({
-			write(chunk) {
-				out ??= new Uint8Array(size)
-
-				if (offset + chunk.length > out.length) {
-					throw new Error("archive entry overran its listed size")
-				}
-
-				out.set(chunk, offset)
-				offset += chunk.length
-			}
-		}),
-		take: () => (out === null ? new Uint8Array(0) : offset === out.length ? out : out.subarray(0, offset))
-	}
 }
 
 // The SDK resolves with its report however the download ended, the writer aborted on an early end: a
@@ -796,8 +756,7 @@ function fileReadClient(c: () => Pick<Client, "downloadFileToWriter">, release?:
 	}
 }
 
-// The byte layer's reads (originSource.ts). Before the SDK has archive readers, an entry is read whole through
-// downloadArchiveEntry, which checks its CRC; only the session client can.
+// The byte layer's reads (originSource.ts). An entry is read through the archive reader its lease names.
 const originDeps: OriginSourceDeps = {
 	session: () => {
 		requireClient()
@@ -815,49 +774,7 @@ const originDeps: OriginSourceDeps = {
 			}
 		)
 	},
-	entryReader,
-	readEntry: async (record, entry, size, signal) => {
-		if (record.anon) {
-			throw new Error("a public link's archive entries need the archive reader")
-		}
-
-		const c = requireClient()
-		const { writer, take } = entryBuffer(size)
-		const { events } = record
-		let phase: EntryDownloadPhase | null = null
-		let checked: boolean
-
-		try {
-			checked = settleEntryReport(
-				await c.downloadArchiveEntry(
-					{
-						archive: record.archive,
-						entry,
-						writer,
-						maxSolidSkip: record.maxSolidSkip(entry),
-						onUpdate: update => {
-							if (update.phase !== phase) {
-								phase = update.phase
-								events?.phase(update.phase)
-							}
-						},
-						managedFuture: { abortSignal: signal }
-					},
-					archivePassword(record.password)
-				)
-			)
-		} catch (e) {
-			events?.failed(asErrorDTO(e))
-
-			throw e
-		}
-
-		if (checked) {
-			events?.verified()
-		}
-
-		return take()
-	}
+	entryReader
 }
 
 interface SharedOriginSource {
@@ -1073,6 +990,7 @@ function detachClient(): Client | null {
 	videoIndexUnsubscribe = null
 	// Archive readers name archives this session opened.
 	clearEntryReaders()
+	archiveReaders.clear()
 	return prev
 }
 
@@ -1105,6 +1023,42 @@ async function withUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<
 function linkedUnauthClient(): UnauthClient {
 	return client !== null ? client.getUnauthed() : UnauthClient.from_config(clientConfig)
 }
+
+// The readers the page opened (archiveReaders.ts): a public link's through its own client handle, freed with it.
+const archiveReaders = createArchiveReaders({
+	open: async ({ archive, anon, password, onUpdate, managedFuture }) => {
+		const params = { archive, skipMacMetadata: true, onUpdate, managedFuture }
+
+		if (!anon) {
+			const reader = await requireClient().openArchiveReader(params, archivePassword(password))
+
+			return {
+				reader,
+				release: () => {
+					reader.free()
+				}
+			}
+		}
+
+		const unauth = linkedUnauthClient()
+
+		try {
+			const reader = await unauth.openArchiveReader(params, archivePassword(password))
+
+			return {
+				reader,
+				release: () => {
+					reader.free()
+					unauth.free()
+				}
+			}
+		} catch (e) {
+			unauth.free()
+
+			throw e
+		}
+	}
+})
 
 // The anon sibling of withUnauth for the public-link (linked-item) surface: runs an op against an
 // UnauthClient, but PREFERS the live authed session's getUnauthed() when a visitor happens to be
@@ -2062,22 +2016,18 @@ const api = {
 			}
 		})
 	},
-	// One file of a zip, 7z or RAR, or a compressed tar's member, into the transferred sink, a transfer of its own like downloadFileToWriter
-	// (cancel and pause by its id). It takes the page's archive slot; each call reads the archive's first
-	// chunk and index again. Resolves with whether its checksum matched.
-	downloadArchiveEntry(
+	// One file of the archive reader `readerId` holds into the transferred sink, a transfer of its own like
+	// downloadFileToWriter (cancel and pause by its id). With the reader's index held only the entry is read (and,
+	// for a solid block's, what the block stores before it). Resolves with whether its checksum matched.
+	downloadReaderEntry(
+		readerId: string,
 		transferId: string,
 		params: EntryJobParams,
-		password: string | undefined,
 		writer: WritableStream<Uint8Array>,
 		onUpdate: (progress: EntryProgress) => void
 	): Promise<boolean> {
-		const c = requireClient()
-
 		return withTransferControls(transferId, async managedFuture =>
-			settleEntryReport(
-				await c.downloadArchiveEntry({ ...entryDownloadParams(params, writer, onUpdate), managedFuture }, archivePassword(password))
-			)
+			settleEntryReport(await archiveReaders.download(readerId, params.entry, writer, params.maxSolidSkip, onUpdate, managedFuture))
 		)
 	},
 	// The page's one progress sink (see postProgress), registered once before its first transfer.
@@ -2265,16 +2215,15 @@ const api = {
 			"extract"
 		)
 	},
-	// A zip's or 7z's index read, a tar's or single compressed file's whole download. It takes the page's
-	// archive slot as an extract does, and its id works with cancel, pause and releaseJob.
-	listArchive(
+	// The archive reader `readerId` lists its archive: from the index it holds (a zip's, 7z's or RAR's), else read
+	// through (a tar's, a single compressed file's). Opening the reader, on its first call, reads the index; that and
+	// a read-through take the page's archive slot as an extract does. `jobId` works with cancel, pause and releaseJob.
+	listArchiveReader(
+		readerId: string,
 		jobId: string,
 		params: ListJobParams,
-		password: string | undefined,
 		onEvent: (event: ListJobEvent) => void | Promise<void>
 	): Promise<ListReportDTO> {
-		const c = requireClient()
-
 		return runOrderedJob(
 			jobControls(jobId),
 			onEvent,
@@ -2287,27 +2236,20 @@ const api = {
 
 				try {
 					const report = listReportToDTO(
-						await c.listArchive(
-							{
-								archive: params.archive,
-								...(params.skipMacMetadata !== undefined ? { skipMacMetadata: params.skipMacMetadata } : {}),
-								onUpdate: update => {
-									// The SDK sends a batch before the update that counts it; the buffered ones go first.
-									batcher?.flush()
-									deliver({ type: "update", update })
-								},
-								// Only packs: past a 16 MiB backlog of entries this has not returned from, the SDK
-								// drops the rest.
-								...(batcher !== null
-									? {
-											onEntriesBatch: (entries: ArchiveEntry[]) => {
-												batcher.push(entries)
-											}
-										}
-									: {}),
-								managedFuture
+						await archiveReaders.list(
+							readerId,
+							// Only packs: past a 16 MiB backlog of entries this has not returned from, the SDK drops the rest.
+							batcher === null
+								? null
+								: entries => {
+										batcher.push(entries)
+									},
+							update => {
+								// The SDK sends a batch before the update that counts it; the buffered ones go first.
+								batcher?.flush()
+								deliver({ type: "update", update })
 							},
-							archivePassword(password)
+							managedFuture
 						)
 					)
 
@@ -3186,25 +3128,52 @@ const api = {
 		serveSyncRangeFor(buffer, port, requireClient, file, previewToken, readerLock)
 	},
 	// ── Byte origins (lib/sdk/byteOrigin.ts) ─────────────────────────────────
-	// Opens the archive `archive` for entry reads under the caller's `id`, read whole through the session client
-	// until the SDK has archive readers. `solidSkips` is the accepted solid skip by entry index; `events` hears the
-	// reads (a Comlink proxy).
-	openEntryReader(
-		id: string,
-		archive: AnyFile,
-		password: string | undefined,
-		solidSkips: ReadonlyMap<number, number>,
-		events: EntryReaderEvents
-	): void {
+	// Opens the archive `archive` for reads under the caller's `id`: through the public-link client when `anon`, else
+	// the session's. Nothing is read before its first call.
+	openArchiveReader(id: string, archive: AnyFile, anon: boolean, password: string | undefined): void {
+		if (!anon) {
+			requireClient()
+		}
+
+		archiveReaders.register(id, archive, anon, password)
+	},
+	// Gives up what the reader holds. Its leases' reads fail from then on.
+	closeArchiveReader(id: string): void {
+		archiveReaders.close(id)
+	},
+	// One entry of the reader `readerId`, read whole as `plan` says, named by the origins `id` builds; `events` hears
+	// its reads (a Comlink proxy).
+	leaseArchiveEntry(id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents): void {
+		const anon = archiveReaders.anon(readerId)
+
+		if (anon === undefined) {
+			throw new Error("archive reader is closed")
+		}
+
 		registerEntryReader(id, {
-			anon: false,
-			archive,
-			password,
-			maxSolidSkip: entry => solidSkips.get(entry.index) ?? 0,
-			events
+			anon,
+			read: (entry, size, signal) =>
+				archiveReaders.readWhole(
+					readerId,
+					entry,
+					size,
+					plan,
+					{
+						phase: phase => {
+							events.phase(phase)
+						},
+						verified: () => {
+							events.verified()
+						},
+						failed: error => {
+							events.failed(asErrorDTO(error))
+						}
+					},
+					signal
+				)
 		})
 	},
-	releaseEntryReader(id: string): void {
+	releaseArchiveEntry(id: string): void {
 		releaseEntryReader(id)
 	},
 	// The origin calls below take the asking surface's `access` and refuse, a second time after the page, an origin a

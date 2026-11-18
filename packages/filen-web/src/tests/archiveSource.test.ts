@@ -75,7 +75,7 @@ const LINKED: LinkedFile = {
 
 describe("archiveSourceOf", () => {
 	it("offers an own archive's directory, null at the drive's root", () => {
-		expect(archiveSourceOf(file("a.zip"), "drive", ROOT)).toMatchObject({ name: "a.zip", size: 2048, ownParent: PARENT })
+		expect(archiveSourceOf(file("a.zip"), "drive", ROOT)).toMatchObject({ name: "a.zip", size: 2048, anon: false, ownParent: PARENT })
 		expect(archiveSourceOf(file("a.zip", ROOT), "drive", ROOT).ownParent).toBeNull()
 		expect(archiveSourceOf(file("a.zip"), "recents", ROOT).ownParent).toBe(PARENT)
 	})
@@ -117,7 +117,7 @@ describe("archiveSourceOf", () => {
 })
 
 describe("linkedArchiveSource", () => {
-	it("reads the SDK's own linked file and offers no directory", () => {
+	it("reads the SDK's own linked file through the public-link client and offers no directory", () => {
 		const item = linkedFileIntoDriveItem(LINKED)
 
 		expect(linkedArchiveSource(item, LINKED)).toEqual({
@@ -125,6 +125,7 @@ describe("linkedArchiveSource", () => {
 			uuid: LINKED.uuid,
 			name: "photos.zip",
 			size: 4096,
+			anon: true,
 			ownParent: undefined
 		})
 	})

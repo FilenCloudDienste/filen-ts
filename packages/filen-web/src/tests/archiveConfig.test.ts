@@ -32,12 +32,19 @@ beforeEach(() => {
 describe("buildArchiveClientConfig", () => {
 	it("maps every option from MiB to bytes and sets nothing else", () => {
 		for (const codecMemoryMib of ARCHIVE_CODEC_MEMORY_MIB) {
-			expect(buildArchiveClientConfig({ codecMemoryMib })).toEqual({ archiveCodecMemBudget: codecMemoryMib * 1024 * 1024 })
+			expect(buildArchiveClientConfig({ codecMemoryMib }, false)).toEqual({
+				archiveCodecMemBudget: codecMemoryMib * 1024 * 1024,
+				archiveRetainedBudget: 48 * 1024 * 1024
+			})
 		}
 	})
 
 	it("defaults to 128 MiB", () => {
-		expect(buildArchiveClientConfig(DEFAULT_ARCHIVE_PREFERENCES)).toEqual({ archiveCodecMemBudget: 134217728 })
+		expect(buildArchiveClientConfig(DEFAULT_ARCHIVE_PREFERENCES, false)).toEqual({
+			archiveCodecMemBudget: 134217728,
+			archiveRetainedBudget: 50331648
+		})
+		expect(buildArchiveClientConfig(DEFAULT_ARCHIVE_PREFERENCES, true).archiveRetainedBudget).toBe(24 * 1024 * 1024)
 	})
 })
 

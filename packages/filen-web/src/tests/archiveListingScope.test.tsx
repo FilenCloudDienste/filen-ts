@@ -22,13 +22,23 @@ interface ListCall {
 	resolve: (report: ListReportDTO) => void
 }
 
-const { calls, caches } = vi.hoisted(() => ({ calls: [] as ListCall[], caches: [] as ListingCache[] }))
+const { calls, caches, readerPasswords } = vi.hoisted(() => ({
+	calls: [] as ListCall[],
+	caches: [] as ListingCache[],
+	readerPasswords: new Map<string, string | undefined>()
+}))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
-		listArchive: (id: string, params: ListJobParams, password: string | undefined, onEvent: (event: ListJobEvent) => void) =>
+		openArchiveReader: (id: string, _file: unknown, _anon: boolean, password: string | undefined) => {
+			readerPasswords.set(id, password)
+
+			return Promise.resolve()
+		},
+		closeArchiveReader: () => Promise.resolve(),
+		listArchiveReader: (readerId: string, id: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) =>
 			new Promise<ListReportDTO>(resolve => {
-				calls.push({ id, params, password, emit: onEvent, resolve })
+				calls.push({ id, params, password: readerPasswords.get(readerId), emit: onEvent, resolve })
 			}),
 		cancelTransfer: () => Promise.resolve(),
 		releaseJob: () => Promise.resolve(),

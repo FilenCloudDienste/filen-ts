@@ -4,11 +4,12 @@ import { referenceWalker, type ReferenceListing } from "@/features/preview/lib/r
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
-import { entryOrigin, entryRequest, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import { entryRequest, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 
 // An archive entry's references, from the archive's own listing: its directory and the directories below it. An entry
-// the SDK cannot read alone (a bare tar's member) is listed as not readable. Each one is read through an entry reader of
-// its own, opened with the password the viewed entry took.
+// the SDK cannot read alone (a bare tar's member) is listed as not readable. Each one is read through a lease of its own
+// on the archive's reader for the password the viewed entry took.
 
 export function entryListing(source: ArchiveSource, store: EntryStore, dir: number): ReferenceListing<number, EntryRequest> {
 	return {
@@ -23,13 +24,20 @@ const NO_EVENTS = {
 	failed: () => undefined
 }
 
-async function readEntry(request: EntryRequest, password: string | undefined, access: PreviewAccessMode, cap: number, signal: AbortSignal) {
-	const reader = crypto.randomUUID()
-	const release = openEntryReader(request, reader, password, NO_EVENTS)
+async function readEntry(
+	request: EntryRequest,
+	store: EntryStore,
+	password: string | undefined,
+	access: PreviewAccessMode,
+	cap: number,
+	signal: AbortSignal
+) {
+	const leaseId = crypto.randomUUID()
+	const file = request.params.archive
+	const slot = store.slotOfIndex(request.params.entry.index)
+	const release = leaseEntry({ leaseId, file, anon: request.anon, password, store, slot, events: NO_EVENTS })
 
-	return await readOrigin(entryOrigin(request, reader, `${reader}:${String(request.params.entry.index)}`), access, cap, signal).finally(
-		release
-	)
+	return await readOrigin(entryLeaseOrigin(leaseId, file, request.anon, store, slot), access, cap, signal).finally(release)
 }
 
 // `index`: the viewed entry's index in the archive.
@@ -57,7 +65,7 @@ export function entryReferences(
 
 			const request = found.file
 
-			return { status: "found", size: request.size, read: (cap, signal) => readEntry(request, password, access, cap, signal) }
+			return { status: "found", size: request.size, read: (cap, signal) => readEntry(request, store, password, access, cap, signal) }
 		}
 	}
 }

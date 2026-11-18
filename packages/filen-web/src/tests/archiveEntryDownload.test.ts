@@ -22,7 +22,29 @@ const { downloadArchiveEntry, cancelTransfer } = vi.hoisted(() => ({
 	cancelTransfer: vi.fn<(id: string) => Promise<void>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadArchiveEntry, cancelTransfer } }))
+// The worker's readers, by id, with the password each was opened under: a save through one reaches downloadArchiveEntry.
+vi.mock("@/lib/sdk/client", () => {
+	const passwords = new Map<string, string | undefined>()
+
+	return {
+		sdkApi: {
+			openArchiveReader: (id: string, _file: AnyFile, _anon: boolean, password: string | undefined) => {
+				passwords.set(id, password)
+
+				return Promise.resolve()
+			},
+			closeArchiveReader: () => Promise.resolve(),
+			downloadReaderEntry: (
+				readerId: string,
+				transferId: string,
+				params: EntryJobParams,
+				writer: WritableStream<Uint8Array>,
+				onUpdate: (progress: EntryProgress) => void
+			) => downloadArchiveEntry(transferId, params, passwords.get(readerId), writer, onUpdate),
+			cancelTransfer
+		}
+	}
+})
 vi.mock("comlink", () => ({ proxy: (value: unknown) => value, transfer: (value: unknown) => value }))
 vi.mock("@/queries/client", () => ({ queryClient: {} }))
 vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted: vi.fn() }))
@@ -62,6 +84,7 @@ function rejection(message: string, kind?: string): ErrorWithDTO {
 const ARCHIVE_UUID = "0a0a0a0a-0000-4000-8000-000000000000" as UuidStr
 const REQUEST: EntryRequest = {
 	params: { archive: { uuid: ARCHIVE_UUID } as unknown as AnyFile, entry: { archive: ARCHIVE_UUID, index: 2 }, maxSolidSkip: 0 },
+	anon: false,
 	name: "notes.txt",
 	size: 3
 }

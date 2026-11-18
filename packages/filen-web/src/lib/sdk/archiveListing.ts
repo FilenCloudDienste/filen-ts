@@ -108,3 +108,18 @@ export interface PackedSolidCosts {
 	// Its estimatedPackedBytes: archive bytes fetched to reach the entry's end.
 	estimated: Float64Array
 }
+
+// Most bytes, and entries, a reader keeps decoded ahead of their read.
+export const READ_AHEAD_MAX_BYTES = 32 * 1024 * 1024
+export const READ_AHEAD_MAX_ENTRIES = 16
+
+// One entry's whole read, as the page planned it from its listing.
+export interface EntryReadPlan {
+	// The listed skip the entry needs; 0 for one that needs none.
+	readonly maxSolidSkip: number
+	// The entry and the files its solid block stores right after it, in archive order: read in one pass when the entry
+	// is read only so. Just the entry for any other.
+	readonly window: readonly { readonly index: number; readonly size: number }[]
+	// The skip the window's pass needs: its last entry's listed skip.
+	readonly windowSkip: number
+}
