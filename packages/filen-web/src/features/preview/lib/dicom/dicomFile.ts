@@ -34,6 +34,8 @@ export class DicomOpenError extends Error {
 // The file's bytes as the worker reads them: whole in memory, or through the sync range reader.
 export interface DicomSource {
 	readonly size: number
+	// Reads are views of bytes already held, not copies.
+	readonly inMemory: boolean
 	// Exactly `length` bytes at `offset`, or throws a DicomOpenError("unreadable").
 	read(offset: number, length: number): Uint8Array
 }
@@ -47,6 +49,7 @@ function checkRange(size: number, offset: number, length: number): void {
 export function memorySource(bytes: Uint8Array): DicomSource {
 	return {
 		size: bytes.length,
+		inMemory: true,
 		read: (offset, length) => {
 			checkRange(bytes.length, offset, length)
 
@@ -60,6 +63,7 @@ export function memorySource(bytes: Uint8Array): DicomSource {
 export function rangeSource(size: number, readInto: (out: Uint8Array, offset: number) => number): DicomSource {
 	return {
 		size,
+		inMemory: false,
 		read: (offset, length) => {
 			checkRange(size, offset, length)
 

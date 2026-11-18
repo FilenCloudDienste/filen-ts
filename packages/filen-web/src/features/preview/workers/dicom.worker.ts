@@ -19,7 +19,8 @@ import {
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
 import { FrameCache } from "@/features/preview/lib/dicom/frameCache.logic"
-import { decodeCompressed } from "@/features/preview/lib/dicom/codecs"
+import { codecHeap, decodeCompressed, releaseCodec } from "@/features/preview/lib/dicom/codecs"
+import { releasesHeap } from "@/features/preview/lib/dicom/budget.logic"
 import { DICOM_FRAME_CACHE_BYTES, type DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import {
 	drawnSize,
@@ -104,6 +105,11 @@ let hidden = false
 let tick: number | null = null
 let lastStep = 0
 const pointers = new Map<number, { x: number; y: number; buttons: number; pointerType: string }>()
+
+// The decoded frames held while another decodes: those kept, and the one on screen when it is not among them.
+function framesHeld(): number {
+	return cache.bytes + (samples !== null && !cache.has(current) ? samples.data.byteLength : 0)
+}
 
 function send(message: WorkerToShell<DicomStatus>): void {
 	shell?.postMessage(message)
@@ -480,7 +486,7 @@ const api = {
 			const module = readPixelModule(header.dataSet, header.syntax?.littleEndian ?? true)
 			const verdict = imageVerdict(module, header.syntax, DECODERS)
 			// What stays held while a frame is read: an inflated data set, else the whole file read into memory, else
-			// (ranged) the frame's bytes and the bridge's slots.
+			// (ranged) the bridge's slots; the frame's own bytes are its decoder's to count.
 			const held = header.heldBytes > 0 ? header.heldBytes : source.kind === "whole" ? file.size : 0
 			const ringBytes = source.kind === "ranged" ? source.ringBytes : 0
 			const frameContext: FrameContext | null =
@@ -492,7 +498,11 @@ const api = {
 							source: header.pixels,
 							budget: {
 								decodeBytes: budget.decodeBytes,
-								heldWith: frameBytes => (held > 0 ? held : frameBytes + ringBytes)
+								held: () => held + ringBytes + framesHeld(),
+								heap: codecHeap,
+								settle: (decoder, need) => {
+									if (releasesHeap(codecHeap(decoder), need, playing)) releaseCodec(decoder)
+								}
 							},
 							compressed: decodeCompressed
 						}

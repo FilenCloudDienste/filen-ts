@@ -43,6 +43,10 @@ export class FrameCache<T> {
 		}
 	}
 
+	has(index: number): boolean {
+		return this.entries.has(index)
+	}
+
 	get bytes(): number {
 		return this.total
 	}

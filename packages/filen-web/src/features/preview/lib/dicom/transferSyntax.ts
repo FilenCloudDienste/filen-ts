@@ -8,9 +8,6 @@ const MIB = 1024 * 1024
 // start), up to this size.
 export const DICOM_WHOLE_MAX_BYTES = 256 * MIB
 
-// Decoded samples (16-bit × 3) plus the RGBA drawn from them, per pixel of a frame.
-export const DICOM_FRAME_BPP = 10
-
 // No frame side past this, whatever the budget.
 export const DICOM_MAX_SIDE = 16_384
 

@@ -73,6 +73,7 @@ function counting(bytes: Uint8Array, size = bytes.length): DicomSource & { reach
 
 	return {
 		size,
+		inMemory: false,
 		read: (offset, length) => {
 			furthest = Math.max(furthest, offset + length)
 			read += length
@@ -101,7 +102,7 @@ function context(file: Uint8Array, decodeBytes = DECODE): { context: FrameContex
 			syntax: header.syntax,
 			color: verdict.color,
 			source: header.pixels,
-			budget: { decodeBytes, heldWith: frameBytes => (header.heldBytes > 0 ? header.heldBytes : frameBytes) },
+			budget: { decodeBytes, held: () => header.heldBytes, heap: () => 0, settle: () => undefined },
 			compressed: null
 		}
 	}
@@ -200,7 +201,7 @@ describe("the header", () => {
 			return out
 		})
 
-		expect(() => readHeader({ size: DICOM_WHOLE_MAX_BYTES + 1, read }, { decodeBytes: DECODE })).toThrow(
+		expect(() => readHeader({ size: DICOM_WHOLE_MAX_BYTES + 1, inMemory: false, read }, { decodeBytes: DECODE })).toThrow(
 			expect.objectContaining({ reason: "tooLarge" })
 		)
 		expect(read).toHaveBeenCalledTimes(1)
@@ -223,7 +224,7 @@ describe("frames", () => {
 	it("refuses a frame over the pixel budget before reading it", () => {
 		const { context: frame, source } = context(ctFile(EXPLICIT_LE))
 		const header = source.reach()
-		const tight: FrameContext = { ...frame, budget: { decodeBytes: 50, heldWith: () => 0 } }
+		const tight: FrameContext = { ...frame, budget: { ...frame.budget, decodeBytes: 50 } }
 
 		expect(() => nativeFrame(tight, 0)).toThrow(DicomFrameFailure)
 		expect(source.reach()).toBe(header)
@@ -287,8 +288,8 @@ describe("frames", () => {
 		if (index === null) throw new Error("no fragments")
 
 		const header = source.total()
-		// Two reductions leave 4096² pixels: a budget of fewer than that refuses the frame.
-		const tight: FrameContext = { ...frame, compressed: decode, budget: { decodeBytes: 4096 * 4096 * 10, heldWith: () => 1 } }
+		// Two reductions leave 4096² pixels, at 20 bytes each and the encoded frame twice: short of that refuses the frame.
+		const tight: FrameContext = { ...frame, compressed: decode, budget: { ...frame.budget, decodeBytes: 4096 * 4096 * 20 } }
 
 		await expect(encapsulatedFrame(tight, index, 0)).rejects.toMatchObject({ reason: "tooLarge" })
 		// The item headers and the head of the fragment, not the fragment.
@@ -296,11 +297,38 @@ describe("frames", () => {
 
 		// Nothing left at all once the frame's bytes are held: refused before even its head is read.
 		const before = source.total()
-		const spent: FrameContext = { ...frame, compressed: decode, budget: { decodeBytes: 1000, heldWith: bytes => bytes } }
+		const spent: FrameContext = { ...frame, compressed: decode, budget: { ...frame.budget, decodeBytes: 1000, held: () => 1000 } }
 
 		await expect(encapsulatedFrame(spent, index, 0)).rejects.toMatchObject({ reason: "tooLarge" })
 		expect(source.total()).toBe(before)
 		expect(decode).not.toHaveBeenCalled()
+	})
+
+	it("tells the worker a codec's need once its frame has decoded, so a grown heap can be let go", async () => {
+		const codestream = siz(4, 2, 1, 16, 0)
+		const file = dicomFile({
+			transferSyntax: JPEG_2000,
+			elements: grayModule({ rows: 2, columns: 4, bitsAllocated: 16, bitsStored: 16, highBit: 15, signed: false }),
+			pixelData: encapsulated([codestream])
+		})
+		const { context: frame } = context(file)
+		const settle = vi.fn()
+		const decoded = {
+			data: new Uint16Array(8),
+			rows: 2,
+			columns: 4,
+			samplesPerPixel: 1,
+			color: "gray" as const,
+			planar: false,
+			shift: 0
+		}
+		const index = fragmentIndex(frame)
+
+		if (index === null) throw new Error("no fragments")
+
+		await encapsulatedFrame({ ...frame, compressed: () => Promise.resolve(decoded), budget: { ...frame.budget, settle } }, index, 0)
+		// OpenJPEG: 10 bytes a 16-bit pixel and the encoded frame, in its heap.
+		expect(settle).toHaveBeenCalledWith("jpeg2000", 8 * 10 + codestream.length + (codestream.length % 2))
 	})
 
 	it("reads a range only within the file, allocating nothing for a read past its end", () => {

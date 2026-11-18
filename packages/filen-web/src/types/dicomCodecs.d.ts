@@ -20,6 +20,11 @@ interface DicomEmbindDecoder {
 	delete(): void
 }
 
+// The module's heap: replaced by a larger view whenever the heap grows (it never shrinks).
+interface DicomEmscriptenModule {
+	readonly HEAPU8: Uint8Array
+}
+
 interface DicomEmscriptenOptions {
 	locateFile: (path: string) => string
 	print: (text: string) => void
@@ -32,7 +37,7 @@ declare module "@cornerstonejs/codec-charls/decodewasmjs" {
 		getInterleaveMode(): number
 	}
 
-	const factory: (options: DicomEmscriptenOptions) => Promise<{ JpegLSDecoder: new () => JpegLSDecoder }>
+	const factory: (options: DicomEmscriptenOptions) => Promise<DicomEmscriptenModule & { JpegLSDecoder: new () => JpegLSDecoder }>
 
 	export default factory
 }
@@ -42,7 +47,7 @@ declare module "@cornerstonejs/codec-openjpeg/decodewasmjs" {
 		decodeSubResolution(decodeLevel: number, decodeLayer: number): void
 	}
 
-	const factory: (options: DicomEmscriptenOptions) => Promise<{ J2KDecoder: new () => J2KDecoder }>
+	const factory: (options: DicomEmscriptenOptions) => Promise<DicomEmscriptenModule & { J2KDecoder: new () => J2KDecoder }>
 
 	export default factory
 }
@@ -52,7 +57,7 @@ declare module "@cornerstonejs/codec-openjph/wasmjs" {
 		decodeSubResolution(decodeLevel: number, decodeLayer: number): void
 	}
 
-	const factory: (options: DicomEmscriptenOptions) => Promise<{ HTJ2KDecoder: new () => HTJ2KDecoder }>
+	const factory: (options: DicomEmscriptenOptions) => Promise<DicomEmscriptenModule & { HTJ2KDecoder: new () => HTJ2KDecoder }>
 
 	export default factory
 }

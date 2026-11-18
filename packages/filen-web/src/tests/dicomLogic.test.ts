@@ -23,6 +23,14 @@ import { stepFrame, dicomViewerKey } from "@/features/preview/lib/dicom/keys.log
 import { transferSyntax } from "@/features/preview/lib/dicom/transferSyntax"
 import { frameRequester, presetOf, windowFigure, windowPresets } from "@/features/preview/components/dicomViewer.logic"
 import { pixelsWithin } from "@/lib/pixelBudget.logic"
+import {
+	DICOM_CODEC_INITIAL_HEAP,
+	decoderCost,
+	frameCost,
+	framePixels,
+	releasesHeap,
+	type CostInput
+} from "@/features/preview/lib/dicom/budget.logic"
 import { encapsulated, frameOffsets, rleFrame } from "@/tests/support/dicomBytes"
 
 // The DICOM viewer's pure parts: RLE, the pixel pipeline, frame offsets, the inflater, the view and its keys.
@@ -405,6 +413,59 @@ describe("the frame cache and budget", () => {
 	it("works out the pixels left once the file is held", () => {
 		expect(pixelsWithin(1000, 200, 10)).toBe(80)
 		expect(pixelsWithin(100, 200, 10)).toBe(0)
+	})
+
+	it("counts each decoder's working set, the encoded frame twice and the codec's grown heap", () => {
+		const MIB = 1024 * 1024
+		const DRAWN = 4096 * 4096
+		const input = (decoder: CostInput["decoder"], samplesPerPixel: number, sampleBytes: number): CostInput => ({
+			decoder,
+			samplesPerPixel,
+			sampleBytes,
+			samplesInPlace: false,
+			encodedInPlace: false,
+			gray: samplesPerPixel === 1
+		})
+		const mobile = (cost: ReturnType<typeof decoderCost>, heap: number, encodedBytes = 0) =>
+			framePixels(cost, { decodeBytes: 384 * MIB, held: 0, heap, encodedBytes, drawnPixels: DRAWN })
+
+		// OpenJPEG: an int32 a sample twice and the decoded sample in wasm; the samples copied out and the RGBA drawn.
+		const colour = decoderCost(input("jpeg2000", 3, 1))
+		const grey = decoderCost(input("jpeg2000", 1, 2))
+
+		expect([colour.js, colour.wasm, colour.encodedJs + colour.encodedWasm]).toEqual([3, 27, 2])
+		expect(mobile(colour, DICOM_CODEC_INITIAL_HEAP)).toBe(Math.floor((384 * MIB) / 38))
+		// Past the backing side squared, the RGBA drawn stops growing.
+		expect(mobile(grey, DICOM_CODEC_INITIAL_HEAP)).toBe(Math.floor((384 * MIB - 8 * DRAWN) / 12))
+
+		// The encoded frame costs twice its size; OpenJPH keeps about twice more of it.
+		expect(mobile(grey, 0, 10 * MIB)).toBe(Math.floor((364 * MIB - 8 * DRAWN) / 12))
+		expect(decoderCost(input("htj2k", 1, 2)).encodedWasm).toBe(3)
+
+		// A heap grown past what the frame needs is held whole: only the JS side is left to the frame.
+		const grownHeap = 300 * MIB
+		const pixels = mobile(grey, grownHeap)
+
+		expect(
+			frameCost(grey, { decodeBytes: 0, held: 0, heap: grownHeap, encodedBytes: 0, drawnPixels: DRAWN }, pixels)
+		).toBeLessThanOrEqual(384 * MIB)
+		expect(pixels).toBe(Math.floor((84 * MIB) / 10))
+
+		// 32-bit colour, native: 12 bytes of samples and the RGBA drawn.
+		expect(decoderCost(input("native", 3, 4)).js).toBe(12)
+		expect(decoderCost({ ...input("native", 1, 2), samplesInPlace: true, encodedInPlace: true })).toMatchObject({ js: 0, encodedJs: 0 })
+
+		// Nothing left once the encoded frame is held.
+		expect(framePixels(grey, { decodeBytes: 100, held: 0, heap: 0, encodedBytes: 60, drawnPixels: DRAWN })).toBe(0)
+	})
+
+	it("lets a codec's heap go once it is past 256 MiB and twice the next frame's need, unless cine is playing", () => {
+		const MIB = 1024 * 1024
+
+		expect(releasesHeap(300 * MIB, 100 * MIB, false)).toBe(true)
+		expect(releasesHeap(300 * MIB, 100 * MIB, true)).toBe(false)
+		expect(releasesHeap(300 * MIB, 200 * MIB, false)).toBe(false)
+		expect(releasesHeap(200 * MIB, 10 * MIB, false)).toBe(false)
 	})
 
 	it("knows the transfer syntaxes it decodes, a padded UID included", () => {

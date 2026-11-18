@@ -18,6 +18,8 @@ import {
 	type CodestreamHeader
 } from "@/features/preview/lib/dicom/codestream.logic"
 import { DicomFrameFailure, type CompressedDecoder } from "@/features/preview/lib/dicom/frameDecode"
+import { DICOM_CODEC_INITIAL_HEAP } from "@/features/preview/lib/dicom/budget.logic"
+import type { DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import type { FrameSamples, SampleColor } from "@/features/preview/lib/dicom/pixels.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
 
@@ -29,21 +31,39 @@ import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
 
 const quiet = (): void => undefined
 
-function loader<T>(load: () => Promise<T>): { get: () => Promise<T>; drop: () => void } {
+interface Loader<T> {
+	readonly get: () => Promise<T>
+	// The module's heap now, or the one it starts with.
+	readonly heap: () => number
+	// Lets the module go: its heap is reclaimed with it, and the next frame loads it afresh.
+	readonly drop: () => void
+}
+
+function loader<T extends { readonly HEAPU8: Uint8Array }>(load: () => Promise<T>): Loader<T> {
 	let module: Promise<T> | null = null
+	let loaded: T | null = null
 
 	return {
 		get: () => {
-			module ??= load().catch((error: unknown) => {
-				module = null
+			module ??= load().then(
+				ready => {
+					loaded = ready
 
-				throw error
-			})
+					return ready
+				},
+				(error: unknown) => {
+					module = null
+
+					throw error
+				}
+			)
 
 			return module
 		},
+		heap: () => loaded?.HEAPU8.byteLength ?? DICOM_CODEC_INITIAL_HEAP,
 		drop: () => {
 			module = null
+			loaded = null
 		}
 	}
 }
@@ -223,6 +243,28 @@ async function jpeg2000(
 	} finally {
 		decoder.delete()
 	}
+}
+
+function codecOf(decoder: DicomDecoder): Loader<unknown> | null {
+	switch (decoder) {
+		case "jpegLs":
+			return charls
+		case "jpeg2000":
+			return openjpeg
+		case "htj2k":
+			return openjph
+		default:
+			return null
+	}
+}
+
+// The wasm heap the decoder of `decoder` holds (or will start with once loaded); 0 for a decoder without one.
+export function codecHeap(decoder: DicomDecoder): number {
+	return codecOf(decoder)?.heap() ?? 0
+}
+
+export function releaseCodec(decoder: DicomDecoder): void {
+	codecOf(decoder)?.drop()
 }
 
 export const decodeCompressed: CompressedDecoder = async (encoded, module, color, decoder, pixels) => {
