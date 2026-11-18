@@ -6,8 +6,8 @@ import { bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles, BOOT
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
 import { comicPagePng, COMIC_PAGES } from "./fixtures/comics"
 
-// A comic book on a public file link, read page by page by a signed-out visitor through the public-link client's
-// archive reader (W6 §3.8). Creating a link is premium, so this runs only against a premium account (E2E_PREMIUM).
+// A comic book on a public file link, read page by page through the public-link client's archive reader (W6 §3.8): by a
+// signed-out visitor, then by the signed-in owner through the session's unauthenticated view. Creating a link is premium, so this runs only against a premium account (E2E_PREMIUM).
 
 async function signedOutPage(browser: Browser, baseURL: string | undefined, url: string) {
 	const context = await browser.newContext(baseURL === undefined ? {} : { baseURL })
@@ -57,6 +57,16 @@ test.describe("comic books on public links", () => {
 			} finally {
 				await visitor.close()
 			}
+
+			// A signed-in visitor reads it too, through the session's own view of the public-link client.
+			await page.goto(url)
+
+			const ownPage = (number: number) =>
+				page.getByRole("img", { name: `Page ${String(number)} of ${String(COMIC_PAGES)}`, exact: true })
+
+			await expect(ownPage(1)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await page.keyboard.press("PageDown")
+			await expect(ownPage(2)).toBeVisible()
 
 			expect(cspViolations).toEqual([])
 		} finally {
