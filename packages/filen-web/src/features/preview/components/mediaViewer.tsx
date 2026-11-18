@@ -18,6 +18,7 @@ import {
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { holdPreviewStreamAlive, isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
+import { EntryMedia } from "@/features/preview/components/entryMedia"
 import { VideoPlayer } from "@/features/preview/components/videoPlayer"
 import { MediaCannotStream, MediaFormatFailure, MediaPlaybackFailure } from "@/features/preview/components/mediaFailureState"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
@@ -409,14 +410,16 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 // where it can serve the file, else through MediaSource fed by the remux worker.
 export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const downloadable = usePreviewDownloadable()
-	// Only an archive's entry carries a provided origin, and archives never open media in the preview.
+	// Only an archive's entry carries a provided origin: played natively from its range port or its buffer.
 	const provided = useProvidedPreviewOrigin()
 
 	if (provided !== null) {
 		return (
-			<MediaFormatFailure
+			<EntryMedia
 				item={item}
-				codecs={[]}
+				category={category}
+				alt={alt}
+				origin={provided}
 			/>
 		)
 	}

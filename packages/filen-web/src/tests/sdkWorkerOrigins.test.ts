@@ -25,6 +25,14 @@ const { exposed, fakeClient, fakeReader, fakeUnauth } = vi.hoisted(() => {
 		format: { type: "zip" },
 		entryByteAccess: vi.fn(() => Promise.resolve({ type: "whole", size: 10n })),
 		downloadEntry: vi.fn<(params: ReaderDownloadEntryParams) => Promise<EntryDownloadReport>>(),
+		writeEntryEmbeddedPreview: vi.fn(async (params: { writer: WritableStream<Uint8Array> }) => {
+			const w = params.writer.getWriter()
+
+			await w.write(new Uint8Array([0xff, 0xd8, 0xff]))
+			await w.close()
+
+			return { type: "preview", width: 3, height: 2, orientation: 1, bytes: 3n }
+		}),
 		close: vi.fn(),
 		free: vi.fn()
 	}
@@ -239,7 +247,7 @@ describe("sdk worker whole origin reads", () => {
 		await unlease(reader.id)
 	})
 
-	it("has no sync range for an origin read whole and no ranged embedded preview for an entry", async () => {
+	it("has no sync range for an origin read whole, and walks a RAW entry's embedded preview through its reader", async () => {
 		const { port1 } = new MessageChannel()
 		const reader = { id: "reader-3" }
 		await lease(reader.id)
@@ -247,7 +255,11 @@ describe("sdk worker whole origin reads", () => {
 		await expect(
 			api.openOriginSyncRange(new SharedArrayBuffer(8), port1, entryOrigin(reader.id), "authed", "s1", "lock")
 		).rejects.toThrow("read whole")
-		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "authed", "r1")).rejects.toThrow("file origin")
+		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "authed", "r1")).resolves.toMatchObject({ type: "preview" })
+		expect(fakeReader.writeEntryEmbeddedPreview).toHaveBeenCalledWith(
+			expect.objectContaining({ entry: { archive: "d0000000-0000-0000-0000-000000000000", index: 2 } })
+		)
 		await unlease(reader.id)
+		await expect(api.fetchOriginRawPreview(entryOrigin(reader.id), "authed", "r2")).rejects.toThrow()
 	})
 })

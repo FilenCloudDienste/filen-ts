@@ -840,6 +840,16 @@ export const preview = {
 	previewComicPageTooLarge: "Page {{page}} is too large to show here ({{size}}).",
 	/** Comic reader — shows the comic book archive's files as an archive's, when it holds no page the reader shows */
 	previewComicBrowseArchive: "Browse as archive",
+	/** Archive entry card — a video or audio file the archive stores so it can't be played from here (compressed so it reads only front to back, or read whole and above 64 MiB); {{name}} is the file */
+	previewArchiveEntryExtractToPlayBody: "“{{name}}” can't be played from inside this archive. Extract the archive to play it.",
+	/** Archive entry card — extracts the archive to play the file */
+	previewArchiveEntryExtractToPlay: "Extract to play",
+	/** Archive entry card — a camera RAW photo the archive stores so its preview can't be read from here; {{name}} is the file */
+	previewArchiveEntryExtractToOpenBody: "“{{name}}” can't be opened from inside this archive. Extract the archive to open it.",
+	/** Archive entry card — extracts the archive to open the file */
+	previewArchiveEntryExtractToOpen: "Extract to open",
+	/** Under an archive entry's player — the entry is compressed, so a seek decodes up to the new position */
+	previewArchiveMediaSeekNote: "Compressed in the archive · seeking may pause while it reads",
 	/** Toast — the file lies in a solid block of the archive too large to read it from here (above 512 MiB); {{name}} is the file */
 	previewArchiveEntryExtractToRead: "“{{name}}” is packed with too much of the archive to read here. Extract the archive to read it.",
 	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */

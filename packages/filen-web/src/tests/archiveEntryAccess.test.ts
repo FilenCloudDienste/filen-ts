@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { AnyFile, EntryAccess } from "@filen/sdk-rs"
 import {
 	canOpenEntry,
+	entryExtractCard,
 	canReadEntry,
 	entryCost,
 	entryKey,
@@ -52,19 +53,35 @@ describe("entry access", () => {
 		)
 	})
 
-	it("opens only the categories the preview loads whole, within their caps", () => {
+	it("shows media and RAW entries their viewer cannot read from here as their Extract card", () => {
+		const MIB = 1024 * 1024
+
+		for (const access of ["mapped", "seekable"] as const) {
+			expect(entryExtractCard("video", access, 4096 * MIB)).toBeNull()
+			expect(entryExtractCard("rawImage", access, 40 * MIB)).toBeNull()
+		}
+
+		expect(entryExtractCard("audio", "whole", 64 * MIB)).toBeNull()
+		expect(entryExtractCard("audio", "whole", 64 * MIB + 1)).toBe("play")
+		expect(entryExtractCard("video", "sequential", 1)).toBe("play")
+		expect(entryExtractCard("rawImage", "whole", 1)).toBe("open")
+		expect(entryExtractCard("pdf", "whole", 1)).toBeNull()
+	})
+
+	it("opens the categories the preview loads whole within their caps, and media and RAW by their access", () => {
 		expect(entryPreviewCategory("notes.md")).toBe("markdown")
 		expect(entryPreviewCategory("photo.HEIC")).toBe("image")
 		expect(entryPreviewCategory("Makefile")).toBe("code")
-		expect(entryPreviewCategory("clip.mp4")).toBeNull()
-		expect(entryPreviewCategory("song.mp3")).toBeNull()
-		expect(entryPreviewCategory("raw.nef")).toBeNull()
+		expect(entryPreviewCategory("clip.mp4")).toBe("video")
+		expect(entryPreviewCategory("song.mp3")).toBe("audio")
+		expect(entryPreviewCategory("raw.nef")).toBe("rawImage")
 		expect(entryPreviewCategory("inner.zip")).toBeNull()
 		expect(entryPreviewCategory("blob.bin")).toBeNull()
 
 		expect(canOpenEntry(only({ path: "doc.pdf", access: DIRECT }), 0)).toBe(true)
 		expect(canOpenEntry(only({ path: "doc.pdf", access: SEQUENTIAL }), 0)).toBe(false)
-		expect(canOpenEntry(only({ path: "clip.mp4", access: DIRECT }), 0)).toBe(false)
+		expect(canOpenEntry(only({ path: "clip.mp4", access: DIRECT, size: 4 * 1024 ** 3 }), 0)).toBe(true)
+		expect(canOpenEntry(only({ path: "clip.mp4", access: SEQUENTIAL }), 0)).toBe(false)
 
 		const cap = Number(SPREADSHEET_MAX_BYTES)
 

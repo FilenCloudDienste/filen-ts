@@ -10,10 +10,10 @@ import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { isArchivePasswordError, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { entryAccessOf, entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import type { EntryAccessKind } from "@/lib/sdk/byteOrigin"
-import { CATEGORY_POLICY } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, entryOpensByAccess } from "@/features/drive/lib/preview.logic"
 import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { ExtractToRead } from "@/features/archive/components/extractToRead"
-import { entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
+import { entryExtractCard, entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
@@ -47,12 +47,31 @@ export interface ArchiveEntryViewerProps {
 // One entry shown in the archive browser's place: read through the archive's reader, or, packed in a solid block too
 // large to read from here (E3), the card offering to extract the archive.
 export function ArchiveEntryViewer(props: ArchiveEntryViewerProps) {
-	return props.entry.extractToRead === true ? <EntryExtractCard {...props} /> : <ReadEntryViewer {...props} />
+	return props.entry.extractToRead === true ? (
+		<EntryExtractCard
+			{...props}
+			reason="read"
+		/>
+	) : (
+		<ReadEntryViewer {...props} />
+	)
 }
 
-function EntryExtractCard({ archiveUuid, entry, onBack, listing }: ArchiveEntryViewerProps) {
+// Why an entry is extracted to be seen: a solid block too large (E3), media that cannot be played from here, a RAW
+// whose preview cannot be read by range (W6 §3.10).
+type ExtractReason = "read" | "play" | "open"
+
+function EntryExtractCard({ archiveUuid, entry, onBack, listing, reason }: ArchiveEntryViewerProps & { reason: ExtractReason }) {
 	const { t } = useTranslation("preview")
 	const { request } = entry
+	const message =
+		reason === "read"
+			? t("previewArchiveEntryExtractToRead", { name: request.name })
+			: reason === "play"
+				? t("previewArchiveEntryExtractToPlayBody", { name: request.name })
+				: t("previewArchiveEntryExtractToOpenBody", { name: request.name })
+	const label =
+		reason === "read" ? undefined : reason === "play" ? t("previewArchiveEntryExtractToPlay") : t("previewArchiveEntryExtractToOpen")
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
 
 	return (
@@ -67,8 +86,13 @@ function EntryExtractCard({ archiveUuid, entry, onBack, listing }: ArchiveEntryV
 			replacement={
 				<PreviewUnsupportedState
 					item={item}
-					message={t("previewArchiveEntryExtractToRead", { name: request.name })}
-					secondary={<ExtractToRead source={listing.source} />}
+					message={message}
+					secondary={
+						<ExtractToRead
+							source={listing.source}
+							label={label}
+						/>
+					}
 				/>
 			}
 		/>
@@ -102,6 +126,8 @@ function ReadEntryViewer({
 	const leaseId = `${readerBase}:${String(attempt)}`
 	// A viewer that reads ranges (a database) streams a mapped or seekable entry by range; the reader says which.
 	const ranged = entry.category !== null && CATEGORY_POLICY[entry.category].entry === "ranged"
+	// Video, audio and RAW open by their access kind, or as their "Extract to …" card.
+	const opensByAccess = entryOpensByAccess(entry.category)
 	const [byteAccess, setByteAccess] = useState<{ key: string; kind: EntryAccessKind } | null>(null)
 	const accessKey = `${leaseId}:${password ?? ""}`
 	const kind = ranged ? (byteAccess?.key === accessKey ? byteAccess.kind : null) : "whole"
@@ -184,6 +210,24 @@ function ReadEntryViewer({
 
 	if (kind === null && ask === null) {
 		return <PreviewLoading />
+	}
+
+	const card = opensByAccess && kind !== null ? entryExtractCard(entry.category, kind, request.size) : null
+
+	if (card !== null) {
+		return (
+			<EntryExtractCard
+				archiveUuid={archiveUuid}
+				entry={entry}
+				password={listingPassword}
+				onPasswordAccepted={onPasswordAccepted}
+				onDownload={onDownload}
+				onBack={onBack}
+				listing={listing}
+				readAhead={readAhead}
+				reason={card}
+			/>
+		)
 	}
 
 	return (

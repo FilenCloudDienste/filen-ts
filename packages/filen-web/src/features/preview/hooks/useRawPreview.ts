@@ -5,13 +5,15 @@ import { runOp } from "@/lib/actions/outcome"
 import { getRawPreview, previewCacheEpoch, setRawPreview } from "@/features/preview/lib/previewCache"
 import { type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
 import { type PreviewLoad, usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
+import { useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 
 export type UseRawPreviewResult =
 	Exclude<PreviewLoad<RawPreviewResult>, { status: "success" }> | { status: "success"; preview: RawPreviewResult; refetch: () => void }
 
 // A RAW's embedded preview instead of the file's own bytes, with usePreviewFetch's lifecycle and the same
-// authed/anon seam and session cache as usePreviewBytes.
+// authed/anon seam and session cache as usePreviewBytes; an archive's entry through its provided origin.
 export function useRawPreview(item: DriveItem): UseRawPreviewResult {
+	const provided = useProvidedPreviewOrigin()
 	const load = usePreviewFetch(item, {
 		seed: getRawPreview,
 		run: async ({ token, accessMode, cacheScope, uuid }) => {
@@ -22,9 +24,13 @@ export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 				return cached
 			}
 
-			const file = narrowToAnyFile(item)
+			// An archive's RAW entry: its embedded preview walked by range through the archive's reader.
 			const preview = await runOp<RawPreviewResult>(
-				accessMode === "anon" ? sdkApi.fetchLinkedRawPreviewAnon(file, token) : sdkApi.fetchRawPreview(file, token)
+				provided !== null
+					? sdkApi.fetchOriginRawPreview(provided, accessMode, token)
+					: accessMode === "anon"
+						? sdkApi.fetchLinkedRawPreviewAnon(narrowToAnyFile(item), token)
+						: sdkApi.fetchRawPreview(narrowToAnyFile(item), token)
 			)
 
 			setRawPreview(cacheScope, uuid, preview, epoch)

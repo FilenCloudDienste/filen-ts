@@ -147,7 +147,7 @@ import {
 	type SearchSnapshotDTO
 } from "@/workers/searchEngine"
 import { createListBatcher } from "@/workers/archiveListPacker"
-import { createArchiveReaders } from "@/workers/archiveReaders"
+import { createArchiveReaders, readerClosed } from "@/workers/archiveReaders"
 import { readAheadBudget, type EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import { readAudioMetadata as parseAudioMetadata, type AudioMetadataDeps, type AudioMetadataResult } from "@/workers/audioMetadata"
@@ -3174,6 +3174,7 @@ const api = {
 			anon: anon ?? false,
 			closed: !archiveReaders.has(readerId),
 			range: (entry, start, end, signal) => archiveReaders.readRange(readerId, entry, start, end, signal),
+			embeddedPreview: (entry, writer, signal) => archiveReaders.embeddedPreview(readerId, entry, writer, signal),
 			read: (entry, size, signal) =>
 				archiveReaders.readWhole(
 					readerId,
@@ -3285,9 +3286,28 @@ const api = {
 			source.release()
 		}
 	},
-	// fetchRawPreview for a drive or public-link file origin; the other kinds have no ranged embedded-preview read.
+	// fetchRawPreview for a drive or public-link file origin, or an archive's mapped or seekable RAW entry (walked by
+	// range through its reader, never held whole); a bytes origin has none.
 	async fetchOriginRawPreview(origin: ByteOrigin, access: OriginAccess, previewToken: string): Promise<RawPreviewResult> {
 		requireOriginAccess(origin, access)
+
+		if (origin.kind === "entry") {
+			const record = entryReader(origin.reader)
+
+			if (record === undefined || record.closed === true) {
+				throw readerClosed()
+			}
+
+			if (record.anon !== origin.anon || record.embeddedPreview === undefined) {
+				throw new Error("archive reader belongs to the other client")
+			}
+
+			const walk = record.embeddedPreview
+
+			return await writeRawPreview(previewToken, params =>
+				walk(origin.entry, params.writer, params.managedFuture.abortSignal ?? new AbortController().signal)
+			)
+		}
 
 		const ref = originFile(origin)
 

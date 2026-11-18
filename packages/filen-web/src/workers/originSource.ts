@@ -1,4 +1,4 @@
-import type { AnyFile, ArchiveEntryId, EntryDownloadPhase } from "@filen/sdk-rs"
+import type { AnyFile, ArchiveEntryId, EmbeddedPreviewResult, EntryDownloadPhase } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import type { AbortableReadRange } from "@/lib/media/blockCache"
@@ -41,6 +41,12 @@ export interface EntryReaderRecord {
 	// Bytes `start..end` of a `mapped` or `seekable` entry, unchecked (its checksum covers it whole), read through the
 	// archive's reader without holding the entry; absent where the lease reads only whole.
 	readonly range?: (entry: ArchiveEntryId, start: number, end: number, signal: AbortSignal) => Promise<Uint8Array>
+	// A RAW entry's embedded preview, walked by range (a `mapped` or `seekable` entry), written to `writer`.
+	readonly embeddedPreview?: (
+		entry: ArchiveEntryId,
+		writer: WritableStream<Uint8Array>,
+		signal: AbortSignal
+	) => Promise<EmbeddedPreviewResult>
 }
 
 export interface OriginSourceDeps {

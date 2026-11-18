@@ -4,6 +4,7 @@ import type {
 	ArchiveEntryId,
 	ArchiveFormat,
 	ArchiveReader,
+	EmbeddedPreviewResult,
 	EntryByteAccess,
 	EntryDownloadPhase,
 	EntryDownloadReport,
@@ -40,7 +41,15 @@ export const READ_AHEAD_IDLE_MS = 10_000
 
 export type ReaderLike = Pick<
 	ArchiveReader,
-	"format" | "list" | "entryByteAccess" | "downloadEntry" | "readEntryRange" | "readEntries" | "close" | "free"
+	| "format"
+	| "list"
+	| "entryByteAccess"
+	| "downloadEntry"
+	| "readEntryRange"
+	| "readEntries"
+	| "writeEntryEmbeddedPreview"
+	| "close"
+	| "free"
 >
 
 export interface ReaderOpenRequest {
@@ -158,6 +167,13 @@ export interface ArchiveReaders {
 	) => Promise<EntryDownloadReport>
 	// Bytes `start..end` of a `mapped` or `seekable` entry, unchecked, through the reader's range read.
 	readRange: (id: string, entry: ArchiveEntryId, start: number, end: number, signal: AbortSignal) => Promise<Uint8Array>
+	// A `mapped` or `seekable` RAW entry's embedded preview, walked by range, written to `writer`.
+	embeddedPreview: (
+		id: string,
+		entry: ArchiveEntryId,
+		writer: WritableStream<Uint8Array>,
+		signal: AbortSignal
+	) => Promise<EmbeddedPreviewResult>
 	// How the entry's bytes can be read, resolved once and kept with the reader.
 	byteAccess: (id: string, entry: ArchiveEntryId, signal: AbortSignal) => Promise<EntryByteAccess["type"]>
 	readWhole: (
@@ -801,6 +817,16 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 
 					return buffer.take()
 				}
+			)
+		},
+		embeddedPreview: (id, entry, writer, signal) => {
+			const record = require(id)
+
+			return borrow(
+				record,
+				signal,
+				() => undefined,
+				(reader, combined) => reader.writeEntryEmbeddedPreview({ entry, writer, managedFuture: { abortSignal: combined } })
 			)
 		},
 		byteAccess: (id, entry, signal) => {

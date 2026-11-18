@@ -204,8 +204,17 @@ function legacyAnon(item: DriveItem): string {
 	return cap === null || base.data.size <= cap ? "previewable" : "too-large"
 }
 
+// Changed on purpose since (W6 §3.10): video, audio and RAW entries open at any size, their viewer deciding by the
+// entry's access kind.
+const ENTRY_BY_ACCESS: ReadonlySet<PreviewCategory> = new Set(["video", "audio", "rawImage"])
+
 function legacyCanOpenEntry(name: string, size: number): boolean {
 	const category = previewCategoryForExtension(fileTypeExtension(name, null))
+
+	if (category !== null && ENTRY_BY_ACCESS.has(category)) {
+		return true
+	}
+
 	const cap = category === null || !LEGACY_ENTRY.has(category) ? null : legacyBufferedSizeCap(category)
 
 	return cap !== null && size <= Number(cap)
@@ -359,7 +368,7 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 		expect(policy.textFamily).toBe(LEGACY_TEXT.has(category))
 		expect(isPhotoCategory(category)).toBe(category === "image" || category === "rawImage" || category === "video")
 		expect(previewKindLabelKey(category)).toBe(LEGACY_LABELS[category])
-		expect(policy.entry !== "none").toBe(LEGACY_ENTRY.has(category))
+		expect(policy.entry !== "none").toBe(LEGACY_ENTRY.has(category) || ENTRY_BY_ACCESS.has(category))
 		expect(policy.pager).toBe(category !== "audio" && category !== "other")
 		expect(policy.aboveCap).toBe(policy.textFamily ? "largeText" : "refuse")
 

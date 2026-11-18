@@ -250,11 +250,11 @@ describe("sniffAdmits", () => {
 		expect(anonPreviewability(fileNamed("report.pages", 3n * MIB))).not.toBe("previewable")
 	})
 
-	it("admits an archive's .ts as the code it opens as there: an entry never streams", () => {
+	it("admits an archive's .ts at any size: as a transport stream it plays by its access kind (W6 §3.10)", () => {
 		const subject = { name: "clip.ts", mime: null, verdict: null }
 
 		expect(sniffAdmitsFor({ ...subject, size: TEXT_MAX_BYTES }, deviceProfile(), "entry")).toBe(true)
-		expect(sniffAdmitsFor({ ...subject, size: TEXT_MAX_BYTES + 1n }, deviceProfile(), "entry")).toBe(false)
+		expect(sniffAdmitsFor({ ...subject, size: TEXT_MAX_BYTES + 1n }, deviceProfile(), "entry")).toBe(true)
 		expect(contentSniffFor({ ...subject, size: 4n * MIB })).toBe("transportStream")
 	})
 

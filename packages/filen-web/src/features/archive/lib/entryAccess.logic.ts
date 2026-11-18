@@ -13,6 +13,7 @@ import {
 	CATEGORY_POLICY,
 	contentSniffFor,
 	entryAdmits,
+	entryOpensByAccess,
 	opensAsLargeText,
 	originServesRanges,
 	fileTypeExtension,
@@ -26,7 +27,7 @@ import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.l
 import { deviceProfile } from "@/lib/deviceProfile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 
 // What the browser can do with one listed entry on its own: open it in a viewer, or save it. The SDK reads
 // a zip's, 7z's or RAR's file, a compressed tar's member and a bare tar's member alone (the last by range, from where
@@ -45,8 +46,8 @@ export function canReadEntry(store: EntryStore, slot: number): boolean {
 	)
 }
 
-// The viewer category its name reads as, or null for one the entry preview does not show (CATEGORY_POLICY's `entry`:
-// media streams, and a RAW or a nested archive needs a file of the drive, so those entries only download).
+// The viewer category its name reads as, or null for one the entry preview does not show (CATEGORY_POLICY's `entry`: a
+// nested archive, a comic or an iWork package needs a reader of its own, so those entries only download).
 export function entryPreviewCategory(name: string): PreviewCategory | null {
 	const category = previewCategoryForExtension(fileTypeExtension(name, null))
 
@@ -69,6 +70,11 @@ export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {
 // verdict; null when that kind does not open there. Text above its cap opens as large text where `origin` serves ranges.
 export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): PreviewCategory | null {
 	const category = previewType(item)
+
+	if (entryOpensByAccess(category)) {
+		return category
+	}
+
 	const profile = deviceProfile()
 	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
 
@@ -77,6 +83,23 @@ export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): Previ
 	}
 
 	return item.data.size <= cap || (opensAsLargeText(category, item.data.size, profile) && originServesRanges(origin)) ? category : null
+}
+
+// Owner decision E5: a media entry read only whole plays from a buffer up to this size.
+export const NON_SEEKABLE_MEDIA_MAX_BYTES = 64 * 1024 * 1024
+
+// The "Extract to …" card an entry opening by access shows instead of a viewer, once its access kind is known; null when
+// the viewer shows it.
+export function entryExtractCard(category: PreviewCategory | null, access: EntryAccessKind, size: number): "play" | "open" | null {
+	if (!entryOpensByAccess(category) || access === "mapped" || access === "seekable") {
+		return null
+	}
+
+	if (category === "rawImage") {
+		return "open"
+	}
+
+	return access === "whole" && size <= NON_SEEKABLE_MEDIA_MAX_BYTES ? null : "play"
 }
 
 export function canOpenEntry(store: EntryStore, slot: number): boolean {

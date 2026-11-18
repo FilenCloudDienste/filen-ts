@@ -147,7 +147,8 @@ export interface CategoryPolicy {
 	bufferCap: ProfileCap
 	// What opens above the cap.
 	aboveCap: "refuse" | "largeText"
-	// How an archive entry opens.
+	// How an archive entry opens. Video, audio and RAW entries open by their access kind (entryOpensByAccess): streamed
+	// or walked by range when mapped or seekable, else as their "Extract to …" card (W6 §3.10).
 	entry: "whole" | "ranged" | "none"
 	// How a public link previews it. "comic": read page by page through the public-link client's archive reader.
 	anon: "stream" | "ranged" | "archive" | "comic" | "buffer" | "none"
@@ -193,7 +194,7 @@ export const CATEGORY_POLICY = {
 		ranged: true,
 		bufferCap: null,
 		aboveCap: "refuse",
-		entry: "none",
+		entry: "ranged",
 		anon: "ranged",
 		textFamily: false,
 		editsAsText: false,
@@ -207,7 +208,7 @@ export const CATEGORY_POLICY = {
 		ranged: false,
 		bufferCap: PREVIEW_MAX_BYTES,
 		aboveCap: "refuse",
-		entry: "none",
+		entry: "ranged",
 		anon: "stream",
 		textFamily: false,
 		editsAsText: false,
@@ -222,7 +223,7 @@ export const CATEGORY_POLICY = {
 		ranged: false,
 		bufferCap: PREVIEW_MAX_BYTES,
 		aboveCap: "refuse",
-		entry: "none",
+		entry: "ranged",
 		anon: "stream",
 		textFamily: false,
 		editsAsText: false,
@@ -903,6 +904,15 @@ export function linkAdmits(category: PreviewCategory, size: bigint, profile: Dev
 	}
 }
 
+// Categories an archive entry opens in at any size, its viewer deciding by the entry's access kind (W6 §3.10): video and
+// audio stream when mapped or seekable, play from a buffer when read only whole up to 64 MiB, else show "Extract to
+// play"; a RAW shows its embedded preview when mapped or seekable, else "Extract to open".
+const ENTRY_OPENS_BY_ACCESS: ReadonlySet<PreviewCategory> = new Set<PreviewCategory>(["video", "audio", "rawImage"])
+
+export function entryOpensByAccess(category: PreviewCategory | null): boolean {
+	return category !== null && ENTRY_OPENS_BY_ACCESS.has(category)
+}
+
 function surfaceAdmits(surface: SniffSurface, category: PreviewCategory, extension: string, size: bigint, profile: DeviceProfile): boolean {
 	switch (surface) {
 		case "drive":
@@ -918,6 +928,11 @@ function surfaceAdmits(surface: SniffSurface, category: PreviewCategory, extensi
 // what the SDK worker holds to serve an entry's ranges from (an entry is read whole there until the SDK reads entries
 // by range).
 export function entryAdmits(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
+	// Media and RAW open by their access kind, at any size (or as their "Extract to …" card).
+	if (entryOpensByAccess(category)) {
+		return true
+	}
+
 	const cap = CATEGORY_POLICY[category].entry === "none" ? null : bufferedSizeCap(category, profile)
 
 	return cap !== null && (size <= cap || (opensAsLargeText(category, size, profile) && size <= ENTRY_RANGE_BUFFER_CAP))
