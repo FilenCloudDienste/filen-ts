@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
-import { DicomOpenError, headerCap, memorySource, rangeSource, readHeader, type DicomSource } from "@/features/preview/lib/dicom/dicomFile"
+import {
+	DICOM_HEADER_HEAP_PER_BYTE,
+	DicomOpenError,
+	fileHeld,
+	headerCap,
+	memorySource,
+	rangeSource,
+	readHeader,
+	type DicomSource
+} from "@/features/preview/lib/dicom/dicomFile"
 import { imageVerdict, readPixelModule } from "@/features/preview/lib/dicom/pixelModule"
 import {
 	DICOM_J2K_HEAD_BYTES,
@@ -102,7 +111,7 @@ function context(file: Uint8Array, decodeBytes = DECODE): { context: FrameContex
 			syntax: header.syntax,
 			color: verdict.color,
 			source: header.pixels,
-			budget: { decodeBytes, held: () => header.heldBytes, heap: () => 0, settle: () => undefined },
+			budget: { decodeBytes, held: () => fileHeld(header, 0), heap: () => 0, settle: () => undefined },
 			compressed: null
 		}
 	}
@@ -165,6 +174,26 @@ describe("the header", () => {
 
 		expect(header.dataSet.elements["x7fe00010"]).toBeDefined()
 		expect(source.reach()).toBe(2 * MIB)
+	})
+
+	it("charges the parsed header's heap, and a prefix copied to parse it, against the frames' budget", () => {
+		const file = ctFile(EXPLICIT_LE)
+		const inMemory = readHeader(memorySource(file), { decodeBytes: DECODE })
+		const pixelOffset = inMemory.dataSet.elements["x7fe00010"]?.dataOffset ?? 0
+		const ranged = readHeader(counting(file), { decodeBytes: DECODE })
+
+		expect(inMemory.headerBytes).toBe(pixelOffset * DICOM_HEADER_HEAP_PER_BYTE)
+		expect(ranged.headerBytes).toBe(pixelOffset * DICOM_HEADER_HEAP_PER_BYTE + file.length)
+		expect(fileHeld(inMemory, file.length)).toBe(file.length + inMemory.headerBytes)
+
+		// The 3×2 frame: its 12 bytes, 12 more swapped out of them and 48 drawn.
+		const { context: frame } = context(file)
+		const fits = ranged.headerBytes + 72
+
+		expect(nativeFrame({ ...frame, budget: { ...frame.budget, decodeBytes: fits } }, 0).rows).toBe(2)
+		expect(() => nativeFrame({ ...frame, budget: { ...frame.budget, decodeBytes: fits - 1 } }, 0)).toThrow(
+			expect.objectContaining({ reason: "tooLarge" })
+		)
 	})
 
 	it("stops at the header cap, a share of the budget", () => {

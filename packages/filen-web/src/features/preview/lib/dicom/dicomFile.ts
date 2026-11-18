@@ -12,8 +12,9 @@ const MIB = 1024 * 1024
 const FIRST_PREFIX = MIB
 const PIXEL_DATA = "x7fe00010"
 
-// dicom-parser keeps every element as an object: measured at up to about 30 bytes of heap a byte of header (a run of
-// empty items), so the header read is capped at a share of the worker's budget as well as 64 MiB.
+// dicom-parser keeps every element as an object: measured at about 23 to 31 bytes of heap a byte of header (a run of
+// empty items the most), so the header read is capped at a share of the worker's budget as well as 64 MiB, and the
+// parsed header's heap is held against the budget the frames decode in.
 export const DICOM_HEADER_MAX_BYTES = 64 * MIB
 export const DICOM_HEADER_HEAP_PER_BYTE = 32
 
@@ -87,6 +88,22 @@ export interface DicomHeader {
 	readonly pixels: DicomSource
 	// Bytes the worker holds for the file beyond what it decodes: the inflated data set, or the whole file.
 	readonly heldBytes: number
+	// The parsed header's heap, and the prefix it was parsed from when that is a copy of its own.
+	readonly headerBytes: number
+}
+
+// What the worker holds for an open file while its frames decode: the bytes read whole (an inflated data set, else
+// `wholeBytes` of a file read into memory) and the parsed header.
+export function fileHeld(header: DicomHeader, wholeBytes: number): number {
+	return (header.heldBytes > 0 ? header.heldBytes : wholeBytes) + header.headerBytes
+}
+
+// The parsed header's heap: elements up to Pixel Data's (or the whole prefix), at the measured heap per byte, and the
+// prefix itself when it is a copy rather than a view of bytes already held.
+function headerBytes(dataSet: DataSet, prefix: Uint8Array, copied: boolean): number {
+	const parsed = dataSet.elements[PIXEL_DATA]?.dataOffset ?? prefix.length
+
+	return Math.min(parsed, prefix.length) * DICOM_HEADER_HEAP_PER_BYTE + (copied ? prefix.length : 0)
 }
 
 function isDicomPrefix(bytes: Uint8Array): boolean {
@@ -155,7 +172,14 @@ export function readHeader(source: DicomSource, options: HeaderOptions): DicomHe
 		const dataSet = tryParse(prefix, { untilTag: PIXEL_DATA, ...parseOptions })
 
 		if (dataSet !== null && (dataSet.elements[PIXEL_DATA] !== undefined || length === size)) {
-			return { dataSet, transferSyntaxUid: meta.uid, syntax, pixels: source, heldBytes: 0 }
+			return {
+				dataSet,
+				transferSyntaxUid: meta.uid,
+				syntax,
+				pixels: source,
+				heldBytes: 0,
+				headerBytes: headerBytes(dataSet, prefix, !source.inMemory)
+			}
 		}
 
 		if (length === size) throw parseFailure()
@@ -163,11 +187,18 @@ export function readHeader(source: DicomSource, options: HeaderOptions): DicomHe
 		if (length >= cap) throw new DicomOpenError("tooLarge", "the header is larger than the viewer reads")
 
 		const next = Math.min(size, length * 2, cap)
-		const grown = new Uint8Array(next)
 
-		grown.set(prefix)
-		grown.set(source.read(length, next - length), length)
-		prefix = grown
+		// A file in memory is parsed in place; one read in ranges grows a copy.
+		if (source.inMemory) {
+			prefix = source.read(0, next)
+		} else {
+			const grown = new Uint8Array(next)
+
+			grown.set(prefix)
+			grown.set(source.read(length, next - length), length)
+			prefix = grown
+		}
+
 		length = next
 	}
 }
@@ -219,7 +250,14 @@ function readDeflated(
 		const dataSet = tryParse(meta, { untilTag: PIXEL_DATA, inflater: () => inflated.subarray(0, limit) })
 
 		if (dataSet !== null && (dataSet.elements[PIXEL_DATA] !== undefined || limit === inflated.length)) {
-			return { dataSet, transferSyntaxUid: uid, syntax, pixels: memorySource(inflated), heldBytes: inflated.length }
+			return {
+				dataSet,
+				transferSyntaxUid: uid,
+				syntax,
+				pixels: memorySource(inflated),
+				heldBytes: inflated.length,
+				headerBytes: headerBytes(dataSet, inflated.subarray(0, limit), false)
+			}
 		}
 
 		if (limit === inflated.length) throw parseFailure()

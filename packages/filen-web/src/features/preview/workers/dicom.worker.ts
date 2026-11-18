@@ -4,6 +4,7 @@ import { SyncRangeReader } from "@filen/office/dom/pdfedit"
 import { RANGE_READ_TIMEOUT_MS } from "@/lib/media/rangePort"
 import {
 	DicomOpenError,
+	fileHeld,
 	memorySource,
 	rangeSource,
 	readHeader,
@@ -485,9 +486,9 @@ const api = {
 			const header = readHeader(file, { decodeBytes: budget.decodeBytes })
 			const module = readPixelModule(header.dataSet, header.syntax?.littleEndian ?? true)
 			const verdict = imageVerdict(module, header.syntax, DECODERS)
-			// What stays held while a frame is read: an inflated data set, else the whole file read into memory, else
-			// (ranged) the bridge's slots; the frame's own bytes are its decoder's to count.
-			const held = header.heldBytes > 0 ? header.heldBytes : source.kind === "whole" ? file.size : 0
+			// What stays held while a frame is read: an inflated data set, else the whole file read into memory, the
+			// parsed header, and (ranged) the bridge's slots; the frame's own bytes are its decoder's to count.
+			const held = fileHeld(header, source.kind === "whole" ? file.size : 0)
 			const ringBytes = source.kind === "ranged" ? source.ringBytes : 0
 			const frameContext: FrameContext | null =
 				verdict.status === "ok" && header.syntax !== null
