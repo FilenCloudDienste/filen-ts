@@ -1,6 +1,7 @@
 import {
 	useEffect,
 	useEffectEvent,
+	useId,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -45,7 +46,11 @@ interface ViewState extends PagerWindow<PagerRowView> {
 	readonly active: { readonly start: number; readonly column: number } | null
 }
 
-const THUMB_PX = 32
+// The thumb's height: a touch target of at least 44 px.
+const THUMB_PX = 44
+// A touch fling's speed (px/ms) loses this much each 16 ms frame, and stops below the second.
+const FLING_DECAY = 0.95
+const FLING_STOP = 0.02
 const MATCH_CLASS = "rounded-[2px] bg-[color-mix(in_oklab,#facc15_35%,transparent)] text-inherit"
 const ACTIVE_CLASS = "rounded-[2px] bg-[color-mix(in_oklab,#f97316_45%,transparent)] text-inherit"
 
@@ -126,7 +131,10 @@ export function LargeTextRows({
 	const fetching = useRef({ before: false, after: false })
 	// A scrollbar drag asks for one position at a time; the latest asked meanwhile follows.
 	const seeking = useRef<{ busy: boolean; next: number | null }>({ busy: false, next: null })
-	const touch = useRef<number | null>(null)
+	// A touch drag's last point and its speed, then the fling it leaves behind.
+	const touch = useRef<{ y: number; time: number; speed: number } | null>(null)
+	const fling = useRef<number | null>(null)
+	const scrollerId = useId()
 	const grab = useRef<number | null>(null)
 	const scrollerRef = useRef<HTMLDivElement | null>(null)
 	const trackRef = useRef<HTMLDivElement | null>(null)
@@ -173,6 +181,13 @@ export function LargeTextRows({
 
 			if (next !== null) seek(next)
 		})
+	}
+
+	const stopFling = (): void => {
+		if (fling.current !== null) {
+			cancelAnimationFrame(fling.current)
+			fling.current = null
+		}
 	}
 
 	const scrollBy = (delta: number): void => {
@@ -314,6 +329,7 @@ export function LargeTextRows({
 		const pixels = event.deltaY * (event.deltaMode === 1 ? rowHeight : event.deltaMode === 2 ? height : 1)
 
 		event.preventDefault()
+		stopFling()
 
 		// Shift with the wheel scrolls sideways where the browser reports it as vertical.
 		if (event.shiftKey) {
@@ -378,22 +394,53 @@ export function LargeTextRows({
 
 		if (move !== undefined && !event.defaultPrevented) {
 			event.preventDefault()
+			stopFling()
 			move()
 		}
 	}
+
+	// Carries a released touch drag on at its speed, slowing each frame.
+	const startFling = (speed: number): void => {
+		let velocity = speed
+		let last = performance.now()
+		const frame = (now: number): void => {
+			const elapsed = Math.max(1, now - last)
+
+			last = now
+			scrollBy(velocity * elapsed)
+			velocity *= FLING_DECAY ** (elapsed / 16)
+			fling.current = Math.abs(velocity) < FLING_STOP ? null : requestAnimationFrame(frame)
+		}
+
+		stopFling()
+		fling.current = Math.abs(velocity) < FLING_STOP ? null : requestAnimationFrame(frame)
+	}
+
+	useEffect(() => stopFling, [])
 
 	const onTouch = (event: PointerEvent<HTMLDivElement>): void => {
 		if (event.pointerType !== "touch") {
 			return
 		}
 
+		const now = performance.now()
+		const last = touch.current
+
 		if (event.type === "pointerdown") {
-			touch.current = event.clientY
-		} else if (event.type === "pointermove" && touch.current !== null) {
-			scrollBy(touch.current - event.clientY)
-			touch.current = event.clientY
+			stopFling()
+			touch.current = { y: event.clientY, time: now, speed: 0 }
+		} else if (event.type === "pointermove" && last !== null) {
+			const delta = last.y - event.clientY
+			const elapsed = Math.max(1, now - last.time)
+
+			scrollBy(delta)
+			// Smoothed over the last moves, so one jittery sample does not set the fling.
+			touch.current = { y: event.clientY, time: now, speed: last.speed * 0.2 + (delta / elapsed) * 0.8 }
 		} else {
 			touch.current = null
+
+			// A drag that ended moving flings; one that paused first does not.
+			if (event.type === "pointerup" && last !== null && now - last.time < 100) startFling(last.speed)
 		}
 	}
 
@@ -460,6 +507,7 @@ export function LargeTextRows({
 		<div className="relative flex min-h-0 flex-1">
 			<div
 				ref={scrollerRef}
+				id={scrollerId}
 				role="document"
 				aria-label={alt}
 				tabIndex={0}
@@ -505,17 +553,25 @@ export function LargeTextRows({
 			<div
 				ref={trackRef}
 				role="scrollbar"
+				tabIndex={0}
 				aria-label={t("previewLargeTextScrollbar")}
+				aria-controls={scrollerId}
 				aria-orientation="vertical"
 				aria-valuemin={0}
 				aria-valuemax={100}
 				aria-valuenow={Math.round(fraction * 100)}
-				className="relative w-3 shrink-0 touch-none border-l border-border bg-muted/40"
+				className="relative w-3 shrink-0 touch-none border-l border-border bg-muted/40 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+				onKeyDown={onKeyDown}
 				onPointerDown={onTrack}
 				onPointerMove={onTrack}
 				onPointerUp={onTrack}
 				onPointerCancel={onTrack}
 			>
+				{/* A finger's target: 44 px wide, reaching over the rows' edge. */}
+				<div
+					aria-hidden="true"
+					className="absolute inset-y-0 right-0 hidden w-11 pointer-coarse:block"
+				/>
 				<div
 					className="absolute inset-x-0.5 rounded-full bg-muted-foreground/40"
 					style={{ top: `${String(fraction * travel)}px`, height: `${String(THUMB_PX)}px` }}

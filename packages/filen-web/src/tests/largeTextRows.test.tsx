@@ -165,4 +165,73 @@ describe("LargeTextRows", () => {
 		// Neither moved the rows.
 		expect(position.get()).toBe(before)
 	})
+
+	it("has a scrollbar that names the rows it controls and takes the keys", async () => {
+		const position = positionStore()
+
+		render(
+			<LargeTextRows
+				reading={reading()}
+				alt="big.log"
+				fontSize={13}
+				pattern={null}
+				jump={null}
+				linesVersion={0}
+				position={position}
+			/>
+		)
+
+		const scroller = screen.getByRole("document", { name: "big.log" })
+		const scrollbar = screen.getByRole("scrollbar", { name: "Position in file" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		expect(scrollbar.getAttribute("aria-controls")).toBe(scroller.id)
+		expect(scrollbar.tabIndex).toBe(0)
+
+		const before = position.get()
+
+		fireEvent.keyDown(scrollbar, { key: "PageDown" })
+		await act(async () => {
+			await Promise.resolve()
+		})
+		expect(position.get()).toBeGreaterThan(before)
+	})
+
+	it("carries a released touch drag on, slowing to a stop", async () => {
+		const position = positionStore()
+
+		render(
+			<LargeTextRows
+				reading={reading()}
+				alt="big.log"
+				fontSize={13}
+				pattern={null}
+				jump={null}
+				linesVersion={0}
+				position={position}
+			/>
+		)
+
+		const scroller = screen.getByRole("document", { name: "big.log" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const touch = { pointerType: "touch", pointerId: 1 }
+
+		fireEvent.pointerDown(scroller, { ...touch, clientY: 400 })
+		await new Promise(resolve => setTimeout(resolve, 20))
+		fireEvent.pointerMove(scroller, { ...touch, clientY: 360 })
+		fireEvent.pointerUp(scroller, { ...touch, clientY: 360 })
+
+		const released = position.get()
+
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 150))
+		})
+		expect(position.get()).toBeGreaterThan(released)
+	})
 })
