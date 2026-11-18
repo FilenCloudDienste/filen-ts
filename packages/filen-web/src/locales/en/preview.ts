@@ -54,6 +54,7 @@ import { previewTextBinary } from "@/locales/en/previewText/binary"
 import { previewTextEmail } from "@/locales/en/previewText/email"
 import { previewTextNotebook } from "@/locales/en/previewText/notebook"
 import { previewTextMermaid } from "@/locales/en/previewText/mermaid"
+import { previewTextLargeText } from "@/locales/en/previewText/largeText"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -911,5 +912,6 @@ export const preview = {
 	...previewTextBinary,
 	...previewTextEmail,
 	...previewTextNotebook,
-	...previewTextMermaid
+	...previewTextMermaid,
+	...previewTextLargeText
 } as const

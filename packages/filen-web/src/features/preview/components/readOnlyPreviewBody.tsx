@@ -1,6 +1,6 @@
 import { type ReactNode } from "react"
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { opensAsLargeText, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { DocxViewer } from "@/features/preview/components/docxViewer"
@@ -8,6 +8,8 @@ import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { LargeTextViewer } from "@/features/preview/components/largeTextViewer"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { FontViewer } from "@/features/preview/components/fontViewer"
 import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { EmailViewer } from "@/features/preview/components/emailViewer"
@@ -28,6 +30,19 @@ import { PresentationViewer } from "@/features/presentation/components/presentat
 // Never an editing surface. Guarded against a missing category arm by the `default` arm at the bottom,
 // the same way previewOverlay's own PreviewBody is.
 export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; category: PreviewCategory; alt: string }): ReactNode {
+	const profile = useDeviceProfile()
+
+	// A text-family file above the cap it loads whole within: read in ranges (LargeTextViewer refuses an origin that
+	// cannot be).
+	if (opensAsLargeText(category, item.data.size, profile)) {
+		return (
+			<LargeTextViewer
+				item={item}
+				alt={alt}
+			/>
+		)
+	}
+
 	switch (category) {
 		case "image":
 			return (

@@ -225,6 +225,16 @@ describe("sniffAdmits", () => {
 		expect(canPreview(fileNamed("disk.vhd", 2n * 1024n * MIB))).toBe(false)
 	})
 
+	// Text whatever the read finds, so large text above the cap; an archive's entry stays capped.
+	it("admits a .vcf at any size on the drive and a link, and a .dot only within its caps", () => {
+		for (const surface of ["drive", "link"] as const) {
+			expect(sniffAdmits(fileNamed("calls.vcf", 4n * 1024n * MIB), deviceProfile(), surface)).toBe(true)
+			expect(sniffAdmits(fileNamed("memo.dot", 4n * 1024n * MIB), deviceProfile(), surface)).toBe(false)
+		}
+
+		expect(sniffAdmits(fileNamed("calls.vcf", TEXT_MAX_BYTES + 1n), deviceProfile(), "entry")).toBe(false)
+	})
+
 	// The SDK lists the package at any size on the drive; a public link's or an archive's needs an archive reader.
 	it("admits a .key on the drive only, at any size", () => {
 		for (const size of [3n * MIB, 4n * 1024n * MIB]) {

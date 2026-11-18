@@ -27,7 +27,7 @@ import {
 import { toast } from "sonner"
 import { asDirectoryOrFile, driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { extensionOf, previewType, needsContentSniff, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewType, needsContentSniff, opensAsLargeText, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
@@ -105,6 +105,8 @@ import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
+import { LargeTextViewer } from "@/features/preview/components/largeTextViewer"
+import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
@@ -2779,6 +2781,7 @@ function PreviewBody({
 	canSaveCopy
 }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
+	const profile = useDeviceProfile()
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
 	// previewType/canPreview already guarantee a file arm for every item that ever reaches this
@@ -2796,6 +2799,16 @@ function PreviewBody({
 	// case below can pass it straight through as MediaViewer's own narrower category prop without a
 	// second, redundant resolution — a raw switch on the call expression doesn't narrow across cases.
 	const category = pinnedCategory ?? previewType(item)
+
+	// A text-family file above the cap it loads whole within: read in ranges, never editable.
+	if (opensAsLargeText(category, base.data.size, profile)) {
+		return (
+			<LargeTextViewer
+				item={item}
+				alt={alt}
+			/>
+		)
+	}
 
 	switch (category) {
 		case "image":

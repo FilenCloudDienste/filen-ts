@@ -303,7 +303,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -317,7 +317,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -331,7 +331,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -483,7 +483,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -498,7 +498,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -513,7 +513,7 @@ export const CATEGORY_POLICY = {
 		streamed: false,
 		ranged: false,
 		bufferCap: TEXT_MAX_BYTES,
-		aboveCap: "refuse",
+		aboveCap: "largeText",
 		entry: "whole",
 		anon: "buffer",
 		textFamily: true,
@@ -837,7 +837,7 @@ export function linkAdmits(category: PreviewCategory, size: bigint, profile: Dev
 		case "buffer": {
 			const cap = bufferedSizeCap(category, profile)
 
-			return cap === null || size <= cap
+			return cap === null || size <= cap || policy.aboveCap === "largeText"
 		}
 	}
 }
@@ -865,11 +865,21 @@ export function sniffAdmitsFor(subject: SniffSubject, profile: DeviceProfile, su
 		return true
 	}
 
-	return sniffCandidates(extension).some(candidate => {
-		const category = candidate === null ? null : previewCategoryForExtension(candidate)
+	const candidates = sniffCandidates(extension).map(candidate => ({
+		candidate,
+		category: candidate === null ? null : previewCategoryForExtension(candidate)
+	}))
+	// Whatever the read finds is text: above the cap it opens as large text (`.vcf`, a vCard or a Variant Call Format
+	// file). A name that may be something else (a `.vhd` disk image, a `.dot` Word template) keeps the caps.
+	const allText = candidates.every(({ category }) => category !== null && CATEGORY_POLICY[category].textFamily)
 
-		return candidate !== null && category !== null && surfaceAdmits(surface, category, candidate, subject.size, profile)
-	})
+	return candidates.some(
+		({ candidate, category }) =>
+			candidate !== null &&
+			category !== null &&
+			surfaceAdmits(surface, category, candidate, subject.size, profile) &&
+			(allText || !opensAsLargeText(category, subject.size, profile))
+	)
 }
 
 // sniffAdmitsFor a drive or link item; false for a directory or an undecryptable file.
@@ -988,6 +998,14 @@ export function canOpenAsText(item: DriveItem): boolean {
 // The JS-memory ceiling for a category previewed from a whole buffer; null for none (see CATEGORY_POLICY).
 export function bufferedSizeCap(category: PreviewCategory, profile: DeviceProfile): bigint | null {
 	return capFor(CATEGORY_POLICY[category].bufferCap, profile)
+}
+
+// Opens in the large text viewer, read in ranges and never editable, instead of its category's own: a text-family file
+// above the cap it is loaded whole within.
+export function opensAsLargeText(category: PreviewCategory, size: bigint, profile: DeviceProfile): boolean {
+	const cap = bufferedSizeCap(category, profile)
+
+	return CATEGORY_POLICY[category].aboveCap === "largeText" && cap !== null && size > cap
 }
 
 // Decision for a streamed image's POST-resolution failure (network drop, an SW-side decrypt abort, a

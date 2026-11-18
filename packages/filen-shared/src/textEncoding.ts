@@ -91,6 +91,11 @@ export function textEncodingLabel(name: string): string | null {
 // Legacy encodings with multi-byte sequences: never written back as-is.
 const MULTI_BYTE_LEGACY: ReadonlySet<string> = new Set(["gb18030", "gbk", "big5", "shift_jis", "euc-jp", "euc-kr", "iso-2022-jp"])
 
+// Whether `encoding` (a WHATWG name) is a legacy encoding whose characters take more than one byte.
+export function isMultiByteLegacy(encoding: string): boolean {
+	return MULTI_BYTE_LEGACY.has(encoding)
+}
+
 // A Map, so a language code never resolves an inherited object key.
 const LEGACY_BY_LANGUAGE: ReadonlyMap<string, string> = new Map([
 	["ru", "windows-1251"],
@@ -180,10 +185,10 @@ function decodeWith(label: string, bytes: Uint8Array, strict: boolean, prefix: b
 	}
 }
 
-type Bom = { label: "utf-8" | "utf-16le" | "utf-16be" | "utf-32le" | "utf-32be"; length: number }
+export type Bom = { label: "utf-8" | "utf-16le" | "utf-16be" | "utf-32le" | "utf-32be"; length: number }
 
-// UTF-32 LE is checked before UTF-16 LE: its mark starts with UTF-16 LE's.
-function readBom(bytes: Uint8Array): Bom | null {
+// The byte order mark the bytes start with. UTF-32 LE is checked before UTF-16 LE: its mark starts with UTF-16 LE's.
+export function readBom(bytes: Uint8Array): Bom | null {
 	const [b0, b1, b2, b3] = bytes
 
 	if (b0 === 0xef && b1 === 0xbb && b2 === 0xbf) {
@@ -254,7 +259,7 @@ function strictUtf16(label: string, bytes: Uint8Array, prefix: boolean): { text:
 const UTF32_CHUNK = 1 << 16
 
 // The platform has no UTF-32 decoder: code points become UTF-16 units, decoded by the platform per chunk.
-function decodeUtf32(bytes: Uint8Array, littleEndian: boolean, prefix: boolean): { text: string; lossy: boolean } {
+export function decodeUtf32(bytes: Uint8Array, littleEndian: boolean, prefix: boolean): { text: string; lossy: boolean } {
 	const whole = bytes.length & ~3
 	const view = new DataView(bytes.buffer, bytes.byteOffset, whole)
 	const units = new Uint16Array(Math.min(whole / 2, UTF32_CHUNK * 2))

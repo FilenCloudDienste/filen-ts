@@ -125,7 +125,15 @@ function CodeFindField({ chrome, locked }: { chrome: CodeChrome; locked: boolean
 
 // The status's encoding, as a menu: what was detected, Reopen with another encoding (not over unsaved edits), Convert to
 // UTF-8 where the file is editable here and not UTF-8 as is.
-function EncodingMenu({ format, encoding, dirty }: { format: TextFileFormat; encoding: TextEncodingControls; dirty: boolean }) {
+export function EncodingMenu({
+	format,
+	encoding,
+	dirty
+}: {
+	format: Pick<TextFileFormat, "encoding" | "bom">
+	encoding: TextEncodingControls
+	dirty: boolean
+}) {
 	const { t } = useTranslation("preview")
 	const label =
 		format.encoding === "utf-8"
@@ -299,7 +307,7 @@ function markdownGroup(markdown: MarkdownBar, phone: boolean): RibbonGroup {
 	}
 }
 
-function DownloadFile({ onDownload }: { onDownload: (() => void) | null }) {
+export function DownloadFile({ onDownload }: { onDownload: (() => void) | null }) {
 	const { t } = useTranslation("preview")
 
 	return onDownload === null ? null : (

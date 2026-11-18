@@ -1,0 +1,479 @@
+import { useRef, useState, useSyncExternalStore } from "react"
+import { useTranslation } from "react-i18next"
+import * as Comlink from "comlink"
+import { ListOrderedIcon, LockIcon, SearchIcon, SlidersHorizontalIcon, TextCursorInputIcon } from "lucide-react"
+import { formatBytes } from "@filen/shared"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { InputDialog } from "@/components/dialogs/inputDialog"
+import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
+import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { DownloadFile, EncodingMenu } from "@/features/preview/components/codeCommandBar"
+import { FullScreenButton } from "@/features/preview/components/commandBarControls"
+import { BAR_BUTTON, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
+import { DocxFindField } from "@/features/preview/components/docxToolbar"
+import type { DocxFindControls } from "@/features/preview/components/docxViewer.logic"
+import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
+import { LargeTextRows, type PagerJump } from "@/features/preview/components/largeTextRows"
+import { positionStore, type PositionStore } from "@/features/preview/lib/textPager/viewport.logic"
+import {
+	PreviewErrorState,
+	PreviewLoading,
+	PreviewNotTextState,
+	PreviewUnsupportedState
+} from "@/features/preview/components/previewErrorState"
+import { useTextPagerSession, type TextPagerReading } from "@/features/preview/hooks/useTextPagerSession"
+import { usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
+import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { searchPattern } from "@/features/preview/lib/textPager/search.logic"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { Kbd } from "@/lib/keymap/kbd"
+import { originRanged } from "@/lib/sdk/byteOrigin"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+
+// A text file too large to load whole, read-only in ranges (textPager.worker.ts): the command bar (File, Find with go to
+// line, View with Count lines), the size, position, encoding and a read-only badge, then the rows. Line numbers show
+// only for what a find, a go to line or Count lines has counted. An archive's entry read only whole stays too large.
+
+// What a scan reports as it goes: how far it has read.
+type Scan = { readonly kind: "search" | "count"; readonly scanned: number } | null
+
+interface FindState {
+	readonly open: boolean
+	readonly focus: number
+	readonly query: string
+	readonly caseSensitive: boolean
+	readonly count: number
+	readonly capped: boolean
+	readonly active: number
+}
+
+const CLOSED_FIND: FindState = { open: false, focus: 0, query: "", caseSensitive: false, count: 0, capped: false, active: -1 }
+
+// A positive line number, as typed.
+function typedLine(value: string): number | null {
+	const line = /^\s*(\d{1,15})\s*$/.exec(value)?.[1]
+
+	return line === undefined || Number(line) < 1 ? null : Number(line)
+}
+
+function Position({ position, size }: { position: PositionStore; size: number }) {
+	const { t } = useTranslation("preview")
+	const at = useSyncExternalStore(position.subscribe, position.get)
+
+	return <span>{t("previewLargeTextPosition", { percent: size === 0 ? 100 : Math.floor((at / size) * 100) })}</span>
+}
+
+function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: string }) {
+	const { t } = useTranslation(["preview", "common"])
+	const { pager, size, fail } = reading
+	const settings = useCodeViewSettings()
+	const download = usePreviewDownload()
+	const [position] = useState(positionStore)
+	const [jump, setJump] = useState<PagerJump | null>(null)
+	const [linesVersion, setLinesVersion] = useState(0)
+	const [lines, setLines] = useState<{ readonly count: number; readonly complete: boolean } | null>(null)
+	const [scan, setScan] = useState<Scan>(null)
+	const [find, setFind] = useState<FindState>(CLOSED_FIND)
+	const [goToLine, setGoToLine] = useState(false)
+	const searches = useRef(0)
+	const rootRef = useRef<HTMLDivElement | null>(null)
+	const pattern = find.open && find.query !== "" ? searchPattern(find.query, find.caseSensitive) : null
+	const rowsAbove = 3
+
+	const jumpTo = (offset: number, line: number | null, match: boolean): void => {
+		setJump(previous => ({ seq: (previous?.seq ?? 0) + 1, offset, before: rowsAbove, line, match }))
+	}
+
+	const showMatch = (index: number): void => {
+		void pager
+			.run(remote => remote.match(index))
+			.then(match => {
+				if (match !== null) jumpTo(match.offset, match.line, true)
+			}, fail)
+	}
+
+	const counted = (next: { lines: number; complete: boolean }): void => {
+		setLines({ count: next.lines, complete: next.complete })
+		setLinesVersion(version => version + 1)
+	}
+
+	const progress = (kind: "search" | "count") =>
+		Comlink.proxy((scanned: number) => {
+			setScan({ kind, scanned })
+		})
+
+	const search = (query: string, caseSensitive: boolean): void => {
+		const seq = ++searches.current
+
+		setFind(previous => ({ ...previous, query, caseSensitive, count: 0, capped: false, active: -1 }))
+
+		if (query === "") {
+			setScan(null)
+			void pager.run(remote => remote.stop()).catch(fail)
+
+			return
+		}
+
+		// The first match at or after the view's top is shown as soon as the search reaches it.
+		let shown = false
+		const from = position.get()
+		const onProgress = Comlink.proxy((scanned: number, count: number, first: number) => {
+			if (searches.current !== seq) {
+				return
+			}
+
+			setScan({ kind: "search", scanned })
+			setFind(previous => ({ ...previous, count, active: !shown && first !== -1 ? first : previous.active }))
+
+			if (!shown && first !== -1) {
+				shown = true
+				showMatch(first)
+			}
+		})
+
+		setScan({ kind: "search", scanned: 0 })
+		void pager
+			.run(remote => remote.search(query, caseSensitive, from, onProgress))
+			.then(result => {
+				if (searches.current !== seq) {
+					return
+				}
+
+				const active = shown ? null : result.first !== -1 ? result.first : result.count > 0 ? 0 : -1
+
+				setScan(null)
+				setFind(previous => ({
+					...previous,
+					count: result.count,
+					capped: result.end !== "done",
+					active: active ?? previous.active
+				}))
+				counted(result)
+
+				if (active !== null && active !== -1) showMatch(active)
+			}, fail)
+	}
+
+	const stop = (): void => {
+		void pager.run(remote => remote.stop()).catch(fail)
+	}
+
+	const countLines = (): void => {
+		searches.current++
+		setScan({ kind: "count", scanned: 0 })
+		void pager
+			.run(remote => remote.countLines(progress("count")))
+			.then(result => {
+				setScan(current => (current?.kind === "count" ? null : current))
+				counted(result)
+			}, fail)
+	}
+
+	const goTo = (line: number): void => {
+		searches.current++
+		setScan({ kind: "count", scanned: 0 })
+		void pager
+			.run(remote => remote.lineStart(line, progress("count")))
+			.then(offset => {
+				setScan(current => (current?.kind === "count" ? null : current))
+				void pager.run(remote => remote.lines()).then(counted, fail)
+
+				if (offset !== null) jumpTo(offset, null, false)
+			}, fail)
+	}
+
+	const findControls: DocxFindControls = {
+		query: find.query,
+		caseSensitive: find.caseSensitive,
+		count: find.count,
+		// More may come while the search runs.
+		capped: find.capped || scan?.kind === "search",
+		active: find.active,
+		search: (query, caseSensitive) => {
+			search(query, caseSensitive)
+		},
+		step: direction => {
+			if (find.count === 0) {
+				return
+			}
+
+			const next = find.active === -1 ? (direction > 0 ? 0 : find.count - 1) : (find.active + direction + find.count) % find.count
+
+			setFind(previous => ({ ...previous, active: next }))
+			showMatch(next)
+		},
+		close: () => {
+			searches.current++
+			stop()
+			setScan(null)
+			setFind(CLOSED_FIND)
+		}
+	}
+
+	const openFind = (): void => {
+		setFind(previous => ({ ...previous, open: true, focus: previous.focus + 1 }))
+	}
+
+	// Find, the next and previous match and go to line, with focus anywhere in the viewer or on its bar.
+	const onKey = (keyboardEvent: KeyboardEvent, run: () => void): void => {
+		const root = rootRef.current
+
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+		run()
+	}
+
+	useAction(
+		"editor.find",
+		keyboardEvent => {
+			onKey(keyboardEvent, openFind)
+		},
+		IN_EDITORS
+	)
+	useAction(
+		"editor.goToLine",
+		keyboardEvent => {
+			onKey(keyboardEvent, () => {
+				setGoToLine(true)
+			})
+		},
+		IN_EDITORS
+	)
+	useAction(
+		"editor.findNext",
+		keyboardEvent => {
+			onKey(keyboardEvent, () => {
+				findControls.step(1)
+			})
+		},
+		IN_EDITORS,
+		[find]
+	)
+	useAction(
+		"editor.findPrevious",
+		keyboardEvent => {
+			onKey(keyboardEvent, () => {
+				findControls.step(-1)
+			})
+		},
+		IN_EDITORS,
+		[find]
+	)
+
+	const groups: RibbonGroup[] = [
+		{
+			id: "find",
+			label: t("previewOfficeRibbonEditing"),
+			icon: SearchIcon,
+			width: 2 * BAR_BUTTON,
+			priority: Infinity,
+			content: (
+				<>
+					<RibbonButton
+						label={t("previewEditorFind")}
+						icon={<SearchIcon />}
+						shortcut={<Kbd action="editor.find" />}
+						onClick={openFind}
+					/>
+					<RibbonButton
+						label={t("previewCommandBarGoToLine")}
+						icon={<TextCursorInputIcon />}
+						shortcut={<Kbd action="editor.goToLine" />}
+						onClick={() => {
+							setGoToLine(true)
+						}}
+					/>
+				</>
+			)
+		},
+		{
+			id: "view",
+			label: t("previewOfficeRibbonTabView"),
+			icon: SlidersHorizontalIcon,
+			width: 2 * BAR_BUTTON,
+			priority: 2,
+			content: (
+				<>
+					<RibbonButton
+						label={t("previewLargeTextCountLines")}
+						icon={<ListOrderedIcon />}
+						disabled={lines?.complete === true || scan !== null}
+						onClick={countLines}
+					/>
+					<FullScreenButton />
+				</>
+			)
+		}
+	]
+
+	const stopButton = (
+		<Button
+			variant="outline"
+			size="sm"
+			className="h-6 px-2 text-xs"
+			onClick={stop}
+		>
+			{t("previewLargeTextStop")}
+		</Button>
+	)
+	const progressOf = (scanned: number) => ({ done: formatBytes(scanned), total: formatBytes(size) })
+
+	return (
+		<div
+			ref={rootRef}
+			className="flex size-full flex-col"
+		>
+			<OfficeCommandBar
+				label={t("previewOfficeRibbonCommands")}
+				file={<DownloadFile onDownload={download} />}
+				groups={groups}
+				replacement={
+					find.open ? (
+						<div className="flex min-w-0 flex-wrap items-center gap-2">
+							<DocxFindField
+								find={findControls}
+								focus={find.focus}
+								onClosed={() => {
+									rootRef.current?.querySelector<HTMLElement>("[role=document]")?.focus()
+								}}
+							/>
+							{scan?.kind === "search" ? (
+								<span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+									{t("previewLargeTextSearching", progressOf(scan.scanned))}
+									{stopButton}
+								</span>
+							) : null}
+						</div>
+					) : undefined
+				}
+				status={
+					<span className="flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+						{scan?.kind === "count" ? (
+							<span className="flex items-center gap-2">
+								{t("previewLargeTextCounting", progressOf(scan.scanned))}
+								{stopButton}
+							</span>
+						) : lines?.complete === true ? (
+							<span className="max-sm:hidden">{t("previewLargeTextLines", { count: lines.count })}</span>
+						) : null}
+						<span className="max-sm:hidden">{formatBytes(size)}</span>
+						<Position
+							position={position}
+							size={size}
+						/>
+						<EncodingMenu
+							format={{ encoding: reading.label, bom: reading.start > 0 }}
+							encoding={{
+								detected: reading.detected,
+								chosen: reading.label === reading.detected ? null : reading.label,
+								reopen: reading.reopen,
+								convert: null,
+								converted: false
+							}}
+							dirty={false}
+						/>
+						<Badge
+							variant="outline"
+							className="text-muted-foreground max-sm:hidden"
+						>
+							<LockIcon data-icon="inline-start" />
+							{t("previewCommandBarReadOnly")}
+						</Badge>
+					</span>
+				}
+			/>
+			<LargeTextRows
+				reading={reading}
+				alt={alt}
+				fontSize={settings.fontSize}
+				pattern={pattern}
+				jump={jump}
+				linesVersion={linesVersion}
+				position={position}
+			/>
+			<InputDialog
+				open={goToLine}
+				pending={false}
+				title={t("previewCommandBarGoToLine")}
+				body={t("previewLargeTextGoToLineLabel")}
+				label={t("previewCommandBarGoToLine")}
+				inputMode="numeric"
+				submitLabel={t("previewCommandBarGoToLineSubmit")}
+				validate={value => typedLine(value) !== null}
+				onOpenChange={setGoToLine}
+				onSubmit={value => {
+					const line = typedLine(value)
+
+					setGoToLine(false)
+
+					if (line !== null) goTo(line)
+				}}
+			/>
+		</div>
+	)
+}
+
+function LargeTextSession({ item, alt }: { item: DriveItem; alt: string }) {
+	const session = useTextPagerSession(item)
+
+	switch (session.status) {
+		case "pending":
+			return <PreviewLoading />
+		case "error":
+			return (
+				<PreviewErrorState
+					message={errorLabel(session.dto)}
+					onRetry={session.retry}
+				/>
+			)
+		case "notText":
+			return session.executable ? (
+				<BinaryInfoViewer item={item} />
+			) : (
+				<PreviewNotTextState
+					item={item}
+					onShowAnyway={session.showAnyway}
+				/>
+			)
+		case "ready":
+			return (
+				<LargeTextReader
+					// Read again with another encoding: new rows, a new find.
+					key={session.reading.label}
+					reading={session.reading}
+					alt={alt}
+				/>
+			)
+	}
+}
+
+// Never editable. Read in ranges from any origin that can be (a drive or link file, held bytes, an archive entry its
+// reader can seek); an archive entry decoded only whole is too large to show.
+export function LargeTextViewer({ item, alt }: { item: DriveItem; alt: string }) {
+	const { t } = useTranslation("preview")
+	const origin = usePreviewOrigin(item)
+
+	useLeaveViewerFullScreen()
+
+	if (origin.kind === "entry" && !originRanged(origin)) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewTextTooLarge")}
+			/>
+		)
+	}
+
+	return (
+		<LargeTextSession
+			item={item}
+			alt={alt}
+		/>
+	)
+}

@@ -23,6 +23,7 @@ import {
 	bufferedSizeCap,
 	previewCategoryForExtension,
 	linkAdmits,
+	opensAsLargeText,
 	PREVIEW_MAX_BYTES,
 	TEXT_MAX_BYTES,
 	RAW_IMAGE_EXTENSIONS,
@@ -148,7 +149,7 @@ describe("previewType — extension category map", () => {
 		expect(needsContentSniff(clip)).toBeNull()
 	})
 
-	it("keeps a .ts the probe found to be TypeScript code, under the text cap", () => {
+	it("keeps a .ts the probe found to be TypeScript code, as large text above the text cap", () => {
 		const big = fileNamed("bundle.ts", { size: TEXT_MAX_BYTES + 1n })
 
 		expect(canPreview(big)).toBe(true)
@@ -156,7 +157,8 @@ describe("previewType — extension category map", () => {
 		recordFileKindVerdict(big.data.uuid, "notTransportStream")
 
 		expect(previewType(big)).toBe("code")
-		expect(canPreview(big)).toBe(false)
+		expect(canPreview(big)).toBe(true)
+		expect(opensAsLargeText("code", big.data.size, deviceProfile())).toBe(true)
 	})
 
 	it("keeps TypeScript uploaded as video/mp2t editable code, and an audio-only .webm audio", () => {
@@ -661,14 +663,16 @@ describe("canPreview", () => {
 		expect(canPreview(fileNamed("deck.pptx", { size: 50n * 1024n * 1024n * 1024n }))).toBe(true)
 	})
 
-	// text/code/markdown are whole-buffer categories with their own, lower cap: a 32 MiB+1 log file must
-	// refuse preview rather than ever reaching CodeMirror.
+	// text/code/markdown are whole-buffer categories with their own, lower cap: a 32 MiB+1 log file never reaches
+	// CodeMirror, it opens in the large text viewer, read in ranges.
 	it.each([
 		["notes.txt", "text"],
 		["script.py", "code"],
 		["readme.md", "markdown"]
-	])("is false for a %s (%s) over the text size cap", name => {
-		expect(canPreview(fileNamed(name, { size: TEXT_MAX_BYTES + 1n }))).toBe(false)
+	] as const)("opens a %s (%s) over the text size cap as large text", (name, category) => {
+		expect(canPreview(fileNamed(name, { size: TEXT_MAX_BYTES + 1n }))).toBe(true)
+		expect(opensAsLargeText(category, TEXT_MAX_BYTES + 1n, deviceProfile())).toBe(true)
+		expect(opensAsLargeText(category, TEXT_MAX_BYTES, deviceProfile())).toBe(false)
 	})
 
 	it.each([

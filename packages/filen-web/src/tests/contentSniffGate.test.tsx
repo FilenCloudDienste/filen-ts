@@ -85,7 +85,7 @@ describe("ContentSniffGate on a .ts", () => {
 		expect(saved).not.toContain("a7000000-0000-0000-0000-000000000000")
 	})
 
-	it("opens TypeScript as code, and offers Download when it is too large to show as text", async () => {
+	it("opens TypeScript as code, the body's large text viewer taking it above the text cap", async () => {
 		probe.probeTransportStream.mockResolvedValue(false)
 		renderGate("types.ts", 4_000_000n, "a3000000-0000-0000-0000-000000000000")
 
@@ -97,7 +97,7 @@ describe("ContentSniffGate on a .ts", () => {
 		renderGate("bundle.ts", 40_000_000n, "a4000000-0000-0000-0000-000000000000")
 
 		await waitFor(() => {
-			expect(screen.getByText("This file is too large to show as text.")).toBeTruthy()
+			expect(screen.getByText("viewer:code")).toBeTruthy()
 		})
 	})
 

@@ -16,6 +16,7 @@ import {
 	isStreamedCategory,
 	itemTypeExtension,
 	needsImageTransform,
+	opensAsLargeText,
 	previewableSiblings,
 	previewCategoryForExtension,
 	previewType,
@@ -206,7 +207,12 @@ function legacyCanOpenEntry(name: string, size: number): boolean {
 }
 
 // The changes made on purpose since: a PDF opens in ranges up to the device's ceiling, on the drive and on a public
-// link alike, a public link reads a deck in ranges at any size, and streams an image the inline route can serve.
+// link alike, a public link reads a deck in ranges at any size, and streams an image the inline route can serve. A
+// text-family file opens at any size, above its cap in the large text viewer.
+function opensAsText(item: DriveItem): boolean {
+	return CATEGORY_POLICY[previewType(item)].textFamily
+}
+
 function withinPdfCeiling(item: DriveItem): boolean {
 	const max = deviceProfile().pdfRangedMax
 
@@ -214,7 +220,7 @@ function withinPdfCeiling(item: DriveItem): boolean {
 }
 
 function expectedCanPreview(item: DriveItem): boolean {
-	return previewType(item) === "pdf" ? withinPdfCeiling(item) : legacyCanPreview(item)
+	return previewType(item) === "pdf" ? withinPdfCeiling(item) : opensAsText(item) || legacyCanPreview(item)
 }
 
 function expectedAnon(item: DriveItem): string {
@@ -226,7 +232,7 @@ function expectedAnon(item: DriveItem): string {
 		case "image":
 			return allowedMediaContentType(item) === null ? legacyAnon(item) : "previewable"
 		default:
-			return legacyAnon(item)
+			return opensAsText(item) ? "previewable" : legacyAnon(item)
 	}
 }
 
@@ -340,7 +346,7 @@ describe("CATEGORY_POLICY reproduces the gates it replaced", () => {
 		expect(previewKindLabelKey(category)).toBe(LEGACY_LABELS[category])
 		expect(policy.entry !== "none").toBe(LEGACY_ENTRY.has(category))
 		expect(policy.pager).toBe(category !== "audio" && category !== "other")
-		expect(policy.aboveCap).toBe("refuse")
+		expect(policy.aboveCap).toBe(policy.textFamily ? "largeText" : "refuse")
 
 		for (const [kind, categories] of Object.entries(LEGACY_KIND)) {
 			expect(policy.assistantKind === kind, `${category} as ${kind}`).toBe(categories.has(category))
@@ -690,13 +696,16 @@ describe("the calendar and contact rows", () => {
 	it.each([
 		["calendar", ["team.ics", "team.ical", "busy.ifb"]],
 		["contact", ["people.vcf", "people.vcard"]]
-	] as const)("opens %s files wherever text opens, up to the text cap, and saves them as text", (category, names) => {
+	] as const)("opens %s files wherever text opens, as large text above the text cap, and saves them as text", (category, names) => {
 		for (const name of names) {
 			expect(previewType(fileNamed(name, 1024n)), name).toBe(category)
 			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES)), name).toBe(true)
-			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(false)
-			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES)), name).toBe("previewable")
+			expect(opensAsLargeText(category, TEXT_MAX_BYTES, deviceProfile()), name).toBe(false)
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(true)
+			expect(opensAsLargeText(category, TEXT_MAX_BYTES + 1n, deviceProfile()), name).toBe(true)
+			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe("previewable")
 			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) + 1 }]), 0), name).toBe(false)
 		}
 
 		expect(isTextCategory(category)).toBe(true)
@@ -730,14 +739,15 @@ describe("the mermaid row", () => {
 
 describe("the subtitle row", () => {
 	// Text before it had a viewer of its own, so every answer is still text's: cap, entry, link, saves, assistant.
-	it("opens subtitles wherever text opens, up to the text cap, and saves them as text", () => {
+	it("opens subtitles wherever text opens, as large text above the text cap, and saves them as text", () => {
 		for (const name of ["movie.srt", "movie.vtt", "movie.ass", "movie.ssa", "movie.smi", "movie.sami", "movie.sub"]) {
 			const item = fileNamed(name, 1024n)
 
 			expect(previewType(item), name).toBe("subtitle")
 			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES)), name).toBe(true)
-			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(false)
-			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES)), name).toBe("previewable")
+			// A `.sub` may be VobSub images, which nothing shows: its cap stays.
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(name !== "movie.sub")
+			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(name === "movie.sub" ? "too-large" : "previewable")
 			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
 		}
 
