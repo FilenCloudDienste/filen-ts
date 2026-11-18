@@ -52,3 +52,6 @@ docs/
 # argent tool output (screen recordings etc.); saved flows stay tracked
 **/.argent/*
 !**/.argent/flows/
+
+# Test runner output written by ad-hoc runs
+.vitest/
