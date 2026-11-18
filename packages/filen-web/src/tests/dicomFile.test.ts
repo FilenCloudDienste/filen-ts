@@ -616,6 +616,23 @@ describe("the tags", () => {
 		expect(rows.find(row => row.tag === "(0002,0010)")?.truncated).toBe(false)
 	})
 
+	it("trims a copied value's padding in linear time, however long its run of spaces", () => {
+		// 1 MiB of spaces with a letter after them: a trailing-run regex tries every space as a start.
+		const spaced = `${" ".repeat(MIB)}x`
+		const file = dicomFile({
+			transferSyntax: EXPLICIT_LE,
+			elements: [text(0x00081030, "UT", spaced), text(0x00081032, "UT", `x${" ".repeat(MIB - 1)}`)]
+		})
+		const header = readHeader(memorySource(file), { decodeBytes: DECODE })
+		const rootText = textOf(header.dataSet, null)
+		const rows = tagLevel(header.dataSet, [], rootText).rows
+		const started = performance.now()
+
+		expect(tagValue(header.dataSet, [rows.findIndex(row => row.tag === "(0008,1030)")], rootText)).toBe(spaced)
+		expect(tagValue(header.dataSet, [rows.findIndex(row => row.tag === "(0008,1032)")], rootText)).toBe("x")
+		expect(performance.now() - started).toBeLessThan(500)
+	})
+
 	it("reads an item's text by its own character set, else its parent's", () => {
 		const latin = Uint8Array.from([0x4d, 0xfc, 0x6c, 0x6c, 0x65, 0x72])
 		const file = dicomFile({

@@ -2,6 +2,7 @@ import { littleEndianByteArrayParser, type DataSet, type Element } from "dicom-p
 import { DICOM_TAGS } from "@/features/preview/lib/dicom/dicomTags.generated"
 import type { DicomTagLevel, DicomTagRow } from "@/features/preview/lib/dicom/protocol"
 import { dicomText, type DicomText } from "@/features/preview/lib/dicom/charset.logic"
+import { withoutPadding } from "@/features/preview/lib/dicom/transferSyntax"
 
 // A parsed file's elements as rows of a tree, named from the PS3.6 dictionary: the worker's side of the tag panel. A
 // sequence's children are its items, an item's its elements. Only one level is built per request, and at most
@@ -162,7 +163,7 @@ function valueOf(dataSet: DataSet, element: Element, vr: string, text: DicomText
 	if (TEXT_VRS.has(vr)) {
 		// Long text past the cut is never decoded whole for its row.
 		const length = whole ? element.length : Math.min(element.length, TAG_VALUE_CHARS * 4)
-		const value = text.decode(dataSet.byteArray.subarray(element.dataOffset, element.dataOffset + length), vr).replace(/[\0 ]+$/, "")
+		const value = withoutPadding(text.decode(dataSet.byteArray.subarray(element.dataOffset, element.dataOffset + length), vr))
 
 		if (whole) return { text: value, truncated: false }
 

@@ -70,7 +70,17 @@ const SYNTAXES: ReadonlyMap<string, TransferSyntax> = new Map([
 	["1.2.840.10008.1.2.4.203", encapsulated("htj2k")]
 ])
 
+// `text` without the NULs and spaces a DICOM value is padded with, walked back from its end: in linear time, where a
+// trailing-run regex is quadratic on a long run that something follows.
+export function withoutPadding(text: string): string {
+	let end = text.length
+
+	while (end > 0 && (text.charCodeAt(end - 1) === 0 || text.charCodeAt(end - 1) === 0x20)) end--
+
+	return end === text.length ? text : text.slice(0, end)
+}
+
 // A UID padded with its trailing NUL or space reads as the bare UID.
 export function transferSyntax(uid: string): TransferSyntax | null {
-	return SYNTAXES.get(uid.replace(/[\0 ]+$/, "")) ?? null
+	return SYNTAXES.get(withoutPadding(uid)) ?? null
 }
