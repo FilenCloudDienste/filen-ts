@@ -89,10 +89,23 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 			.toBe(true)
 	}
 
-	// Played on a while after the pick, which a move to the ladder would have made by then.
+	// Played on a second after the pick, which a move to the ladder would have made by then. The three-second clip
+	// loops, so the second is counted across a loop back to the start.
 	const at = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
 
-	await playing(page, at + 1)
+	await expect
+		.poll(
+			() =>
+				video
+					.evaluate((el, from) => {
+						const element = el as HTMLVideoElement
+
+						return (element.currentTime - from + element.duration) % element.duration
+					}, at)
+					.catch(() => 0),
+			{ timeout: LAZY_VIEWER_TIMEOUT_MS }
+		)
+		.toBeGreaterThan(1)
 
 	if (browserName === "webkit") {
 		// Still the direct stream, unless the switch stalled and the preview moved it to the ladder (MediaSource).
