@@ -35,6 +35,7 @@ import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { legacyUnprobedTransportStream } from "@/tests/support/legacySniff"
 import { canOpenEntry } from "@/features/archive/lib/entryAccess.logic"
 import { GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.logic"
+import { DXF_MAX_BYTES } from "@/features/preview/lib/previewCaps"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { isPhotoCategory } from "@/features/photos/lib/predicate"
 import { canEditImage, isTextCategory } from "@/features/drive/lib/previewSave.logic"
@@ -87,6 +88,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	sqlite: "drivePreviewKindSqlite",
 	geo: "drivePreviewKindGeo",
 	model3d: "drivePreviewKindModel3d",
+	cad: "drivePreviewKindCad",
 	torrent: "drivePreviewKindTorrent",
 	email: "drivePreviewKindEmail",
 	notebook: "drivePreviewKindNotebook",
@@ -300,6 +302,7 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"ebook",
 	"geo",
 	"model3d",
+	"cad",
 	"torrent",
 	"email",
 	"notebook",
@@ -634,6 +637,28 @@ describe("the model3d row", () => {
 		expect(previewType(fileNamed("main.obj", 1024n), "notWavefront")).toBe("other")
 		expect(previewKindLabelKey("model3d")).toBe("drivePreviewKindModel3d")
 		expect(isPhotoCategory("model3d")).toBe(false)
+	})
+})
+
+describe("the cad row", () => {
+	it("opens a .dxf up to the text cap, on the drive, a link and in an archive", () => {
+		expect(previewType(fileNamed("plan.dxf", 1024n))).toBe("cad")
+		expect(previewType(fileNamed("PLAN.DXF", 1024n))).toBe("cad")
+		expect(canPreview(fileNamed("plan.dxf", TEXT_MAX_BYTES))).toBe(true)
+		expect(canPreview(fileNamed("plan.dxf", TEXT_MAX_BYTES + 1n))).toBe(false)
+		expect(anonPreviewability(fileNamed("plan.dxf", TEXT_MAX_BYTES))).toBe("previewable")
+		expect(canOpenEntry(storeOf([{ path: "plan.dxf", access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0)).toBe(true)
+		// The text cap, so View source reads the bytes the drawing was built from.
+		expect(BigInt(DXF_MAX_BYTES)).toBe(TEXT_MAX_BYTES)
+	})
+
+	it("reads an extensionless drawing by its stored type, and leaves DWG a download", () => {
+		expect(previewType(fileNamed("plan", 1024n, "image/vnd.dxf"))).toBe("cad")
+		expect(previewType(fileNamed("plan", 1024n, "application/dxf"))).toBe("cad")
+		expect(previewType(fileNamed("plan.dwg", 1024n))).toBe("other")
+		expect(previewKindLabelKey("cad")).toBe("drivePreviewKindCad")
+		expect(isPhotoCategory("cad")).toBe(false)
+		expect(isTextCategory("cad")).toBe(false)
 	})
 })
 

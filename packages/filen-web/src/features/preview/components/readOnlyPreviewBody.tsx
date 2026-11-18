@@ -22,6 +22,7 @@ import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
+import { DxfViewer } from "@/features/preview/components/dxfViewer"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
 import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
 
@@ -161,6 +162,8 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 			return <GeoViewer item={item} />
 		case "model3d":
 			return <Model3dViewer item={item} />
+		case "cad":
+			return <DxfViewer item={item} />
 		// A public link's: anonPreviewability admits rawImage, its embedded preview read through the anon
 		// worker method by the provider around this. An archive's entry never asks for one.
 		case "rawImage":

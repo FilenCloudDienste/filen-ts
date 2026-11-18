@@ -28,7 +28,7 @@ import { GEO_FORMATS, GEO_MAX_BYTES } from "@/features/preview/lib/geo/formats.l
 import { capFor, deviceProfile, type DeviceProfile, type ProfileCap } from "@/lib/deviceProfile"
 import type { DriveKey } from "@/lib/i18n"
 import { VIDEO_CONTAINERS, type VideoContainer } from "@filen/shared/videos"
-import { EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
+import { DXF_MAX_BYTES, EMAIL_MAX_BYTES, TEXT_CAP } from "@/features/preview/lib/previewCaps"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -52,6 +52,7 @@ export type PreviewCategory =
 	| "sqlite"
 	| "geo"
 	| "model3d"
+	| "cad"
 	| "torrent"
 	| "email"
 	| "subtitle"
@@ -448,6 +449,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindModel3d",
 		assistantKind: null
 	},
+	// DXF drawings, read whole into the CAD worker (the cap is the text cap, so View source reuses the held bytes).
+	cad: {
+		streamed: false,
+		ranged: false,
+		bufferCap: BigInt(DXF_MAX_BYTES),
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindCad",
+		assistantKind: null
+	},
 	// A message read whole in the text-family worker: its body in a script-less frame, nothing remote loaded; kept as it
 	// arrived (its source is read-only).
 	email: {
@@ -637,6 +653,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[GEO_FORMATS, "geo"],
 	// A `.obj` is a Wavefront model unless its head is not text (a compiled object file).
 	[MODEL_FORMATS, "model3d"],
+	// DXF is text (its source opens read-only from the viewer); DWG stays a download.
+	[["dxf"], "cad"],
 	[["torrent"], "torrent"],
 	[["eml", "msg"], "email"],
 	[["md", "markdown", "mkd"], "markdown"],

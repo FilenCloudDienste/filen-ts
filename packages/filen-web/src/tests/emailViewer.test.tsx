@@ -39,7 +39,7 @@ const { message } = vi.hoisted((): { message: { current: string | Uint8Array } }
 // A small text cap, so bodies and files past it stay small here.
 // The message's source past the text cap: read in ranges by the large text viewer.
 vi.mock("@/features/preview/components/largeTextViewer", () => ({ LargeTextViewer: () => <p>large text source</p> }))
-vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864 }))
+vi.mock("@/features/preview/lib/previewCaps", () => ({ TEXT_CAP: 4096, EMAIL_MAX_BYTES: 67_108_864, DXF_MAX_BYTES: 4096 }))
 // The sanitizer's HTML cap, as small: HTML past it is never sent to the page.
 vi.mock("@filen/shared/dom/emailSanitizer", async importOriginal => ({
 	...(await importOriginal<typeof import("@filen/shared/dom/emailSanitizer")>()),

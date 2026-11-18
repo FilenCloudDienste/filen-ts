@@ -103,6 +103,7 @@ import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
 import { Model3dViewer } from "@/features/preview/components/model3dViewer"
+import { DxfViewer } from "@/features/preview/components/dxfViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { LargeTextViewer } from "@/features/preview/components/largeTextViewer"
@@ -3046,6 +3047,8 @@ function PreviewBody({
 			return <GeoViewer item={item} />
 		case "model3d":
 			return <Model3dViewer item={item} />
+		case "cad":
+			return <DxfViewer item={item} />
 		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive
 		// switch's required fallback.
 		case "other":
