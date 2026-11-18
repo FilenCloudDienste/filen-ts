@@ -9,6 +9,10 @@ import { MIDI_MAX_EVENTS } from "@filen/shared"
 
 const PARSE_BYTES = 40 * 1024 * 1024
 const WORKER_HEAP_BYTES = 60 * 1024 * 1024
+// The render's thread CPU time over a reference workload's (midiWorkerHost's `calibrate`) for the same length of audio.
+// A desktop core renders the dense song at about 4 times the reference, a twentieth of the core: 9 times is about a
+// tenth of it, and a slower or busier machine raises both sides.
+const RENDER_TO_REFERENCE = 9
 
 // Runs `body` (an ES module's statements) in `node --expose-gc` and returns what it prints, parsed.
 function measure(body: string): unknown {
@@ -110,7 +114,7 @@ function denseMidi(seconds: number): Uint8Array<ArrayBuffer> {
 }
 
 describe("MIDI worker", () => {
-	it("renders a dense song at under a tenth of a core, adding under 60 MiB to a worker that holds its bank", async () => {
+	it("renders a dense song at under 9 times a reference workload's CPU, adding under 60 MiB to a worker that holds its bank", async () => {
 		const { Worker } = await import("node:worker_threads")
 		const worker = new Worker(new URL("./fixtures/synth/midiWorkerHost.ts", import.meta.url), {
 			execArgv: ["--import", "tsx"],
@@ -161,18 +165,26 @@ describe("MIDI worker", () => {
 
 			const { handle } = await ask({ type: "open", key: "dense", sampleRate: 48_000 })
 			const SECONDS = 10
-			const started = Number((await ask({ type: "cpu" })).cpu)
+			let render = 0
+			let reference = 0
 			let frames = 0
 
-			while (frames < SECONDS * 48_000) {
-				frames += Number((await ask({ type: "render", handle, frames: 4096 })).frames)
+			// Two seconds at a time, each followed by the reference workload: both run on the same thread over the same
+			// stretch, so what slows one (a slower CPU, a neighbour thrashing the cache) slows the other.
+			for (let second = 2; second <= SECONDS; second += 2) {
+				const started = Number((await ask({ type: "cpu" })).cpu)
+
+				while (frames < second * 48_000) {
+					frames += Number((await ask({ type: "render", handle, frames: 4096 })).frames)
+				}
+
+				render += Number((await ask({ type: "cpu" })).cpu) - started
+				reference += Number((await ask({ type: "calibrate" })).cpu)
 			}
 
-			// The thread's own CPU time: what else the machine runs meanwhile does not count.
-			const elapsed = (Number((await ask({ type: "cpu" })).cpu) - started) / 1_000_000
 			const { heap } = await ask({ type: "heap" })
 
-			expect(elapsed / SECONDS).toBeLessThan(0.1)
+			expect(render / reference).toBeLessThan(RENDER_TO_REFERENCE)
 			expect(Number(heap) - idle).toBeLessThan(WORKER_HEAP_BYTES)
 		} finally {
 			await worker.terminate()
