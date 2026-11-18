@@ -258,8 +258,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
       '@filen/sdk-rs':
-        specifier: 0.5.32
-        version: 0.5.32(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
+        specifier: 0.5.33
+        version: 0.5.33
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -1134,8 +1134,8 @@ importers:
         specifier: workspace:*
         version: link:../filen-office
       '@filen/sdk-rs':
-        specifier: 0.5.32
-        version: 0.5.32(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
+        specifier: 0.5.33
+        version: 0.5.33
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -2985,14 +2985,33 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
+  '@filen/sdk-rs-darwin-arm64@0.5.33':
+    resolution: {integrity: sha512-koqjRqTdFrbdgmkR61OFE14Dmz/O1KERjVp0U36ZCLgb6hC9flBzibh1u2V+LQtt8W8DDYReN3w82e8ibyDFqg==}
+    engines: {node: '>=23'}
+    cpu: [arm64]
+    os: [darwin]
+
   '@filen/sdk-rs-darwin-x64@0.5.32':
     resolution: {integrity: sha512-njHyH6i/LWsYeXCDMw184GQb5R13pstDJPEFIOCV5wkTVQZNgl1LMKqw+v7t/qX8bJKMsnE2K+Iv7NtsCNMyCg==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [darwin]
 
+  '@filen/sdk-rs-darwin-x64@0.5.33':
+    resolution: {integrity: sha512-WQTSFhTTx2t0I0DW56sixIR65uo9cHlYC3g0g1Hm4+mn3Wk+pS1OjBmw12wMYOu+MBZf54a48L/j1cVJwnRczA==}
+    engines: {node: '>=23'}
+    cpu: [x64]
+    os: [darwin]
+
   '@filen/sdk-rs-linux-arm64-gnu@0.5.32':
     resolution: {integrity: sha512-xAjTRXfeaXQnplWz4MEtP5FnaHGnRWg0ylwkKGj9VzIoy2zpOktqbjtEI1wZIK8Hi4L9eeS+BjDsKX3CumBXzQ==}
+    engines: {node: '>=23'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.33':
+    resolution: {integrity: sha512-ryDtzsVVRS9orhn2fmDPqkC7KxV3YQWx35dtRugGj4BizeHuwHDi3B7GIEaKZFsmW4T8I+eYSKG7OM6USwXkAQ==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [linux]
@@ -3005,8 +3024,21 @@ packages:
     os: [linux]
     libc: [glibc]
 
+  '@filen/sdk-rs-linux-x64-gnu@0.5.33':
+    resolution: {integrity: sha512-KBcs04lgwmOnUlYHZF3MeNFcXHLbPucUbEGTAclIiEsfv/5uiPoPzuuIWwVq8QapAQ42U/0FS0KQJ6olqx9hoQ==}
+    engines: {node: '>=23'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
   '@filen/sdk-rs-win32-arm64-msvc@0.5.32':
     resolution: {integrity: sha512-Tsbc432ysVDmggmVOdjCTvXInsbyx3Kepw9eeB/rDcVKwaTUHU5X6I+AuOndJkkq96x689mLML+UYc4E4Bg+/Q==}
+    engines: {node: '>=23'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.33':
+    resolution: {integrity: sha512-NsamvfXmiDL0fjOkeu5rtBEFt5SF41E0oKeWdQA0zQhXjcpsVI/0frmqSnsIeAoBgpvUKDc+sR7I7Y7OrtPBmA==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [win32]
@@ -3017,8 +3049,18 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@filen/sdk-rs-win32-x64-msvc@0.5.33':
+    resolution: {integrity: sha512-Qxafse5R8aRQVxNzp22FIariz6oE1q3krPCLStExwCqt3TSs3vEh2ThPkjNEGJh7BDDubPEkZhQNRZucckOVpw==}
+    engines: {node: '>=23'}
+    cpu: [x64]
+    os: [win32]
+
   '@filen/sdk-rs@0.5.32':
     resolution: {integrity: sha512-pWS5rHKsAQH87r/8eZ4HiluEaAd0ZZ5FTBcz8BHSspw8toxVwm7sNqLwNtLUnNmzva6pOME//Q5xR0UZbMGpYQ==}
+    engines: {node: '>=23'}
+
+  '@filen/sdk-rs@0.5.33':
+    resolution: {integrity: sha512-klLbLBvAT+GuMmoQeOIcA/NvYSRN84jTJgZMYZ6dQui9CNYrdv0XGmBR3B7rgUWYiM4WmFsZ4EKV0lozweMbVQ==}
     engines: {node: '>=23'}
 
   '@floating-ui/core@1.8.0':
@@ -13662,19 +13704,37 @@ snapshots:
   '@filen/sdk-rs-darwin-arm64@0.5.32':
     optional: true
 
+  '@filen/sdk-rs-darwin-arm64@0.5.33':
+    optional: true
+
   '@filen/sdk-rs-darwin-x64@0.5.32':
+    optional: true
+
+  '@filen/sdk-rs-darwin-x64@0.5.33':
     optional: true
 
   '@filen/sdk-rs-linux-arm64-gnu@0.5.32':
     optional: true
 
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.33':
+    optional: true
+
   '@filen/sdk-rs-linux-x64-gnu@0.5.32':
+    optional: true
+
+  '@filen/sdk-rs-linux-x64-gnu@0.5.33':
     optional: true
 
   '@filen/sdk-rs-win32-arm64-msvc@0.5.32':
     optional: true
 
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.33':
+    optional: true
+
   '@filen/sdk-rs-win32-x64-msvc@0.5.32':
+    optional: true
+
+  '@filen/sdk-rs-win32-x64-msvc@0.5.33':
     optional: true
 
   '@filen/sdk-rs@0.5.32(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)':
@@ -13687,6 +13747,17 @@ snapshots:
       '@filen/sdk-rs-linux-x64-gnu': 0.5.32
       '@filen/sdk-rs-win32-arm64-msvc': 0.5.32
       '@filen/sdk-rs-win32-x64-msvc': 0.5.32
+
+  '@filen/sdk-rs@0.5.33':
+    dependencies:
+      uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
+    optionalDependencies:
+      '@filen/sdk-rs-darwin-arm64': 0.5.33
+      '@filen/sdk-rs-darwin-x64': 0.5.33
+      '@filen/sdk-rs-linux-arm64-gnu': 0.5.33
+      '@filen/sdk-rs-linux-x64-gnu': 0.5.33
+      '@filen/sdk-rs-win32-arm64-msvc': 0.5.33
+      '@filen/sdk-rs-win32-x64-msvc': 0.5.33
 
   '@floating-ui/core@1.8.0':
     dependencies:

@@ -68,7 +68,8 @@ function waitingUpdate(phase: ListUpdate["phase"]): ListJobEvent {
 			undeliveredEntries: 0n,
 			bytesPerSecond: undefined,
 			etaMs: undefined,
-			activeTimeMs: 0n
+			activeTimeMs: 0n,
+			reading: undefined
 		}
 	}
 }

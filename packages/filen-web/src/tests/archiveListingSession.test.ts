@@ -87,6 +87,7 @@ function update(phase: ListUpdate["phase"], extra: Partial<ListUpdate> = {}): Li
 			bytesPerSecond: undefined,
 			etaMs: undefined,
 			activeTimeMs: 0n,
+			reading: undefined,
 			...extra
 		}
 	}
