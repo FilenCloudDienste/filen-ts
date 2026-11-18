@@ -395,20 +395,47 @@ describe("the view, keys and presets", () => {
 })
 
 describe("the frame cache and budget", () => {
-	it("drops the least recently used frames past its cap", () => {
-		const cache = new FrameCache<string>(10)
+	it("keeps the frames ahead of a cine loop longer than it, rather than the ones just shown", () => {
+		// 10 frames looped three times, room for 8: the frames furthest from being shown again go first.
+		const cache = new FrameCache<number>(8)
+		let hits = 0
 
-		cache.set(0, "a", 4)
-		cache.set(1, "b", 4)
-		cache.get(0)
-		cache.set(2, "c", 4)
+		for (let step = 0; step < 30; step++) {
+			const frame = step % 10
 
-		expect(cache.get(1)).toBeUndefined()
-		expect(cache.get(0)).toBe("a")
+			cache.anchor(frame, 10, true)
+
+			if (cache.has(frame)) hits++
+			else cache.set(frame, frame, 1)
+		}
+
+		// Every loop after the first finds all but the frames the cache cannot hold (an LRU finds none).
+		expect(hits).toBeGreaterThanOrEqual(2 * 7)
 		expect(cache.bytes).toBe(8)
+	})
 
-		cache.set(3, "huge", 11)
-		expect(cache.get(3)).toBeUndefined()
+	it("keeps the frames nearest the one on screen while stepping, and nothing past its cap", () => {
+		const cache = new FrameCache<string>(3)
+
+		for (const frame of [0, 1, 2, 3, 4]) {
+			cache.anchor(frame, 10, false)
+			cache.set(frame, String(frame), 1)
+		}
+
+		expect([0, 1, 2, 3, 4].filter(frame => cache.has(frame))).toEqual([2, 3, 4])
+
+		// Back to frame 1: frame 4 is the furthest, and goes for it.
+		cache.anchor(1, 10, false)
+		expect(cache.keeps(1, 1)).toBe(true)
+		cache.set(1, "1", 1)
+		expect([1, 2, 3, 4].filter(frame => cache.has(frame))).toEqual([1, 2, 3])
+		// Further than every frame kept: not kept.
+		expect(cache.keeps(9, 1)).toBe(false)
+		cache.set(9, "9", 1)
+		expect(cache.has(9)).toBe(false)
+
+		cache.set(5, "huge", 4)
+		expect(cache.get(5)).toBeUndefined()
 	})
 
 	it("works out the pixels left once the file is held", () => {

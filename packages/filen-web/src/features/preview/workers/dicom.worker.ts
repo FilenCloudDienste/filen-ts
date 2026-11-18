@@ -164,8 +164,8 @@ function schedule(): void {
 	})
 }
 
-// One playback step a frame time after the last: the next frame (looping), decoded before the step after is timed, so
-// a slow decode slows playback rather than queueing frames.
+// One playback step a frame time after the last: the next frame (looping), then the one after it decoded while this
+// one is on screen, before the step after is timed, so a slow decode slows playback rather than queueing frames.
 function playStep(now: number): void {
 	tick = null
 
@@ -180,9 +180,16 @@ function playStep(now: number): void {
 	}
 
 	lastStep = now
-	void showFrame((current + 1) % state.info.frames).then(() => {
-		if (playing && !hidden && tick === null) tick = requestAnimationFrame(playStep)
-	})
+
+	const next = (current + 1) % state.info.frames
+
+	void showFrame(next)
+		.then(async () => {
+			await prefetch(state, (next + 1) % state.info.frames)
+		})
+		.then(() => {
+			if (playing && !hidden && tick === null) tick = requestAnimationFrame(playStep)
+		})
 }
 
 function setPlaying(on: boolean): void {
@@ -458,12 +465,28 @@ async function decode(state: Opened, index: number): Promise<FrameSamples> {
 	return decoded
 }
 
+// The frame after the one on screen in play order, decoded into the cache while cine plays and the cache would keep
+// it (sized as the frame on screen). A frame that fails is let be: its own step shows why.
+async function prefetch(state: Opened, index: number): Promise<void> {
+	const shown = samples
+
+	if (!playing || hidden || opened !== state || shown === null || cache.has(index) || !cache.keeps(index, shown.data.byteLength)) return
+
+	try {
+		await decode(state, index)
+	} catch {
+		// shown by its own step
+	}
+}
+
 async function showFrame(index: number): Promise<DicomFrameOutcome> {
 	const state = opened
 
 	if (state === null) return "unsupported"
 
 	const ticket = ++requested
+
+	cache.anchor(index, state.info.frames, playing)
 
 	try {
 		const decoded = await decode(state, index)
