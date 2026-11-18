@@ -550,9 +550,14 @@ const api = {
 								},
 								held: () => held + ringBytes + framesHeld(),
 								heap: codecHeap,
+								// Past what the budget leaves, a grown heap goes even while cine plays.
 								settle: (decoder, need) => {
-									if (releasesHeap(codecHeap(decoder), need, playing)) releaseCodec(decoder)
-								}
+									const heap = codecHeap(decoder)
+
+									if (releasesHeap(heap, need, playing) || held + ringBytes + framesHeld() + heap > decodeBytes)
+										releaseCodec(decoder)
+								},
+								release: releaseCodec
 							},
 							compressed: decodeCompressed
 						}

@@ -32,6 +32,7 @@ import {
 	HTJ2K,
 	JPEG_2000,
 	JPEG_BASELINE,
+	JPEG_LS,
 	RLE,
 	binary,
 	dicomFile,
@@ -50,7 +51,7 @@ import {
 
 const MIB = 1024 * 1024
 const DECODE = 1024 * MIB
-const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpeg2000", "htj2k"])
+const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpegLs", "jpeg2000", "htj2k"])
 
 // A 3×2 CT frame stored 12 bits in 16, signed, with a rescale to Hounsfield units.
 function ctFile(syntax: string, extra: ReturnType<typeof text>[] = []): Uint8Array {
@@ -116,7 +117,7 @@ function context(file: Uint8Array, decodeBytes = DECODE): { context: FrameContex
 			syntax: header.syntax,
 			color: verdict.color,
 			source: header.pixels,
-			budget: { decodeBytes, held: () => fileHeld(header, 0), heap: () => 0, settle: () => undefined },
+			budget: { decodeBytes, held: () => fileHeld(header, 0), heap: () => 0, settle: () => undefined, release: () => undefined },
 			compressed: null
 		}
 	}
@@ -480,6 +481,50 @@ describe("frames", () => {
 
 		main[main.length - 6] = 1
 		expect(jpeg2000Header(main)?.codeBlock).toBe(8)
+	})
+
+	it("lets a grown codec heap go before refusing the next frame, rather than refusing every frame after it", async () => {
+		const side = 2048
+		const file = dicomFile({
+			transferSyntax: JPEG_LS,
+			elements: grayModule({ rows: side, columns: side, bitsAllocated: 16, bitsStored: 16, highBit: 15, signed: false }),
+			pixelData: encapsulated([new Uint8Array(64)])
+		})
+		const { context: frame } = context(file)
+		const index = fragmentIndex(frame)
+
+		if (index === null) throw new Error("no fragments")
+
+		// A heap a hostile frame grew to 300 MiB leaves a 320 MiB budget no room for a 2048² frame; a fresh one does.
+		let heap = 300 * MIB
+		const release = vi.fn(() => {
+			heap = 50 * MIB
+		})
+		const decoded = {
+			data: new Uint16Array(4),
+			rows: side,
+			columns: side,
+			samplesPerPixel: 1,
+			color: "gray" as const,
+			planar: false,
+			shift: 0
+		}
+		const decode = vi.fn(() => Promise.resolve(decoded))
+		const budget = { ...frame.budget, decodeBytes: 320 * MIB, heap: () => heap, release }
+
+		await expect(encapsulatedFrame({ ...frame, compressed: decode, budget }, index, 0)).resolves.toBe(decoded)
+		expect(release).toHaveBeenCalledWith("jpegLs")
+		expect(decode).toHaveBeenCalledTimes(1)
+
+		// A frame no fresh heap would fit is still refused, the heap let go once.
+		heap = 300 * MIB
+		release.mockClear()
+		await expect(
+			encapsulatedFrame({ ...frame, compressed: decode, budget: { ...budget, decodeBytes: 60 * MIB } }, index, 0)
+		).rejects.toMatchObject({
+			reason: "tooLarge"
+		})
+		expect(release).toHaveBeenCalledTimes(1)
 	})
 
 	it("reads a range only within the file, allocating nothing for a read past its end", () => {

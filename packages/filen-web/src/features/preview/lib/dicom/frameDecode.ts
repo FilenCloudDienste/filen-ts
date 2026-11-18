@@ -10,6 +10,7 @@ import {
 import { jpeg2000Header, matchesTags, reductionWithin, type Jpeg2000Header } from "@/features/preview/lib/dicom/codestream.logic"
 import { decodeRle, DicomRleError } from "@/features/preview/lib/dicom/rle.logic"
 import {
+	DICOM_CODEC_INITIAL_HEAP,
 	DICOM_MIN_CODE_BLOCK,
 	decoderCost,
 	framePixels,
@@ -47,6 +48,8 @@ export interface DecodeBudget {
 	readonly heap: (decoder: DicomDecoder) => number
 	// Once a frame has decoded (or failed to): the heap its decoder needed, so a grown heap may be let go.
 	readonly settle: (decoder: DicomDecoder, need: number) => void
+	// Lets the decoder's module, and its grown heap, go: the next decode loads it afresh at its initial heap.
+	readonly release: (decoder: DicomDecoder) => void
 }
 
 // A decoder of compressed frames (the codecs): the frame's codestream into samples. `pixels` is the budget left for
@@ -108,9 +111,37 @@ interface Budgeted {
 // Bytes a fragment's span takes while its frame is read (the object and its two numbers).
 const SPAN_BYTES = 48
 
-function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace: boolean, indexBytes = 0, structure = 0): Budgeted {
+// The pixels a frame may decode to; refused (tooLarge) when they do not fit it, by `fits`. A codec heap grown past its
+// initial size is let go first and the frame weighed again, so a heap a large frame left cannot keep refusing the next.
+function checkBudget(
+	context: FrameContext,
+	encodedBytes: number,
+	encodedInPlace: boolean,
+	indexBytes = 0,
+	structure = 0,
+	fits: (pixels: number) => boolean = () => true
+): Budgeted {
+	const weighed = weigh(context, encodedBytes, encodedInPlace, indexBytes, structure)
+	const { rows, columns } = context.module
+	const { decoder } = context.syntax
+	const fitting = (pixels: number): boolean => pixels >= 1 && (rows * columns <= pixels || REDUCIBLE.has(decoder)) && fits(pixels)
+
+	if (fitting(weighed.pixels)) return weighed
+
+	if (context.budget.heap(decoder) > DICOM_CODEC_INITIAL_HEAP) {
+		context.budget.release(decoder)
+
+		const again = weigh(context, encodedBytes, encodedInPlace, indexBytes, structure)
+
+		if (fitting(again.pixels)) return again
+	}
+
+	tooLarge()
+}
+
+function weigh(context: FrameContext, encodedBytes: number, encodedInPlace: boolean, indexBytes: number, structure: number): Budgeted {
 	const { module, syntax, source, budget } = context
-	const { rows, columns, samplesPerPixel, bitsAllocated } = module
+	const { samplesPerPixel, bitsAllocated } = module
 	const { decoder } = syntax
 	const compressed = decoder !== "native" && decoder !== "rle"
 	const cost = decoderCost({
@@ -129,8 +160,6 @@ function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace
 		structure,
 		drawnPixels: MAX_BACKING_SIDE * MAX_BACKING_SIDE
 	})
-
-	if (pixels < 1 || (rows * columns > pixels && !REDUCIBLE.has(decoder))) tooLarge()
 
 	return { cost, pixels }
 }
@@ -153,9 +182,14 @@ function checkedJpeg2000(context: FrameContext, bytes: Uint8Array): Jpeg2000Head
 function checkReducible(context: FrameContext, header: Jpeg2000Header, encoded: EncodedFrame): Budgeted {
 	const decoder = context.syntax.decoder === "htj2k" ? "htj2k" : "jpeg2000"
 	const structure = structureBytes(decoder, header)
-	const budgeted = checkBudget(context, encoded.bytes, encoded.inPlace, encoded.indexBytes, structure)
-
-	if (reductionWithin(header, budgeted.pixels) === null) tooLarge()
+	const budgeted = checkBudget(
+		context,
+		encoded.bytes,
+		encoded.inPlace,
+		encoded.indexBytes,
+		structure,
+		pixels => reductionWithin(header, pixels) !== null
+	)
 
 	return { ...budgeted, structure }
 }
