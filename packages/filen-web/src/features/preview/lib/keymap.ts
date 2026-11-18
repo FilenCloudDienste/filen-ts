@@ -68,6 +68,19 @@ export const PDF_VIEWER_ACTIONS: readonly Def<PdfViewerAction>[] = [
 	pdfAction("preview.pdfOutline", "", "preview:previewKeyPdfOutline")
 ]
 
+// The comic reader's page keys (comicPager.tsx). The arrows stay with paging between the files (X23); the on-screen
+// arrows follow the reading direction, these never do.
+export type ComicViewerAction = "preview.comicNextPage" | "preview.comicPreviousPage"
+
+function comicAction(id: ComicViewerAction, defaultCombo: string, descriptionKey: ActionDef["descriptionKey"]): Def<ComicViewerAction> {
+	return { id, defaultCombo, scope: "editor", section: "viewer", descriptionKey, hintKey: "settings:keyboardHintPreview" }
+}
+
+export const COMIC_VIEWER_ACTIONS: readonly Def<ComicViewerAction>[] = [
+	comicAction("preview.comicNextPage", "pagedown", "preview:previewKeyComicNextPage"),
+	comicAction("preview.comicPreviousPage", "pageup", "preview:previewKeyComicPreviousPage")
+]
+
 // The preview overlay's own keys, for the file on screen (previewOverlay.tsx): paging between the files, closing, and
 // the header's download and item menu, with Finder's and Explorer's keys for those: F2 renames, Delete (Cmd+Backspace
 // on a Mac) trashes, Alt+Enter (Cmd+I on a Mac) shows the info, Shift+F10 opens the menu. Mod+S downloads a file that
@@ -410,6 +423,7 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 		hintKey: "settings:keyboardHintPreview"
 	},
 	...PDF_VIEWER_ACTIONS,
+	...COMIC_VIEWER_ACTIONS,
 	...IMAGE_EDITOR_ACTIONS,
 	...VIDEO_EDITOR_ACTIONS,
 	...PREVIEW_OVERLAY_ACTIONS,

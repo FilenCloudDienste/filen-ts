@@ -84,6 +84,7 @@ import { ImageViewer, RawImageViewer } from "@/features/preview/components/image
 import type { FileVerdict } from "@filen/shared"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
+import { ComicViewer } from "@/features/comics/components/comicViewer"
 import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 import { fileKindVerdict, subscribeFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
 import { DocxViewer } from "@/features/preview/components/docxViewer"
@@ -3023,6 +3024,13 @@ function PreviewBody({
 		case "archive":
 			return (
 				<ArchiveBrowser
+					item={item}
+					variant={variant}
+				/>
+			)
+		case "comic":
+			return (
+				<ComicViewer
 					item={item}
 					variant={variant}
 				/>

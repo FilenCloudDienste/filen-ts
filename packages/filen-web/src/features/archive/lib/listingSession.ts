@@ -6,7 +6,7 @@ import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { ArchiveNameInfo, ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
 import { archiveNameInfo, cachedArchiveNameInfo } from "@/features/drive/lib/archiveHelpers"
 import { AUTO_LIST_DELAY_MS, gateFor } from "@/features/archive/lib/archiveGate.logic"
-import { isZipPackageName } from "@/features/drive/lib/archiveFormats"
+import { comicFormatOfName, isZipPackageName } from "@/features/drive/lib/archiveFormats"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { createEntryStore, type EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingCache } from "@/features/archive/lib/listingCache"
@@ -445,7 +445,7 @@ export function openListingSession(
 			return
 		}
 
-		if (gateFor(info.format, source.size, isZipPackageName(source.name)) === "gate") {
+		if (gateFor(info.format ?? comicFormatOfName(source.name), source.size, isZipPackageName(source.name)) === "gate") {
 			setPhase({ type: "gate", format: info.format })
 		} else {
 			scheduleStart()

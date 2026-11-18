@@ -1,7 +1,7 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { originRanged, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
-import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
+import { ARCHIVE_NAME_EXTENSIONS, COMIC_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
 import { IWORK_EXTENSIONS } from "@/features/iwork/lib/iworkPreview.logic"
@@ -48,6 +48,7 @@ export type PreviewCategory =
 	| "markdown"
 	| "notebook"
 	| "archive"
+	| "comic"
 	| "iwork"
 	| "font"
 	| "sqlite"
@@ -374,6 +375,22 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindArchive",
 		assistantKind: null
 	},
+	// A comic book: the SDK lists it and reads one page at a time (comicViewer.tsx), so any size opens. Inside an archive
+	// it needs a nested reader; a public link previews none inline.
+	comic: {
+		streamed: false,
+		ranged: true,
+		bufferCap: null,
+		aboveCap: "refuse",
+		entry: "none",
+		anon: "none",
+		textFamily: false,
+		editsAsText: false,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindComic",
+		assistantKind: null
+	},
 	// The SDK lists the package and reads the one rendering it carries (iworkPreview.ts), so any size opens. Inside an
 	// archive the package needs a nested reader, which no entry opens yet; a public link previews none inline.
 	iwork: {
@@ -689,6 +706,8 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	// Executables and disk images, shown by their headers (an installer package, `.msi`, stays a download).
 	[["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"], "binaryInfo"],
 	[["txt", "log"], "text"],
+	// Before the archives: a .cbr is a RAR the comic reader opens.
+	[COMIC_EXTENSIONS, "comic"],
 	[[...ARCHIVE_NAME_EXTENSIONS, ...ZIP_PACKAGE_EXTENSIONS], "archive"],
 	// A `.key` is one only once a read of its head found a zip (resolveFileKind gives it no kind until then).
 	[IWORK_EXTENSIONS, "iwork"],

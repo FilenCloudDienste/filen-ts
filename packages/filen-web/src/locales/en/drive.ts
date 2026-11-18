@@ -667,6 +667,8 @@ export const drive = {
 	drivePreviewKindMarkdown: "Markdown",
 	/** Info panel — Kind row value: an archive or compressed file (zip, 7z, tar, gz, …) */
 	drivePreviewKindArchive: "Archive",
+	/** Info panel — Kind row value: a comic book archive (.cbz, .cbr, .cb7, .cbt) */
+	drivePreviewKindComic: "Comic book",
 	/** Info panel — Kind row value: an Apple Pages, Numbers or Keynote document */
 	drivePreviewKindIwork: "iWork document",
 	/** Info panel — Kind row value: a font file (ttf, otf, woff, woff2) */

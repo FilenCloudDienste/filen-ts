@@ -5,10 +5,10 @@ import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo } from "./helpers/listing"
 import { RAR_README_TEXT, rarComicPageText } from "./fixtures/rar"
 
-// RAR archives in the archive browser (fixtures/rar.ts): a RAR 4 with a directory, and a solid RAR 5 comic book, whose
-// pages after the first are read after the ones stored before them. A pure read: this spec never extracts.
+// RAR archives in the archive browser (fixtures/rar.ts): a RAR 4 with a directory, and a solid RAR 5, whose
+// files after the first are read after the ones stored before them. A pure read: this spec never extracts.
 
-const [COMIC, STORE] = FIXTURE_FILES["archive-rar"]
+const [SOLID, STORE] = FIXTURE_FILES["archive-rar"]
 
 test.describe("RAR archives", () => {
 	test("a RAR lists, navigates and opens an entry", async ({ page }) => {
@@ -30,11 +30,11 @@ test.describe("RAR archives", () => {
 		expect(cspViolations).toEqual([])
 	})
 
-	test("a solid comic book asks its cost once: the first page opens at once, the others after one confirm", async ({ page }) => {
+	test("a solid RAR asks its cost once: the first page opens at once, the others after one confirm", async ({ page }) => {
 		await bootTo(page)
 
 		const { listbox } = await openFixtureRows(page, "archive-rar")
-		const browser = await openArchive(page, listbox, COMIC)
+		const browser = await openArchive(page, listbox, SOLID)
 
 		await expectRows(browser.list, ["page-01.txt", "page-02.txt", "page-03.txt", "page-04.txt"])
 

@@ -1,7 +1,7 @@
 import { scenarioModule } from "./scenarios"
 
 // The RAR spec's archives (archive-rar.spec.ts), written by rars 0.12.4, the crate the SDK reads them with: a solid
-// RAR 5 comic book of four text pages (each page after the first is read after the ones before it) and a RAR 4 holding
+// RAR 5 of four text pages (each page after the first is read after the ones before it) and a RAR 4 holding
 // a directory. Inline: neither is 500 bytes.
 //
 // Recipe (in a scratch directory; the package is Apache-2.0):
@@ -27,7 +27,7 @@ const COMIC_CBR =
 const STORE_RAR =
 	"UmFyIRoHAM+QcwAADQAAAAAAAAACGnoAwCQAHAAAABwAAAAABb2P7QAAAAAdMAQAAAAAAFJBUlNyYXJzLzAuMTIuNAptYXJrZXItc2NoZW1hPTEKxjZ0IIAvAA8AAAAPAAAAAFYy4RUAACFcHTAPACAAAABkb2NzL3JlYWRtZS50eHRhIFJBUidzIHJlYWRtZQqACXQggCkAFgAAABYAAAAAFUmtMgAAIVwdMAkAIAAAAG5vdGVzLnR4dG5vdGVzIHN0b3JlZCBpbiBhIFJBUgo="
 
-export const RAR_SCENARIOS = scenarioModule({ "archive-rar": ["e2e-rar-comic.cbr", "e2e-rar-store.rar"] }, () => ({
-	"e2e-rar-comic.cbr": { buffer: Buffer.from(COMIC_CBR, "base64"), mimeType: "application/vnd.comicbook-rar" },
+export const RAR_SCENARIOS = scenarioModule({ "archive-rar": ["e2e-rar-solid.rar", "e2e-rar-store.rar"] }, () => ({
+	"e2e-rar-solid.rar": { buffer: Buffer.from(COMIC_CBR, "base64"), mimeType: "application/vnd.rar" },
 	"e2e-rar-store.rar": { buffer: Buffer.from(STORE_RAR, "base64"), mimeType: "application/vnd.rar" }
 }))

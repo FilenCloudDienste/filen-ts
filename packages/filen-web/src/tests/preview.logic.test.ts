@@ -459,8 +459,12 @@ describe("previewType — extension category map", () => {
 })
 
 describe("archive category", () => {
-	it.each([...ARCHIVE_NAME_EXTENSIONS])("%s -> archive", ext => {
+	it.each([...ARCHIVE_NAME_EXTENSIONS].filter(ext => ext !== "cbr"))("%s -> archive", ext => {
 		expect(previewType(fileNamed(`bundle.${ext}`))).toBe("archive")
+	})
+
+	it("opens a .cbr, a renamed RAR, in the comic reader", () => {
+		expect(previewType(fileNamed("issue.cbr"))).toBe("comic")
 	})
 
 	// Code is listed after archives, so an extension in both would silently stop being code.

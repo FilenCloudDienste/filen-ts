@@ -812,6 +812,28 @@ export const preview = {
 	previewArchiveEntryCostOpen: "Open",
 	/** Solid archive cost dialog — saves the file anyway */
 	previewArchiveEntryCostDownload: "Download",
+	/** Comic reader gate — lists a big comic book archive (its listing reads the whole archive, which the line above says) */
+	previewComicRead: "Read",
+	/** Comic reader — the comic book archive holds no page image the reader shows */
+	previewComicNoPages: "No pages to show in this comic.",
+	/** Comic reader — its pages lie in one solid block too large to read page by page */
+	previewComicTooLarge: "This comic is packed too large to read page by page here. Extract it to read it.",
+	/** Comic reader — extracts the comic into the user's drive, to read its pages as files */
+	previewComicExtractToRead: "Extract to read",
+	/** Comic reader — the user declined reading the archive's earlier pages first */
+	previewComicNotOpened: "The comic wasn't opened.",
+	/** Comic reader — on-screen button turning to the previous page (or spread) */
+	previewComicPrevious: "Previous page",
+	/** Comic reader — on-screen button turning to the next page (or spread) */
+	previewComicNext: "Next page",
+	/** Comic reader — the page slider's accessible name */
+	previewComicPageSlider: "Page",
+	/** Comic reader — the counter; {{pages}} is a page ("7") or a spread ("6–7"), {{total}} the page count */
+	previewComicCounter: "{{pages}} / {{total}}",
+	/** Comic reader — toggle showing two pages side by side */
+	previewComicSpread: "Two-page spread",
+	/** Comic reader — toggle reading right to left (manga) */
+	previewComicRightToLeft: "Right to left",
 	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */
 	previewArchiveEntryDownloadUnsupported: "A single file can't be saved from this archive here. Extract it to your drive instead.",
 

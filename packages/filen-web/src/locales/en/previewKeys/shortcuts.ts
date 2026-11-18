@@ -93,6 +93,10 @@ export const previewKeysShortcuts = {
 	// ── PDF viewer ───────────────────────────────────────────────────────────
 	/** Shortcuts list — the PDF viewer's key showing the next page */
 	previewKeyPdfNextPage: "Next page (PDF)",
+	/** Shortcuts list — the comic reader's next page (or two-page spread) */
+	previewKeyComicNextPage: "Next page (comic)",
+	/** Shortcuts list — the comic reader's previous page (or two-page spread) */
+	previewKeyComicPreviousPage: "Previous page (comic)",
 	/** Shortcuts list — the PDF viewer's key showing the previous page */
 	previewKeyPdfPreviousPage: "Previous page (PDF)",
 	/** Shortcuts list — the PDF viewer's key showing the first page */

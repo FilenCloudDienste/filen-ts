@@ -83,6 +83,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	code: "drivePreviewKindCode",
 	markdown: "drivePreviewKindMarkdown",
 	archive: "drivePreviewKindArchive",
+	comic: "drivePreviewKindComic",
 	iwork: "drivePreviewKindIwork",
 	font: "drivePreviewKindFont",
 	sqlite: "drivePreviewKindSqlite",
@@ -128,7 +129,7 @@ const LEGACY_AUDIO_TIER = [
 
 // An iWork document (added after the policy table) is listed by the SDK like an archive: no cap.
 function legacyBufferedSizeCap(category: PreviewCategory): bigint | null {
-	if (category === "rawImage" || category === "archive" || category === "iwork") {
+	if (category === "rawImage" || category === "archive" || category === "comic" || category === "iwork") {
 		return null
 	}
 
@@ -434,8 +435,16 @@ describe("precedence tiers", () => {
 			}
 		}
 
-		// Grammars the code tier derives that an earlier tier keeps.
-		expect(overlaps).toEqual({ svg: "image", md: "markdown", markdown: "markdown", mkd: "markdown", gpx: "geo", kml: "geo" })
+		// Grammars the code tier derives that an earlier tier keeps, and a .cbr, a RAR the comic reader opens.
+		expect(overlaps).toEqual({
+			svg: "image",
+			md: "markdown",
+			markdown: "markdown",
+			mkd: "markdown",
+			gpx: "geo",
+			kml: "geo",
+			cbr: "comic"
+		})
 
 		for (const [extension, winner] of Object.entries(overlaps)) {
 			expect(previewCategoryForExtension(extension)).toBe(winner)

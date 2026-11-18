@@ -1,4 +1,4 @@
-import type { AesStrength, CompressFormat, SevenZMethod, StreamCodec, ZipMethod } from "@filen/sdk-rs"
+import type { AesStrength, ArchiveFormat, CompressFormat, SevenZMethod, StreamCodec, ZipMethod } from "@filen/sdk-rs"
 import { ZIP_PACKAGE_EXTENSIONS } from "@filen/shared"
 import type { ArchiveKey } from "@/lib/i18n"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
@@ -300,6 +300,24 @@ export const ARCHIVE_NAME_EXTENSIONS: ReadonlySet<string> = new Set([
 	"br",
 	"zst"
 ])
+
+// Comic book archives by their names: a zip, a 7z, a tar or a RAR of page images.
+const COMIC_FORMATS: ReadonlyMap<string, ArchiveFormat> = new Map<string, ArchiveFormat>([
+	["cbz", { type: "zip" }],
+	["cb7", { type: "sevenZ" }],
+	["cbt", { type: "tar", codec: undefined }],
+	["cbr", { type: "rar", version: "rar50Plus" }]
+])
+
+export const COMIC_EXTENSIONS: ReadonlySet<string> = new Set(COMIC_FORMATS.keys())
+
+// What a comic book's name says it is, for the listing gate before the SDK read any of it; null for any other name.
+// A RAR's generation is unknown until read: every one gates alike.
+export function comicFormatOfName(name: string): ArchiveFormat | null {
+	const extension = nameExtension(name)
+
+	return extension === null ? null : (COMIC_FORMATS.get(extension) ?? null)
+}
 
 function nameExtension(name: string): string | null {
 	const dot = name.lastIndexOf(".")

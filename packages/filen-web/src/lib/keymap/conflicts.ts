@@ -273,6 +273,11 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["preview.imageCancel", "chats.clearSelection"],
 	["preview.imageCancel", "notes.clearSelection"],
 	["preview.imageCancel", "presentation.show.end"],
+	// The comic reader is a body of its own: no video player or running show shares its layer.
+	["preview.comicNextPage", "presentation.show.next"],
+	["preview.comicPreviousPage", "presentation.show.previous"],
+	["preview.comicNextPage", "media.chapterNext"],
+	["preview.comicPreviousPage", "media.chapterPrevious"],
 	["preview.imagePanLeft", "preview.prev"],
 	["preview.imagePanRight", "preview.next"],
 	["preview.imagePanLeft", "presentation.show.previous"],
