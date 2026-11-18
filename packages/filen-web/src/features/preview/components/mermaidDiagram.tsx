@@ -44,17 +44,51 @@ function RefusedDiagram({ source }: { source: string }) {
 	)
 }
 
-function InlineSvg({ svg }: { svg: Blob }) {
+// A diagram's height before it is drawn, guessed from its source (a line a row of boxes, roughly), so the drawing
+// replaces a placeholder of about its size rather than pushing the text below it.
+function placeholderHeight(source: string): number {
+	const lines = source.split("\n", 64).length
+
+	return Math.min(480, Math.max(96, lines * 28))
+}
+
+// "Rendering diagram…" in the diagram's place: while the frame starts (the first diagram of a page waits for it), then
+// while it draws, then until the picture has loaded.
+function Rendering({ source }: { source: string }) {
+	const { t } = useTranslation("preview")
+
+	return (
+		<div
+			role="status"
+			className="mb-3 flex items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground"
+			style={{ minHeight: placeholderHeight(source) }}
+		>
+			{t("previewMermaidRendering")}
+		</div>
+	)
+}
+
+function InlineSvg({ svg, source }: { svg: Blob; source: string }) {
 	const { t } = useTranslation("preview")
 	const url = useObjectUrl(svg)
+	const [loaded, setLoaded] = useState(false)
 
-	return url === null ? null : (
-		<img
-			src={url}
-			alt={t("previewMermaidAlt")}
-			draggable={false}
-			className="mb-3 h-auto max-w-full"
-		/>
+	return (
+		<div className="relative">
+			{loaded ? null : <Rendering source={source} />}
+			{url === null ? null : (
+				<img
+					src={url}
+					alt={t("previewMermaidAlt")}
+					draggable={false}
+					onLoad={() => {
+						setLoaded(true)
+					}}
+					// Laid out only once loaded: until then the placeholder holds its place.
+					className={loaded ? "mb-3 h-auto max-w-full" : "pointer-events-none absolute top-0 left-0 h-auto max-w-full opacity-0"}
+				/>
+			)}
+		</div>
 	)
 }
 
@@ -76,13 +110,7 @@ function DiagramState({ state, source }: { state: Exclude<MermaidDiagramState, {
 			)
 		case "waiting":
 		case "pending":
-			return (
-				<div
-					role="status"
-					aria-label={t("previewMermaidRendering")}
-					className="mb-3 h-24 rounded-lg bg-muted"
-				/>
-			)
+			return <Rendering source={source} />
 	}
 }
 
@@ -132,7 +160,10 @@ export function MermaidFence({ source, ordinal }: { source: string; ordinal: num
 	return (
 		<div ref={ref}>
 			{state.status === "svg" ? (
-				<InlineSvg svg={state.svg} />
+				<InlineSvg
+					svg={state.svg}
+					source={source}
+				/>
 			) : (
 				<DiagramState
 					state={state}

@@ -3,8 +3,8 @@
 export const previewTextMermaid = {
 	/** Mermaid diagram — the picture's description for screen readers */
 	previewMermaidAlt: "Mermaid diagram",
-	/** Mermaid diagram — status while it is drawn */
-	previewMermaidRendering: "Rendering diagram",
+	/** Mermaid diagram — shown in the diagram's place while it is drawn (the first one also waits for the drawing frame to start) */
+	previewMermaidRendering: "Rendering diagram…",
 	/** Mermaid diagram — button on a diagram past the first 50 of a document, which waits until asked */
 	previewMermaidRender: "Render diagram",
 	/** Mermaid diagram — shown instead of a diagram that names images, icons or links */

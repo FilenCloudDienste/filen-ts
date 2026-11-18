@@ -90,12 +90,25 @@ describe("Mermaid fences in the file preview", () => {
 			{ wrapper }
 		)
 
-		expect(screen.getByRole("status", { name: "Rendering diagram" })).toBeTruthy()
+		const placeholder = screen.getByRole("status")
+
+		// "Rendering diagram…" at about the diagram's size, so the drawing does not push the text below it.
+		expect(placeholder.textContent).toBe("Rendering diagram…")
+		expect(placeholder.style.minHeight).toBe("96px")
 		expect(renderSpy).not.toHaveBeenCalled()
 
 		bringNear(0)
 
-		expect(await screen.findByRole("img", { name: "Mermaid diagram" })).toBeTruthy()
+		const image = await screen.findByRole("img", { name: "Mermaid diagram" })
+
+		// Out of the flow until it has loaded: the placeholder keeps its place till then.
+		expect(image.className).toContain("absolute")
+		expect(screen.getByRole("status")).toBeTruthy()
+
+		fireEvent.load(image)
+
+		expect(image.className).not.toContain("absolute")
+		expect(screen.queryByRole("status")).toBeNull()
 		expect(renderSpy).toHaveBeenCalledWith("graph TD; A0-->B\n", "dark")
 		// Watched until it came near, not after.
 		expect(unobserved.has(observed[0]?.element ?? document.body)).toBe(true)
