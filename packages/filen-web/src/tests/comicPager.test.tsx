@@ -10,7 +10,9 @@ import "@/lib/i18n"
 // The comic reader's pager over a listed comic: pages read through leases on the archive's reader (the worker stood
 // in for by readPage), the solid cost asked once, the page keys, the spread and right-to-left toggles, the read-ahead.
 
-const { readPage, sdkCancels, pageTokens } = vi.hoisted(() => ({
+const { readPage, sdkCancels, pageTokens, leasePlans } = vi.hoisted(() => ({
+	// Every lease's plan, in order.
+	leasePlans: [] as EntryReadPlan[],
 	readPage: vi.fn<(index: number, maxSolidSkip: number) => Promise<Uint8Array>>(),
 	sdkCancels: vi.fn<(token: string) => void>(),
 	// Each read's cancel token, to the page it read.
@@ -27,6 +29,7 @@ vi.mock("@/lib/sdk/client", () => {
 			archiveReaderHeldBytes: () => Promise.resolve(0),
 			leaseArchiveEntry: (id: string, _reader: string, plan: EntryReadPlan) => {
 				leases.set(id, plan)
+				leasePlans.push(plan)
 
 				return Promise.resolve()
 			},
@@ -165,6 +168,7 @@ afterEach(() => {
 	cleanup()
 	runPreviewDisposers()
 	vi.clearAllMocks()
+	leasePlans.length = 0
 })
 
 describe("ComicPager", () => {
@@ -223,6 +227,35 @@ describe("ComicPager", () => {
 		expect(await screen.findByText("page 1")).toBeTruthy()
 		await new Promise(resolve => setTimeout(resolve, 20))
 		expect(readPage.mock.calls.map(([index]) => index)).toEqual([0])
+	})
+
+	it("turned back, reads the window before the page shown, and the page before it ahead", async () => {
+		showComic(6, true)
+
+		expect(await screen.findByText("page 1")).toBeTruthy()
+		press("PageDown")
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Open" }))
+
+		for (const page of [2, 3, 4]) {
+			expect(await screen.findByText(`page ${String(page)}`)).toBeTruthy()
+			press("PageDown")
+		}
+
+		expect(await screen.findByText("page 5")).toBeTruthy()
+		leasePlans.length = 0
+		readPage.mockClear()
+		press("PageUp")
+		expect(await screen.findByText("page 4")).toBeTruthy()
+		await vi.waitFor(() => {
+			expect(readPage.mock.calls.map(([index]) => index)).toContain(2)
+		})
+
+		// Page 4's window ends at it, taking the pages before it; nothing after it is read.
+		const own = leasePlans.find(plan => plan.window.at(-1)?.index === 3)
+
+		expect(own?.window.map(item => item.index)).toEqual([0, 1, 2, 3])
+		expect(own?.windowSkip).toBe(0)
+		expect(readPage.mock.calls.map(([index]) => index)).not.toContain(4)
 	})
 
 	it("keeps the read ahead of the page a turn shows, which its viewer joins: read once", async () => {

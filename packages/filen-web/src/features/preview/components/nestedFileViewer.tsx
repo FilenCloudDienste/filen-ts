@@ -42,10 +42,23 @@ export interface NestedFileViewerProps {
 	overlay?: ReactNode
 	// A new key remounts the viewer, so it reads again (another password).
 	bodyKey?: string | number
+	// Shown instead of the viewer its content read found, when that kind is not shown from here (an "Extract to …"
+	// card); undefined for the viewer.
+	sniffedReplacement?: ((category: PreviewCategory) => ReactNode | undefined) | undefined
 }
 
 // The file's viewer: the one its name picked, else the one its content read found.
-function NestedBody({ item, origin, category }: { item: DriveItem; origin: ByteOrigin; category: PreviewCategory | null }) {
+function NestedBody({
+	item,
+	origin,
+	category,
+	sniffedReplacement
+}: {
+	item: DriveItem
+	origin: ByteOrigin
+	category: PreviewCategory | null
+	sniffedReplacement: NestedFileViewerProps["sniffedReplacement"]
+}) {
 	const { t } = useTranslation("preview")
 	const shown = category ?? sniffedEntryCategory(item, origin)
 
@@ -56,6 +69,12 @@ function NestedBody({ item, origin, category }: { item: DriveItem; origin: ByteO
 				message={t("previewUnsupportedType")}
 			/>
 		)
+	}
+
+	const replaced = category === null ? sniffedReplacement?.(shown) : undefined
+
+	if (replaced !== undefined) {
+		return replaced
 	}
 
 	return (
@@ -82,7 +101,8 @@ export function NestedFileViewer({
 	onDownload,
 	replacement,
 	overlay,
-	bodyKey
+	bodyKey,
+	sniffedReplacement
 }: NestedFileViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
@@ -135,6 +155,7 @@ export function NestedFileViewer({
 						item={item}
 						origin={origin}
 						category={category}
+						sniffedReplacement={sniffedReplacement}
 					/>
 				)}
 			/>

@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
+import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 import { sdkApi } from "@/lib/sdk/client"
 import {
 	holdPreviewStreamAlive,
@@ -36,18 +37,15 @@ export function directSource(params: { file: AnyFile; name: string; contentType:
 // Which SDK client serves the bytes: the session's, or an unauthenticated one for a public link's file.
 type RangeAccess = "authed" | "anon"
 
-function createRemuxSource(file: AnyFile, options: { warmKey?: string; access?: RangeAccess } = {}): RemuxSource {
-	const { warmKey, access = "authed" } = options
+// Ports `open` serves in the SDK worker, every one under the source's token, which its close cancels.
+function portSource(open: (port: MessagePort, token: string) => Promise<void>, warmKey?: string): RemuxSource {
 	const token = crypto.randomUUID()
 
 	return {
 		openPort: async () => {
 			const { port1, port2 } = new MessageChannel()
-			const transferred = Comlink.transfer(port1, [port1])
 
-			await (access === "anon"
-				? sdkApi.openLinkedRangePortAnon(transferred, file, token)
-				: sdkApi.openRangePort(transferred, file, token))
+			await open(Comlink.transfer(port1, [port1]), token)
 
 			return port2
 		},
@@ -56,6 +54,20 @@ function createRemuxSource(file: AnyFile, options: { warmKey?: string; access?: 
 		},
 		...(warmKey === undefined ? {} : { warmKey })
 	}
+}
+
+function createRemuxSource(file: AnyFile, options: { warmKey?: string; access?: RangeAccess } = {}): RemuxSource {
+	const { warmKey, access = "authed" } = options
+
+	return portSource(
+		(port, token) => (access === "anon" ? sdkApi.openLinkedRangePortAnon(port, file, token) : sdkApi.openRangePort(port, file, token)),
+		warmKey
+	)
+}
+
+// Any origin the SDK worker reads (an archive's entry), asked for by `access`'s surface; never prewarmed.
+export function originRemuxSource(origin: ByteOrigin, access: OriginAccess): RemuxSource {
+	return portSource((port, token) => sdkApi.openOriginRangePort(port, origin, access, token))
 }
 
 export function remuxSource(file: AnyFile): RemuxSource {

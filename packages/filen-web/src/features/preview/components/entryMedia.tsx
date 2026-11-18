@@ -1,26 +1,29 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
+import { probeSource, probeVideo, type MediaCodec, type VideoProbe } from "@filen/shared/videos"
 import { sdkApi } from "@/lib/sdk/client"
-import { originRanged, type ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { originRanged, originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { mediaControlsList, usePreviewAccessMode, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
-import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
+import { usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
+import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
 import { unplayableCodecs } from "@/features/preview/lib/previewPlayback.logic"
-import { MediaFormatFailure } from "@/features/preview/components/mediaFailureState"
+import { MediaCannotStream, MediaFormatFailure } from "@/features/preview/components/mediaFailureState"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
-import type { MediaCodec } from "@filen/shared/videos"
+import { NON_SEEKABLE_MEDIA_MAX_BYTES } from "@/features/archive/lib/entryAccess.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 
-// An archive entry's video or audio (W6 §3.10). A `mapped` or `seekable` entry streams through the service worker from
-// the SDK worker's range port (registerPortStream over openOriginRangePort): no JS buffer holds it, and a seekable one
-// says under the player that a seek may pause while it decodes (§6.2 A). One read only whole is played from a Blob (the
-// entry viewer caps it at 64 MiB first). The browser plays it natively; one it cannot names its codecs, read through
-// readOriginProbe.
+// An archive entry's video or audio (W6 §3.10), or an attachment's. A `mapped` or `seekable` entry streams through the
+// service worker from the SDK worker's range port (registerPortStream over openOriginRangePort): no JS buffer holds it,
+// and a seekable one says under the player that a seek may pause while it decodes (§6.2 A). One read only whole is
+// played from a Blob (the entry viewer caps it at 64 MiB first), and so is a streamable one of that size where the
+// service worker cannot serve it. The browser plays it natively; one it cannot names its codecs from a probe: of the
+// Blob on the page when it is held, else of the stream's head through readOriginProbe.
 export function EntryMedia({
 	item,
 	category,
@@ -71,22 +74,46 @@ interface EntryMediaSourceProps {
 	contentType: string
 }
 
+// Names what an unplayable entry holds; `signal` aborts once its element is gone.
+type Probe = (signal: AbortSignal) => Promise<VideoProbe | null>
+
 function StreamedEntryMedia({ item, category, alt, origin, contentType }: EntryMediaSourceProps) {
 	const { t } = useTranslation("preview")
+	const access = usePreviewAccessMode()
 	const result = usePreviewStreamUrl(item, driveItemName(item), contentType)
 
 	if (result.status === "pending") {
 		return <PreviewLoading />
 	}
 
-	// Its port could not be registered: no other way plays it.
+	// Its port could not be registered (no service worker serves the page): one small enough plays from a buffer.
 	if (result.status === "error") {
-		return (
-			<MediaFormatFailure
+		return originSize(origin) <= NON_SEEKABLE_MEDIA_MAX_BYTES ? (
+			<BufferedEntryMedia
 				item={item}
-				codecs={[]}
+				category={category}
+				alt={alt}
+				origin={origin}
+				contentType={contentType}
 			/>
+		) : (
+			<MediaCannotStream item={item} />
 		)
+	}
+
+	// The head tier: the browser already read the stream's head, and a seekable entry's tail decodes most of it.
+	const probe: Probe = signal => {
+		const token = crypto.randomUUID()
+
+		signal.addEventListener(
+			"abort",
+			() => {
+				void sdkApi.cancelPreviewDownload(token)
+			},
+			{ once: true }
+		)
+
+		return sdkApi.readOriginProbe(origin, access, "card", token)
 	}
 
 	return (
@@ -94,15 +121,37 @@ function StreamedEntryMedia({ item, category, alt, origin, contentType }: EntryM
 			item={item}
 			category={category}
 			alt={alt}
-			origin={origin}
+			probe={probe}
 			src={result.url}
 			note={origin.kind === "entry" && origin.access === "seekable" ? t("previewArchiveMediaSeekNote") : null}
 		/>
 	)
 }
 
+// The entry as one Blob: an attachment's is the Blob its holder has; an entry's is read once (checked), wrapped in the
+// same tick and its array dropped, so the page holds it once. Not kept in the preview cache, which would hold the array
+// beside the Blob.
 function BufferedEntryMedia({ item, category, alt, origin, contentType }: EntryMediaSourceProps) {
-	const result = usePreviewBytes(item)
+	const access = usePreviewAccessMode()
+	// A slice shares the held Blob's bytes, typed for the element.
+	const held = (): Blob | undefined => (origin.kind === "bytes" ? origin.blob.slice(0, origin.blob.size, contentType) : undefined)
+	const result = usePreviewFetch<Blob>(item, {
+		seed: held,
+		run: async ({ token, signal, cacheScope }) =>
+			held() ??
+			new Blob(
+				[
+					(await loadOriginBytes(origin, token, {
+						access,
+						cap: originSize(origin),
+						scope: cacheScope,
+						signal,
+						store: false
+					})) as Uint8Array<ArrayBuffer>
+				],
+				{ type: contentType }
+			)
+	})
 
 	if (result.status === "error") {
 		return (
@@ -122,25 +171,39 @@ function BufferedEntryMedia({ item, category, alt, origin, contentType }: EntryM
 			item={item}
 			category={category}
 			alt={alt}
-			origin={origin}
-			bytes={result.bytes}
+			blob={result.value}
 			contentType={contentType}
 		/>
 	)
 }
 
 function HeldEntryMedia({
-	bytes,
+	blob,
 	contentType,
 	...props
-}: Omit<EntryMediaSourceProps, "contentType"> & { bytes: Uint8Array; contentType: string }) {
-	const url = useObjectUrl(bytes, contentType)
+}: Omit<EntryMediaSourceProps, "contentType" | "origin"> & { blob: Blob; contentType: string }) {
+	const url = useObjectUrl(blob, contentType)
+	// Probed on the page from the Blob it plays: nothing read again.
+	const probe: Probe = signal => {
+		const source = probeSource(
+			blob.size,
+			async (start, end) => {
+				signal.throwIfAborted()
+
+				return new Uint8Array(await blob.slice(start, end).arrayBuffer())
+			},
+			"full"
+		)
+
+		return probeVideo(source, "full")
+	}
 
 	return url === null ? (
 		<PreviewLoading />
 	) : (
 		<EntryMediaElement
 			{...props}
+			probe={probe}
 			src={url}
 			note={null}
 		/>
@@ -151,20 +214,28 @@ function EntryMediaElement({
 	item,
 	category,
 	alt,
-	origin,
+	probe,
 	src,
 	note
 }: {
 	item: DriveItem
 	category: "video" | "audio"
 	alt: string
-	origin: ByteOrigin
+	probe: Probe
 	src: string
 	note: string | null
 }) {
 	const downloadable = usePreviewDownloadable()
-	const access = usePreviewAccessMode()
 	const [failed, setFailed] = useState<readonly MediaCodec[] | null>(null)
+	const probing = useRef<AbortController | null>(null)
+
+	// A probe still reading once the element is gone is cancelled.
+	useEffect(
+		() => () => {
+			probing.current?.abort()
+		},
+		[]
+	)
 
 	if (failed !== null) {
 		return (
@@ -175,14 +246,25 @@ function EntryMediaElement({
 		)
 	}
 
-	// The browser cannot play it: the probe names what it holds.
+	// The browser cannot play it: the probe names what it holds, once.
 	const fail = (): void => {
-		void sdkApi.readOriginProbe(origin, access, "full", crypto.randomUUID()).then(
-			probe => {
-				setFailed(unplayableCodecs(probe, null))
+		if (probing.current !== null) {
+			return
+		}
+
+		const controller = new AbortController()
+
+		probing.current = controller
+		void probe(controller.signal).then(
+			found => {
+				if (!controller.signal.aborted) {
+					setFailed(unplayableCodecs(found, null))
+				}
 			},
 			() => {
-				setFailed([])
+				if (!controller.signal.aborted) {
+					setFailed([])
+				}
 			}
 		)
 	}

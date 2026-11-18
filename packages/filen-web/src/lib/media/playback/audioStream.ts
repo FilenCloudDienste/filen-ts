@@ -8,7 +8,8 @@ import { openRemuxSession, type RemuxSession } from "@/lib/media/mseController"
 import { holdRemuxWorker } from "@/lib/media/remuxClient"
 import type { PcmStreamInfo } from "@/lib/media/remuxTypes"
 import type { RemuxSource } from "@/lib/media/playback/remuxSession"
-import { linkedRemuxSource, remuxSource } from "@/lib/media/playback/sources"
+import { linkedRemuxSource, originRemuxSource, remuxSource } from "@/lib/media/playback/sources"
+import { originKey, originSize, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 
 // An audio file decoded into a WAV stream in the remux worker and served by the service worker's range route
 // at a URL an <audio> element plays like any other: the worker reads the file through the SDK worker's range
@@ -22,18 +23,30 @@ export interface DecodedAudioStream {
 	release(): void
 }
 
+// What is decoded: a drive or public link file, or any origin the SDK worker reads (an archive's entry).
+export type DecodedAudioSubject =
+	{ readonly file: AnyFile; readonly access: "authed" | "anon" } | { readonly origin: ByteOrigin; readonly access: OriginAccess }
+
 // Rejects with AudioUnsupportedError (isAudioUnsupported) when nothing in the file can be decoded, and with
 // another error when the service worker cannot take the stream (the caller falls back to MediaSource).
 // `synth` names the synthesizer a file a synthesizer renders needs (audioSynthKind).
-export async function openDecodedAudioStream(params: {
-	file: AnyFile
-	access: "authed" | "anon"
-	synth?: AudioSynthKind | undefined
-	id?: string
-}): Promise<DecodedAudioStream> {
-	const { file, access, synth, id = crypto.randomUUID() } = params
+export async function openDecodedAudioStream(
+	params: DecodedAudioSubject & {
+		synth?: AudioSynthKind | undefined
+		id?: string
+	}
+): Promise<DecodedAudioStream> {
+	const { synth, id = crypto.randomUUID() } = params
 	const hold = await holdRemuxWorker()
-	const source = access === "anon" ? linkedRemuxSource(file) : remuxSource(file)
+	const source =
+		"origin" in params
+			? originRemuxSource(params.origin, params.access)
+			: params.access === "anon"
+				? linkedRemuxSource(params.file)
+				: remuxSource(params.file)
+	const size = "origin" in params ? originSize(params.origin) : Number(params.file.size)
+	// The synthesizer's cache key: what the bytes are.
+	const key = "origin" in params ? originKey(params.origin) : params.file.uuid
 	let released = false
 	const opened: { info: PcmStreamInfo | null } = { info: null }
 	const release = (): void => {
@@ -58,8 +71,8 @@ export async function openDecodedAudioStream(params: {
 						Comlink.transfer(
 							{
 								port: input,
-								size: Number(file.size),
-								...(synth === undefined ? {} : { synth: { kind: synth, key: file.uuid } })
+								size,
+								...(synth === undefined ? {} : { synth: { kind: synth, key } })
 							},
 							[input]
 						),

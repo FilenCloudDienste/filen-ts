@@ -23,6 +23,7 @@ import { VideoPlayer } from "@/features/preview/components/videoPlayer"
 import { MediaCannotStream, MediaFormatFailure, MediaPlaybackFailure } from "@/features/preview/components/mediaFailureState"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
+import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 
 export interface MediaViewerProps {
 	item: DriveItem
@@ -150,16 +151,20 @@ function DecodedAudio({
 	alt,
 	resume,
 	synth,
-	onStreamFailed
+	onStreamFailed,
+	origin
 }: {
 	item: DriveItem
 	alt: string
 	resume: AudioResume
 	synth: AudioSynthKind | undefined
 	onStreamFailed: (resume: AudioResume) => void
+	// An archive's entry: decoded from its origin, not from a drive file.
+	origin?: ByteOrigin | undefined
 }) {
 	const access = usePreviewAccessMode()
-	const [file] = useState(() => narrowToAnyFile(item))
+	// What is decoded, as it was on mount: a provider hands over a new origin object for the same bytes each render.
+	const [subject] = useState(() => (origin === undefined ? { file: narrowToAnyFile(item) } : { origin }))
 	const [state, setState] = useState<{ status: "pending" } | { status: "ready"; url: string } | { status: "unsupported" }>({
 		status: "pending"
 	})
@@ -173,7 +178,7 @@ function DecodedAudio({
 		let live = true
 		let release: (() => void) | null = null
 
-		void openDecodedAudioStream({ file, access, synth }).then(
+		void openDecodedAudioStream({ ...subject, access, synth }).then(
 			stream => {
 				if (live) {
 					release = () => {
@@ -202,7 +207,7 @@ function DecodedAudio({
 			live = false
 			release?.()
 		}
-	}, [file, access, synth, resume, onStreamFailed])
+	}, [subject, access, synth, resume, onStreamFailed])
 
 	if (state.status === "unsupported") {
 		return (
@@ -406,12 +411,59 @@ function PreviewAudio({ item, alt }: { item: DriveItem; alt: string }) {
 	)
 }
 
+// A synthesizer's audio from a provided origin: decoded through the service worker's route, from the origin's range
+// port (an archive's entry, read by range or from its one checked read). Retry opens it again.
+function ProvidedSynthAudio({ item, alt, origin, synth }: { item: DriveItem; alt: string; origin: ByteOrigin; synth: AudioSynthKind }) {
+	const [failed, setFailed] = useState<AudioResume | null>(null)
+	const [attempt, setAttempt] = useState(0)
+
+	if (!isMediaStreamAvailable()) {
+		return <MediaCannotStream item={item} />
+	}
+
+	if (failed !== null) {
+		return (
+			<MediaPlaybackFailure
+				onRetry={() => {
+					setFailed(null)
+					setAttempt(attempt + 1)
+				}}
+			/>
+		)
+	}
+
+	return (
+		<DecodedAudio
+			key={attempt}
+			item={item}
+			alt={alt}
+			resume={FROM_START}
+			synth={synth}
+			origin={origin}
+			onStreamFailed={setFailed}
+		/>
+	)
+}
+
 // Video and audio always stream, never as a whole-file buffer: through the service worker's range route
 // where it can serve the file, else through MediaSource fed by the remux worker.
 export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const downloadable = usePreviewDownloadable()
-	// Only an archive's entry carries a provided origin: played natively from its range port or its buffer.
+	// Only an archive's entry (or an attachment) carries a provided origin: played natively from its range port or its
+	// buffer, a synthesizer's (a tracker module) decoded from it.
 	const provided = useProvidedPreviewOrigin()
+	const synth = category === "audio" ? audioSynthKind(itemTypeExtension(item)) : undefined
+
+	if (provided !== null && synth !== undefined) {
+		return (
+			<ProvidedSynthAudio
+				item={item}
+				alt={alt}
+				origin={provided}
+				synth={synth}
+			/>
+		)
+	}
 
 	if (provided !== null) {
 		return (

@@ -10,7 +10,8 @@ import {
 	isEncryptedEntry,
 	maxSolidSkipFor,
 	needsCostConfirm,
-	sniffedEntryCategory
+	sniffedEntryCategory,
+	sniffMayReadByRange
 } from "@/features/archive/lib/entryAccess.logic"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
@@ -208,5 +209,31 @@ describe("sniffedEntryCategory", () => {
 		expect(sniffedEntryCategory(huge, { kind: "bytes", blob: new Blob([]), cacheKey: "m#0" })).toBe("text")
 		expect(sniffedEntryCategory(large, entry(TEXT_MAX_BYTES + 1n))).toBe("text")
 		expect(sniffedEntryCategory(huge, entry(ENTRY_RANGE_BUFFER_CAP + 1n))).toBeNull()
+	})
+})
+
+describe("entries whose content read picks the viewer", () => {
+	it("asks the access of an entry whose read may find media, never of one it may only find text in", () => {
+		expect(sniffMayReadByRange("song.mod")).toBe(true)
+		expect(sniffMayReadByRange("notes.txt")).toBe(false)
+	})
+
+	it("opens a RAW an archive's reader walks by range, never one the page holds as bytes", () => {
+		const entryOrigin = (index: number): ByteOrigin => ({
+			kind: "entry",
+			reader: "r",
+			entry: { archive: TEST_ARCHIVE, index },
+			size: 10,
+			access: "mapped",
+			anon: false,
+			cacheKey: `a#${String(index)}`
+		})
+		const heldOrigin: ByteOrigin = { kind: "bytes", blob: new Blob([]), cacheKey: "m#0" }
+		const raw = archiveEntryItem(TEST_ARCHIVE, 1, "photo.nef", 10, Number.NaN)
+		const clip = archiveEntryItem(TEST_ARCHIVE, 2, "clip.mp4", 10, Number.NaN)
+
+		expect(sniffedEntryCategory(raw, entryOrigin(1))).toBe("rawImage")
+		expect(sniffedEntryCategory(raw, heldOrigin)).toBeNull()
+		expect(sniffedEntryCategory(clip, heldOrigin)).toBe("video")
 	})
 })

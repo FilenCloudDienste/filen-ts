@@ -546,6 +546,15 @@ const previewProgress = new Map<string, PreviewProgress>()
 const earlyCancels = new EarlyCancels()
 
 // Every preview-token read registers through here, so one cancelled before it got this far starts aborted.
+// An entry read's failure the page answers with a password prompt; any other it hears from the read itself.
+function tellPasswordFailure(events: EntryReaderEvents, error: unknown): void {
+	const dto = asErrorDTO(error)
+
+	if (dto.kind === "ArchivePasswordRequired" || dto.kind === "ArchiveWrongPassword") {
+		events.failed(dto)
+	}
+}
+
 function registerPreviewAbort(previewToken: string, controller: AbortController): void {
 	previewAborts.set(previewToken, controller)
 
@@ -3156,8 +3165,20 @@ const api = {
 			// A reader closed already reads nothing, on either client: a cancel, not a client mismatch.
 			anon: anon ?? false,
 			closed: !archiveReaders.has(readerId),
-			range: (entry, start, end, signal) => archiveReaders.readRange(readerId, entry, start, end, signal),
-			embeddedPreview: (entry, writer, signal) => archiveReaders.embeddedPreview(readerId, entry, writer, signal),
+			// A range read and a preview walk check no password themselves: one the SDK refuses on the way is told like a
+			// whole read's, so the page asks again instead of showing a playback or preview failure.
+			range: (entry, start, end, signal) =>
+				archiveReaders.readRange(readerId, entry, start, end, signal).catch((e: unknown) => {
+					tellPasswordFailure(events, e)
+
+					throw e
+				}),
+			embeddedPreview: (entry, writer, signal) =>
+				archiveReaders.embeddedPreview(readerId, entry, writer, signal).catch((e: unknown) => {
+					tellPasswordFailure(events, e)
+
+					throw e
+				}),
 			read: (entry, size, signal) =>
 				archiveReaders.readWhole(
 					readerId,
@@ -3180,9 +3201,19 @@ const api = {
 		})
 	},
 	// How the reader's entry `entry` can be read (mapped, seekable, whole, sequential): what an entry origin's `access`
-	// says, so a viewer streams a mapped or seekable entry by range instead of holding it whole.
-	async archiveEntryAccess(readerId: string, entry: ArchiveEntryId): Promise<EntryAccessKind> {
-		return archiveReaders.byteAccess(readerId, entry, new AbortController().signal)
+	// says, so a viewer streams a mapped or seekable entry by range instead of holding it whole. Cancelled by its token
+	// (cancelPreviewDownload), with whatever it read for the answer (a tar's listing read again).
+	async archiveEntryAccess(readerId: string, entry: ArchiveEntryId, previewToken: string): Promise<EntryAccessKind> {
+		const controller = new AbortController()
+
+		registerPreviewAbort(previewToken, controller)
+		try {
+			return await archiveReaders.byteAccess(readerId, entry, controller.signal)
+		} finally {
+			if (previewAborts.get(previewToken) === controller) {
+				previewAborts.delete(previewToken)
+			}
+		}
 	},
 	releaseArchiveEntry(id: string): void {
 		const readerId = entryLeaseReaders.get(id)

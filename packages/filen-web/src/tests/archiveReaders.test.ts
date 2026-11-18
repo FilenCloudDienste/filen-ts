@@ -151,7 +151,7 @@ function modelReader(kind: "solidRar" | "gzipTar", shape: Shape = SHAPE) {
 
 type Model = ReturnType<typeof modelReader>
 
-function readersOver(model: Model, release: () => void = vi.fn()) {
+function readersOver(model: Model, release: () => void = vi.fn(), budget = BUDGET) {
 	const opens: ReaderOpenRequest[] = []
 	const readers = createArchiveReaders({
 		open: request => {
@@ -159,7 +159,7 @@ function readersOver(model: Model, release: () => void = vi.fn()) {
 
 			return Promise.resolve({ reader: model.asReader, release })
 		},
-		aheadBudget: () => BUDGET
+		aheadBudget: () => budget
 	})
 
 	readers.register("r", ARCHIVE, false, undefined)
@@ -174,11 +174,26 @@ function readPage(readers: ReturnType<typeof readersOver>["readers"], index: num
 }
 
 // A comic read through from its first page, each page turned forward: the window grows with the turns.
-async function readThrough(readers: ReturnType<typeof readersOver>["readers"], shape: Shape): Promise<void> {
+async function readThrough(readers: ReturnType<typeof readersOver>["readers"], shape: Shape, budget = BUDGET): Promise<void> {
 	const store = solidListing(shape)
 
 	for (let index = 0; index < shape.sizes.length; index++) {
-		const plan = entryReadPlan(store, index, true, BUDGET, readAheadEntries(index))
+		const plan = entryReadPlan(store, index, true, budget, readAheadEntries(index))
+
+		expect((await readers.readWhole("r", idOf(index), size(index, shape), plan, EVENTS, new AbortController().signal)).length).toBe(
+			size(index, shape)
+		)
+	}
+}
+
+// The same comic read from its last page to its first, each page turned back: the window grows with the turns and is
+// planned back.
+async function readBack(readers: ReturnType<typeof readersOver>["readers"], shape: Shape): Promise<void> {
+	const store = solidListing(shape)
+	const last = shape.sizes.length - 1
+
+	for (let index = last; index >= 0; index--) {
+		const plan = entryReadPlan(store, index, true, BUDGET, readAheadEntries(last - index), "back")
 
 		expect((await readers.readWhole("r", idOf(index), size(index, shape), plan, EVENTS, new AbortController().signal)).length).toBe(
 			size(index, shape)
@@ -228,6 +243,44 @@ describe("archive readers: what 50 sequential pages of 2 to 5 MiB fetch, once th
 		expect(model.cost.passes).toBeLessThanOrEqual(5)
 		expect(ratio).toBeLessThan(2.5)
 		expect(ratio).toBeGreaterThan(1.5)
+	})
+
+	it("reads a solid comic backwards in passes of a window turned around, not once per page", async () => {
+		const model = modelReader("solidRar")
+		const { readers } = readersOver(model)
+
+		await readBack(readers, SHAPE)
+
+		// Each pass ends at the page asked and brings the ones before it, which it decodes on its way anyway: five to eleven
+		// 2 to 5 MiB pages a pass, as forward. A forward window from each page asked would be one pass per page.
+		expect(model.cost.passes).toBeLessThan(PAGES / 4)
+		expect(model.cost.downloads).toBe(0)
+		expect(model.cost.fetched / LINEAR).toBeLessThan(5)
+	})
+
+	it("reads a long solid comic of scanned pages backwards in about its size again", async () => {
+		const long = shapeOf(Array.from({ length: 200 }, (_, i) => 300 * KiB + ((i * 7919) % 101) * 2 * KiB))
+		const model = modelReader("solidRar", long)
+		const { readers } = readersOver(model)
+
+		await readBack(readers, long)
+
+		// A pass every 64 pages once the window has grown, each ending at its asked page: under three times the archive,
+		// where a forward window from each page asked would decode it about a hundred times.
+		expect(model.cost.passes).toBeLessThanOrEqual(6)
+		expect(model.cost.fetched / long.linear).toBeLessThan(3)
+	})
+
+	it("reads big pages on a phone's budget in about twice the passes of a desktop's", async () => {
+		const desktop = modelReader("solidRar")
+		const phone = modelReader("solidRar")
+
+		await readThrough(readersOver(desktop).readers, SHAPE)
+		await readThrough(readersOver(phone, vi.fn(), BUDGET / 2).readers, SHAPE, BUDGET / 2)
+
+		// The window is bound by bytes, never by its count, for 2 to 5 MiB pages: half the budget, about twice the passes.
+		expect(phone.cost.passes / desktop.cost.passes).toBeGreaterThan(1.5)
+		expect(phone.cost.passes / desktop.cost.passes).toBeLessThan(2.6)
 	})
 
 	it("reads a .tar.gz's members through range reads that decode on from the last one: the archive once", async () => {
@@ -312,6 +365,116 @@ describe("archive readers: read-ahead", () => {
 		expect(results.map(result => result.status)).toEqual(["rejected", "fulfilled", "fulfilled"])
 		expect(firstIndexes).toEqual([0, 1])
 		expect(most).toBe(1)
+	})
+
+	it("budgets the passes of two readers running at once together: the later one's window is cut to the room left", async () => {
+		const one = modelReader("solidRar")
+		const two = modelReader("solidRar")
+		const holds: (() => void)[] = []
+		let inFlight = 0
+		let most = 0
+
+		for (const model of [one, two]) {
+			const pass = model.reader.readEntries.getMockImplementation()
+
+			model.reader.readEntries.mockImplementation(async params => {
+				// What the pass brings besides the asked entry (the first of a forward window).
+				const brought = params.entries.slice(1).reduce((sum, entry) => sum + size(entry.index), 0)
+
+				inFlight += brought
+				most = Math.max(most, inFlight)
+				await new Promise<void>(resolve => {
+					holds.push(resolve)
+				})
+
+				try {
+					return await (pass?.(params) ?? Promise.resolve(EMPTY_PASS))
+				} finally {
+					inFlight -= brought
+				}
+			})
+		}
+
+		const readers = createArchiveReaders({
+			open: request => Promise.resolve({ reader: request.archive === ARCHIVE ? one.asReader : two.asReader, release: vi.fn() }),
+			aheadBudget: () => BUDGET
+		})
+		const OTHER = { uuid: "b0000000-0000-0000-0000-000000000000", size: 1n } as unknown as AnyFile
+
+		readers.register("r", ARCHIVE, false, undefined)
+		readers.register("s", OTHER, false, undefined)
+
+		const reads = [readPage(readers, 0, undefined, "r"), readPage(readers, 0, undefined, "s")]
+
+		await vi.waitFor(() => {
+			expect(holds).toHaveLength(2)
+		})
+		expect(most).toBeLessThanOrEqual(BUDGET)
+		expect(two.reader.readEntries.mock.calls[0]?.[0].entries.length ?? 0).toBeLessThan(
+			one.reader.readEntries.mock.calls[0]?.[0].entries.length ?? 0
+		)
+
+		for (const release of holds) {
+			release()
+		}
+
+		await Promise.all(reads)
+		expect(readers.heldBytes("r") + readers.heldBytes("s")).toBeLessThanOrEqual(BUDGET)
+	})
+
+	it("saves an entry being read from that read, not a second decode beside it", async () => {
+		const model = modelReader("solidRar")
+		const { readers } = readersOver(model)
+		const reading = readPage(readers, 0)
+		const chunks: Uint8Array[] = []
+		const writer = new WritableStream<Uint8Array>({
+			write: chunk => {
+				chunks.push(chunk)
+			}
+		})
+		const saved = await readers.download("r", idOf(0), writer, 0, () => undefined, {})
+
+		expect((await reading).length).toBe(size(0))
+		expect(Number(saved.bytesWritten)).toBe(size(0))
+		expect(chunks.reduce((sum, chunk) => sum + chunk.length, 0)).toBe(size(0))
+		expect(model.cost.passes).toBe(1)
+		expect(model.reader.downloadEntry).not.toHaveBeenCalled()
+	})
+
+	it("makes a solid read wait for a solid save running, then read its block once", async () => {
+		const model = modelReader("solidRar")
+		const hold = Promise.withResolvers<undefined>()
+		let saving = 0
+		let overlapped = false
+
+		model.reader.downloadEntry.mockImplementationOnce(async params => {
+			saving += 1
+			await hold.promise
+			await fill(params.writer, size(params.entry.index))
+			saving -= 1
+
+			return DONE
+		})
+		model.reader.readEntries.mockImplementation(() => {
+			overlapped ||= saving > 0
+
+			return Promise.resolve(EMPTY_PASS)
+		})
+
+		const { readers } = readersOver(model)
+		const save = readers.download("r", idOf(2), new WritableStream(), size(0) + size(1), () => undefined, {})
+
+		await vi.waitFor(() => {
+			expect(saving).toBe(1)
+		})
+
+		const read = readPage(readers, 3).catch(() => undefined)
+
+		await Promise.resolve()
+		hold.resolve(undefined)
+		await save
+		await read
+		expect(overlapped).toBe(false)
 	})
 
 	it("keeps what is held ahead and what a pass brings within the budget together, during the pass", async () => {
@@ -540,6 +703,53 @@ describe("archive readers: lifetime", () => {
 		expect(fresh.reader.list).toHaveBeenCalledTimes(2)
 	})
 
+	it("frees an opening that resolves after a close which freed the one before it", async () => {
+		const stale = modelReader("solidRar")
+		const late = modelReader("solidRar")
+		const openings = [
+			Promise.withResolvers<{ reader: ReaderLike; release: () => void }>(),
+			Promise.withResolvers<{ reader: ReaderLike; release: () => void }>()
+		]
+		const releases = [vi.fn(), vi.fn()]
+		let opened = 0
+		const readers = createArchiveReaders({
+			open: () => (openings[opened++] ?? openings[1])?.promise ?? Promise.reject(new Error("no opening")),
+			aheadBudget: () => BUDGET
+		})
+
+		readers.register("r", ARCHIVE, false, undefined)
+
+		const leaving = new AbortController()
+		const first = readers.list("r", null, () => undefined, { abortSignal: leaving.signal })
+
+		await vi.waitFor(() => {
+			expect(opened).toBe(1)
+		})
+		leaving.abort(new Error("left"))
+		await expect(first).rejects.toThrow("left")
+
+		const second = readers.list("r", null, () => undefined, { abortSignal: new AbortController().signal })
+
+		await vi.waitFor(() => {
+			expect(opened).toBe(2)
+		})
+		// The abandoned opening lands first and is kept; the close frees it.
+		openings[0]?.resolve({ reader: stale.asReader, release: releases[0] ?? vi.fn() })
+		await vi.waitFor(() => {
+			expect(readers.format("r")).toBeDefined()
+		})
+		readers.close("r")
+		expect(releases[0]).toHaveBeenCalledTimes(1)
+
+		// The other lands after the close: nobody holds it, and it is closed and freed at once.
+		openings[1]?.resolve({ reader: late.asReader, release: releases[1] ?? vi.fn() })
+		await expect(second).rejects.toMatchObject({ name: "Cancelled" })
+		await vi.waitFor(() => {
+			expect(releases[1]).toHaveBeenCalledTimes(1)
+		})
+		expect(late.reader.close).toHaveBeenCalledTimes(1)
+	})
+
 	it("shares one opening among its waiters: one leaving cancels nothing for the rest, and each hears its progress", async () => {
 		const model = modelReader("solidRar")
 		const opened = Promise.withResolvers<{ reader: ReaderLike; release: () => void }>()
@@ -655,6 +865,30 @@ describe("read plans", () => {
 			],
 			windowSkip: 15
 		})
+	})
+
+	it("turned back, takes the files before the entry and throws away only what lies before and between them", () => {
+		const store = storeOf([
+			{ path: "z", index: 0, size: 10, access: solid(0, 200) },
+			{ path: "a", index: 1, size: 10, access: solid(0, 100) },
+			{ path: "b", index: 2, size: 10, access: solid(10, 100) },
+			// 5 bytes of a left-out entry before it.
+			{ path: "c", index: 4, size: 10, access: solid(25, 100) }
+		])
+
+		expect(entryReadPlan(store, 3, true, BUDGET, READ_AHEAD_MIN_ENTRIES, "back")).toEqual({
+			maxSolidSkip: 25,
+			window: [
+				{ index: 1, size: 10 },
+				{ index: 2, size: 10 },
+				{ index: 4, size: 10 }
+			],
+			windowSkip: 5
+		})
+		// Within the budget: the files nearest the entry.
+		expect(entryReadPlan(store, 3, true, 10, READ_AHEAD_MIN_ENTRIES, "back").window.map(item => item.index)).toEqual([2, 4])
+		// What the pass fetches ends with the entry, as its own read's does.
+		expect(entryCost(store, 3, entryReadPlan(store, 3, true, BUDGET, READ_AHEAD_MIN_ENTRIES, "back"))?.estimatedBytes).toBe(35)
 	})
 
 	it("states what the window fetches, and sends a file of a block above 512 MiB to extracting", () => {

@@ -85,7 +85,6 @@ function fileSource(client: FileReadClient, file: AnyFile): OriginSource {
 	}
 }
 
-// An entry's ranges come from one checked whole read, made on the first range read and held for the source's life. Each range is a copy: the reader receives it transferred.
 // A `mapped` or `seekable` entry's ranges, each read by range through the archive's reader: nothing is held, so an
 // entry of any size streams (media, a database). Its whole read stays the checked one.
 function rangedEntrySource(
@@ -113,6 +112,8 @@ function rangedEntrySource(
 	}
 }
 
+// An entry read only whole: its ranges come from one checked whole read, made on the first range read and held for the
+// source's life. Each range is a copy: the reader receives it transferred.
 function entrySource(record: EntryReaderRecord, entry: ArchiveEntryId, size: number): OriginSource {
 	const lifetime = new AbortController()
 	let held: Promise<Uint8Array> | null = null

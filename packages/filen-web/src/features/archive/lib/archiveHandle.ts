@@ -116,13 +116,28 @@ export function entryLeaseOrigin(
 }
 
 // How the archive's entry `index` can be read, asked of its reader for `password` (held for the call): mapped or
-// seekable entries are read by range (media, a database), others whole.
-export async function entryAccessOf(target: ReaderTarget, password: string | undefined, index: number): Promise<EntryAccessKind> {
+// seekable entries are read by range (media, a database), others whole. `signal` cancels the question and what its
+// answer reads (a tar's listing, read again when the reader gave it up).
+export async function entryAccessOf(
+	target: ReaderTarget,
+	password: string | undefined,
+	index: number,
+	signal?: AbortSignal
+): Promise<EntryAccessKind> {
+	signal?.throwIfAborted()
+
 	const reader = acquireArchiveReader(target, password)
+	const token = crypto.randomUUID()
+	const cancel = (): void => {
+		void sdkApi.cancelPreviewDownload(token)
+	}
+
+	signal?.addEventListener("abort", cancel, { once: true })
 
 	try {
-		return await sdkApi.archiveEntryAccess(reader.id, { archive: target.uuid as ArchiveEntryId["archive"], index })
+		return await sdkApi.archiveEntryAccess(reader.id, { archive: target.uuid as ArchiveEntryId["archive"], index }, token)
 	} finally {
+		signal?.removeEventListener("abort", cancel)
 		reader.release()
 	}
 }

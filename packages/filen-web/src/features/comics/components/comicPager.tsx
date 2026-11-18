@@ -18,7 +18,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingSession } from "@/features/archive/lib/listingSession"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
-import { entryCost, entryKey, entryReadPlan, needsCostConfirm } from "@/features/archive/lib/entryAccess.logic"
+import { entryCost, entryKey, entryReadPlan, needsCostConfirm, type ReadHeading } from "@/features/archive/lib/entryAccess.logic"
 import { isArchivePasswordError } from "@/features/archive/lib/entryDownload"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
@@ -87,8 +87,9 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 	const [passwordAsk, setPasswordAsk] = useState<{ wrong: boolean } | null>(null)
 	// The page the slider is dragged to, before it is let go.
 	const [scrub, setScrub] = useState<number | null>(null)
-	// Pages turned forward in a row: the read-ahead window grows with them.
+	// Pages turned in a row, either way: the read-ahead window grows with them, and turning back keeps it, planned back.
 	const [turns, setTurns] = useState(0)
+	const [heading, setHeading] = useState<ReadHeading>("forward")
 	// Pages on screen (or done failing), by slot and password.
 	const [shownPages, setShownPages] = useState<ReadonlySet<string>>(() => new Set())
 	const views = comicViews(pages.length, layout, landscape)
@@ -140,15 +141,22 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 
 	const forward = (): void => {
 		if (viewIndex < views.length - 1 && show(viewIndex + 1)) {
+			setHeading("forward")
 			setTurns(previous => previous + view.length)
 		}
 	}
+	// The window read so far is turned around: a pass to an earlier page brings the pages before it, which it decodes
+	// on its way anyway.
 	const back = (): void => {
-		show(viewIndex - 1)
+		if (viewIndex > 0 && show(viewIndex - 1)) {
+			setHeading("back")
+			setTurns(previous => previous + view.length)
+		}
 	}
 	// A jump is no read in a row: the window starts small again.
 	const jump = (position: number): void => {
 		setTurns(0)
+		setHeading("forward")
 		show(viewOf(views, position))
 	}
 
@@ -201,8 +209,9 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 		}
 	}, [viewKey, source.uuid, store])
 
-	// The next view read ahead, once the shown one is on screen, and only when reading it asks nothing.
-	const next = views[viewIndex + 1]
+	// The next view the way the reader goes read ahead, once the shown one is on screen, and only when reading it asks
+	// nothing.
+	const next = views[heading === "back" ? viewIndex - 1 : viewIndex + 1]
 	const blocked = declined || costlyIn(view) !== null
 	const viewShown = view.every(position => shownPages.has(shownKey(pages[position] ?? -1)))
 	const ahead = !blocked && viewShown && next !== undefined && costlyIn(next) === null && costAsk === null ? next : null
@@ -211,17 +220,18 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 
 		return slot !== undefined && pageOpens(store, slot) && !held(position) ? [slot] : []
 	})
-	const readsKey = `${wanted.join(",")}|${viewSlots.join(",")}|${password ?? ""}|${String(aheadEntries)}`
+	const readsKey = `${wanted.join(",")}|${viewSlots.join(",")}|${password ?? ""}|${String(aheadEntries)}|${heading}`
 	const plan = useEffectEvent(() => ({
 		wanted,
 		keep: new Set([...wanted, ...viewSlots]),
 		password,
 		aheadEntries,
+		heading,
 		costAccepted: session()?.costAccepted() === true
 	}))
 
 	useEffect(() => {
-		const { wanted: wantedSlots, keep, password: readWith, aheadEntries: entries, costAccepted } = plan()
+		const { wanted: wantedSlots, keep, password: readWith, aheadEntries: entries, heading: way, costAccepted } = plan()
 		const running = reads.current
 
 		// A page no longer wanted, nor shown now (a turn onto it keeps it: its viewer joins the read), is cancelled.
@@ -246,7 +256,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 					leaseId,
 					target: source,
 					password: readWith,
-					plan: entryReadPlan(store, slot, costAccepted, undefined, entries),
+					plan: entryReadPlan(store, slot, costAccepted, undefined, entries, way),
 					events: { phase: () => undefined, verified: () => undefined, failed: () => undefined }
 				})
 			}
@@ -301,7 +311,8 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 
 	const costSlot = costAsk === null ? undefined : pages[costAsk]
 	// What the read after a yes fetches: the page and the ones read ahead with it.
-	const cost = costSlot === undefined ? null : entryCost(store, costSlot, entryReadPlan(store, costSlot, true, undefined, aheadEntries))
+	const cost =
+		costSlot === undefined ? null : entryCost(store, costSlot, entryReadPlan(store, costSlot, true, undefined, aheadEntries, heading))
 	// ◀ goes forward when reading right to left.
 	const left = direction === "rtl" ? forward : back
 	const right = direction === "rtl" ? back : forward
@@ -363,6 +374,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 										password={password}
 										readAhead={session()?.costAccepted() === true}
 										aheadEntries={aheadEntries}
+										heading={heading}
 										onShown={(image: ShownImage | null) => {
 											if (image !== null && image.width > image.height) {
 												markLandscape(position)

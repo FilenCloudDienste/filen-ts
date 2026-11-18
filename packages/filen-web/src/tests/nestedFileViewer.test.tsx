@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
-import { bytesOrigin } from "@/lib/sdk/byteOrigin"
+import { bytesOrigin, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
@@ -95,5 +95,46 @@ describe("embeddedFileItem", () => {
 		expect(item.data.parent).toBe("mail-1#att2")
 		expect(item.data.decryptedMeta).toMatchObject({ name: "chart.png", mime: "image/png", size: 10n })
 		expect(embeddedFileItem("k", "blob.unknownext", 1, NaN).data.decryptedMeta).toMatchObject({ mime: "application/octet-stream" })
+	})
+
+	it("shows the replacement its content read's kind asks for instead of that viewer, and the viewer for a named kind", async () => {
+		const item = embeddedFileItem("arc#4", "clip.mp4", 3, NaN)
+		const origin: ByteOrigin = {
+			kind: "entry",
+			reader: "lease",
+			entry: { archive: "a0000000-0000-0000-0000-000000000000", index: 4 },
+			size: 3,
+			access: "whole",
+			anon: false,
+			cacheKey: "arc#4"
+		}
+		const props = {
+			item,
+			origin,
+			references: null,
+			backLabel: "Back",
+			onBack: vi.fn(),
+			onDownload: null,
+			sniffedReplacement: (category: string) => (category === "video" ? <p>Extract to play</p> : undefined)
+		} as const
+
+		const { unmount } = render(
+			<NestedFileViewer
+				{...props}
+				category={null}
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		expect(await screen.findByText("Extract to play")).toBeTruthy()
+		unmount()
+		render(
+			<NestedFileViewer
+				{...props}
+				category="text"
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+		expect(screen.queryByText("Extract to play")).toBeNull()
 	})
 })

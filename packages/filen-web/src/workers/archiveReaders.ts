@@ -294,6 +294,8 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 	// Every reader's read-ahead, oldest first, charged to one budget.
 	const aheadOrder = new Map<string, { record: ReaderRecord; index: number; bytes: number }>()
 	let aheadTotal = 0
+	// What the passes running on every reader will bring besides their asked entries: room they took from the budget.
+	let passing = 0
 
 	// The SDK names a nested archive's entries by an id of its own, derived from its parent's: the page names them by
 	// the archive's (outermost) uuid, mapped here.
@@ -328,8 +330,9 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		}
 	}
 
+	// Within the budget less what the passes still running took for their windows.
 	const keepAhead = (record: ReaderRecord, index: number, held: Ahead): void => {
-		const budget = deps.aheadBudget()
+		const budget = deps.aheadBudget() - passing
 
 		if (record.closed || held.bytes.length > budget) {
 			return
@@ -454,25 +457,15 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 					record.opening = null
 				}
 
-				// An opening given up before the SDK saw it, which another opening beat: nobody holds this one.
-				if (record.opened !== null) {
+				// Closed while it opened (a close may have freed another opening already), or given up before the SDK saw it
+				// and beaten by another opening: nobody holds this one, and no call borrowed it.
+				if (record.closed || record.opened !== null) {
 					shut(opened)
 
 					return
 				}
 
 				record.opened = opened
-
-				// Closed while it opened: nobody holds it.
-				if (record.closed) {
-					try {
-						opened.reader.close()
-					} catch (e) {
-						log.warn("archiveReaders", "closing a reader failed", e)
-					}
-
-					releaseIfIdle(record)
-				}
 			},
 			() => {
 				if (record.opening === opening) {
@@ -605,11 +598,124 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		return false
 	}
 
-	// Room for a pass's window before it starts, so what is held ahead and what the pass brings stay within the budget
+	// The entry without a decode of its own: read ahead already, being read by another caller, or on its way in a running
+	// read. A read that failed or was cancelled leaves it to the first waiter to read again, which marks it for the rest; a
+	// solid read (`solid`) waits for any other one running, then looks again, so the waiters of a failed pass never decode
+	// beside each other. Once nothing else brings it, `start` reads it, called in the same turn as that last look so a
+	// read asked meanwhile finds this one.
+	const fromOthersOr = async <T>(
+		record: ReaderRecord,
+		index: number,
+		solid: boolean,
+		signal: AbortSignal,
+		start: () => Promise<T>
+	): Promise<{ readonly shared: Ahead } | { readonly own: T }> => {
+		let leave: (() => void) | null = null
+
+		try {
+			for (;;) {
+				const held = dropAhead(record, index)
+
+				if (held !== undefined) {
+					return { shared: held }
+				}
+
+				const same = record.reads.get(index)
+
+				if (same !== undefined) {
+					// Its first caller takes the bytes it read (transferred to the page): this one a copy, made at once.
+					const shared = await raceAbort(
+						same.then(
+							read => ({ bytes: read.bytes.slice(), checked: read.checked }),
+							() => null
+						),
+						signal
+					)
+
+					if (shared !== null) {
+						return { shared }
+					}
+				} else {
+					const running = record.passes.get(index) ?? (solid ? record.solidReads.values().next().value : undefined)
+
+					// An earlier entry's waiter reads first after a failed pass: its window may bring this one.
+					const on = running ?? (solid && earlierWaiter(record, index) ? record.changed.promise : undefined)
+
+					if (on === undefined) {
+						leave?.()
+						leave = null
+
+						return { own: await start() }
+					}
+
+					if (solid) {
+						leave ??= enlist(record, index)
+					}
+
+					await raceAbort(
+						on.catch(() => undefined),
+						signal
+					)
+				}
+
+				if (record.closed) {
+					throw readerClosed()
+				}
+			}
+		} finally {
+			leave?.()
+		}
+	}
+
+	// The window cut to the room the passes already running left in the budget: the files farthest from the asked one go
+	// first. A file cut from before the window's first is then decoded and thrown away, so the pass's skip grows by it.
+	const fitWindow = (plan: EntryReadPlan, asked: number): EntryReadPlan => {
+		const room = deps.aheadBudget() - passing
+		let coming = 0
+
+		for (const item of plan.window) {
+			if (item.index !== asked) {
+				coming += item.size
+			}
+		}
+
+		if (coming <= room) {
+			return plan
+		}
+
+		const kept = new Set([asked])
+		const nearest = plan.window
+			.filter(item => item.index !== asked)
+			.sort((a, b) => Math.abs(a.index - asked) - Math.abs(b.index - asked))
+		let taken = 0
+
+		for (const item of nearest) {
+			if (taken + item.size > room) {
+				break
+			}
+
+			taken += item.size
+			kept.add(item.index)
+		}
+
+		const window = plan.window.filter(item => kept.has(item.index))
+		const first = window[0]?.index ?? asked
+		let windowSkip = plan.windowSkip
+
+		for (const item of plan.window) {
+			if (item.index < first) {
+				windowSkip += item.size
+			}
+		}
+
+		return { maxSolidSkip: plan.maxSolidSkip, window, windowSkip }
+	}
+
+	// Room for a pass's window before it starts, so what is held ahead and what the passes bring stay within the budget
 	// together: this reader's files outside the window go first (the reader moved on), then those the window brings
-	// again, then the oldest of any reader.
-	const makeRoom = (record: ReaderRecord, plan: EntryReadPlan, asked: number): void => {
-		const budget = deps.aheadBudget()
+	// again, then the oldest of any reader. Returns what the pass will bring besides the asked entry.
+	const makeRoom = (record: ReaderRecord, plan: EntryReadPlan, asked: number): number => {
+		const budget = deps.aheadBudget() - passing
 		const inWindow = new Set(plan.window.map(item => item.index))
 		let coming = 0
 
@@ -636,6 +742,8 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 
 			dropAhead(owner, index)
 		}
+
+		return coming
 	}
 
 	// The window in one ordered pass: the asked entry returned, the others it wrote kept for their own read.
@@ -643,34 +751,43 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		record: ReaderRecord,
 		reader: ReaderLike,
 		entry: ArchiveEntryId,
-		plan: EntryReadPlan,
+		planned: EntryReadPlan,
 		events: EntryReadEvents,
 		signal: AbortSignal
 	): Promise<Ahead> => {
+		const plan = fitWindow(planned, entry.index)
 		const buffers = new Map<number, ReturnType<typeof entryBuffer>>()
 		const sizes = new Map(plan.window.map(item => [item.index, item.size]))
 		let phase: EntryDownloadPhase | null = null
+		const coming = makeRoom(record, plan, entry.index)
 
-		makeRoom(record, plan, entry.index)
+		passing += coming
 
-		const report = await reader.readEntries({
-			entries: plan.window.map(item => ownId(record, reader, { archive: entry.archive, index: item.index })),
-			writerFor: (id, stated) => {
-				const buffer = entryBuffer(stated === undefined ? (sizes.get(id.index) ?? 0) : Number(stated))
+		let report: Awaited<ReturnType<ReaderLike["readEntries"]>>
 
-				buffers.set(id.index, buffer)
+		try {
+			report = await reader.readEntries({
+				entries: plan.window.map(item => ownId(record, reader, { archive: entry.archive, index: item.index })),
+				writerFor: (id, stated) => {
+					const buffer = entryBuffer(stated === undefined ? (sizes.get(id.index) ?? 0) : Number(stated))
 
-				return buffer.writer
-			},
-			maxSolidSkip: plan.windowSkip,
-			onUpdate: update => {
-				if (update.phase !== phase) {
-					phase = update.phase
-					events.phase(update.phase)
-				}
-			},
-			managedFuture: { abortSignal: signal }
-		})
+					buffers.set(id.index, buffer)
+
+					return buffer.writer
+				},
+				maxSolidSkip: plan.windowSkip,
+				onUpdate: update => {
+					if (update.phase !== phase) {
+						phase = update.phase
+						events.phase(update.phase)
+					}
+				},
+				managedFuture: { abortSignal: signal }
+			})
+		} finally {
+			passing -= coming
+		}
+
 		const checked = report.error === undefined && report.checked
 
 		for (const [index, buffer] of buffers) {
@@ -760,6 +877,67 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 				return { bytes: buffer.take(), checked }
 			}
 		)
+
+	// The entry's own read as `plan` says, shared with whoever asks for it (or a file its window brings) meanwhile.
+	const ownRead = async (
+		record: ReaderRecord,
+		entry: ArchiveEntryId,
+		size: number,
+		plan: EntryReadPlan,
+		events: EntryReadEvents,
+		signal: AbortSignal,
+		solid: boolean
+	): Promise<Uint8Array> => {
+		let marked: number[] = plan.window.length > 1 ? plan.window.map(item => item.index).filter(index => index !== entry.index) : []
+		let reading: Promise<Ahead> | null = null
+		const unmark = (): void => {
+			for (const index of marked) {
+				if (record.passes.get(index) === reading) {
+					record.passes.delete(index)
+				}
+			}
+
+			marked = []
+		}
+
+		reading = readEntry(record, entry, size, plan, events, signal, unmark)
+		// Marked before the read's first await: a read of a file after it, asked meanwhile, waits for what it brings.
+		marked = marked.filter(index => !record.passes.has(index))
+
+		for (const index of marked) {
+			record.passes.set(index, reading)
+		}
+
+		const own = reading
+
+		record.reads.set(entry.index, own)
+
+		if (solid) {
+			record.solidReads.add(own)
+			notify(record)
+		}
+
+		try {
+			const read = await own
+
+			if (read.checked) {
+				events.verified()
+			}
+
+			return read.bytes
+		} catch (e) {
+			events.failed(e)
+
+			throw e
+		} finally {
+			unmark()
+			record.solidReads.delete(own)
+
+			if (record.reads.get(entry.index) === own) {
+				record.reads.delete(entry.index)
+			}
+		}
+	}
 
 	return {
 		register: (id, archive, anon, password) => {
@@ -853,37 +1031,54 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 		},
 		download: async (id, entry, writer, maxSolidSkip, onProgress, managedFuture) => {
 			const record = require(id)
-			// Read ahead already (a solid block's file a pass brought): saved from what is held.
-			const held = dropAhead(record, entry.index)
+			const signal = managedFuture.abortSignal ?? new AbortController().signal
+			// Decodes a solid block from its start, as a solid whole read does: other solid reads wait for it.
+			const solid = maxSolidSkip > 0
+			const save = async (): Promise<EntryDownloadReport> => {
+				const saving = borrow(
+					record,
+					signal,
+					update => {
+						onProgress({ phase: update.phase, bytesWritten: 0 })
+					},
+					(reader, combined) =>
+						reader.downloadEntry({
+							entry: ownId(record, reader, entry),
+							writer,
+							maxSolidSkip,
+							onUpdate: (update: EntryDownloadUpdate) => {
+								onProgress({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
+							},
+							managedFuture: { ...managedFuture, abortSignal: combined }
+						})
+				)
 
-			if (held !== undefined) {
-				const w = writer.getWriter()
+				if (solid) {
+					record.solidReads.add(saving)
+					notify(record)
+				}
 
-				onProgress({ phase: "reading", bytesWritten: 0 })
-				await w.write(held.bytes)
-				await w.close()
-				onProgress({ phase: "done", bytesWritten: held.bytes.length })
+				try {
+					return await saving
+				} finally {
+					record.solidReads.delete(saving)
+				}
+			}
+			// Read ahead already, or being read by a viewer: saved from those bytes, not decoded a second time beside them.
+			const got = await fromOthersOr(record, entry.index, solid, signal, save)
 
-				return { bytesWritten: BigInt(held.bytes.length), bytesRead: 0n, checked: held.checked, error: undefined }
+			if ("own" in got) {
+				return got.own
 			}
 
-			return borrow(
-				record,
-				managedFuture.abortSignal ?? new AbortController().signal,
-				update => {
-					onProgress({ phase: update.phase, bytesWritten: 0 })
-				},
-				(reader, signal) =>
-					reader.downloadEntry({
-						entry: ownId(record, reader, entry),
-						writer,
-						maxSolidSkip,
-						onUpdate: (update: EntryDownloadUpdate) => {
-							onProgress({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
-						},
-						managedFuture: { ...managedFuture, abortSignal: signal }
-					})
-			)
+			const w = writer.getWriter()
+
+			onProgress({ phase: "reading", bytesWritten: 0 })
+			await w.write(got.shared.bytes)
+			await w.close()
+			onProgress({ phase: "done", bytesWritten: got.shared.bytes.length })
+
+			return { bytesWritten: BigInt(got.shared.bytes.length), bytesRead: 0n, checked: got.shared.checked, error: undefined }
 		},
 		readRange: (id, entry, start, end, signal) => {
 			const record = require(id)
@@ -937,120 +1132,15 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 			// Decodes a solid block from its start: one such read at a time per reader, the archive slot being one anyway.
 			const solid = plan.window.length > 1 || plan.maxSolidSkip > 0
 
-			// Read ahead already, being read by another caller, or on its way in a running read: from there. A read that
-			// failed or was cancelled leaves it to the first waiter to read again, which marks it for the rest; a solid read
-			// waits for any other one running, then looks again, so the waiters of a failed pass never decode beside each
-			// other.
-			let leave: (() => void) | null = null
+			const got = await fromOthersOr(record, entry.index, solid, signal, () =>
+				ownRead(record, entry, size, plan, events, signal, solid)
+			)
 
-			try {
-				for (;;) {
-					const held = dropAhead(record, entry.index)
-
-					if (held !== undefined) {
-						if (held.checked) {
-							events.verified()
-						}
-
-						return held.bytes
-					}
-
-					const same = record.reads.get(entry.index)
-
-					if (same !== undefined) {
-						// Its first caller takes the bytes it read (transferred to the page): this one a copy, made at once.
-						const shared = await raceAbort(
-							same.then(
-								read => ({ bytes: read.bytes.slice(), checked: read.checked }),
-								() => null
-							),
-							signal
-						)
-
-						if (shared !== null) {
-							if (shared.checked) {
-								events.verified()
-							}
-
-							return shared.bytes
-						}
-					} else {
-						const running = record.passes.get(entry.index) ?? (solid ? record.solidReads.values().next().value : undefined)
-
-						// An earlier entry's waiter reads first after a failed pass: its window may bring this one.
-						const on = running ?? (solid && earlierWaiter(record, entry.index) ? record.changed.promise : undefined)
-
-						if (on === undefined) {
-							break
-						}
-
-						if (solid) {
-							leave ??= enlist(record, entry.index)
-						}
-
-						await raceAbort(
-							on.catch(() => undefined),
-							signal
-						)
-					}
-
-					if (record.closed) {
-						throw readerClosed()
-					}
-				}
-			} finally {
-				leave?.()
+			if ("shared" in got && got.shared.checked) {
+				events.verified()
 			}
 
-			let marked: number[] = plan.window.length > 1 ? plan.window.map(item => item.index).filter(index => index !== entry.index) : []
-			let reading: Promise<Ahead> | null = null
-			const unmark = (): void => {
-				for (const index of marked) {
-					if (record.passes.get(index) === reading) {
-						record.passes.delete(index)
-					}
-				}
-
-				marked = []
-			}
-
-			reading = readEntry(record, entry, size, plan, events, signal, unmark)
-			// Marked before the read's first await: a read of a file after it, asked meanwhile, waits for what it brings.
-			marked = marked.filter(index => !record.passes.has(index))
-
-			for (const index of marked) {
-				record.passes.set(index, reading)
-			}
-
-			const own = reading
-
-			record.reads.set(entry.index, own)
-
-			if (solid) {
-				record.solidReads.add(own)
-				notify(record)
-			}
-
-			try {
-				const read = await own
-
-				if (read.checked) {
-					events.verified()
-				}
-
-				return read.bytes
-			} catch (e) {
-				events.failed(e)
-
-				throw e
-			} finally {
-				unmark()
-				record.solidReads.delete(own)
-
-				if (record.reads.get(entry.index) === own) {
-					record.reads.delete(entry.index)
-				}
-			}
+			return "shared" in got ? got.shared.bytes : got.own
 		}
 	}
 }

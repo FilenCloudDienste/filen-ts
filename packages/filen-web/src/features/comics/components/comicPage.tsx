@@ -6,7 +6,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
-import { entryReadPlan } from "@/features/archive/lib/entryAccess.logic"
+import { entryReadPlan, type ReadHeading } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { PreviewByteOriginProvider } from "@/features/preview/lib/accessMode"
 import { ImageShownContext, type ShownImage } from "@/features/preview/lib/imageDisplay"
@@ -25,6 +25,8 @@ export interface ComicPageProps {
 	// (readAheadEntries).
 	readAhead: boolean
 	aheadEntries: number
+	// Which way the reader goes: the window takes the pages after this one, or those before it.
+	heading: ReadHeading
 	// The page is on screen (or failed, or shows its placeholder): the reader may read ahead. `image`: its size, when
 	// one is shown (a two-page scan is wider than tall).
 	onShown: (image: ShownImage | null) => void
@@ -74,6 +76,7 @@ function ShownComicPage({
 	password,
 	readAhead,
 	aheadEntries,
+	heading,
 	alt,
 	onShown,
 	onVerified,
@@ -85,7 +88,7 @@ function ShownComicPage({
 	const leaseId = `${leaseBase}:${String(slot)}:${password ?? ""}`
 	const origin = entryLeaseOrigin(leaseId, source.uuid, source.anon, store.index(slot), store.size(slot))
 	const item = archiveEntryItem(source.uuid, store.index(slot), store.name(slot), store.size(slot), store.modified(slot))
-	const leaseRequest = useEffectEvent(() => ({ plan: entryReadPlan(store, slot, readAhead, undefined, aheadEntries), password }))
+	const leaseRequest = useEffectEvent(() => ({ plan: entryReadPlan(store, slot, readAhead, undefined, aheadEntries, heading), password }))
 	const phase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
 	})

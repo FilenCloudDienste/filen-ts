@@ -1,7 +1,8 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { CATEGORY_POLICY, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
@@ -10,13 +11,13 @@ import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { isArchivePasswordError, type EntryRequest } from "@/features/archive/lib/entryDownload"
 import { entryAccessOf, entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import type { EntryAccessKind } from "@/lib/sdk/byteOrigin"
-import { CATEGORY_POLICY, entryOpensByAccess } from "@/features/drive/lib/preview.logic"
-import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { ExtractToRead } from "@/features/archive/components/extractToRead"
-import { entryExtractCard, entryPlanOf } from "@/features/archive/lib/entryAccess.logic"
+import { entryExtractCard, entryPlanOf, sniffMayReadByRange, type ExtractReason } from "@/features/archive/lib/entryAccess.logic"
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
+import type { DriveItem } from "@/features/drive/lib/item"
 
 export interface ViewedEntry {
 	request: EntryRequest
@@ -25,8 +26,8 @@ export interface ViewedEntry {
 	// NaN when absent.
 	modified: number
 	encrypted: boolean
-	// In a solid block too large to read from here (E3): its card offers to extract the archive instead.
-	extractToRead?: boolean
+	// Not read from here: its card offers to extract the archive instead (a solid block too large, E3).
+	extract?: ExtractReason | undefined
 }
 
 export interface ArchiveEntryViewerProps {
@@ -42,36 +43,74 @@ export interface ArchiveEntryViewerProps {
 	listing: { source: ArchiveSource; store: EntryStore }
 	// The session accepted a solid cost: a solid block's entry reads the files after it ahead.
 	readAhead: boolean
+	// The archive may be extracted from here (the link's download flag, or a trashed file's extract): its "Extract to …"
+	// cards offer it only then.
+	extractAllowed: boolean
 }
 
-// One entry shown in the archive browser's place: read through the archive's reader, or, packed in a solid block too
-// large to read from here (E3), the card offering to extract the archive.
+// One entry shown in the archive browser's place: read through the archive's reader, or, one not read from here (a
+// solid block too large, E3), the card offering to extract the archive.
 export function ArchiveEntryViewer(props: ArchiveEntryViewerProps) {
-	return props.entry.extractToRead === true ? (
+	return props.entry.extract === undefined ? (
+		<ReadEntryViewer {...props} />
+	) : (
 		<EntryExtractCard
 			{...props}
-			reason="read"
+			reason={props.entry.extract}
 		/>
-	) : (
-		<ReadEntryViewer {...props} />
 	)
 }
 
-// Why an entry is extracted to be seen: a solid block too large (E3), media that cannot be played from here, a RAW
-// whose preview cannot be read by range (W6 §3.10).
-type ExtractReason = "read" | "play" | "open"
-
-function EntryExtractCard({ archiveUuid, entry, onBack, listing, reason }: ArchiveEntryViewerProps & { reason: ExtractReason }) {
+// The card's body: why the entry is not shown here, and the extract that would show it (where allowed).
+function EntryExtractBody({
+	item,
+	name,
+	source,
+	reason,
+	extractAllowed
+}: {
+	item: DriveItem
+	name: string
+	source: ArchiveSource
+	reason: ExtractReason
+	extractAllowed: boolean
+}) {
 	const { t } = useTranslation("preview")
-	const { request } = entry
 	const message =
 		reason === "read"
-			? t("previewArchiveEntryExtractToRead", { name: request.name })
+			? t("previewArchiveEntryExtractToRead", { name })
 			: reason === "play"
-				? t("previewArchiveEntryExtractToPlayBody", { name: request.name })
-				: t("previewArchiveEntryExtractToOpenBody", { name: request.name })
+				? t("previewArchiveEntryExtractToPlayBody", { name })
+				: t("previewArchiveEntryExtractToOpenBody", { name })
 	const label =
 		reason === "read" ? undefined : reason === "play" ? t("previewArchiveEntryExtractToPlay") : t("previewArchiveEntryExtractToOpen")
+
+	return (
+		<PreviewUnsupportedState
+			item={item}
+			message={message}
+			secondary={
+				extractAllowed ? (
+					<ExtractToRead
+						source={source}
+						label={label}
+					/>
+				) : undefined
+			}
+		/>
+	)
+}
+
+function EntryExtractCard({
+	archiveUuid,
+	entry,
+	onBack,
+	listing,
+	reason,
+	extractAllowed
+}: ArchiveEntryViewerProps & { reason: ExtractReason }) {
+	const { t } = useTranslation("preview")
+	const { request } = entry
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
 
 	return (
@@ -84,25 +123,25 @@ function EntryExtractCard({ archiveUuid, entry, onBack, listing, reason }: Archi
 			onBack={onBack}
 			onDownload={null}
 			replacement={
-				<PreviewUnsupportedState
+				<EntryExtractBody
 					item={item}
-					message={message}
-					secondary={
-						<ExtractToRead
-							source={listing.source}
-							label={label}
-						/>
-					}
+					name={request.name}
+					source={listing.source}
+					reason={reason}
+					extractAllowed={extractAllowed}
 				/>
 			}
 		/>
 	)
 }
 
+// The entry's access kind for the lease and password it was asked under, or why it could not be told.
+type AccessAnswer = { key: string; kind: EntryAccessKind } | { key: string; error: ErrorDTO }
+
 // One entry read and shown in the archive browser's place, read-only, with the viewers a drive file of its kind
 // gets. Its bytes come through the entry's origin, a lease on the archive's reader for each password tried (the
-// listing's own reader for its password), cached like a file's under the entry's key. An encrypted entry without a password asks first; a password the SDK refuses asks
-// again.
+// listing's own reader for its password), cached like a file's under the entry's key. An encrypted entry without a
+// password asks first; a password the SDK refuses (a whole read's, a range read's, a RAW walk's) asks again.
 function ReadEntryViewer({
 	archiveUuid,
 	entry,
@@ -111,26 +150,30 @@ function ReadEntryViewer({
 	onDownload,
 	onBack,
 	listing,
-	readAhead
+	readAhead,
+	extractAllowed
 }: ArchiveEntryViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const [password, setPassword] = useState(listingPassword)
 	const [ask, setAsk] = useState<{ wrong: boolean } | null>(entry.encrypted && listingPassword === undefined ? { wrong: false } : null)
 	// Remounts the viewer, so a new password loads again.
 	const [attempt, setAttempt] = useState(0)
+	// A failed access lookup asked again.
+	const [lookup, setLookup] = useState(0)
 	const [waiting, setWaiting] = useState(false)
 	const [readerBase] = useState(() => crypto.randomUUID())
 	const { request } = entry
 	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
 	// One lease per password tried; the viewer below remounts with it.
 	const leaseId = `${readerBase}:${String(attempt)}`
-	// A viewer that reads ranges (a database) streams a mapped or seekable entry by range; the reader says which.
-	const ranged = entry.category !== null && CATEGORY_POLICY[entry.category].entry === "ranged"
-	// Video, audio and RAW open by their access kind, or as their "Extract to …" card.
-	const opensByAccess = entryOpensByAccess(entry.category)
-	const [byteAccess, setByteAccess] = useState<{ key: string; kind: EntryAccessKind } | null>(null)
-	const accessKey = `${leaseId}:${password ?? ""}`
-	const kind = ranged ? (byteAccess?.key === accessKey ? byteAccess.kind : null) : "whole"
+	// A viewer that reads ranges (media, a RAW, a database) streams a mapped or seekable entry by range; the reader says
+	// which. An entry whose content read picks its viewer is asked too when that read may find such a kind: its head is
+	// then read by range, and media found by it plays (or shows its card) as one named so would.
+	const ranged = entry.category === null ? sniffMayReadByRange(request.name) : CATEGORY_POLICY[entry.category].entry === "ranged"
+	const [byteAccess, setByteAccess] = useState<AccessAnswer | null>(null)
+	const accessKey = `${leaseId}:${password ?? ""}:${String(lookup)}`
+	const answer = ranged && byteAccess?.key === accessKey ? byteAccess : null
+	const kind = ranged ? (answer !== null && "kind" in answer ? answer.kind : null) : "whole"
 	const origin = entryLeaseOrigin(leaseId, request.target.uuid, request.anon, request.params.entry.index, request.size, kind ?? "whole")
 	const onPhase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
@@ -160,20 +203,30 @@ function ReadEntryViewer({
 			return
 		}
 
-		let live = true
+		const controller = new AbortController()
 		const asked = accessRequest()
 
-		// A reader that cannot tell (a refused password): read whole, which asks the password as before.
-		void entryAccessOf(asked.request.target, asked.password, asked.request.params.entry.index)
-			.catch((): EntryAccessKind => "whole")
-			.then(next => {
-				if (live) {
+		void entryAccessOf(asked.request.target, asked.password, asked.request.params.entry.index, controller.signal).then(
+			next => {
+				if (!controller.signal.aborted) {
 					setByteAccess({ key: accessKey, kind: next })
 				}
-			})
+			},
+			(e: unknown) => {
+				if (controller.signal.aborted) {
+					return
+				}
+
+				const dto = asErrorDTO(e)
+
+				// A reader that cannot tell for a password (a refused one): read whole, which asks the password as before. Any
+				// other failure (the network, the slot) is shown, not taken for an entry read only whole.
+				setByteAccess(isArchivePasswordError(dto) ? { key: accessKey, kind: "whole" } : { key: accessKey, error: dto })
+			}
+		)
 
 		return () => {
-			live = false
+			controller.abort()
 		}
 	}, [ranged, accessKey])
 
@@ -200,11 +253,11 @@ function ReadEntryViewer({
 		})
 	}, [leaseId])
 
-	if (kind === null && ask === null) {
-		return <PreviewLoading />
-	}
-
-	const card = opensByAccess && kind !== null ? entryExtractCard(entry.category, kind, request.size) : null
+	// The "Extract to …" card for media and RAW the reader cannot serve from here (W6 §3.10): by its name, or by what its
+	// content read found.
+	const cardFor = (category: PreviewCategory | null): ExtractReason | null =>
+		kind === null ? null : entryExtractCard(category, kind, request.size)
+	const card = cardFor(entry.category)
 
 	if (card !== null) {
 		return (
@@ -217,6 +270,7 @@ function ReadEntryViewer({
 				onBack={onBack}
 				listing={listing}
 				readAhead={readAhead}
+				extractAllowed={extractAllowed}
 				reason={card}
 			/>
 		)
@@ -232,8 +286,21 @@ function ReadEntryViewer({
 			onBack={onBack}
 			onDownload={onDownload}
 			bodyKey={attempt}
+			sniffedReplacement={sniffed => {
+				const reason = cardFor(sniffed)
+
+				return reason === null ? undefined : (
+					<EntryExtractBody
+						item={item}
+						name={request.name}
+						source={listing.source}
+						reason={reason}
+						extractAllowed={extractAllowed}
+					/>
+				)
+			}}
 			replacement={
-				ask === null ? undefined : (
+				ask !== null ? (
 					<ArchivePasswordGate
 						name={request.name}
 						wrong={ask.wrong}
@@ -243,7 +310,17 @@ function ReadEntryViewer({
 							setAttempt(attempt + 1)
 						}}
 					/>
-				)
+				) : answer !== null && "error" in answer ? (
+					<PreviewErrorState
+						message={errorLabel(answer.error)}
+						onRetry={() => {
+							setLookup(lookup + 1)
+						}}
+					/>
+				) : kind === null ? (
+					// The reader is asked how the entry reads; back stays at hand meanwhile.
+					<PreviewLoading />
+				) : undefined
 			}
 			overlay={
 				waiting && ask === null ? (

@@ -15,8 +15,9 @@ import "@/lib/i18n"
 // otherwise, a solid 7z entry's cost is confirmed first, an encrypted one asks for the password, and a
 // file row's menu offers what the entry allows.
 
-const { openListingSession, runEntryDownload, loadEntryBytes } = vi.hoisted(() => ({
+const { openListingSession, runEntryDownload, loadEntryBytes, archiveEntryAccess } = vi.hoisted(() => ({
 	openListingSession: vi.fn(),
+	archiveEntryAccess: vi.fn<(readerId: string, entry: unknown, token: string) => Promise<string>>(),
 	runEntryDownload: vi.fn(),
 	loadEntryBytes: vi.fn()
 }))
@@ -42,6 +43,7 @@ vi.mock("@/lib/sdk/client", async () => {
 				return Promise.resolve()
 			},
 			archiveReaderHeldBytes: () => Promise.resolve(0),
+			archiveEntryAccess,
 			leaseArchiveEntry: (id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents) => {
 				leases.set(id, { readerId, plan, events })
 
@@ -247,6 +249,7 @@ beforeEach(() => {
 	clearPreviewCache()
 	runEntryDownload.mockResolvedValue({ status: "success" })
 	loadEntryBytes.mockResolvedValue({ bytes: new TextEncoder().encode("hi!"), checked: true })
+	archiveEntryAccess.mockResolvedValue("whole")
 })
 
 afterEach(() => {
@@ -582,6 +585,70 @@ describe("an archive entry on its own", () => {
 		expect(await screen.findByRole("menuitem", { name: "Extract" })).toBeTruthy()
 		expect(screen.getByRole("menuitem", { name: "Open" })).toBeTruthy()
 		expect(docs.getAttribute("aria-selected")).toBe("true")
+	})
+
+	it("offers no extract on an entry's card where the link allows no downloads", async () => {
+		show(
+			[
+				{
+					path: "deep.md",
+					size: 3,
+					access: {
+						type: "solidBlock",
+						skippedBytes: BigInt(5 * MiB),
+						estimatedPackedBytes: BigInt(6 * MiB),
+						blockPackedBytes: BigInt(513 * MiB)
+					}
+				},
+				{ path: "film.mp4", size: 100 * MiB, access: DIRECT }
+			],
+			{ downloadable: false }
+		)
+
+		fireEvent.doubleClick(row("deep.md"))
+		expect(await screen.findByText(/Extract the archive to read it/)).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Extract to read" })).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: /Back/ }))
+		fireEvent.doubleClick(row("film.mp4"))
+		expect(await screen.findByText(/Extract the archive to play it/)).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Extract to play" })).toBeNull()
+	})
+
+	it("shows why an entry's access could not be told, and asks again on Try again", async () => {
+		archiveEntryAccess.mockRejectedValueOnce(new Error("network down"))
+		show([{ path: "film.mp4", size: 100 * MiB, access: DIRECT }])
+
+		fireEvent.doubleClick(row("film.mp4"))
+		fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
+		expect(await screen.findByText(/Extract the archive to play it/)).toBeTruthy()
+		expect(archiveEntryAccess).toHaveBeenCalledTimes(2)
+	})
+
+	it("asks how an entry reads before its content read when that read may find media", async () => {
+		show([{ path: "song.mod", size: 100 * MiB, access: DIRECT }])
+
+		fireEvent.doubleClick(row("song.mod"))
+		await vi.waitFor(() => {
+			expect(archiveEntryAccess).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it("cancels an entry's access question when the viewer goes", async () => {
+		const { sdkApi } = await import("@/lib/sdk/client")
+
+		archiveEntryAccess.mockReturnValueOnce(new Promise(() => undefined))
+		show([{ path: "film.mp4", size: 100 * MiB, access: DIRECT }])
+
+		fireEvent.doubleClick(row("film.mp4"))
+		await vi.waitFor(() => {
+			expect(archiveEntryAccess).toHaveBeenCalledTimes(1)
+		})
+
+		const token = archiveEntryAccess.mock.calls[0]?.[2]
+
+		fireEvent.click(screen.getByRole("button", { name: /Back/ }))
+		expect(sdkApi.cancelPreviewDownload).toHaveBeenCalledWith(token)
 	})
 
 	it("previews but never saves from a link that allows no downloads", async () => {

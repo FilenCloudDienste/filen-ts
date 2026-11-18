@@ -24,6 +24,7 @@ import {
 	type SniffSubject
 } from "@/features/drive/lib/preview.logic"
 import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
+import { sniffCandidates } from "@filen/shared"
 import { deviceProfile } from "@/lib/deviceProfile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
@@ -58,6 +59,16 @@ function entrySubject(store: EntryStore, slot: number): SniffSubject {
 	return { name: store.name(slot), mime: null, size: BigInt(Math.max(0, store.size(slot))), verdict: null }
 }
 
+// Whether a content read may find the entry `name` a kind read by range (media, RAW, a database): its access is asked
+// first, so the read and the viewer read by range where the reader can, never buffering the entry for a head.
+export function sniffMayReadByRange(name: string): boolean {
+	return sniffCandidates(fileTypeExtension(name, null)).some(candidate => {
+		const category = candidate === null ? null : previewCategoryForExtension(candidate)
+
+		return category !== null && CATEGORY_POLICY[category].entry === "ranged"
+	})
+}
+
 // Whether the entry's viewer is picked by a content read run before it opens (ContentSniffGate), not by its name. A
 // viewer-mode read runs in the viewer its name picks.
 export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {
@@ -67,12 +78,14 @@ export function entryAwaitsSniff(store: EntryStore, slot: number): boolean {
 }
 
 // The viewer a file held inside another (an archive's entry, an attachment) whose content read has run opens in, by its
-// verdict; null when that kind does not open there. Text above its cap opens as large text where `origin` serves ranges.
+// verdict; null when that kind does not open there. Media and RAW in an archive open by their access kind; bytes the page
+// holds play media from their Blob and have no RAW preview read. Text above its cap opens as large text where `origin`
+// serves ranges.
 export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): PreviewCategory | null {
 	const category = previewType(item)
 
 	if (entryOpensByAccess(category)) {
-		return category
+		return origin.kind === "bytes" && category === "rawImage" ? null : category
 	}
 
 	const profile = deviceProfile()
@@ -88,9 +101,17 @@ export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): Previ
 // Owner decision E5: a media entry read only whole plays from a buffer up to this size.
 export const NON_SEEKABLE_MEDIA_MAX_BYTES = 64 * 1024 * 1024
 
+// Why an entry is extracted to be seen instead: a solid block too large (E3, "read"), media that cannot be played from
+// here ("play"), a RAW or a nested archive that cannot be opened from here ("open"; W6 §3.10).
+export type ExtractReason = "read" | "play" | "open"
+
 // The "Extract to …" card an entry opening by access shows instead of a viewer, once its access kind is known; null when
 // the viewer shows it.
-export function entryExtractCard(category: PreviewCategory | null, access: EntryAccessKind, size: number): "play" | "open" | null {
+export function entryExtractCard(
+	category: PreviewCategory | null,
+	access: EntryAccessKind,
+	size: number
+): Exclude<ExtractReason, "read"> | null {
 	if (!entryOpensByAccess(category) || access === "mapped" || access === "seekable") {
 		return null
 	}
@@ -180,17 +201,24 @@ export function lonePlan(index: number, size: number, maxSolidSkip: number): Ent
 	return { maxSolidSkip, window: [{ index, size }], windowSkip: maxSolidSkip }
 }
 
+// Which way a reader goes through a solid block's files: on to the files stored after the asked one, or back to those
+// before it (a comic read backwards).
+export type ReadHeading = "forward" | "back"
+
 // How the entry is read whole: alone, or, once the session accepted a solid cost (`readAhead`), a solid block's entry
-// in one pass with the files its block stores right after it, up to `aheadEntries` files (readAheadEntries) and
-// `aheadBytes`, so reading them in turn decodes the block once per window rather than once per file. The pass may throw
-// away the entry's own skip and what lies between the window's files, no more. A slot no longer in the store (a relist)
+// in one pass with the files its block stores next to it, up to `aheadEntries` files (readAheadEntries) and `aheadBytes`,
+// so reading them in turn decodes the block once per window rather than once per file. Going `forward` the window takes
+// the files after the entry; going `back`, those before it, which the same pass decodes anyway on its way to the entry:
+// the next turns back are then held already. The pass may throw away the window's first file's skip and what lies
+// between the window's files, never more than the entry's own skip going back. A slot no longer in the store (a relist)
 // reads alone.
 export function entryReadPlan(
 	store: EntryStore,
 	slot: number,
 	readAhead: boolean,
 	aheadBytes: number = deviceReadAheadBytes(),
-	aheadEntries: number = READ_AHEAD_MIN_ENTRIES
+	aheadEntries: number = READ_AHEAD_MIN_ENTRIES,
+	heading: ReadHeading = "forward"
 ): EntryReadPlan {
 	const index = store.index(slot)
 	const maxSolidSkip = maxSolidSkipFor(store, slot)
@@ -200,9 +228,27 @@ export function entryReadPlan(
 		return plan
 	}
 
+	return heading === "forward"
+		? forwardWindow(store, slot, plan, aheadBytes, aheadEntries)
+		: backWindow(store, slot, plan, aheadBytes, aheadEntries)
+}
+
+// A file of the same block, read alone otherwise, that a window may take.
+function windowFile(store: EntryStore, at: number, block: number): boolean {
+	return (
+		at !== -1 &&
+		store.kind(at) === ENTRY_KIND.file &&
+		canReadEntry(store, at) &&
+		accessOfFlags(store.flags(at)) === ENTRY_ACCESS.solidBlock &&
+		store.solidBlock(at) === block
+	)
+}
+
+function forwardWindow(store: EntryStore, slot: number, plan: EntryReadPlan, aheadBytes: number, aheadEntries: number): EntryReadPlan {
+	const index = store.index(slot)
 	const window = [...plan.window]
 	const block = store.solidBlock(slot)
-	let windowSkip = maxSolidSkip
+	let windowSkip = plan.maxSolidSkip
 	// Where the window's last file ends in the block's decoded output.
 	let end = store.solidSkipped(slot) + store.size(slot)
 	let bytes = 0
@@ -217,13 +263,7 @@ export function entryReadPlan(
 		const skipped = store.solidSkipped(at)
 
 		// Another block (its skip starts over, at 0 for its first file), or an entry read some other way: the window ends.
-		if (
-			!canReadEntry(store, at) ||
-			accessOfFlags(store.flags(at)) !== ENTRY_ACCESS.solidBlock ||
-			store.solidBlock(at) !== block ||
-			skipped === 0 ||
-			skipped < end
-		) {
+		if (!windowFile(store, at, block) || skipped === 0 || skipped < end) {
 			break
 		}
 
@@ -240,7 +280,42 @@ export function entryReadPlan(
 		window.push({ index: next, size })
 	}
 
-	return { maxSolidSkip, window, windowSkip }
+	return { maxSolidSkip: plan.maxSolidSkip, window, windowSkip }
+}
+
+function backWindow(store: EntryStore, slot: number, plan: EntryReadPlan, aheadBytes: number, aheadEntries: number): EntryReadPlan {
+	const index = store.index(slot)
+	const block = store.solidBlock(slot)
+	const earlier: { index: number; size: number }[] = []
+	// Where the window's first file starts in the block's decoded output.
+	let start = store.solidSkipped(slot)
+	let bytes = 0
+
+	for (let previous = index - 1; previous >= index - WINDOW_SCAN && previous >= 0 && earlier.length < aheadEntries; previous--) {
+		const at = store.slotOfIndex(previous)
+
+		if (at === -1 || store.kind(at) !== ENTRY_KIND.file) {
+			continue
+		}
+
+		const size = store.size(at)
+		const skipped = store.solidSkipped(at)
+
+		// Another block, an entry read some other way, or one stored past this one's start: the window ends.
+		if (!windowFile(store, at, block) || skipped + size > start || bytes + size > aheadBytes) {
+			break
+		}
+
+		bytes += size
+		start = skipped
+		earlier.push({ index: previous, size })
+	}
+
+	const window = [...earlier.reverse(), ...plan.window]
+	// What the pass decodes and throws away: everything before the window's first file, and the gaps between its files.
+	const windowSkip = plan.maxSolidSkip - bytes
+
+	return { maxSolidSkip: plan.maxSolidSkip, window, windowSkip }
 }
 
 // The plan for the archive's entry `index` from its listing (entryReadPlan); read alone when the store no longer lists

@@ -4,6 +4,7 @@ import type { AnyFile, EntryDownloadReport, ReaderDownloadEntryParams, Stringifi
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
 import type { RangePortApi } from "@/lib/media/rangePort"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import { ErrorWithDTO } from "@/lib/sdk/errors"
 
 // The byte layer's worker APIs against a stand-in client: only the wasm module and Comlink are replaced, so the
 // preview-token registry, the port groups and the origin sources are the real ones.
@@ -229,6 +230,25 @@ describe("sdk worker origin access", () => {
 		expect(Array.from(await api.downloadOriginBytes({ kind: "linkedFile", file: fileOf(10) }, "anon", 10, "a6"))).toEqual(CONTENT)
 		expect(fakeUnauth.downloadFileToWriter).toHaveBeenCalledTimes(1)
 		expect(fakeClient.downloadFileToWriter).not.toHaveBeenCalled()
+	})
+})
+
+describe("sdk worker entry range reads", () => {
+	it("tells the lease of a password the SDK refuses in a RAW walk, and of no other failure", async () => {
+		const events = { phase: vi.fn(), verified: vi.fn(), failed: vi.fn() }
+		const wrong = new ErrorWithDTO({ species: "sdk", kind: "ArchiveWrongPassword", label: "Wrong password", message: "wrong" })
+
+		await api.openArchiveReader("pw-reader", fileOf(100), false, "nope")
+		await api.leaseArchiveEntry("pw", "pw-reader", PLAN, events)
+		fakeReader.writeEntryEmbeddedPreview.mockRejectedValueOnce(wrong)
+		await expect(api.fetchOriginRawPreview(entryOrigin("pw", "mapped"), "authed", "pw1")).rejects.toThrow()
+		expect(events.failed).toHaveBeenCalledWith(expect.objectContaining({ kind: "ArchiveWrongPassword" }))
+
+		events.failed.mockClear()
+		fakeReader.writeEntryEmbeddedPreview.mockRejectedValueOnce(new Error("network"))
+		await expect(api.fetchOriginRawPreview(entryOrigin("pw", "mapped"), "authed", "pw2")).rejects.toThrow()
+		expect(events.failed).not.toHaveBeenCalled()
+		await unlease("pw")
 	})
 })
 
