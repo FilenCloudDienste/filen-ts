@@ -23,6 +23,7 @@ import { stepFrame, dicomViewerKey } from "@/features/preview/lib/dicom/keys.log
 import { transferSyntax } from "@/features/preview/lib/dicom/transferSyntax"
 import { frameRequester, presetOf, windowFigure, windowPresets } from "@/features/preview/components/dicomViewer.logic"
 import { pixelsWithin } from "@/lib/pixelBudget.logic"
+import { dicomText } from "@/features/preview/lib/dicom/charset.logic"
 import {
 	DICOM_CODEC_INITIAL_HEAP,
 	decoderCost,
@@ -473,5 +474,67 @@ describe("the frame cache and budget", () => {
 		expect(transferSyntax("1.2.840.10008.1.2.1.99")).toMatchObject({ deflated: true })
 		expect(transferSyntax("1.2.840.10008.1.2.4.201")).toMatchObject({ decoder: "htj2k", encapsulated: true })
 		expect(transferSyntax("1.2.840.10008.1.2.4.100")).toBeNull()
+	})
+})
+
+describe("Specific Character Set", () => {
+	const ESC = 0x1b
+	const bytes = (...parts: (string | number[])[]) =>
+		Uint8Array.from(parts.flatMap(part => (typeof part === "string" ? [...new TextEncoder().encode(part)] : part)))
+
+	it("reads ISO 2022 code extensions, switching sets at escapes and back at each delimiter (PS3.5 H, I, K)", () => {
+		// Japanese: JIS X 0208 escaped into G0.
+		const japanese = bytes(
+			"Yamada^Tarou=",
+			[ESC, 0x24, 0x42, 0x3b, 0x33, 0x45, 0x44, ESC, 0x28, 0x42],
+			"^",
+			[ESC, 0x24, 0x42, 0x42, 0x40, 0x4f, 0x3a, ESC, 0x28, 0x42],
+			"=",
+			[ESC, 0x24, 0x42, 0x24, 0x64, 0x24, 0x5e, 0x24, 0x40, ESC, 0x28, 0x42],
+			"^",
+			[ESC, 0x24, 0x42, 0x24, 0x3f, 0x24, 0x6d, 0x24, 0x26, ESC, 0x28, 0x42]
+		)
+
+		expect(dicomText("\\ISO 2022 IR 87").decode(japanese, "PN")).toBe("Yamada^Tarou=山田^太郎=やまだ^たろう")
+
+		// Korean: KS X 1001 designated to G1, again after each delimiter.
+		const korean = bytes(
+			"Hong^Gildong=",
+			[ESC, 0x24, 0x29, 0x43, 0xfb, 0xf3],
+			"^",
+			[ESC, 0x24, 0x29, 0x43, 0xd1, 0xce, 0xd4, 0xd7],
+			"=",
+			[ESC, 0x24, 0x29, 0x43, 0xc8, 0xab],
+			"^",
+			[ESC, 0x24, 0x29, 0x43, 0xb1, 0xe6, 0xb5, 0xbf]
+		)
+
+		expect(dicomText("\\ISO 2022 IR 149").decode(korean, "PN")).toBe("Hong^Gildong=洪^吉洞=홍^길동")
+
+		// Chinese: GB 2312 in G1.
+		const chinese = bytes(
+			"Zhang^XiaoDong=",
+			[ESC, 0x24, 0x29, 0x41, 0xd5, 0xc5],
+			"^",
+			[ESC, 0x24, 0x29, 0x41, 0xd0, 0xa1, 0xb6, 0xab],
+			"="
+		)
+
+		expect(dicomText("ISO 2022 IR 6\\ISO 2022 IR 58").decode(chinese, "PN")).toBe("Zhang^XiaoDong=张^小东=")
+
+		// JIS X 0212 and half-width katakana in G1 from the first term.
+		expect(dicomText("\\ISO 2022 IR 159").decode(bytes([ESC, 0x24, 0x28, 0x44, 0x2b, 0x21, ESC, 0x28, 0x42]), "LO")).toBe("á")
+		expect(dicomText("ISO 2022 IR 13\\ISO 2022 IR 87").decode(bytes([0xd4, 0xcf, 0xc0, 0xde]), "PN")).toBe("ﾔﾏﾀﾞ")
+		expect(dicomText("ISO 2022 IR 100").decode(bytes("M", [0xfc], "ller"), "PN")).toBe("Müller")
+	})
+
+	it("reads one set for the whole value without extensions, and Latin-1 only when nothing else reads it", () => {
+		expect(dicomText("ISO_IR 144").decode(bytes([0xbf, 0xe0, 0xd8, 0xd2, 0xd5, 0xe2]), "LO")).toBe("Привет")
+		expect(dicomText("ISO_IR 192").decode(bytes("Zoë"), "PN")).toBe("Zoë")
+		// Unknown, or nothing declared: UTF-8 when the bytes are UTF-8, else Latin-1.
+		expect(dicomText("ISO_IR 999").decode(bytes("Zoë"), "PN")).toBe("Zoë")
+		expect(dicomText(undefined).decode(bytes("M", [0xfc], "ller"), "PN")).toBe("Müller")
+		// A code string is the default repertoire whatever is declared.
+		expect(dicomText("ISO_IR 192").decode(bytes("ORIGINAL"), "CS")).toBe("ORIGINAL")
 	})
 })

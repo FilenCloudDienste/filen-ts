@@ -1,6 +1,7 @@
 import { littleEndianByteArrayParser, type DataSet, type Element } from "dicom-parser"
 import { DICOM_TAGS } from "@/features/preview/lib/dicom/dicomTags.generated"
 import type { DicomTagLevel, DicomTagRow } from "@/features/preview/lib/dicom/protocol"
+import { dicomText, type DicomText } from "@/features/preview/lib/dicom/charset.logic"
 
 // A parsed file's elements as rows of a tree, named from the PS3.6 dictionary: the worker's side of the tag panel. A
 // sequence's children are its items, an item's its elements. Only one level is built per request, and at most
@@ -71,45 +72,11 @@ const TEXT_VRS = new Set(["AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", 
 
 const NUMBER_SIZES: Readonly<Record<string, number>> = { US: 2, SS: 2, UL: 4, SL: 4, FL: 4, FD: 8, AT: 4, SV: 8, UV: 8 }
 
-// Specific Character Set's defined terms (PS3.3 C.12.1.1.2) to WHATWG encoding labels; code extensions (ISO 2022) are
-// read as their first, single-byte set.
-const CHARSETS: Readonly<Record<string, string>> = {
-	"ISO_IR 100": "iso-8859-1",
-	"ISO_IR 101": "iso-8859-2",
-	"ISO_IR 109": "iso-8859-3",
-	"ISO_IR 110": "iso-8859-4",
-	"ISO_IR 144": "iso-8859-5",
-	"ISO_IR 127": "iso-8859-6",
-	"ISO_IR 126": "iso-8859-7",
-	"ISO_IR 138": "iso-8859-8",
-	"ISO_IR 148": "iso-8859-9",
-	"ISO_IR 203": "iso-8859-15",
-	"ISO_IR 13": "shift_jis",
-	"ISO_IR 166": "windows-874",
-	"ISO_IR 192": "utf-8",
-	GB18030: "gb18030",
-	GBK: "gbk",
-	"ISO 2022 IR 100": "iso-8859-1",
-	"ISO 2022 IR 101": "iso-8859-2",
-	"ISO 2022 IR 144": "iso-8859-5",
-	"ISO 2022 IR 126": "iso-8859-7",
-	"ISO 2022 IR 138": "iso-8859-8",
-	"ISO 2022 IR 148": "iso-8859-9",
-	"ISO 2022 IR 13": "shift_jis",
-	"ISO 2022 IR 166": "windows-874"
-}
+// The text of a data set: its own Specific Character Set, else the one it is nested in (an item inherits its parent's).
+export function textOf(dataSet: DataSet, parent: DicomText | null): DicomText {
+	const declared = dataSet.elements["x00080005"] === undefined ? undefined : (dataSet.string("x00080005") ?? "")
 
-// The decoder for a data set's text, from its Specific Character Set (0008,0005).
-export function textDecoderFor(dataSet: DataSet): TextDecoder {
-	const declared = dataSet.string("x00080005")
-	const terms = (declared ?? "").split("\\").map(term => term.trim())
-	const label = CHARSETS[terms.find(term => term !== "") ?? ""] ?? CHARSETS[terms[1] ?? ""] ?? "iso-8859-1"
-
-	try {
-		return new TextDecoder(label)
-	} catch {
-		return new TextDecoder("iso-8859-1")
-	}
+	return declared === undefined && parent !== null ? parent : dicomText(declared)
 }
 
 function vrOf(element: Element): string {
@@ -175,7 +142,7 @@ function numbers(dataSet: DataSet, element: Element, vr: string): string {
 	return Math.floor(element.length / size) > count ? `${shown}\\…` : shown
 }
 
-function valueOf(dataSet: DataSet, element: Element, vr: string, decoder: TextDecoder): string | null {
+function valueOf(dataSet: DataSet, element: Element, vr: string, text: DicomText): string | null {
 	if (!held(dataSet, element) || element.length === 0) {
 		return element.length === 0 ? "" : null
 	}
@@ -183,9 +150,9 @@ function valueOf(dataSet: DataSet, element: Element, vr: string, decoder: TextDe
 	if (TEXT_VRS.has(vr)) {
 		// Long text past the cut is never decoded whole.
 		const bytes = dataSet.byteArray.subarray(element.dataOffset, element.dataOffset + Math.min(element.length, TAG_VALUE_CHARS * 4))
-		const text = (vr === "UI" ? new TextDecoder("ascii") : decoder).decode(bytes).replace(/[\0 ]+$/, "")
+		const value = text.decode(bytes, vr).replace(/[\0 ]+$/, "")
 
-		return cut(text)
+		return cut(value)
 	}
 
 	if (vr in NUMBER_SIZES) {
@@ -195,7 +162,7 @@ function valueOf(dataSet: DataSet, element: Element, vr: string, decoder: TextDe
 	return null
 }
 
-function elementRow(dataSet: DataSet, element: Element, decoder: TextDecoder): DicomTagRow {
+function elementRow(dataSet: DataSet, element: Element, text: DicomText): DicomTagRow {
 	const vr = vrOf(element)
 	const isPrivate = isPrivateTag(element.tag)
 	const entry = isPrivate ? null : dictionaryEntry(element.tag)
@@ -205,7 +172,7 @@ function elementRow(dataSet: DataSet, element: Element, decoder: TextDecoder): D
 		vr,
 		name: entry?.name ?? null,
 		item: null,
-		value: element.items === undefined ? valueOf(dataSet, element, vr, decoder) : null,
+		value: element.items === undefined ? valueOf(dataSet, element, vr, text) : null,
 		length: element.hadUndefinedLength === true ? -1 : element.length,
 		children: element.items?.length ?? 0,
 		isPrivate
@@ -217,8 +184,9 @@ function sortedElements(dataSet: DataSet): Element[] {
 }
 
 // The rows under `path` (indices from the root: an element, then its item, then that item's element, …).
-export function tagLevel(root: DataSet, path: readonly number[], decoder: TextDecoder): DicomTagLevel {
+export function tagLevel(root: DataSet, path: readonly number[], rootText: DicomText): DicomTagLevel {
 	let dataSet: DataSet = root
+	let text = rootText
 	let items: Element[] | null = null
 
 	for (const index of path) {
@@ -234,6 +202,7 @@ export function tagLevel(root: DataSet, path: readonly number[], decoder: TextDe
 			if (item === undefined) return { rows: [], more: 0 }
 
 			dataSet = item
+			text = textOf(item, text)
 			items = null
 		}
 	}
@@ -256,7 +225,7 @@ export function tagLevel(root: DataSet, path: readonly number[], decoder: TextDe
 	const elements = sortedElements(dataSet)
 
 	return {
-		rows: elements.slice(0, TAG_ROWS_MAX).map(element => elementRow(dataSet, element, decoder)),
+		rows: elements.slice(0, TAG_ROWS_MAX).map(element => elementRow(dataSet, element, text)),
 		more: Math.max(0, elements.length - TAG_ROWS_MAX)
 	}
 }

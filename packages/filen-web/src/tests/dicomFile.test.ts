@@ -18,7 +18,7 @@ import {
 	nativeFrame,
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
-import { tagLevel, textDecoderFor } from "@/features/preview/lib/dicom/tagTree"
+import { tagLevel, textOf } from "@/features/preview/lib/dicom/tagTree"
 import { DICOM_WHOLE_MAX_BYTES, type DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import {
 	DEFLATED,
@@ -465,7 +465,7 @@ describe("the tags", () => {
 			]
 		})
 		const header = readHeader(memorySource(file), { decodeBytes: DECODE })
-		const decoder = textDecoderFor(header.dataSet)
+		const decoder = textOf(header.dataSet, null)
 		const root = tagLevel(header.dataSet, [], decoder)
 		const byTag = new Map(root.rows.map((row, index) => [row.tag, { row, index }]))
 
@@ -481,5 +481,29 @@ describe("the tags", () => {
 
 		expect(items.rows.map(row => row.item)).toEqual([1, 2])
 		expect(tagLevel(header.dataSet, [series?.index ?? -1, 1], decoder).rows[0]).toMatchObject({ tag: "(0020,000E)", value: "1.2.4" })
+	})
+
+	it("reads an item's text by its own character set, else its parent's", () => {
+		const latin = Uint8Array.from([0x4d, 0xfc, 0x6c, 0x6c, 0x65, 0x72])
+		const file = dicomFile({
+			transferSyntax: EXPLICIT_LE,
+			elements: [
+				text(0x00080005, "CS", "ISO_IR 100"),
+				binary(0x00100010, "PN", latin),
+				sequence(0x00081115, [
+					[binary(0x00100010, "PN", latin)],
+					[text(0x00080005, "CS", "ISO_IR 192"), text(0x00100010, "PN", "Zoë")]
+				])
+			]
+		})
+		const header = readHeader(memorySource(file), { decodeBytes: DECODE })
+		const rootText = textOf(header.dataSet, null)
+		const root = tagLevel(header.dataSet, [], rootText)
+		const series = root.rows.findIndex(row => row.tag === "(0008,1115)")
+		const name = (item: number) => tagLevel(header.dataSet, [series, item], rootText).rows.find(row => row.tag === "(0010,0010)")?.value
+
+		expect(root.rows.find(row => row.tag === "(0010,0010)")?.value).toBe("Müller")
+		expect(name(0)).toBe("Müller")
+		expect(name(1)).toBe("Zoë")
 	})
 })

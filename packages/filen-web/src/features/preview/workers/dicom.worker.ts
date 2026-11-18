@@ -37,7 +37,8 @@ import {
 	type Window
 } from "@/features/preview/lib/dicom/pixels.logic"
 import { FITTED, dragWindow, panBy, placement, wheelFactor, windowStep, zoomAt, type View } from "@/features/preview/lib/dicom/view.logic"
-import { tagLevel, textDecoderFor } from "@/features/preview/lib/dicom/tagTree"
+import { tagLevel, textOf } from "@/features/preview/lib/dicom/tagTree"
+import type { DicomText } from "@/features/preview/lib/dicom/charset.logic"
 import type { FragmentIndex } from "@/features/preview/lib/dicom/frames.logic"
 import type {
 	DicomBudget,
@@ -74,7 +75,7 @@ interface Opened {
 	readonly fragments: FragmentIndex | null
 	readonly model: GrayModel
 	readonly info: DicomInfo
-	readonly decoder: TextDecoder
+	readonly text: DicomText
 }
 
 let opened: Opened | null = null
@@ -528,7 +529,7 @@ const api = {
 				fragments: frameContext === null ? null : fragmentIndex(frameContext),
 				model: grayModel(module),
 				info,
-				decoder: textDecoderFor(header.dataSet)
+				text: textOf(header.dataSet, null)
 			}
 
 			return { info, failure: null }
@@ -572,7 +573,7 @@ const api = {
 	tags: (path: readonly number[]): DicomTagLevel => {
 		const state = opened
 
-		return state === null ? { rows: [], more: 0 } : tagLevel(state.header.dataSet, path, state.decoder)
+		return state === null ? { rows: [], more: 0 } : tagLevel(state.header.dataSet, path, state.text)
 	}
 }
 
