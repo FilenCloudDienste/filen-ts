@@ -34,6 +34,7 @@ import {
 	rowSkip,
 	SKIP_LABEL_KEYS,
 	type BrowserListKeyAction,
+	type ReadingRow,
 	type RowPosition
 } from "@/features/archive/lib/archiveBrowser.logic"
 import type { ListingSnapshot } from "@/features/archive/lib/listingSession"
@@ -44,7 +45,7 @@ import { isEmptySpaceTarget, isPlainPointerClick } from "@/features/drive/lib/cl
 import { isKeyboardContextMenu, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { dirOfRef, isDirRef, type ChildSort, type ChildSortKey, type RowRef, type RowView } from "@/features/archive/lib/sortedChildren"
 import { EntryMenuContext, type RowMenu } from "@/features/archive/lib/entryMenu"
-import { ArchiveEntryRow } from "@/features/archive/components/archiveEntryRow"
+import { ArchiveEntryRow, ArchiveReadingRow } from "@/features/archive/components/archiveEntryRow"
 import { ArchiveRowContextMenuContent } from "@/features/archive/components/archiveEntryMenu"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 
@@ -67,8 +68,10 @@ export interface ArchiveEntryListProps {
 	headerCheck: RowCheck
 	// Nothing in the directory can be selected.
 	headerDisabled: boolean
-	// Shown in place of the rows when there are none.
+	// Shown in place of the rows when there are none, and no member is being read.
 	empty: ReactNode
+	// The member the listing is reading, shown after the rows.
+	reading: ReadingRow | null
 	onSort: (key: ChildSortKey) => void
 	onHeaderCheck: () => void
 	// The cursor's new index, which the list scrolls to; null when it didn't move.
@@ -117,6 +120,7 @@ export function ArchiveEntryList({
 	headerCheck,
 	headerDisabled,
 	empty,
+	reading,
 	onSort,
 	onHeaderCheck,
 	onKeyAction,
@@ -418,12 +422,12 @@ export function ArchiveEntryList({
 						/>
 					}
 				>
-					{rows.count === 0 ? (
+					{rows.count === 0 && reading === null ? (
 						empty
 					) : (
 						<div
 							className="relative w-full"
-							style={{ height: virtualizer.getTotalSize() }}
+							style={{ height: virtualizer.getTotalSize() + (reading === null ? 0 : ARCHIVE_ROW_HEIGHT) }}
 						>
 							<MarqueeRect store={marquee.rectStore} />
 							{virtualRows.map(virtualRow => {
@@ -466,6 +470,12 @@ export function ArchiveEntryList({
 									/>
 								)
 							})}
+							{reading === null ? null : (
+								<ArchiveReadingRow
+									{...reading}
+									start={virtualizer.getTotalSize()}
+								/>
+							)}
 						</div>
 					)}
 				</ContextMenuTrigger>

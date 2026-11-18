@@ -1,4 +1,4 @@
-import type { ArchiveEntryKind, EntryAccess, ListedSkipReason } from "@filen/sdk-rs"
+import type { ArchiveEntry, ArchiveEntryKind, EntryAccess, ListedSkipReason } from "@filen/sdk-rs"
 
 // A listing's entries as the worker posts them: one struct-of-arrays per batch instead of an object
 // graph per entry, so 250k entries clone and settle on the page as a few dozen typed arrays. Imported by
@@ -54,6 +54,18 @@ export function accessOfFlags(flags: number): EntryAccessCode {
 // a control (C0, DEL, C1) or a format character behind bidi overrides and invisible joins.
 export const MISLEADING_CHARACTER =
 	/[\p{Cc}\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB\u{E0001}\u{E0020}-\u{E007F}]/u
+
+// Where extracting the entry puts it, its trailing slashes (a directory's) cut; "" for an entry without a path.
+export function listedPathOf(entry: ArchiveEntry): string {
+	const path = entry.path?.path ?? ""
+	let end = path.length
+
+	while (end > 0 && path.charCodeAt(end - 1) === 47) {
+		end--
+	}
+
+	return end < path.length ? path.slice(0, end) : path
+}
 
 export function skipCode(reason: ListedSkipReason["type"]): number {
 	return SKIP_REASONS.indexOf(reason) + 1

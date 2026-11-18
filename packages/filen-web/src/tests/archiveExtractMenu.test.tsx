@@ -339,7 +339,7 @@ describe("ArchiveSourceBrowser extracts", () => {
 
 	it("stops a running listing before Extract all, which needs the archive slot", () => {
 		const fake = fakeSession(
-			{ type: "reading", bytesRead: 1, archiveBytes: 9, entries: 3, bytesPerSecond: null, etaMs: null },
+			{ type: "reading", bytesRead: 1, archiveBytes: 9, entries: 3, bytesPerSecond: null, etaMs: null, member: null },
 			storeOf(TREE)
 		)
 

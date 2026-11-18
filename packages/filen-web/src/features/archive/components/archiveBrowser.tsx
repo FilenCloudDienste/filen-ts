@@ -51,6 +51,7 @@ import {
 	headerCheck,
 	holdsSlot,
 	positionIndex,
+	readingRowOf,
 	readsWholeArchive,
 	refsView,
 	marqueeSelection,
@@ -1116,6 +1117,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 					headerCheck={headerCheck(snapshot, selection, dir, searchRefs)}
 					headerDisabled={searchRefs === null ? !dirSelectable(snapshot, dir) : searchRefs.length === 0}
 					empty={empty}
+					reading={readingRowOf(store, phase, dir, searchMode)}
 					onSort={handleSort}
 					onHeaderCheck={handleHeaderCheck}
 					onKeyAction={handleKeyAction}

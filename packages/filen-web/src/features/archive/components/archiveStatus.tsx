@@ -195,7 +195,12 @@ export function ArchiveStatus({ phase, summary, entries, onListAgain, onEnterPas
 					>
 						{failureKey === null ? errorLabel(phase.error) : t(failureKey)}
 						{entries > 0 ? (
-							<span className="text-muted-foreground"> {t("previewArchivePartial", { count: entries })}</span>
+							<span className="text-muted-foreground">
+								{" "}
+								{t(phase.error.kind === "ArchiveCorrupt" ? "previewArchivePartial" : "previewArchivePartialListed", {
+									count: entries
+								})}
+							</span>
 						) : null}
 					</Banner>
 				) : null}

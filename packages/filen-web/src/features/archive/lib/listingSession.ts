@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
-import type { ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
+import type { ArchiveEntry, ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
+import { ENTRY_KIND, listedPathOf, type EntryKindCode } from "@/lib/sdk/archiveListing"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
@@ -26,7 +27,15 @@ export type ListingPhase =
 	| { type: "starting" }
 	// Another archive job holds the page's slot.
 	| { type: "waiting" }
-	| { type: "reading"; bytesRead: number; archiveBytes: number; entries: number; bytesPerSecond: number | null; etaMs: number | null }
+	| {
+			type: "reading"
+			bytesRead: number
+			archiveBytes: number
+			entries: number
+			bytesPerSecond: number | null
+			etaMs: number | null
+			member: ReadingMember | null
+	  }
 	// Nothing could be listed without a password (a 7z whose index is encrypted).
 	| { type: "needsPassword"; wrong: boolean }
 	| { type: "done"; summary: ListSummary }
@@ -34,6 +43,18 @@ export type ListingPhase =
 	| { type: "stopped"; summary: ListSummary }
 	// The entries read before the failure stay (a damaged tar); no summary when the call itself was refused.
 	| { type: "failed"; error: ErrorDTO; summary: ListSummary | null }
+
+// The member a compressed tar's listing is decoding, before it is listed (ListUpdate.reading): shown apart from the
+// store, never selectable, until a batch lists it or an update names another or none.
+export interface ReadingMember {
+	// Its ArchiveEntryId.index.
+	index: number
+	// As a row names it: the last segment of its extracted path, the whole stored path for a pathless one.
+	name: string
+	// Its directory, "/"-joined ("" the root).
+	parentPath: string
+	kind: EntryKindCode
+}
 
 export interface ListTotalsN {
 	entries: number
@@ -187,15 +208,37 @@ export function listSummaryOf(report: ListReportDTO): ListSummary {
 	}
 }
 
-function readingPhase(update: ListUpdate): ListingPhase {
+function readingMemberOf(entry: ArchiveEntry, previous: ReadingMember | null): ReadingMember {
+	// Sent with every update while it is read: the one already held is kept.
+	if (previous?.index === entry.id.index) {
+		return previous
+	}
+
+	const path = listedPathOf(entry)
+	const slash = path.lastIndexOf("/")
+
+	return {
+		index: entry.id.index,
+		name: path === "" ? entry.storedPath : path.slice(slash + 1),
+		parentPath: slash < 0 ? "" : path.slice(0, slash),
+		kind: ENTRY_KIND[entry.kind.type]
+	}
+}
+
+function readingPhase(update: ListUpdate, previous: ReadingMember | null): ListingPhase {
 	return {
 		type: "reading",
 		bytesRead: Number(update.bytesRead),
 		archiveBytes: Number(update.archiveBytes),
 		entries: Number(update.entries),
 		bytesPerSecond: update.bytesPerSecond === undefined ? null : Number(update.bytesPerSecond),
-		etaMs: update.etaMs === undefined ? null : Number(update.etaMs)
+		etaMs: update.etaMs === undefined ? null : Number(update.etaMs),
+		member: update.reading === undefined ? null : readingMemberOf(update.reading, previous)
 	}
+}
+
+function readingMember(phase: ListingPhase): ReadingMember | null {
+	return phase.type === "reading" ? phase.member : null
 }
 
 function withSummary(phase: ListingPhase, summary: ListSummary): ListingPhase {
@@ -295,8 +338,9 @@ export function openListingSession(
 
 			setPhase({ type: "done", summary }, current.store)
 		} else if (error.kind === "Cancelled") {
-			// Stopped before anything was read (while waiting for the slot, say): as if never started. Stopped inside a tar's
-			// first member (listed only once its data was passed) keeps the stop, which says nothing was whole yet.
+			// Stopped before anything was read (while waiting for the slot, say): as if never started. A compressed tar's
+			// member stopped mid-read is listed all the same; a stop after some bytes yet before any member's header keeps
+			// the stop, which says nothing was listed yet.
 			setPhase(
 				current.store.entryCount === 0 && current.bytesRead === 0
 					? { type: "gate", format: report.format ?? snapshot.info?.format ?? null }
@@ -349,9 +393,17 @@ export function openListingSession(
 				return
 			}
 
+			const phase = snapshot.phase
+			const member = readingMember(phase)
+
 			if (event.type === "entries") {
-				// Appended unannounced: the next update tells, at most every 200 ms.
+				// Appended unannounced: the next update tells, at most every 200 ms. A batch listing the member being read
+				// announces it at once, the member's row giving way to its entry.
 				current.store.append(event.batch)
+
+				if (phase.type === "reading" && member !== null && event.batch.index.includes(member.index)) {
+					setPhase({ ...phase, member: null })
+				}
 
 				return
 			}
@@ -363,10 +415,15 @@ export function openListingSession(
 					break
 				case "reading":
 					current.bytesRead = Number(event.update.bytesRead)
-					setPhase(readingPhase(event.update))
+					setPhase(readingPhase(event.update, member))
 
 					break
 				default:
+					// The last update names no member.
+					if (phase.type === "reading" && member !== null) {
+						setPhase({ ...phase, member: null })
+					}
+
 					break
 			}
 		}

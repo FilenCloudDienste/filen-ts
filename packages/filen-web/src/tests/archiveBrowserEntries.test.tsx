@@ -7,7 +7,7 @@ import { onlineManager, QueryClientProvider } from "@tanstack/react-query"
 import type { AnyFile, EntryAccess, EntryDownloadPhase } from "@filen/sdk-rs"
 import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 import type { EntryReaderEvents } from "@/workers/originSource"
-import type { EntryReadPlan } from "@/lib/sdk/archiveListing"
+import { ENTRY_KIND, type EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { ArchiveNameInfo } from "@/workers/sdk.worker"
 import "@/lib/i18n"
 
@@ -120,7 +120,7 @@ vi.mock("@/features/preview/components/readOnlyPreviewBody", async () => {
 import { queryClient } from "@/queries/client"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
-import type { ListingSession, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
+import type { ListingSession, ListingSnapshot, ListSummary, ReadingMember } from "@/features/archive/lib/listingSession"
 import { ArchiveSourceBrowser } from "@/features/archive/components/archiveBrowser"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
@@ -161,6 +161,10 @@ const SOLID_GZIP_LATE: EntryAccess = {
 	blockPackedBytes: BigInt(100 * 1024 * 1024)
 }
 const MiB = 1024 * 1024
+
+function readingPhase(member: ReadingMember | null): ListingSnapshot["phase"] {
+	return { type: "reading", bytesRead: 2 * MiB, archiveBytes: 10 * MiB, entries: 0, bytesPerSecond: null, etaMs: null, member }
+}
 
 function fakeSession(
 	store: EntryStore,
@@ -1088,28 +1092,56 @@ describe("an archive entry on its own", () => {
 		expect(loadEntryBytes).not.toHaveBeenCalled()
 	})
 
-	it("says a stop came before the first file was read through, never that the archive is empty", () => {
+	it("says a stop came before the first entry was read, never that the archive is empty", () => {
 		openListingSession.mockReturnValue(fakeSession(storeOf([]), undefined, { type: "stopped", summary: SUMMARY }))
 		renderBrowser()
 
-		expect(screen.getByText("Stopped before the first file was read through, so nothing is listed yet.")).toBeTruthy()
+		expect(screen.getByText("Stopped before the first entry was read, so nothing is listed yet.")).toBeTruthy()
 		expect(screen.queryByText("This archive is empty.")).toBeNull()
 	})
 
-	it("says how far the first file is read while nothing is listed yet", () => {
+	it("lists the member a stop came in, never saying nothing is listed", () => {
+		mockListViewport()
 		openListingSession.mockReturnValue(
-			fakeSession(storeOf([]), undefined, {
-				type: "reading",
-				bytesRead: 2 * MiB,
-				archiveBytes: 10 * MiB,
-				entries: 0,
-				bytesPerSecond: null,
-				etaMs: null
-			})
+			fakeSession(storeOf([{ path: "big.bin", size: 10 * MiB }]), undefined, { type: "stopped", summary: SUMMARY })
 		)
 		renderBrowser()
 
+		expect(row("big.bin")).toBeTruthy()
+		expect(screen.getByText("Listing stopped after 1 entry.")).toBeTruthy()
+		expect(screen.queryByText(/Stopped before the first entry/)).toBeNull()
+	})
+
+	it("says how far the first file is read while nothing is listed yet", () => {
+		openListingSession.mockReturnValue(fakeSession(storeOf([]), undefined, readingPhase(null)))
+		renderBrowser()
+
 		expect(screen.getByText("Reading the first file… 2 MiB of 10 MiB read so far.")).toBeTruthy()
+	})
+
+	it("shows the member being read as a row after the listed ones, which is no option to select", () => {
+		mockListViewport()
+		openListingSession.mockReturnValue(
+			fakeSession(storeOf(["a.txt"]), undefined, readingPhase({ index: 1, name: "big.bin", parentPath: "", kind: ENTRY_KIND.file }))
+		)
+		renderBrowser()
+
+		const reading = screen.getByText("Reading big.bin…")
+
+		expect(reading.closest('[role="option"]')).toBeNull()
+		expect(within(list()).getAllByRole("option")).toHaveLength(1)
+		expect(row("a.txt")).toBeTruthy()
+	})
+
+	it("shows the first member being read in the list's place, with its directory when not the one shown", () => {
+		openListingSession.mockReturnValue(
+			fakeSession(storeOf([]), undefined, readingPhase({ index: 0, name: "sub", parentPath: "docs", kind: ENTRY_KIND.dir }))
+		)
+		renderBrowser()
+
+		expect(screen.getByText("Reading sub…")).toBeTruthy()
+		expect(screen.getByText("docs")).toBeTruthy()
+		expect(screen.queryByText(/Reading the first file/)).toBeNull()
 	})
 
 	it("previews but never saves from a link that allows no downloads", async () => {

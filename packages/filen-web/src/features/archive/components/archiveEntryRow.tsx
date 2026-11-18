@@ -11,7 +11,7 @@ import {
 	LIST_SIZE_COLUMN_CLASS,
 	LIST_TRAILING_SLOT_CLASS
 } from "@/features/drive/lib/listingCells"
-import { ARCHIVE_ROW_HEIGHT, type EntryRowKind } from "@/features/archive/lib/archiveBrowser.logic"
+import { ARCHIVE_ROW_HEIGHT, type EntryRowKind, type ReadingRow } from "@/features/archive/lib/archiveBrowser.logic"
 import type { RowCheck } from "@/features/archive/lib/selection"
 import type { RowRef } from "@/features/archive/lib/sortedChildren"
 import { ArchiveEntryMenuContent } from "@/features/archive/components/archiveEntryMenu"
@@ -51,6 +51,80 @@ export interface ArchiveEntryRowProps {
 	onPointer: (index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (ref: RowRef) => void
 	onCheck: (index: number, ref: RowRef) => void
+}
+
+function EntryKindIcon({ kind, name }: { kind: EntryRowKind; name: string }) {
+	switch (kind) {
+		case "dir":
+			return (
+				<DirectoryGlyph
+					color="default"
+					className="size-5"
+				/>
+			)
+		case "link":
+			return (
+				<LinkIcon
+					aria-hidden="true"
+					className="size-5 text-muted-foreground"
+				/>
+			)
+		case "other":
+			return (
+				<FileQuestionIcon
+					aria-hidden="true"
+					className="size-5 text-muted-foreground"
+				/>
+			)
+		default:
+			return (
+				<FileTypeIcon
+					iconKey={fileIconKey(name)}
+					className="size-5"
+				/>
+			)
+	}
+}
+
+export interface ArchiveReadingRowProps extends ReadingRow {
+	// Its offset in the list.
+	start: number
+}
+
+// The member a listing is reading, after the listed rows: dimmed, with a bar sweeping under it, and nothing to
+// select or open. No option of the listbox: the reading banner above the list tells the same.
+export function ArchiveReadingRow({ name, kind, parentPath, start }: ArchiveReadingRowProps) {
+	const { t } = useTranslation("preview")
+
+	return (
+		<div
+			aria-hidden="true"
+			style={{
+				position: "absolute",
+				top: 0,
+				left: 0,
+				width: "100%",
+				height: ARCHIVE_ROW_HEIGHT,
+				transform: `translateY(${String(start)}px)`
+			}}
+			className="flex items-center gap-3 overflow-hidden px-3 text-sm text-muted-foreground select-none"
+		>
+			{/* The checkbox column. */}
+			<span className="size-4 shrink-0" />
+			<span className="flex shrink-0 opacity-50">
+				<EntryKindIcon
+					kind={kind}
+					name={name}
+				/>
+			</span>
+			<span className={LIST_NAME_CLASS}>{t("previewArchiveReadingMember", { name })}</span>
+			{parentPath === null ? null : <span className="hidden max-w-48 min-w-0 shrink truncate text-xs sm:block">{parentPath}</span>}
+			<span className="relative h-0.5 w-24 shrink-0 overflow-hidden rounded-full bg-foreground/10">
+				<span className="absolute inset-y-0 left-0 w-1/3 animate-indeterminate bg-primary/60 motion-reduce:animate-none" />
+			</span>
+			<span className={LIST_TRAILING_SLOT_CLASS} />
+		</div>
+	)
 }
 
 // One entry of the archive browser's listbox: an option drawing its checkbox as a decorative span (the
@@ -147,27 +221,10 @@ export function ArchiveEntryRow({
 				{check === "on" ? <CheckIcon className="size-3" /> : check === "mixed" ? <MinusIcon className="size-3" /> : null}
 			</span>
 			<span className={cn("flex shrink-0", skipped && "opacity-50")}>
-				{kind === "dir" ? (
-					<DirectoryGlyph
-						color="default"
-						className="size-5"
-					/>
-				) : kind === "link" ? (
-					<LinkIcon
-						aria-hidden="true"
-						className="size-5 text-muted-foreground"
-					/>
-				) : kind === "other" ? (
-					<FileQuestionIcon
-						aria-hidden="true"
-						className="size-5 text-muted-foreground"
-					/>
-				) : (
-					<FileTypeIcon
-						iconKey={fileIconKey(name)}
-						className="size-5"
-					/>
-				)}
+				<EntryKindIcon
+					kind={kind}
+					name={name}
+				/>
 			</span>
 			<span
 				className={cn(LIST_NAME_CLASS, skipped && "text-muted-foreground")}

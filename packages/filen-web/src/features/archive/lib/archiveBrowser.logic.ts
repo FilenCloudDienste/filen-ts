@@ -318,11 +318,11 @@ export function splitCrumbs(trail: readonly number[], visible: number): { hidden
 export type EntryRowKind = "dir" | "file" | "link" | "other"
 
 export function entryRowKind(store: EntryStore, ref: RowRef): EntryRowKind {
-	if (isDirRef(ref)) {
-		return "dir"
-	}
+	return isDirRef(ref) ? "dir" : rowKindOfCode(store.kind(ref))
+}
 
-	switch (store.kind(ref)) {
+export function rowKindOfCode(code: number): EntryRowKind {
+	switch (code) {
 		case ENTRY_KIND.file:
 		case ENTRY_KIND.hardlink:
 			return "file"
@@ -333,6 +333,30 @@ export function entryRowKind(store: EntryStore, ref: RowRef): EntryRowKind {
 			return "dir"
 		default:
 			return "other"
+	}
+}
+
+// The member a listing is reading, as the row after the listed ones shows it.
+export interface ReadingRow {
+	name: string
+	kind: EntryRowKind
+	// Its directory, when not the one shown (any in search, where rows name theirs).
+	parentPath: string | null
+}
+
+export function readingRowOf(store: EntryStore, phase: ListingPhase, dir: number, searchMode: boolean): ReadingRow | null {
+	const member = phase.type === "reading" ? phase.member : null
+
+	if (member === null) {
+		return null
+	}
+
+	const here = searchMode ? member.parentPath === "" : store.findDir(member.parentPath) === dir
+
+	return {
+		name: member.name,
+		kind: rowKindOfCode(member.kind),
+		parentPath: here ? null : member.parentPath === "" ? "/" : member.parentPath
 	}
 }
 

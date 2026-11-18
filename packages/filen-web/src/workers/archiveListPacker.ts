@@ -3,6 +3,7 @@ import {
 	accessBits,
 	ENTRY_FLAG,
 	ENTRY_KIND,
+	listedPathOf,
 	skipCode,
 	type PackedEntryBatch,
 	type PackedEntryLink,
@@ -67,16 +68,7 @@ export function createListBatcher(
 
 	function add(entry: ArchiveEntry): void {
 		const i = count
-		let path = entry.path?.path ?? ""
-		let end = path.length
-
-		while (end > 0 && path.charCodeAt(end - 1) === 47) {
-			end--
-		}
-
-		if (end < path.length) {
-			path = path.slice(0, end)
-		}
+		const path = listedPathOf(entry)
 
 		let bits = (entry.encrypted ? ENTRY_FLAG.encrypted : 0) | (entry.macMetadata ? ENTRY_FLAG.macMetadata : 0)
 

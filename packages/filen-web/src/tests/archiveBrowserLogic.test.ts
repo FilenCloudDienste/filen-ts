@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { preview } from "@/locales/en/preview"
-import { ENTRY_FLAG, SKIP_REASONS } from "@/lib/sdk/archiveListing"
+import { ENTRY_FLAG, ENTRY_KIND, SKIP_REASONS } from "@/lib/sdk/archiveListing"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
 import { EMPTY_SELECTION, selectAll, setMany } from "@/features/archive/lib/selection"
@@ -19,6 +19,7 @@ import {
 	marqueeSelection,
 	positionIndex,
 	rangeSelection,
+	readingRowOf,
 	readsWholeArchive,
 	refsView,
 	rowElementId,
@@ -382,7 +383,15 @@ describe("breadcrumbs", () => {
 
 describe("phases", () => {
 	const done: ListingPhase = { type: "done", summary: SUMMARY }
-	const reading: ListingPhase = { type: "reading", bytesRead: 1, archiveBytes: 2, entries: 3, bytesPerSecond: null, etaMs: null }
+	const reading: ListingPhase = {
+		type: "reading",
+		bytesRead: 1,
+		archiveBytes: 2,
+		entries: 3,
+		bytesPerSecond: null,
+		etaMs: null,
+		member: null
+	}
 
 	it("lets a selection be extracted from what a finished, stopped or failed listing holds", () => {
 		expect(canExtractSelection(done, 0)).toBe(true)
@@ -404,6 +413,29 @@ describe("phases", () => {
 	it("reads a summary off the settled phases only", () => {
 		expect(summaryOf(done)).toBe(SUMMARY)
 		expect(summaryOf(reading)).toBeNull()
+	})
+
+	it("shows the member being read with its directory only where that is not the one shown", () => {
+		const store = storeOf(["docs/a.txt", "top.txt"])
+		const docs = store.findDir("docs")
+		const at = (parentPath: string): ListingPhase => ({
+			...reading,
+			member: { index: 9, name: "x", parentPath, kind: ENTRY_KIND.symlink }
+		})
+
+		expect(readingRowOf(store, reading, 0, false)).toBeNull()
+		expect(readingRowOf(store, done, 0, false)).toBeNull()
+		expect(readingRowOf(store, at("docs"), docs, false)).toEqual({ name: "x", kind: "link", parentPath: null })
+		// Any spelling of the directory is the one shown.
+		expect(readingRowOf(store, at("DOCS"), docs, false)?.parentPath).toBeNull()
+		expect(readingRowOf(store, at("docs"), 0, false)?.parentPath).toBe("docs")
+		expect(readingRowOf(store, at(""), docs, false)?.parentPath).toBe("/")
+		expect(readingRowOf(store, at(""), 0, false)?.parentPath).toBeNull()
+		// Search names every match's directory but the root.
+		expect(readingRowOf(store, at("docs"), docs, true)?.parentPath).toBe("docs")
+		expect(readingRowOf(store, at(""), docs, true)?.parentPath).toBeNull()
+		// A directory not listed yet.
+		expect(readingRowOf(store, at("new/deep"), 0, false)?.parentPath).toBe("new/deep")
 	})
 
 	it("shows a byte bar only where the listing reads the whole archive", () => {

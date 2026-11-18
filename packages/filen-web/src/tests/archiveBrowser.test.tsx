@@ -259,7 +259,7 @@ describe("ArchiveSourceBrowser states", () => {
 		mockListViewport()
 
 		const fake = fakeSession(
-			{ type: "reading", bytesRead: 25, archiveBytes: 100, entries: 2, bytesPerSecond: 10, etaMs: 7500 },
+			{ type: "reading", bytesRead: 25, archiveBytes: 100, entries: 2, bytesPerSecond: 10, etaMs: 7500, member: null },
 			storeOf(["a.txt", "b.txt"]),
 			{ format: { type: "tar", codec: undefined }, defaultName: "photos" }
 		)
@@ -375,6 +375,16 @@ describe("ArchiveSourceBrowser states", () => {
 		expect(options()).toHaveLength(1)
 	})
 
+	it("keeps the entries listed before a failure that is no damage, never calling it damage", () => {
+		mockListViewport()
+
+		show(fakeSession({ type: "failed", error: error("ArchiveTooLarge"), summary: SUMMARY }, storeOf(["a.txt"])))
+
+		expect(screen.getByText("This archive is too large to list here.")).toBeTruthy()
+		expect(screen.getByText(/Showing the 1 entry listed before that/)).toBeTruthy()
+		expect(screen.queryByText(/damage/)).toBeNull()
+	})
+
 	it("fails in place of the list when nothing was read, with Try again", () => {
 		const fake = fakeSession({ type: "failed", error: error("ArchiveTooLarge"), summary: null })
 
@@ -391,7 +401,7 @@ describe("ArchiveSourceBrowser states", () => {
 		mockListViewport()
 
 		const fake = fakeSession(
-			{ type: "reading", bytesRead: 0, archiveBytes: 0, entries: 2, bytesPerSecond: null, etaMs: null },
+			{ type: "reading", bytesRead: 0, archiveBytes: 0, entries: 2, bytesPerSecond: null, etaMs: null, member: null },
 			storeOf(TREE)
 		)
 

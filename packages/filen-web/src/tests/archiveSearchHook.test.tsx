@@ -15,7 +15,15 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 function snapshotOf(store: EntryStore, version: number): ListingSnapshot {
 	return {
-		phase: { type: "reading", bytesRead: 0, archiveBytes: 0, entries: store.entryCount, bytesPerSecond: null, etaMs: null },
+		phase: {
+			type: "reading",
+			bytesRead: 0,
+			archiveBytes: 0,
+			entries: store.entryCount,
+			bytesPerSecond: null,
+			etaMs: null,
+			member: null
+		},
 		store,
 		version,
 		info: null

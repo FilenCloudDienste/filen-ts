@@ -736,12 +736,16 @@ export const preview = {
 	previewArchiveFailedUnsupported: "This archive's format isn't supported.",
 	/** Archive browser — the listing failed: the archive is damaged */
 	previewArchiveFailedCorrupt: "This archive is damaged.",
-	/** Archive browser — the listing failed: too many entries to list in the browser, or it unpacks to an implausible size */
+	/** Archive browser — the listing failed: too many entries to list in the browser, it unpacks to an implausible size, or an entry's header in a compressed tarball is implausibly large */
 	previewArchiveFailedTooLarge: "This archive is too large to list here.",
 	/** Archive browser — a damaged archive whose first entries could be read */
 	previewArchivePartial_one: "Showing the {{count}} entry read before the damage.",
 	/** Archive browser — a damaged archive whose first entries could be read */
 	previewArchivePartial_other: "Showing the {{count}} entries read before the damage.",
+	/** Archive browser — a listing that failed for another reason than damage (too large, a dropped connection) after its first entries were read */
+	previewArchivePartialListed_one: "Showing the {{count}} entry listed before that.",
+	/** Archive browser — a listing that failed for another reason than damage (too large, a dropped connection) after its first entries were read */
+	previewArchivePartialListed_other: "Showing the {{count}} entries listed before that.",
 	/** Archive browser note — entries the listing found but could not hand to the page */
 	previewArchiveUndelivered_one: "{{count}} entry couldn't be shown; Extract all still extracts everything.",
 	/** Archive browser note — entries the listing found but could not hand to the page */
@@ -752,10 +756,12 @@ export const preview = {
 	previewArchiveDuplicates_other: "{{count}} entries are left out because a later entry has the same name.",
 	/** Archive browser — the whole archive holds nothing */
 	previewArchiveEmpty: "This archive is empty.",
-	/** Archive browser, in the list's place — a tarball's first file is still being read, and a file shows only once read through; {{read}} and {{total}} are sizes */
+	/** Archive browser, in the list's place — a compressed tarball is being read and no entry is known yet; {{read}} and {{total}} are sizes */
 	previewArchiveReadingFirst: "Reading the first file… {{read}} of {{total}} read so far.",
-	/** Archive browser, in the list's place — the listing was stopped before its first file was read through, so nothing is listed (the archive isn't empty) */
-	previewArchiveStoppedBeforeFirst: "Stopped before the first file was read through, so nothing is listed yet.",
+	/** Archive browser row, after the listed entries — the entry (a file, a directory or a link) the listing is reading right now, listed once read; {{name}} is its name */
+	previewArchiveReadingMember: "Reading {{name}}…",
+	/** Archive browser, in the list's place — the listing was stopped before its first entry was read, so nothing is listed (the archive isn't empty) */
+	previewArchiveStoppedBeforeFirst: "Stopped before the first entry was read, so nothing is listed yet.",
 	/** Archive browser — the directory shown holds nothing */
 	previewArchiveDirectoryEmpty: "This directory is empty.",
 	/** Archive browser search — nothing below the directory shown matches; {{query}} is the search text */

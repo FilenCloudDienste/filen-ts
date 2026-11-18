@@ -5,7 +5,8 @@ import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import { log } from "@/lib/log"
 import type { ArchiveNameInfo, ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
-import { packEntries, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
+import { archiveEntry, packEntries, TEST_ARCHIVE, type EntrySpec } from "@/tests/support/archiveEntries"
+import { ENTRY_KIND } from "@/lib/sdk/archiveListing"
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
@@ -24,6 +25,7 @@ interface Call {
 }
 
 const MiB = 1024 * 1024
+const MiB_N = BigInt(MiB)
 
 function source(name: string, size: number, uuid = TEST_ARCHIVE): ArchiveSource {
 	return { file: { uuid } as unknown as AnyFile, uuid, name, size, anon: false, nested: null, ownParent: null }
@@ -93,7 +95,7 @@ function update(phase: ListUpdate["phase"], extra: Partial<ListUpdate> = {}): Li
 	}
 }
 
-function entriesEvent(paths: string[]): ListJobEvent {
+function entriesEvent(paths: (EntrySpec | string)[]): ListJobEvent {
 	const [batch] = packEntries(paths)
 
 	if (batch === undefined) {
@@ -304,7 +306,8 @@ describe("openListingSession", () => {
 			archiveBytes: 100,
 			entries: 2,
 			bytesPerSecond: 20,
-			etaMs: 3000
+			etaMs: 3000,
+			member: null
 		})
 
 		resolve(report({ duplicates: { names: ["x"], count: 3n } }))
@@ -341,7 +344,7 @@ describe("openListingSession", () => {
 		expect(session.getSnapshot().store.entryCount).toBe(1)
 	})
 
-	it("stopping inside a tar's first member keeps the stop: bytes were read, though no member was whole yet", async () => {
+	it("stopping a compressed tar before any member was listed keeps the stop: bytes were read, though nothing is listed", async () => {
 		const { call, deps } = harness(nameInfo({ type: "tar", codec: "gzip" }))
 		const session = openListingSession(source("big.tar.gz", 100 * MiB), deps)
 
@@ -353,6 +356,114 @@ describe("openListingSession", () => {
 
 		expect(session.getSnapshot().phase.type).toBe("stopped")
 		expect(session.getSnapshot().store.entryCount).toBe(0)
+	})
+
+	describe("the member being read", () => {
+		function readingSession() {
+			const { call, deps } = harness(nameInfo({ type: "tar", codec: "gzip" }))
+			const session = openListingSession(source("big.tar.gz", 100 * MiB), deps)
+
+			session.start()
+
+			return { call, session }
+		}
+
+		function member(session: ReturnType<typeof openListingSession>) {
+			const phase = session.getSnapshot().phase
+
+			return phase.type === "reading" ? phase.member : undefined
+		}
+
+		it("is held apart from the store while an update names it, any kind of member", () => {
+			const { call, session } = readingSession()
+
+			call(0).emit(update("reading", { bytesRead: MiB_N, reading: archiveEntry("docs/big.bin", 0) }))
+
+			const first = member(session)
+
+			expect(first).toEqual({ index: 0, name: "big.bin", parentPath: "docs", kind: ENTRY_KIND.file })
+			expect(session.getSnapshot().store.entryCount).toBe(0)
+
+			// The same member on the next update: the one held is kept.
+			call(0).emit(update("reading", { bytesRead: 2n * MiB_N, reading: archiveEntry("docs/big.bin", 0) }))
+
+			expect(member(session)).toBe(first)
+
+			call(0).emit(update("reading", { reading: archiveEntry({ path: "docs/sub/", index: 1 }) }))
+
+			expect(member(session)).toEqual({ index: 1, name: "sub", parentPath: "docs", kind: ENTRY_KIND.dir })
+
+			call(0).emit(
+				update("reading", {
+					reading: archiveEntry({ path: undefined, stored: "../escape", index: 2, kind: { type: "symlink", target: "x" } })
+				})
+			)
+
+			expect(member(session)).toEqual({ index: 2, name: "../escape", parentPath: "", kind: ENTRY_KIND.symlink })
+		})
+
+		it("gives way at once to the batch that lists it", () => {
+			const { call, session } = readingSession()
+			const listener = vi.fn()
+
+			call(0).emit(update("reading", { reading: archiveEntry("a.bin", 1) }))
+			session.subscribe(listener)
+			// A batch without it changes nothing yet.
+			call(0).emit(entriesEvent(["before.txt"]))
+
+			expect(member(session)?.index).toBe(1)
+			expect(listener).not.toHaveBeenCalled()
+
+			call(0).emit(entriesEvent([{ path: "a.bin", index: 1 }]))
+
+			expect(member(session)).toBeNull()
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(session.getSnapshot().store.entryCount).toBe(2)
+		})
+
+		it("is dropped by an update that names none", () => {
+			const { call, session } = readingSession()
+
+			call(0).emit(update("reading", { reading: archiveEntry("a.bin", 0) }))
+			call(0).emit(update("reading", { bytesRead: MiB_N }))
+
+			expect(member(session)).toBeNull()
+
+			call(0).emit(update("reading", { reading: archiveEntry("b.bin", 1) }))
+			call(0).emit(update("done"))
+
+			expect(member(session)).toBeNull()
+		})
+
+		it("is dropped by a stop, which lists the member it stopped in", async () => {
+			const { call, session } = readingSession()
+
+			call(0).emit(update("reading", { bytesRead: MiB_N, reading: archiveEntry("a.bin", 0) }))
+			session.stop()
+			call(0).emit(entriesEvent(["a.bin"]))
+			call(0).resolve(report({ format: { type: "tar", codec: "gzip" }, error: sdkError("Cancelled") }))
+			await settled()
+
+			expect(session.getSnapshot().phase.type).toBe("stopped")
+			expect(session.getSnapshot().store.entryCount).toBe(1)
+		})
+
+		it("is dropped by a stop and a failure even while an update still named it", async () => {
+			const stopped = readingSession()
+
+			stopped.call(0).emit(update("reading", { bytesRead: MiB_N, reading: archiveEntry("a.bin", 0) }))
+			stopped.session.stop()
+			stopped.call(0).resolve(report({ format: { type: "tar", codec: "gzip" }, error: sdkError("Cancelled") }))
+
+			const failed = readingSession()
+
+			failed.call(0).emit(update("reading", { bytesRead: MiB_N, reading: archiveEntry("a.bin", 0) }))
+			failed.call(0).resolve(report({ format: { type: "tar", codec: "gzip" }, error: sdkError("ArchiveTooLarge") }))
+			await settled()
+
+			expect(stopped.session.getSnapshot().phase.type).toBe("stopped")
+			expect(failed.session.getSnapshot().phase.type).toBe("failed")
+		})
 	})
 
 	it("keeps an accepted solid cost with the listing it caches, so reopening asks it no more", async () => {
