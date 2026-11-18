@@ -655,7 +655,8 @@ describe("the cad row", () => {
 		expect(BigInt(DXF_MAX_BYTES)).toBeLessThanOrEqual(TEXT_MAX_BYTES)
 		expect(canOpenAsText(fileNamed("plan.dxf", CAP))).toBe(false)
 		expect(canOpenAsText(fileNamed("plan.dxf", CAP + 1n))).toBe(true)
-		expect(canOpenAsText(fileNamed("plan.dxf", TEXT_MAX_BYTES + 1n))).toBe(false)
+		// Past the text cap it opens in the large text viewer, read in ranges.
+		expect(canOpenAsText(fileNamed("plan.dxf", TEXT_MAX_BYTES + 1n))).toBe(true)
 	})
 
 	it("reads an extensionless drawing by its stored type, and leaves DWG a download", () => {
