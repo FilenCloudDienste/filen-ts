@@ -7,6 +7,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { RICH_FONT_FAMILY, RICH_SQLITE_ENTRY } from "./fixtures/rich"
 import { RICH_CUBE_TRIANGLES, RICH_MODEL_ENTRY, RICH_MODELS_PASSWORD } from "./fixtures/richModels"
+import { RICH_CAD_LAYERS } from "./fixtures/richCad"
 import { WORKER_WEBGL } from "./helpers/workerWebgl"
 import { drawnPixels } from "./helpers/canvasPixels"
 
@@ -20,6 +21,7 @@ const [RIDE, PLACES_KML, PLACES_KMZ, AREA] = FIXTURE_FILES["rich-geo"]
 const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF] = FIXTURE_FILES["rich-models"]
 const [LONE_OBJ] = FIXTURE_FILES["rich-models-lone"]
 const [MODELS_ZIP, MODELS_LOCKED_ZIP] = FIXTURE_FILES["rich-models-archive"]
+const [PLAN_DXF] = FIXTURE_FILES["rich-cad"]
 
 async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
@@ -275,6 +277,68 @@ test("a 3D model is drawn in a worker from its own files, and references outside
 		await expectModel(browser.overlay, webgl, { triangles: 2, textures: 1, text: true })
 		await browser.close()
 	}
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+})
+
+test("a DXF drawing is built and drawn in a worker, its layers toggled, with nothing fetched but the bundled fonts", async ({
+	page,
+	context,
+	browserName
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+	const webgl = WORKER_WEBGL[browserName]
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "rich-cad")
+	const dialog = previewOverlay(page)
+
+	await itemRow(listbox, PLAN_DXF).dblclick()
+
+	if (webgl) {
+		const drawing = dialog.getByLabel("Drawing", { exact: true })
+
+		await expect(drawing).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+		// Both layers listed (the panel opens by itself for more than one), the drawing drawn into the worker's canvas.
+		const layers = dialog.getByRole("list", { name: "Drawing layers" })
+
+		for (const name of RICH_CAD_LAYERS) {
+			await expect(layers.getByRole("checkbox", { name })).toBeChecked({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		}
+
+		await expect.poll(() => drawnPixels(drawing), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(200)
+
+		const shown = await drawnPixels(drawing)
+
+		// Hiding DIMS (the circle and the text) leaves the walls only.
+		await layers.getByRole("checkbox", { name: "DIMS" }).uncheck()
+		await expect.poll(() => drawnPixels(drawing), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeLessThan(shown)
+		await expect(dialog.getByText("Some characters can't be shown.")).toHaveCount(0)
+
+		// The other background redraws it; Fit frames it again.
+		await dialog.getByRole("button", { name: "Dark background", exact: true }).click()
+		await expect(dialog.getByRole("button", { name: "Dark background", exact: true })).toHaveAttribute("aria-pressed", "true")
+		await dialog.getByRole("button", { name: "Fit", exact: true }).click()
+		await expect.poll(() => drawnPixels(drawing), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(200)
+	} else {
+		await expect(dialog.getByText("This browser can't display drawings here.")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	}
+
+	// The source is the file's text, read-only.
+	await dialog.getByRole("button", { name: "View source", exact: true }).click()
+	await expect(dialog.getByText("ANSI_1252", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	if (webgl) {
+		await dialog.getByRole("button", { name: "View drawing", exact: true }).click()
+		await expect(dialog.getByLabel("Drawing", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	}
+
+	await closePreview(page)
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])

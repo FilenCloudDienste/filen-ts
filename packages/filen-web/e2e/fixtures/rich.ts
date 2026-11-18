@@ -5,10 +5,12 @@ import { buildZip } from "../helpers/archiveFixtures"
 import { appDatabase, walDatabase } from "./richSqlite"
 import { RICH_GEO_JSON, RICH_GEO_KML, placesKmz, rideGpx } from "./richGeo"
 import { RICH_MODELS_PASSWORD, checkerPng, cubeStl, meshMtl, meshObj, modelGlb, modelsZip, print3mf } from "./richModels"
+import { planDxf } from "./richCad"
 import { scenarioModule } from "./scenarios"
 
 // The rich viewers' files (preview-rich.spec.ts): fonts from the office package's own assets, SQLite databases written
-// by node:sqlite (fixtures/richSqlite.ts), tracks (fixtures/richGeo.ts) and 3D models (fixtures/richModels.ts).
+// by node:sqlite (fixtures/richSqlite.ts), tracks (fixtures/richGeo.ts), 3D models (fixtures/richModels.ts) and a CAD
+// drawing (fixtures/richCad.ts).
 
 const FONTS = fileURLToPath(new URL("../../../filen-office/assets/fonts/arimo/", import.meta.url))
 
@@ -29,7 +31,8 @@ export const RICH_SCENARIOS = scenarioModule(
 		// An OBJ whose MTL is nowhere.
 		"rich-models-lone": ["rich-lone.obj"],
 		// The OBJ trio as archive entries, its texture in a subdirectory; the second archive encrypted.
-		"rich-models-archive": ["rich-models.zip", "rich-models-locked.zip"]
+		"rich-models-archive": ["rich-models.zip", "rich-models-locked.zip"],
+		"rich-cad": ["rich-plan.dxf"]
 	},
 	() => ({
 		"rich-font.ttf": { generate: () => gunzipSync(readFileSync(`${FONTS}Arimo-Regular.ttf.gz`)) },
@@ -57,6 +60,7 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-print.3mf": { generate: print3mf },
 		"rich-lone.obj": { generate: () => Buffer.from(meshObj("rich-lone.mtl"), "utf8") },
 		"rich-models.zip": { generate: () => modelsZip() },
-		"rich-models-locked.zip": { generate: () => modelsZip(RICH_MODELS_PASSWORD) }
+		"rich-models-locked.zip": { generate: () => modelsZip(RICH_MODELS_PASSWORD) },
+		"rich-plan.dxf": { generate: planDxf }
 	})
 )
