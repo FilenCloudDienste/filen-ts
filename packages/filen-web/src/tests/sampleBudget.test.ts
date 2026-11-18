@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { afterEach, describe, expect, it } from "vitest"
-import { BasicSample, SoundBankLoader, SpessaLog } from "spessasynth_core"
+import { BasicSample, BasicSoundBank, SoundBankLoader, SpessaLog } from "spessasynth_core"
 import { SampleBudget, type BudgetedSynth } from "@/workers/synth/sampleBudget"
 
 // The MIDI worker's decoded-sample budget as a cap: 128 notes struck at once on 128 distinct large compressed samples
@@ -13,8 +13,10 @@ afterEach(() => {
 })
 
 describe("the decoded-sample budget", () => {
-	it("holds 128 sounding notes on 128 large samples within the budget, the rest silent", () => {
+	it("holds 128 sounding notes on 128 large samples within the budget, the rest silent", async () => {
 		SpessaLog.setLogLevel(false, false, false)
+		// The Vorbis decoder compiles asynchronously; a decode before it is ready yields silence.
+		await BasicSoundBank.ready
 
 		const bank = SoundBankLoader.fromArrayBuffer(
 			readFileSync(new URL("../assets/soundfonts/GeneralUser-GS-2.0.3.sf3", import.meta.url)).buffer
