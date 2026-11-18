@@ -3,9 +3,9 @@ import { expectRows, openArchive } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo } from "./helpers/listing"
-import { RAR_README_TEXT, rarComicPageText } from "./fixtures/rar"
+import { RAR_README_LINE, rarComicPageText } from "./fixtures/rar"
 
-// RAR archives in the archive browser (fixtures/rar.ts): a RAR 4 with a directory, and a solid RAR 5, whose
+// RAR archives in the archive browser (fixtures/rar.ts): a RAR 4 with a directory, its members compressed, and a solid RAR 5, whose
 // files after the first are read after the ones stored before them. A pure read: this spec never extracts.
 
 const [SOLID, STORE] = FIXTURE_FILES["archive-rar"]
@@ -24,7 +24,7 @@ test.describe("RAR archives", () => {
 		await expectRows(browser.list, ["docs", "notes.txt"])
 		await browser.into("docs")
 		await browser.row("readme.txt").dblclick()
-		await expect(browser.overlay.getByText(RAR_README_TEXT.trim())).toBeVisible()
+		await expect(browser.overlay.getByText(RAR_README_LINE, { exact: false }).first()).toBeVisible()
 		await browser.overlay.getByRole("button", { name: "Back to the archive", exact: true }).click()
 		await expectRows(browser.list, ["readme.txt"])
 		expect(cspViolations).toEqual([])

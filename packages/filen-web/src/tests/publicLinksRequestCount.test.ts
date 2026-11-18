@@ -23,7 +23,8 @@ const {
 	listLinkedDirAnon,
 	hasClient,
 	ownsItem,
-	listArchive,
+	openArchiveReader,
+	listArchiveReader,
 	archiveNameInfo
 } = vi.hoisted(() => ({
 	getLinkedFileAnon: vi.fn<(uuid: string, key: string, password: string | undefined) => Promise<unknown>>(),
@@ -32,7 +33,8 @@ const {
 	listLinkedDirAnon: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>(),
 	hasClient: vi.fn<() => Promise<boolean>>(),
 	ownsItem: vi.fn<(kind: "file" | "directory", uuid: string) => Promise<boolean>>(),
-	listArchive: vi.fn<() => Promise<unknown>>(),
+	openArchiveReader: vi.fn<() => Promise<unknown>>(),
+	listArchiveReader: vi.fn<() => Promise<unknown>>(),
 	archiveNameInfo: vi.fn<(names: string[]) => Promise<unknown>>()
 }))
 
@@ -45,7 +47,8 @@ vi.mock("@/lib/sdk/client", () => ({
 		listLinkedDirAnon,
 		hasClient,
 		ownsItem,
-		listArchive,
+		openArchiveReader,
+		listArchiveReader,
 		archiveNameInfo
 	}
 }))
@@ -308,7 +311,8 @@ describe("public archive link request count", () => {
 		expect(screen.getByRole("button", { name: "Browse contents" })).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Extract to my Cloud Drive" })).toBeNull()
 		expect(ownsItem).not.toHaveBeenCalled()
-		expect(listArchive).not.toHaveBeenCalled()
+		expect(openArchiveReader).not.toHaveBeenCalled()
+		expect(listArchiveReader).not.toHaveBeenCalled()
 		expect(archiveNameInfo).not.toHaveBeenCalled()
 	})
 
@@ -318,13 +322,15 @@ describe("public archive link request count", () => {
 		expect(screen.getByRole("button", { name: "Extract to my Cloud Drive" })).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Browse contents" })).toBeTruthy()
 		expect(ownsItem).toHaveBeenCalledTimes(1)
-		expect(listArchive).not.toHaveBeenCalled()
+		expect(openArchiveReader).not.toHaveBeenCalled()
+		expect(listArchiveReader).not.toHaveBeenCalled()
 		expect(archiveNameInfo).not.toHaveBeenCalled()
 
 		await focusAndReconnect()
 
 		expect(ownsItem).toHaveBeenCalledTimes(1)
-		expect(listArchive).not.toHaveBeenCalled()
+		expect(openArchiveReader).not.toHaveBeenCalled()
+		expect(listArchiveReader).not.toHaveBeenCalled()
 		expect(archiveNameInfo).not.toHaveBeenCalled()
 	})
 })
