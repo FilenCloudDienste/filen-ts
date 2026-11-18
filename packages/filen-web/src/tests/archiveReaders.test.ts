@@ -316,6 +316,19 @@ describe("archive readers: read-ahead", () => {
 	})
 })
 
+describe("archive readers: range reads", () => {
+	it("reads a range of an entry through the reader, and tells its access once", async () => {
+		const model = modelReader("gzipTar")
+		const { readers } = readersOver(model)
+		const signal = new AbortController().signal
+
+		expect((await readers.readRange("r", idOf(2), 10, 110, signal)).length).toBe(100)
+		await expect(readers.byteAccess("r", idOf(2), signal)).resolves.toBe("seekable")
+		await expect(readers.byteAccess("r", idOf(2), signal)).resolves.toBe("seekable")
+		expect(model.reader.readEntryRange).toHaveBeenCalledTimes(1)
+	})
+})
+
 describe("archive readers: lifetime", () => {
 	it("closes with a call in flight: aborts it, never throws, and frees only once it settled", async () => {
 		const model = modelReader("solidRar")

@@ -158,7 +158,7 @@ import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { serveFileSyncRange } from "@/lib/media/syncRangeServe"
 import type { AbortableReadRange } from "@/lib/media/blockCache"
-import { originKey, originWhole, requireOriginAccess, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
+import { originKey, originWhole, requireOriginAccess, type ByteOrigin, type EntryAccessKind, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import {
 	clearEntryReaders,
 	entryReader,
@@ -3163,6 +3163,7 @@ const api = {
 		archiveReaders.lease(readerId)
 		registerEntryReader(id, {
 			anon,
+			range: (entry, start, end, signal) => archiveReaders.readRange(readerId, entry, start, end, signal),
 			read: (entry, size, signal) =>
 				archiveReaders.readWhole(
 					readerId,
@@ -3183,6 +3184,11 @@ const api = {
 					signal
 				)
 		})
+	},
+	// How the reader's entry `entry` can be read (mapped, seekable, whole, sequential): what an entry origin's `access`
+	// says, so a viewer streams a mapped or seekable entry by range instead of holding it whole.
+	async archiveEntryAccess(readerId: string, entry: ArchiveEntryId): Promise<EntryAccessKind> {
+		return archiveReaders.byteAccess(readerId, entry, new AbortController().signal)
 	},
 	releaseArchiveEntry(id: string): void {
 		const readerId = entryLeaseReaders.get(id)

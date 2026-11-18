@@ -36,6 +36,9 @@ export interface EntryReaderRecord {
 	readonly anon: boolean
 	// The entry's whole decoded bytes, checked against its checksum where the archive has one, under `signal`.
 	read(entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
+	// Bytes `start..end` of a `mapped` or `seekable` entry, unchecked (its checksum covers it whole), read through the
+	// archive's reader without holding the entry; absent where the lease reads only whole.
+	readonly range?: (entry: ArchiveEntryId, start: number, end: number, signal: AbortSignal) => Promise<Uint8Array>
 }
 
 export interface OriginSourceDeps {
@@ -75,6 +78,33 @@ function fileSource(client: FileReadClient, file: AnyFile): OriginSource {
 }
 
 // An entry's ranges come from one checked whole read, made on the first range read and held for the source's life. Each range is a copy: the reader receives it transferred.
+// A `mapped` or `seekable` entry's ranges, each read by range through the archive's reader: nothing is held, so an
+// entry of any size streams (media, a database). Its whole read stays the checked one.
+function rangedEntrySource(
+	record: EntryReaderRecord,
+	range: NonNullable<EntryReaderRecord["range"]>,
+	entry: ArchiveEntryId,
+	size: number
+): OriginSource {
+	const lifetime = new AbortController()
+
+	return {
+		size,
+		read: async (start, end, signal) => {
+			lifetime.signal.throwIfAborted()
+
+			const to = Math.min(end, size)
+
+			return to <= start ? new Uint8Array(0) : await range(entry, start, to, AbortSignal.any([signal, lifetime.signal]))
+		},
+		readWhole: (cap, signal) =>
+			size > cap ? Promise.reject(tooLarge(size, cap)) : record.read(entry, size, AbortSignal.any([signal, lifetime.signal])),
+		release: () => {
+			lifetime.abort(released())
+		}
+	}
+}
+
 function entrySource(record: EntryReaderRecord, entry: ArchiveEntryId, size: number): OriginSource {
 	const lifetime = new AbortController()
 	let held: Promise<Uint8Array> | null = null
@@ -140,6 +170,11 @@ export function originSource(o: ByteOrigin, deps: OriginSourceDeps): OriginSourc
 			// A reader opened on one client is never read through the other.
 			if (record.anon !== o.anon) {
 				throw new Error("archive reader belongs to the other client")
+			}
+
+			// Read by range only where the origin says it may be: a whole-read origin keeps its one checked read.
+			if ((o.access === "mapped" || o.access === "seekable") && record.range !== undefined) {
+				return rangedEntrySource(record, record.range, o.entry, o.size)
 			}
 
 			return entrySource(record, o.entry, o.size)

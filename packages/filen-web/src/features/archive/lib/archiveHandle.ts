@@ -3,7 +3,7 @@ import type { AnyFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
-import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
+import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { EntryReadPlan, PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import type { ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
@@ -94,15 +94,35 @@ export const defaultArchiveHandleDeps: ArchiveHandleDeps = {
 }
 
 // The origin the lease `leaseId` (leaseEntry) names the archive's entry `index` by.
-export function entryLeaseOrigin(leaseId: string, file: AnyFile, anon: boolean, index: number, size: number): ByteOrigin {
+// `access`: how its bytes are read (entryAccessOf); a whole read, checked, unless the reader said it maps or seeks.
+export function entryLeaseOrigin(
+	leaseId: string,
+	file: AnyFile,
+	anon: boolean,
+	index: number,
+	size: number,
+	access: EntryAccessKind = "whole"
+): ByteOrigin {
 	return {
 		kind: "entry",
 		reader: leaseId,
 		entry: { archive: file.uuid, index },
 		size,
-		access: "whole",
+		access,
 		anon,
 		cacheKey: entryKey(file.uuid, index)
+	}
+}
+
+// How the archive's entry `index` can be read, asked of its reader for `password` (held for the call): mapped or
+// seekable entries are read by range (media, a database), others whole.
+export async function entryAccessOf(file: AnyFile, anon: boolean, password: string | undefined, index: number): Promise<EntryAccessKind> {
+	const reader = acquireArchiveReader(file, anon, password)
+
+	try {
+		return await sdkApi.archiveEntryAccess(reader.id, { archive: file.uuid, index })
+	} finally {
+		reader.release()
 	}
 }
 

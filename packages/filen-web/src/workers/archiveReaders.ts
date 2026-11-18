@@ -131,6 +131,10 @@ export interface ArchiveReaders {
 		onProgress: (progress: { phase: EntryDownloadPhase; bytesWritten: number }) => void,
 		managedFuture: ManagedFuture
 	) => Promise<EntryDownloadReport>
+	// Bytes `start..end` of a `mapped` or `seekable` entry, unchecked, through the reader's range read.
+	readRange: (id: string, entry: ArchiveEntryId, start: number, end: number, signal: AbortSignal) => Promise<Uint8Array>
+	// How the entry's bytes can be read, resolved once and kept with the reader.
+	byteAccess: (id: string, entry: ArchiveEntryId, signal: AbortSignal) => Promise<EntryByteAccess["type"]>
 	readWhole: (
 		id: string,
 		entry: ArchiveEntryId,
@@ -661,6 +665,32 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 						},
 						managedFuture: { ...managedFuture, abortSignal: signal }
 					})
+			)
+		},
+		readRange: (id, entry, start, end, signal) => {
+			const record = require(id)
+
+			return borrow(
+				record,
+				signal,
+				() => undefined,
+				async (reader, combined) => {
+					const buffer = entryBuffer(end - start)
+
+					await reader.readEntryRange({ entry, start, end, writer: buffer.writer, managedFuture: { abortSignal: combined } })
+
+					return buffer.take()
+				}
+			)
+		},
+		byteAccess: (id, entry, signal) => {
+			const record = require(id)
+
+			return borrow(
+				record,
+				signal,
+				() => undefined,
+				(reader, combined) => accessOf(record, reader, entry, combined)
 			)
 		},
 		readWhole: async (id, entry, size, plan, events, signal) => {

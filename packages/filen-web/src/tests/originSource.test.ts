@@ -136,6 +136,30 @@ describe("originSource", () => {
 		await expect(source.read(0, 1, new AbortController().signal)).rejects.toBe(failure)
 	})
 
+	it("reads a mapped or seekable entry by range through its reader, holding nothing, and whole through the checked read", async () => {
+		const range = vi.fn((_entry: ArchiveEntryId, start: number, end: number) => Promise.resolve(content.slice(start, end)))
+		const { deps } = setUp({ r: { anon: false, read: readEntry, range } })
+		const mapped: ByteOrigin = { ...entry(), access: "mapped" } as ByteOrigin
+		const source = originSource(mapped, deps)
+		const signal = new AbortController().signal
+
+		await expect(source.read(2, 5, signal)).resolves.toEqual(Uint8Array.of(2, 3, 4))
+		await expect(source.read(8, 20, signal)).resolves.toEqual(Uint8Array.of(8, 9))
+		expect(range).toHaveBeenCalledTimes(2)
+		expect(readEntry).not.toHaveBeenCalled()
+		await expect(source.readWhole(10, signal)).resolves.toEqual(content)
+		expect(readEntry).toHaveBeenCalledTimes(1)
+
+		source.release()
+		await expect(source.read(0, 1, signal)).rejects.toThrow()
+
+		// A whole-read origin keeps its one checked read, ranges or not.
+		const whole = originSource(entry(), deps)
+
+		await whole.read(0, 2, signal)
+		expect(range).toHaveBeenCalledTimes(2)
+	})
+
 	it("refuses an entry whose reader is closed or belongs to the other client", () => {
 		const { deps } = setUp({ r: record(true) })
 
