@@ -149,6 +149,25 @@ describe("codestream headers", () => {
 		expect(declaredPixels({ ...header, rows: 4800 }, TAGS)).toBe(4800 * 64)
 	})
 
+	it("takes the fewest decomposition levels any component or tile part codes with", () => {
+		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, { componentLevels: [{ component: 2, levels: 2 }] }))?.levels).toBe(2)
+
+		// The main header ends at its SOT marker; a tile part follows with its own COD of one level, then a second.
+		const main = siz(64, 48, 1, 8, 5)
+		const tilePart = (levels: number | null): number[] => {
+			const cod = levels === null ? [] : [0xff, 0x52, 0, 12, 0, 0, 0, 1, 0, levels, 4, 4, 0, 0]
+			const body = [0xff, 0x93, 1, 2, 3, 4]
+			const length = 12 + cod.length + body.length
+
+			// Lsot, Isot, Psot, TPsot, TNsot: the SOT marker's own two bytes are the main header's (or the part before).
+			return [0, 10, 0, 0, 0, 0, 0, length, 0, 1, ...cod, ...body]
+		}
+		const stream = Uint8Array.from([...main, ...tilePart(null), 0xff, 0x90, ...tilePart(1), 0xff, 0xd9])
+
+		expect(jpeg2000Header(stream)?.levels).toBe(1)
+		expect(jpeg2000Header(Uint8Array.from([...main, ...tilePart(null), 0xff, 0xd9]))?.levels).toBe(5)
+	})
+
 	it("sizes a reduced resolution from the image's origin on the reference grid, as the decoders do", () => {
 		const header = jpeg2000Header(siz(101, 7, 1, 8, 3, { x0: 1, y0: 3 }))
 
