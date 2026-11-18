@@ -10,7 +10,9 @@ import { log } from "@/lib/log"
 // closes every one at once.
 
 export const READER_LINGER_MS = 30_000
-// Above this much held read ahead, a reader nobody holds closes at once rather than linger.
+// Above this much held read ahead, a reader nobody holds closes at once rather than linger. Only the worker's JS
+// read-ahead is counted: the SDK states no reader's retained bytes (its index, chunks and decoder states, which its own
+// retained budget bounds across readers).
 export const READER_CLOSE_AT_ONCE_BYTES = 4 * 1024 * 1024
 
 export interface ArchiveReaderRef {
