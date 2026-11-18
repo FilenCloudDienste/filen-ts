@@ -8,6 +8,7 @@ import { trackForeignRequests } from "./helpers/requests"
 import { RICH_FONT_FAMILY, RICH_SQLITE_ENTRY } from "./fixtures/rich"
 import { RICH_CUBE_TRIANGLES, RICH_MODEL_ENTRY, RICH_MODELS_PASSWORD } from "./fixtures/richModels"
 import { RICH_CAD_LAYERS } from "./fixtures/richCad"
+import { RICH_CINE_FRAMES, RICH_DICOM_PATIENT } from "./fixtures/richDicom"
 import { WORKER_WEBGL } from "./helpers/workerWebgl"
 import { drawnPixels } from "./helpers/canvasPixels"
 
@@ -22,6 +23,7 @@ const [CUBE_STL, MESH_OBJ, , , MODEL_GLB, PRINT_3MF] = FIXTURE_FILES["rich-model
 const [LONE_OBJ] = FIXTURE_FILES["rich-models-lone"]
 const [MODELS_ZIP, MODELS_LOCKED_ZIP] = FIXTURE_FILES["rich-models-archive"]
 const [PLAN_DXF] = FIXTURE_FILES["rich-cad"]
+const [DICOM_CT, DICOM_CINE, DICOM_JLS, DICOM_J2K, DICOM_COLOR, DICOM_DEFLATE] = FIXTURE_FILES["rich-dicom"]
 
 async function closePreview(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
@@ -339,6 +341,70 @@ test("a DXF drawing is built and drawn in a worker, its layers toggled, with not
 	}
 
 	await closePreview(page)
+
+	expect(cspViolations).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+})
+
+// A DICOM image drawn by its worker: its summary line, and the image on the canvas.
+async function expectDicomImage(dialog: Locator, summary: string): Promise<void> {
+	await expect(dialog.getByText(summary, { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect
+		.poll(() => drawnPixels(dialog.getByLabel("DICOM image", { exact: true })), { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		.toBeGreaterThan(200)
+	await expect(dialog.getByText(/frame couldn't be shown|doesn't match its header|too large/)).toHaveCount(0)
+}
+
+test("a DICOM image is drawn in a worker, its frames stepped and played, its tags listed", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "rich-dicom")
+	const dialog = previewOverlay(page)
+
+	// A CT: signed 12-bit samples rescaled to Hounsfield units, shown through the file's window.
+	await itemRow(listbox, DICOM_CT).dblclick()
+	await expectDicomImage(dialog, "CT · 128×128")
+	await expect(dialog.getByText("W 400 L 40", { exact: true })).toBeVisible()
+	await dialog.getByRole("button", { name: "Window: Default" }).click()
+	await page.getByRole("menuitem", { name: "Lung" }).click()
+	await expect(dialog.getByText("W 1500 L -600", { exact: true })).toBeVisible()
+
+	// The tags, named from the dictionary; a value copies on its own.
+	await dialog.getByRole("button", { name: "Tags", exact: true }).click()
+
+	const tags = dialog.getByRole("tree", { name: "DICOM tags" })
+
+	await expect(tags.getByText("Patient's Name", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(tags.getByText(RICH_DICOM_PATIENT, { exact: true })).toBeVisible()
+	await closePreview(page)
+
+	// An RLE cine: Page Down steps a frame, Play runs them.
+	await itemRow(listbox, DICOM_CINE).dblclick()
+	await expectDicomImage(dialog, `XA · 64×64 · ${String(RICH_CINE_FRAMES)} frames`)
+	await expect(dialog.getByText(`1 / ${String(RICH_CINE_FRAMES)}`, { exact: true })).toBeVisible()
+	await dialog.getByLabel("DICOM image", { exact: true }).click()
+	await page.keyboard.press("PageDown")
+	await expect(dialog.getByText(`2 / ${String(RICH_CINE_FRAMES)}`, { exact: true })).toBeVisible()
+	await dialog.getByRole("button", { name: "Play", exact: true }).click()
+	await expect(dialog.getByText(`2 / ${String(RICH_CINE_FRAMES)}`, { exact: true })).toHaveCount(0, { timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: "Pause", exact: true }).click()
+	await closePreview(page)
+
+	// The compressed frames (JPEG-LS, JPEG 2000, a colour baseline JPEG) and a deflated data set.
+	for (const [name, summary] of [
+		[DICOM_JLS, "MR · 96×96"],
+		[DICOM_J2K, "MR · 96×96"],
+		[DICOM_COLOR, "XC · 96×96"],
+		[DICOM_DEFLATE, "CT · 128×128"]
+	] as const) {
+		await itemRow(listbox, name).dblclick()
+		await expectDicomImage(dialog, summary)
+		await closePreview(page)
+	}
 
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])

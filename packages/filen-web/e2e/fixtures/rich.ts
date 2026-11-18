@@ -6,11 +6,12 @@ import { appDatabase, walDatabase } from "./richSqlite"
 import { RICH_GEO_JSON, RICH_GEO_KML, placesKmz, rideGpx } from "./richGeo"
 import { RICH_MODELS_PASSWORD, checkerPng, cubeStl, meshMtl, meshObj, modelGlb, modelsZip, print3mf } from "./richModels"
 import { planDxf } from "./richCad"
+import { richCine, richColor, richCt, richDeflate, richJ2k, richJls } from "./richDicom"
 import { scenarioModule } from "./scenarios"
 
 // The rich viewers' files (preview-rich.spec.ts): fonts from the office package's own assets, SQLite databases written
-// by node:sqlite (fixtures/richSqlite.ts), tracks (fixtures/richGeo.ts), 3D models (fixtures/richModels.ts) and a CAD
-// drawing (fixtures/richCad.ts).
+// by node:sqlite (fixtures/richSqlite.ts), tracks (fixtures/richGeo.ts), 3D models (fixtures/richModels.ts), a CAD
+// drawing (fixtures/richCad.ts) and DICOM images (fixtures/richDicom.ts).
 
 const FONTS = fileURLToPath(new URL("../../../filen-office/assets/fonts/arimo/", import.meta.url))
 
@@ -32,7 +33,9 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-models-lone": ["rich-lone.obj"],
 		// The OBJ trio as archive entries, its texture in a subdirectory; the second archive encrypted.
 		"rich-models-archive": ["rich-models.zip", "rich-models-locked.zip"],
-		"rich-cad": ["rich-plan.dxf"]
+		"rich-cad": ["rich-plan.dxf"],
+		// A CT (native, signed 12 in 16), an RLE cine, JPEG-LS, JPEG 2000, a colour baseline JPEG and a deflated CT.
+		"rich-dicom": ["rich-ct.dcm", "rich-cine.dcm", "rich-jls.dcm", "rich-j2k.dcm", "rich-color.dcm", "rich-deflate.dcm"]
 	},
 	() => ({
 		"rich-font.ttf": { generate: () => gunzipSync(readFileSync(`${FONTS}Arimo-Regular.ttf.gz`)) },
@@ -61,6 +64,12 @@ export const RICH_SCENARIOS = scenarioModule(
 		"rich-lone.obj": { generate: () => Buffer.from(meshObj("rich-lone.mtl"), "utf8") },
 		"rich-models.zip": { generate: () => modelsZip() },
 		"rich-models-locked.zip": { generate: () => modelsZip(RICH_MODELS_PASSWORD) },
-		"rich-plan.dxf": { generate: planDxf }
+		"rich-plan.dxf": { generate: planDxf },
+		"rich-ct.dcm": { generate: richCt },
+		"rich-cine.dcm": { generate: richCine },
+		"rich-jls.dcm": { generate: richJls },
+		"rich-j2k.dcm": { generate: richJ2k },
+		"rich-color.dcm": { generate: richColor },
+		"rich-deflate.dcm": { generate: richDeflate }
 	})
 )
