@@ -16,9 +16,10 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 
 // What the browser can do with one listed entry on its own: open it in a viewer, or save it. The SDK reads
-// a zip's or 7z's file alone; a tar's member or a single compressed file only front to back, so never.
+// a zip's, 7z's or RAR's file and a compressed tar's member alone; a bare tar's member or a single compressed file
+// only front to back, so never.
 
-// The SDK reads it alone: a file an extraction creates, of a zip or a 7z.
+// The SDK reads it alone: a file an extraction creates, directly or from a solid block.
 export function canReadEntry(store: EntryStore, slot: number): boolean {
 	if (store.kind(slot) !== ENTRY_KIND.file || store.skip(slot) !== 0 || store.size(slot) < 0) {
 		return false
@@ -85,7 +86,9 @@ export interface EntryCost {
 	estimatedBytes: number
 }
 
-// What a solid 7z entry costs beyond itself; null for any other entry.
+// What a solid block's entry costs beyond itself (a solid 7z's or RAR's file, a compressed tar's member); null for
+// any other entry. A compressed tar's estimatedBytes is approximate: up to one compressed block of its codec and a
+// fetch's 1 MiB rounding off.
 export function entryCost(store: EntryStore, slot: number): EntryCost | null {
 	if (accessOfFlags(store.flags(slot)) !== ENTRY_ACCESS.solidBlock) {
 		return null

@@ -255,8 +255,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
       '@filen/sdk-rs':
-        specifier: 0.5.31
-        version: 0.5.31
+        specifier: 0.5.32
+        version: 0.5.32
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -1119,8 +1119,8 @@ importers:
         specifier: workspace:*
         version: link:../filen-office
       '@filen/sdk-rs':
-        specifier: 0.5.31
-        version: 0.5.31
+        specifier: 0.5.32
+        version: 0.5.32
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -2949,8 +2949,8 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
-  '@filen/sdk-rs-darwin-arm64@0.5.31':
-    resolution: {integrity: sha512-2boJqdCYDi3qYTvcOgEShHncUsSJbhZRVXUU8lmsbc2JrvYWbAmexnG/c+oTHKUo2ofxEOSIlnEf+4E1zySuWw==}
+  '@filen/sdk-rs-darwin-arm64@0.5.32':
+    resolution: {integrity: sha512-NlBYNaQVnwzaSbhb8qZqLTK+syUjxboJhAMfKTuUD1rQsveUKIUJdCIRqTzE58pWwpfJ1ZWZt+7fM/let5jtpg==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [darwin]
@@ -2961,8 +2961,8 @@ packages:
     cpu: [x64]
     os: [darwin]
 
-  '@filen/sdk-rs-darwin-x64@0.5.31':
-    resolution: {integrity: sha512-gkxkQbd7DMEMucAbmEyiy+yP1W1T64r8uFt5Sk1BxQ+TTVDCP9cK6X89XEocD1LNOAUINi2VOljBQ9X3nO65rQ==}
+  '@filen/sdk-rs-darwin-x64@0.5.32':
+    resolution: {integrity: sha512-njHyH6i/LWsYeXCDMw184GQb5R13pstDJPEFIOCV5wkTVQZNgl1LMKqw+v7t/qX8bJKMsnE2K+Iv7NtsCNMyCg==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [darwin]
@@ -2974,8 +2974,8 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@filen/sdk-rs-linux-arm64-gnu@0.5.31':
-    resolution: {integrity: sha512-LU+xjucuR60cXk27BLQ5bSnZ/Ev0xvAu7bpI8rg6gnCmhffzfIXJDN+Og5uaMuQr1EuA3VQTYC1v5GZCnQibxw==}
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.32':
+    resolution: {integrity: sha512-xAjTRXfeaXQnplWz4MEtP5FnaHGnRWg0ylwkKGj9VzIoy2zpOktqbjtEI1wZIK8Hi4L9eeS+BjDsKX3CumBXzQ==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [linux]
@@ -2988,8 +2988,8 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@filen/sdk-rs-linux-x64-gnu@0.5.31':
-    resolution: {integrity: sha512-IHe7xRjA+CNnBwENVGyS8LNXv+m9oAvvKSmYFL8XOmogdR6R/vVqeiiwfimG3Txj1ab+1qZP5Pqgn9F2Kz4OzA==}
+  '@filen/sdk-rs-linux-x64-gnu@0.5.32':
+    resolution: {integrity: sha512-YSYxC7IFTBQrmT57KIbOrI2tEnSh8ekddMUnSCSmRZKn8FpiUTKJYwPyohrjssUuMvOd9ItqXEt+y/MWK9WFJg==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [linux]
@@ -3001,8 +3001,8 @@ packages:
     cpu: [arm64]
     os: [win32]
 
-  '@filen/sdk-rs-win32-arm64-msvc@0.5.31':
-    resolution: {integrity: sha512-5naS3g7KJ7cP00Rj9LDneoMfLEqHri26ba91Ln6PNC5S8/l7RaglXo7sA7a6YyVAAOyHCvbEDmQOLcqUURXVfw==}
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.32':
+    resolution: {integrity: sha512-Tsbc432ysVDmggmVOdjCTvXInsbyx3Kepw9eeB/rDcVKwaTUHU5X6I+AuOndJkkq96x689mLML+UYc4E4Bg+/Q==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [win32]
@@ -3013,8 +3013,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@filen/sdk-rs-win32-x64-msvc@0.5.31':
-    resolution: {integrity: sha512-T/qAj1bBuKpCgZ21CCx06+drT6+I+Euw/aOAgFFdvJcMXlpUi1HJ3XSkFoweHfVj55bpTXzkxsBmCybXoWB/UA==}
+  '@filen/sdk-rs-win32-x64-msvc@0.5.32':
+    resolution: {integrity: sha512-mGse7cRCB4bVMhQAhebUAn/GXCmsmgxOC9+GgmaPp/rnafTb0VTijUpwQKxyjVpiKmdZbA7hqHZqkrrnv7q3Aw==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [win32]
@@ -3023,8 +3023,8 @@ packages:
     resolution: {integrity: sha512-WfYOoGWIPjpbbRGhxnJc63Ighh7mjXO0NYuA3YYxa9zIwlXQSN3Ql7fsBoy4JyoOQO2xoh3xJSBwJPECLfJw8A==}
     engines: {node: '>=23'}
 
-  '@filen/sdk-rs@0.5.31':
-    resolution: {integrity: sha512-9dFTc2bfRVLpB8GJC+a4qXrQSl4ogd0tCCe5Ix+Y2YkOznvIR996qGH+pXXLxmaIjZ0DN9e8vNdH3U7ETOovVw==}
+  '@filen/sdk-rs@0.5.32':
+    resolution: {integrity: sha512-pWS5rHKsAQH87r/8eZ4HiluEaAd0ZZ5FTBcz8BHSspw8toxVwm7sNqLwNtLUnNmzva6pOME//Q5xR0UZbMGpYQ==}
     engines: {node: '>=23'}
 
   '@floating-ui/core@1.8.0':
@@ -13629,37 +13629,37 @@ snapshots:
   '@filen/sdk-rs-darwin-arm64@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-darwin-arm64@0.5.31':
+  '@filen/sdk-rs-darwin-arm64@0.5.32':
     optional: true
 
   '@filen/sdk-rs-darwin-x64@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-darwin-x64@0.5.31':
+  '@filen/sdk-rs-darwin-x64@0.5.32':
     optional: true
 
   '@filen/sdk-rs-linux-arm64-gnu@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-linux-arm64-gnu@0.5.31':
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.32':
     optional: true
 
   '@filen/sdk-rs-linux-x64-gnu@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-linux-x64-gnu@0.5.31':
+  '@filen/sdk-rs-linux-x64-gnu@0.5.32':
     optional: true
 
   '@filen/sdk-rs-win32-arm64-msvc@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-win32-arm64-msvc@0.5.31':
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.32':
     optional: true
 
   '@filen/sdk-rs-win32-x64-msvc@0.5.27':
     optional: true
 
-  '@filen/sdk-rs-win32-x64-msvc@0.5.31':
+  '@filen/sdk-rs-win32-x64-msvc@0.5.32':
     optional: true
 
   '@filen/sdk-rs@0.5.27(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)':
@@ -13673,16 +13673,16 @@ snapshots:
       '@filen/sdk-rs-win32-arm64-msvc': 0.5.27
       '@filen/sdk-rs-win32-x64-msvc': 0.5.27
 
-  '@filen/sdk-rs@0.5.31':
+  '@filen/sdk-rs@0.5.32':
     dependencies:
       uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
     optionalDependencies:
-      '@filen/sdk-rs-darwin-arm64': 0.5.31
-      '@filen/sdk-rs-darwin-x64': 0.5.31
-      '@filen/sdk-rs-linux-arm64-gnu': 0.5.31
-      '@filen/sdk-rs-linux-x64-gnu': 0.5.31
-      '@filen/sdk-rs-win32-arm64-msvc': 0.5.31
-      '@filen/sdk-rs-win32-x64-msvc': 0.5.31
+      '@filen/sdk-rs-darwin-arm64': 0.5.32
+      '@filen/sdk-rs-darwin-x64': 0.5.32
+      '@filen/sdk-rs-linux-arm64-gnu': 0.5.32
+      '@filen/sdk-rs-linux-x64-gnu': 0.5.32
+      '@filen/sdk-rs-win32-arm64-msvc': 0.5.32
+      '@filen/sdk-rs-win32-x64-msvc': 0.5.32
 
   '@floating-ui/core@1.8.0':
     dependencies:

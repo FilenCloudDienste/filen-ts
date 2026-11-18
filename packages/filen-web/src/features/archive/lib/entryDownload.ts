@@ -31,7 +31,7 @@ export interface EntryRequest {
 	size: number
 }
 
-// The call for a listed entry; null for one the SDK cannot read alone (a tar's member, a skipped entry,
+// The call for a listed entry; null for one the SDK cannot read alone (a bare tar's member, a skipped entry,
 // anything but a file), which must never reach it.
 export function entryRequest(source: ArchiveSource, store: EntryStore, slot: number): EntryRequest | null {
 	if (!canReadEntry(store, slot)) {

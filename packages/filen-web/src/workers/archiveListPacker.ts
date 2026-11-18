@@ -18,7 +18,7 @@ export interface ListBatcher {
 
 // Packs a listing's entries into PackedEntryBatches of up to `flushAt`. The builder columns are
 // allocated once; a flush posts trimmed copies, so the builder is reused and only the copies clone. The
-// solid costs are allocated on the first solid 7z entry only, and posted only by a batch holding one.
+// solid costs are allocated on the first solid block entry only, and posted only by a batch holding one.
 export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, flushAt = 4096): ListBatcher {
 	const index = new Uint32Array(flushAt)
 	const kind = new Uint8Array(flushAt)

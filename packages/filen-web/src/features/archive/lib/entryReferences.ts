@@ -7,7 +7,7 @@ import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryOrigin, entryRequest, openEntryReader, type EntryRequest } from "@/features/archive/lib/entryDownload"
 
 // An archive entry's references, from the archive's own listing: its directory and the directories below it. An entry
-// the SDK cannot read alone (a tar's member) is listed as not readable. Each one is read through an entry reader of
+// the SDK cannot read alone (a bare tar's member) is listed as not readable. Each one is read through an entry reader of
 // its own, opened with the password the viewed entry took.
 
 export function entryListing(source: ArchiveSource, store: EntryStore, dir: number): ReferenceListing<number, EntryRequest> {

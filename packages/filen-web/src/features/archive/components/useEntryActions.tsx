@@ -43,7 +43,7 @@ export interface ViewedEntryState extends EntryTarget {
 export interface EntryActions {
 	viewing: ViewedEntryState | null
 	closeViewer: () => void
-	// Opens or saves it, confirming a solid 7z entry's cost first.
+	// Opens or saves it, confirming a solid block entry's cost first.
 	request: (target: EntryTarget, intent: EntryIntent) => void
 	// A double-click or Enter on a file: opened when it previews, else saved; false when neither applies.
 	activate: (target: EntryTarget) => boolean

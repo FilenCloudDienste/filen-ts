@@ -41,7 +41,7 @@ export interface EntryStore {
 	link: (slot: number) => EntryLink | undefined
 	// Set only when the name is not the stored path.
 	storedPath: (slot: number) => string | undefined
-	// A solid 7z entry's skippedBytes and estimatedPackedBytes (accessOfFlags tells it is one); 0 otherwise.
+	// A solid block's entry's skippedBytes and estimatedPackedBytes (accessOfFlags tells it is one); 0 otherwise.
 	solidSkipped: (slot: number) => number
 	solidEstimated: (slot: number) => number
 	// Per directory node.
@@ -78,7 +78,7 @@ interface EntryChunk {
 	size: Float64Array
 	modified: Float64Array
 	parent: Int32Array
-	// Allocated by the chunk's first solid 7z entry.
+	// Allocated by the chunk's first solid block entry.
 	solidSkipped: Float64Array | null
 	solidEstimated: Float64Array | null
 }

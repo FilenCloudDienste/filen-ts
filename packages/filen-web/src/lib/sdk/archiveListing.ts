@@ -98,7 +98,7 @@ export interface PackedEntryBatch {
 	links: PackedEntryLink[]
 	// Only entries whose name is not their stored path: rewritten, pathless or truncated.
 	stored: PackedStoredPath[]
-	// A solid 7z entry's costs, per position (0 for any other entry); null when the batch holds none.
+	// A solid block entry's costs, per position (0 for any other entry); null when the batch holds none.
 	solid: PackedSolidCosts | null
 }
 

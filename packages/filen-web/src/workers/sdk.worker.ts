@@ -460,11 +460,11 @@ export interface ListJobParams {
 
 export type ListJobEvent = { type: "update"; update: ListUpdate } | { type: "entries"; batch: PackedEntryBatch }
 
-// One file of a zip or 7z, from its listing.
+// One file of a zip, 7z or RAR, or a compressed tar's member, from its listing.
 export interface EntryJobParams {
 	archive: AnyFile
 	entry: ArchiveEntryId
-	// The listed skippedBytes of a solid 7z entry the user accepted, 0 for any other: never null, which
+	// The listed skippedBytes of a solid block entry the user accepted, 0 for any other: never null, which
 	// would let the SDK decode any amount.
 	maxSolidSkip: number
 }
@@ -2062,7 +2062,7 @@ const api = {
 			}
 		})
 	},
-	// One file of a zip or 7z into the transferred sink, a transfer of its own like downloadFileToWriter
+	// One file of a zip, 7z or RAR, or a compressed tar's member, into the transferred sink, a transfer of its own like downloadFileToWriter
 	// (cancel and pause by its id). It takes the page's archive slot; each call reads the archive's first
 	// chunk and index again. Resolves with whether its checksum matched.
 	downloadArchiveEntry(
