@@ -240,8 +240,8 @@ describe("editableAsIs", () => {
 		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x82, 0xa0), { encoding: "shift_jis" }))).toBe(false)
 		// A UTF-8 mark over bytes that are not UTF-8.
 		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61, 0xe9, 0x62)))).toBe(false)
-		// windows-1255 leaves holes.
-		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xca), { encoding: "windows-1255" }))).toBe(false)
+		// windows-1255 leaves holes. Not 0xCA: newer ICU maps it to U+05BA, as the WHATWG index does.
+		expect(editableAsIs(decodeTextBytes(Uint8Array.of(0x61, 0xd9), { encoding: "windows-1255" }))).toBe(false)
 	})
 })
 
