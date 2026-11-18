@@ -13,6 +13,7 @@ import {
 	EMAIL_ATTACHMENT_TEXT,
 	EMAIL_REMOTE,
 	EMAIL_SUBJECT,
+	NOTEBOOK_STREAM_TEXT,
 	ISO_VOLUME,
 	TORRENT_INFOHASH,
 	TORRENT_TRACKER,
@@ -32,6 +33,7 @@ const [CUES, MICRODVD, VOBSUB] = FIXTURE_FILES["preview-subtitles"]
 const [CALENDAR, CONTACTS, VARIANTS] = FIXTURE_FILES["preview-pim"]
 const [TOOL, SETUP, DISC] = FIXTURE_FILES["preview-binary-info"]
 const [MESSAGE] = FIXTURE_FILES["preview-email"]
+const [NOTEBOOK] = FIXTURE_FILES["preview-notebook"]
 const NEVER_RUN = "Never run. Read from the file's headers only."
 const NO_PREVIEW = "Preview isn't available for this file type yet."
 
@@ -298,6 +300,43 @@ test("a message shows its own picture and attachment, and nothing remote it name
 
 	await dialog.getByRole("button", { name: "Source", exact: true }).click()
 	await expect(dialog.locator(".cm-content")).toHaveAttribute("contenteditable", "false")
+	await close(page)
+
+	expect(remote).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("a notebook shows its cells, highlighted code and outputs, and loads nothing remote", async ({ page, context }) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+	const remote: string[] = []
+
+	context.on("request", request => {
+		if (request.url().startsWith(EMAIL_REMOTE)) remote.push(request.url())
+	})
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-notebook")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, NOTEBOOK).dblclick()
+	await expect(dialog.getByText("In [4]:", { exact: true })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("heading", { name: "E2E notebook" })).toBeVisible()
+	await expect(dialog.getByText(NOTEBOOK_STREAM_TEXT)).toBeVisible()
+	// Highlighted as the editor would: the keyword is a span of its own.
+	await expect(dialog.locator("pre.fo-code-static span", { hasText: "def" })).toHaveCount(1)
+	await expect(dialog.locator('img[src^="blob:"]')).toHaveCount(1)
+
+	const frame = page.frameLocator('iframe[title="HTML output"]')
+
+	await expect(frame.getByText("cell")).toBeVisible()
+	await expect(frame.locator('img[alt="remote"]')).not.toHaveAttribute("src", /.+/u)
+
+	await dialog.getByRole("button", { name: "Source", exact: true }).click()
+	await expect(dialog.locator(".cm-content")).toContainText("nbformat")
 	await close(page)
 
 	expect(remote).toEqual([])

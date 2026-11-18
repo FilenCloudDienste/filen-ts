@@ -87,6 +87,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	model3d: "drivePreviewKindModel3d",
 	torrent: "drivePreviewKindTorrent",
 	email: "drivePreviewKindEmail",
+	notebook: "drivePreviewKindNotebook",
 	subtitle: "drivePreviewKindSubtitle",
 	calendar: "drivePreviewKindCalendar",
 	contact: "drivePreviewKindContact",
@@ -285,6 +286,7 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"model3d",
 	"torrent",
 	"email",
+	"notebook",
 	"subtitle",
 	"calendar",
 	"contact",
@@ -647,6 +649,18 @@ describe("the email row", () => {
 		expect(canOpenEntry(storeOf([{ path: "mail.eml", access: DIRECT, size: Number(CAP) }]), 0)).toBe(true)
 		expect(isTextCategory("email")).toBe(false)
 		expect(previewKindLabelKey("email")).toBe("drivePreviewKindEmail")
+	})
+})
+
+describe("the notebook row", () => {
+	// A text-family file up to the text cap, its JSON source editable.
+	it("opens a notebook up to the text cap, editable as text", () => {
+		expect(previewType(fileNamed("analysis.ipynb", 1024n))).toBe("notebook")
+		expect(canPreview(fileNamed("analysis.ipynb", TEXT_MAX_BYTES))).toBe(true)
+		expect(canPreview(fileNamed("analysis.ipynb", TEXT_MAX_BYTES + 1n))).toBe(false)
+		expect(isTextCategory("notebook")).toBe(true)
+		expect(CATEGORY_POLICY.notebook.editsAsText).toBe(true)
+		expect(previewKindLabelKey("notebook")).toBe("drivePreviewKindNotebook")
 	})
 })
 

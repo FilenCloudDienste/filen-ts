@@ -8,6 +8,7 @@ import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/bi
 import { readEmail, readEmailNames, type EmailReading } from "@/features/preview/lib/emailReading"
 import { emailText } from "@/features/preview/lib/emailText"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
+import { readNotebook, type NotebookReading } from "@/features/preview/lib/notebookReading"
 
 // The text family's parsers, off the page: each call takes a copy of a file the page holds, reads it and answers with
 // plain data, keeping nothing (a stateless worker, textFamilyClient.ts).
@@ -51,6 +52,8 @@ const api = {
 
 		return reading.status === "ok" ? Comlink.transfer(reading, [reading.starts.buffer, reading.ends.buffer]) : reading
 	},
+	// The text the page decoded, read as a Jupyter notebook; its images Blobs within `maxPixels` each.
+	notebook: (text: string, maxPixels: number): NotebookReading => readNotebook(text, maxPixels),
 	// The text the page decoded, read as iCalendar: its events and to-dos.
 	calendar: (text: string): CalendarFile => readCalendar(text),
 	// The text the page decoded, read as vCards.

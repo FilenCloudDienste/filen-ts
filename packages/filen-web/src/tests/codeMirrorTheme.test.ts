@@ -22,8 +22,8 @@ function block(selector: string): Record<string, string> {
 
 // The dark syntax colours are the package's own One Dark values, every light fallback overridden.
 describe("code editor theme", () => {
-	it("sets exactly the package's dark syntax variables in dark mode", () => {
-		expect(block(".dark .cm-editor")).toEqual(codeSyntaxVariables("dark"))
+	it("sets exactly the package's dark syntax variables in dark mode, in the editor and in static code", () => {
+		expect(block(".dark .cm-editor,\n.dark .fo-code-static")).toEqual(codeSyntaxVariables("dark"))
 	})
 
 	it("maps the editor chrome onto the app's tokens", () => {

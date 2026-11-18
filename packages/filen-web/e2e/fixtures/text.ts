@@ -235,6 +235,41 @@ const EMAIL_TEXT = [
 	""
 ].join("\r\n")
 
+// A notebook with highlighted code, a stream, an inline picture and an HTML output that names a remote picture: nothing
+// remote may load.
+export const NOTEBOOK_STREAM_TEXT = "e2e stream output"
+const NOTEBOOK_TEXT = JSON.stringify({
+	nbformat: 4,
+	nbformat_minor: 5,
+	metadata: { language_info: { name: "python", file_extension: ".py" } },
+	cells: [
+		{ cell_type: "markdown", metadata: {}, source: "# E2E notebook" },
+		{
+			cell_type: "code",
+			execution_count: 4,
+			metadata: {},
+			source: "def total(values):\n    return sum(values)",
+			outputs: [
+				{ output_type: "stream", name: "stdout", text: `${NOTEBOOK_STREAM_TEXT}\n` },
+				{
+					output_type: "display_data",
+					metadata: {},
+					data: {
+						"image/png": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+						"text/plain": "<Figure>"
+					}
+				},
+				{
+					output_type: "execute_result",
+					execution_count: 4,
+					metadata: {},
+					data: { "text/html": `<table><tr><td>cell</td></tr></table><img src="${EMAIL_REMOTE}/nb.png" alt="remote">` }
+				}
+			]
+		}
+	]
+})
+
 export const TEXT_SCENARIOS = scenarioModule(
 	{
 		"preview-text-legacy": ["cyrillic-notes.txt"],
@@ -243,7 +278,8 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"preview-subtitles": ["e2e-cues.srt", "e2e-microdvd.sub", "e2e-vobsub.sub"],
 		"preview-pim": ["e2e-team.ics", "e2e-people.vcf", "e2e-variants.vcf"],
 		"preview-binary-info": ["e2e-tool", "e2e-setup.exe", "e2e-disc.iso"],
-		"preview-email": ["e2e-message.eml"]
+		"preview-email": ["e2e-message.eml"],
+		"preview-notebook": ["e2e-analysis.ipynb"]
 	},
 	() => ({
 		"cyrillic-notes.txt": { buffer: encodeSingleByte(LEGACY_CYRILLIC_TEXT, "windows-1251"), mimeType: "text/plain" },
@@ -261,6 +297,7 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"e2e-tool": { buffer: elfBytes(), mimeType: "application/octet-stream" },
 		"e2e-setup.exe": { buffer: peBytes(), mimeType: "application/x-msdownload" },
 		"e2e-disc.iso": { buffer: isoBytes(), mimeType: "application/x-iso9660-image" },
-		"e2e-message.eml": { buffer: Buffer.from(EMAIL_TEXT, "utf8"), mimeType: "message/rfc822" }
+		"e2e-message.eml": { buffer: Buffer.from(EMAIL_TEXT, "utf8"), mimeType: "message/rfc822" },
+		"e2e-analysis.ipynb": { buffer: Buffer.from(NOTEBOOK_TEXT, "utf8"), mimeType: "application/x-ipynb+json" }
 	})
 )

@@ -681,6 +681,7 @@ export const drive = {
 	drivePreviewKindTorrent: "Torrent",
 	/** Info panel — Kind row value: an e-mail message (.eml) */
 	drivePreviewKindEmail: "Email message",
+	drivePreviewKindNotebook: "Notebook",
 	/** Info dialog "Kind" value — a subtitle file */
 	drivePreviewKindSubtitle: "Subtitles",
 	/** Info dialog "Kind" value — a calendar file (ics) */

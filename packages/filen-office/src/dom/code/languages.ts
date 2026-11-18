@@ -116,13 +116,20 @@ function stream<State>(parser: StreamParser<State>): () => Extension {
 // The grammar nested inside a markdown fence: its info string's first word as a language id or extension.
 // Resolved lazily per fence through the shared cache; markdown itself is not nested.
 function fenceLanguage(info: string): Language | null {
-	const word = (/^\S+/.exec(info)?.[0] ?? "").toLowerCase()
-	const id = isCodeLanguageId(word) ? word : codeLanguageForExtension(word)
+	const id = codeLanguageIdFor(/^\S+/.exec(info)?.[0] ?? "")
 
-	if (id === null || id === "markdown") {
-		return null
-	}
+	return id === null || id === "markdown" ? null : codeLanguage(id)
+}
 
+// A language named by an id or an extension ("typescript", "ts", ".py"), case-insensitively; null for none.
+export function codeLanguageIdFor(name: string): CodeLanguageId | null {
+	const word = name.toLowerCase().replace(/^\./, "")
+
+	return isCodeLanguageId(word) ? word : codeLanguageForExtension(word)
+}
+
+// A language's parser, for highlighting outside an editor.
+export function codeLanguage(id: CodeLanguageId): Language | null {
 	const extension = codeLanguageSupport(id)
 
 	return extension instanceof LanguageSupport ? extension.language : extension instanceof Language ? extension : null

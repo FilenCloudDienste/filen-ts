@@ -44,6 +44,7 @@ export type PreviewCategory =
 	| "text"
 	| "code"
 	| "markdown"
+	| "notebook"
 	| "archive"
 	| "iwork"
 	| "font"
@@ -339,6 +340,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindMarkdown",
 		assistantKind: "document"
 	},
+	// Cells and outputs read in the text-family worker, its JSON source a toggle away.
+	notebook: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindNotebook",
+		assistantKind: "document"
+	},
 	archive: {
 		streamed: false,
 		ranged: true,
@@ -607,6 +623,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["torrent"], "torrent"],
 	[["eml", "msg"], "email"],
 	[["md", "markdown", "mkd"], "markdown"],
+	[["ipynb"], "notebook"],
 	// A `.sub` is MicroDVD text until a read of its head finds VobSub images (no kind).
 	[[...SUBTITLE_FILE_EXTENSIONS, "sub"], "subtitle"],
 	[["ics", "ical", "ifb"], "calendar"],

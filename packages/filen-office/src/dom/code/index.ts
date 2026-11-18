@@ -1,4 +1,5 @@
-export { codeLanguageSupport } from "./languages"
+export { codeLanguage, codeLanguageIdFor, codeLanguageSupport } from "./languages"
+export { HIGHLIGHT_MAX_CHARS, highlightCodeRuns, mountCodeHighlightStyle, type CodeRun } from "./highlight"
 export { codeHighlightStyle, codeSyntaxVariables, codeTheme } from "./theme"
 export { codeEditorSetup, codeFillParent, codeLineNumbers, codeReadOnly, type CodeEditorSetupOptions } from "./setup"
 export { CODE_EDITOR_SCOPE, CODE_SEARCH_SCOPE, codeKeymap, openReplacePanel, openSearchPanel, type CodeBinding } from "./search"

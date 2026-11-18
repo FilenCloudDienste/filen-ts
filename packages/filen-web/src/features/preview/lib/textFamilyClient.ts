@@ -5,6 +5,7 @@ import { statelessWorker, type WorkerHandle } from "@/lib/workers/ownedWorker"
 import { WorkerJobTimeoutError, workerJob, type JobClock } from "@/features/preview/lib/workerJob"
 import type { SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 import type { EmailReading } from "@/features/preview/lib/emailReading"
+import type { NotebookReading } from "@/features/preview/lib/notebookReading"
 import type { CalendarFile } from "@filen/shared/calendarFile"
 import type { ContactFile } from "@filen/shared/contactFile"
 import type { BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
@@ -70,6 +71,11 @@ async function emailJob<R>(run: (remote: WorkerHandle<TextFamilyWorkerApi>["remo
 // A subtitle file's cues, from the text the page decoded; the worker transfers the times back.
 export async function readSubtitleCues(text: string, extension: string): Promise<SubtitleReading> {
 	return await job<SubtitleReading>(async remote => await remote.subtitles(text, extension))
+}
+
+// A notebook's cells and outputs; each image within `maxPixels` (the page's budget: the worker cannot read the profile).
+export async function readNotebookFile(text: string, maxPixels: number): Promise<NotebookReading> {
+	return await job<NotebookReading>(async remote => await remote.notebook(text, maxPixels))
 }
 
 // A calendar file's events and to-dos, from the text the page decoded.

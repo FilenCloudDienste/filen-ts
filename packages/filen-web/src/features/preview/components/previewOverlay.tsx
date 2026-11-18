@@ -95,6 +95,7 @@ import { TorrentViewer } from "@/features/preview/components/torrentViewer"
 import { EmailViewer } from "@/features/preview/components/emailViewer"
 import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
+import { NotebookViewer } from "@/features/preview/components/notebookViewer"
 import { ContactViewer } from "@/features/preview/components/contactViewer"
 import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
@@ -2934,6 +2935,19 @@ function PreviewBody({
 		case "subtitle":
 			return (
 				<SubtitleViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					onTextState={onTextState}
+					readAs={readAs}
+					contentRef={contentRef}
+				/>
+			)
+		case "notebook":
+			return (
+				<NotebookViewer
 					item={item}
 					alt={alt}
 					editable={editable}

@@ -1,6 +1,7 @@
 /* The code editor's --fo-code-* variables (@filen/office/dom/code) on the app's tokens. The chrome follows
    the tokens in both themes; syntax colours fall back to CodeMirror's light style, and the dark theme sets
-   One Dark (codeSyntaxVariables("dark"), checked by codeMirrorTheme.test.ts). */
+   One Dark (codeSyntaxVariables("dark"), checked by codeMirrorTheme.test.ts). Code highlighted outside an editor
+   (.fo-code-static: a notebook's cells) takes the same syntax colours. */
 .cm-editor {
 	--fo-code-bg: transparent;
 	--fo-code-fg: var(--foreground);
@@ -24,7 +25,8 @@
 	--fo-code-match-selected: color-mix(in oklab, #f97316 45%, transparent);
 }
 
-.dark .cm-editor {
+.dark .cm-editor,
+.dark .fo-code-static {
 	--fo-code-meta: #7d8799;
 	--fo-code-link: #7d8799;
 	--fo-code-link-decoration: underline;

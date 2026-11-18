@@ -371,11 +371,11 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("email")
 	})
 
-	it("reads a mailbox as code (its grammar), geo files as maps, and notebook JSON as nothing yet", () => {
+	it("reads a mailbox as code (its grammar), geo files as maps, and a notebook as one", () => {
 		expect(previewType(fileNamed("inbox.mbox"))).toBe("code")
 		expect(previewType(fileNamed("tracks.gpx"))).toBe("geo")
 		expect(previewType(fileNamed("map.geojson"))).toBe("geo")
-		expect(previewType(fileNamed("analysis.ipynb"))).toBe("other")
+		expect(previewType(fileNamed("analysis.ipynb"))).toBe("notebook")
 	})
 
 	it.each(["apk", "aab", "aar", "ipa", "jar", "war", "ear", "xpi", "crx", "whl", "nupkg", "vsix", "appx", "msix"])(
