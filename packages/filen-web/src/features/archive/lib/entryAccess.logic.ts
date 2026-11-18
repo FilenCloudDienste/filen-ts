@@ -25,6 +25,7 @@ import {
 } from "@/features/drive/lib/preview.logic"
 import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { sniffCandidates } from "@filen/shared"
+import { isArchiveCandidateName, isZipPackageName } from "@/features/drive/lib/archiveFormats"
 import { deviceProfile } from "@/lib/deviceProfile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
@@ -136,6 +137,33 @@ export function canOpenEntry(store: EntryStore, slot: number): boolean {
 	const category = entryPreviewCategory(store.name(slot))
 
 	return category !== null && entryAdmits(category, BigInt(store.size(slot)), deviceProfile())
+}
+
+// An archive (or a comic book) held in the entry, which the browser opens in its place (W6 §3.4, §6.1 A): one read alone
+// and named as an archive. A ZIP package (a document) is its own viewer's. How deep it may lie is the caller's
+// (nestedTarget).
+export function holdsNestedArchive(store: EntryStore, slot: number): boolean {
+	const name = store.name(slot)
+
+	return canReadEntry(store, slot) && isArchiveCandidateName(name) && !isZipPackageName(name)
+}
+
+// An archive in a seekable entry is inflated whole before it opens, its index lying at its end (W6 §3.4, B#9): above
+// this, the user confirms that first.
+export const NESTED_INFLATE_CONFIRM_BYTES = 256 * 1024 * 1024
+
+// How a held archive opens once its entry's access kind is known: in the browser's place (`enter`), after the inflate is
+// confirmed (`confirm`), or as the "Extract to open" card (`extract`: read only whole or front to back, W6 §3.10).
+export function nestedOpening(access: EntryAccessKind, size: number): "enter" | "confirm" | "extract" {
+	switch (access) {
+		case "mapped":
+			return "enter"
+		case "seekable":
+			return size > NESTED_INFLATE_CONFIRM_BYTES ? "confirm" : "enter"
+		case "whole":
+		case "sequential":
+			return "extract"
+	}
 }
 
 export function isEncryptedEntry(store: EntryStore, slot: number): boolean {

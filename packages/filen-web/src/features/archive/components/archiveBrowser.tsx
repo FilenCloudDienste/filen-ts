@@ -61,7 +61,7 @@ import { useArchiveListing } from "@/features/archive/components/useArchiveListi
 import { useArchiveSearch } from "@/features/archive/components/useArchiveSearch"
 import { ArchiveGate } from "@/features/archive/components/archiveGate"
 import { ArchiveReading, ArchiveStatus, ArchiveWaiting, Delayed } from "@/features/archive/components/archiveStatus"
-import { ArchiveToolbar } from "@/features/archive/components/archiveToolbar"
+import { ArchiveToolbar, type OuterCrumb } from "@/features/archive/components/archiveToolbar"
 import { ArchiveEntryList } from "@/features/archive/components/archiveEntryList"
 import { ArchiveFooter } from "@/features/archive/components/archiveFooter"
 import { ArchivePasswordGate, ArchivePasswordPrompt } from "@/features/archive/components/archivePasswordPrompt"
@@ -137,10 +137,95 @@ export interface ArchiveSourceBrowserProps {
 	extractable?: boolean
 }
 
+// One archive entered from another (W6 §6.1 A): its source, and the directory of the archive holding it that it was
+// entered from.
+interface NestedLevel {
+	source: ArchiveSource
+	fromDirPath: string
+}
+
+// The archive and those entered from it, one inside the next (at most MAX_NESTED_DEPTH deep), each browsed in the place of
+// the one holding it. The crumbs run on through the archives holding the one shown, a glyph where they cross into it;
+// leaving an inner archive (its root's Back, an outer crumb) shows the outer one again from the host's listing cache, at
+// the directory chosen.
+export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourceBrowserProps) {
+	const [nested, setNested] = useState<readonly NestedLevel[]>([])
+	// Where the archive shown opens: an outer crumb's directory, else where its cached listing was left.
+	const [openAt, setOpenAt] = useState<string | null>(null)
+	const levels = [source, ...nested.map(level => level.source)]
+	const shown = levels.at(-1) ?? source
+	const depth = levels.length - 1
+
+	const leaveTo = (level: number, dirPath: string): void => {
+		setNested(nested.slice(0, level))
+		setOpenAt(dirPath)
+	}
+
+	const outer = nested.flatMap((level, i) => {
+		const holder = levels[i] ?? source
+		const segments = level.fromDirPath === "" ? [] : level.fromDirPath.split("/")
+
+		return [
+			{
+				key: `${holder.uuid}:`,
+				name: holder.name,
+				onSelect: () => {
+					leaveTo(i, "")
+				}
+			},
+			...segments.map((segment, at) => {
+				const dirPath = segments.slice(0, at + 1).join("/")
+
+				return {
+					key: `${holder.uuid}:${dirPath}`,
+					name: segment,
+					onSelect: () => {
+						leaveTo(i, dirPath)
+					}
+				}
+			})
+		]
+	})
+
+	return (
+		<ArchiveLevelBrowser
+			key={shown.uuid}
+			source={shown}
+			deps={deps}
+			extractable={extractable === true}
+			outer={outer}
+			openAt={openAt}
+			onEnter={(inner, fromDirPath) => {
+				setNested([...nested, { source: inner, fromDirPath }])
+				setOpenAt(null)
+			}}
+			onLeave={
+				depth === 0
+					? null
+					: () => {
+							leaveTo(depth - 1, nested.at(-1)?.fromDirPath ?? "")
+						}
+			}
+		/>
+	)
+}
+
+interface ArchiveLevelBrowserProps extends ArchiveSourceBrowserProps {
+	// The crumbs of the archives holding this one (empty for a file's own).
+	outer: readonly OuterCrumb[]
+	// The directory to open at, "" the root; null: where its cached listing was left.
+	openAt: string | null
+	// Browses an archive held in one of its entries in its place, entered from the directory `fromDirPath`.
+	onEnter: (inner: ArchiveSource, fromDirPath: string) => void
+	// Back to the archive holding this one; null for a file's own.
+	onLeave: (() => void) | null
+}
+
 // The archive's directories, browsed and searched, with an extract of the selection or of everything.
 // The selection's base is the directory shown (owner decision), so navigating clears it; extracts land in
-// the user's own drive whatever the archive's source.
-export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourceBrowserProps) {
+// the user's own drive whatever the archive's source. An archive held in another is never extracted from: it has no
+// drive file of its own.
+function ArchiveLevelBrowser({ source, deps, extractable, outer, openAt, onEnter, onLeave }: ArchiveLevelBrowserProps) {
 	const { t } = useTranslation(["preview", "drive", "common"])
 	const isOnline = useIsOnline()
 	// A public link that allows no downloads can still be browsed, but nothing leaves it.
@@ -151,7 +236,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	const { snapshot } = listing
 	const { phase, store, info } = snapshot
 	// Every hook before anything derived: a value computed across a hook call loses its memo.
-	const [path, setPath] = useState(listing.restoredDirPath)
+	const [path, setPath] = useState(openAt ?? listing.restoredDirPath)
 	const [sort, setSort] = useState<ChildSort>(DEFAULT_SORT)
 	const [query, setQuery] = useState("")
 	// Per store: a new listing run (List again, a password) starts from nothing.
@@ -164,7 +249,15 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	// the row may unmount while the picker is open.
 	const [rowPick, setRowPick] = useState<EntryTarget | "selection" | null>(null)
 	const [viewStore, setViewStore] = useState(store)
-	const entries = useEntryActions({ source, session: listing.session, downloadable, isOnline })
+	const entries = useEntryActions({
+		source,
+		session: listing.session,
+		downloadable,
+		isOnline,
+		onEnterArchive: inner => {
+			onEnter(inner, path)
+		}
+	})
 	// Ends the wait for a password check that an extract is waiting on.
 	const pendingCheck = useRef<(() => void) | null>(null)
 	// The last marquee step: the rows it covered and the selection that made.
@@ -195,9 +288,10 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	const dirName = dir === 0 ? source.name : store.dirName(dir)
 	const baseFolderName = dir === 0 ? (info?.defaultName ?? source.name) : store.dirName(dir)
 	const totals = selectionTotalsOf(snapshot, selection)
-	const extractAllowed = downloadable || extractable === true
+	const inner = source.nested !== null
+	const extractAllowed = (downloadable || extractable === true) && !inner
 	const extractOff = info === null || !isOnline || !extractAllowed
-	const notAllowed = extractAllowed ? undefined : t("previewArchiveExtractNotAllowed")
+	const notAllowed = inner ? t("previewArchiveExtractNestedNote") : extractAllowed ? undefined : t("previewArchiveExtractNotAllowed")
 	const extractOffTitle = notAllowed ?? (isOnline ? undefined : t("common:offlineActionDisabled"))
 	const { hidden, shown } = splitCrumbs(crumbTrail(store, dir), ARCHIVE_VISIBLE_CRUMBS)
 
@@ -235,9 +329,12 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		placeCursor(focus === null ? null : { ref: focus, index: -1 }, true)
 	}
 
+	// At an inner archive's root, back to the archive holding it.
 	function goParent(): void {
 		if (dir !== 0) {
 			navigate(store.dirParent(dir), dirRef(dir))
+		} else {
+			onLeave?.()
 		}
 	}
 
@@ -737,6 +834,7 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	return (
 		<div className="flex size-full flex-col">
 			<ArchiveToolbar
+				outer={outer}
 				rootName={source.name}
 				shown={shown.map(id => ({ id, name: store.dirName(id) }))}
 				hidden={hidden.map(id => ({ id, name: store.dirName(id) }))}

@@ -10,6 +10,9 @@ import {
 	isEncryptedEntry,
 	maxSolidSkipFor,
 	needsCostConfirm,
+	holdsNestedArchive,
+	NESTED_INFLATE_CONFIRM_BYTES,
+	nestedOpening,
 	sniffedEntryCategory,
 	sniffMayReadByRange
 } from "@/features/archive/lib/entryAccess.logic"
@@ -235,5 +238,27 @@ describe("entries whose content read picks the viewer", () => {
 		expect(sniffedEntryCategory(raw, entryOrigin(1))).toBe("rawImage")
 		expect(sniffedEntryCategory(raw, heldOrigin)).toBeNull()
 		expect(sniffedEntryCategory(clip, heldOrigin)).toBe("video")
+	})
+})
+
+describe("archives held in an entry", () => {
+	it("are archives and comics read alone, never a ZIP package a viewer of its own shows", () => {
+		const store = storeOf([
+			{ path: "inner.zip", size: 10, access: DIRECT },
+			{ path: "book.cbz", size: 10, access: DIRECT },
+			{ path: "report.docx", size: 10, access: DIRECT },
+			{ path: "deep.7z", size: 10, access: SOLID_LATER }
+		])
+
+		expect([0, 1, 2].map(slot => holdsNestedArchive(store, slot))).toEqual([true, true, false])
+		expect(holdsNestedArchive(store, 3)).toBe(canReadEntry(store, 3))
+	})
+
+	it("open in place when stored, after a confirm when inflated above 256 MiB, else as the card", () => {
+		expect(nestedOpening("mapped", NESTED_INFLATE_CONFIRM_BYTES * 2)).toBe("enter")
+		expect(nestedOpening("seekable", NESTED_INFLATE_CONFIRM_BYTES)).toBe("enter")
+		expect(nestedOpening("seekable", NESTED_INFLATE_CONFIRM_BYTES + 1)).toBe("confirm")
+		expect(nestedOpening("whole", 10)).toBe("extract")
+		expect(nestedOpening("sequential", 10)).toBe("extract")
 	})
 })

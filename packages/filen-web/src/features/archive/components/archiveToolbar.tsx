@@ -1,6 +1,6 @@
 import { Fragment, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
+import { ChevronRightIcon, MoreHorizontalIcon, PackageIcon } from "lucide-react"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -10,7 +10,16 @@ export interface ArchiveCrumb {
 	name: string
 }
 
+// A level of the archives holding this one (W6 §6.1 A): an outer archive's root or one of its directories, left for it.
+export interface OuterCrumb {
+	key: string
+	name: string
+	onSelect: () => void
+}
+
 export interface ArchiveToolbarProps {
+	// The archives holding this one and the directories it lies in, outermost first; empty for a file's own archive.
+	outer: readonly OuterCrumb[]
 	// The archive's name, standing for its root.
 	rootName: string
 	// Below the root, top down; the last is the directory shown.
@@ -47,7 +56,7 @@ function Separator() {
 }
 
 // Where in the archive the browser is, and its search below there.
-export function ArchiveToolbar({ rootName, shown, hidden, query, searchBoxRef, onNavigate, onQueryChange }: ArchiveToolbarProps) {
+export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBoxRef, onNavigate, onQueryChange }: ArchiveToolbarProps) {
 	const { t } = useTranslation("preview")
 
 	return (
@@ -56,6 +65,24 @@ export function ArchiveToolbar({ rootName, shown, hidden, query, searchBoxRef, o
 				aria-label={t("previewArchiveBreadcrumbs")}
 				className="flex min-w-0 flex-1 items-center gap-0.5"
 			>
+				{outer.map(crumb => (
+					<Fragment key={crumb.key}>
+						<Crumb
+							name={crumb.name}
+							current={false}
+							onClick={crumb.onSelect}
+						/>
+						<Separator />
+					</Fragment>
+				))}
+				{/* Where the trail crosses into an archive held in another. */}
+				{outer.length > 0 ? (
+					<PackageIcon
+						aria-hidden="true"
+						data-archive-boundary=""
+						className="size-3.5 shrink-0 text-muted-foreground"
+					/>
+				) : null}
 				<Crumb
 					name={rootName}
 					current={shown.length === 0}

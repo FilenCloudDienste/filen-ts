@@ -188,9 +188,15 @@ function show(specs: EntrySpec[], options: { downloadable?: boolean; password?: 
 	const session = fakeSession(storeOf(specs), options.password)
 
 	openListingSession.mockReturnValue(session)
+	renderBrowser(SOURCE, options.downloadable)
+
+	return session
+}
+
+function renderBrowser(source: ArchiveSource = SOURCE, downloadable?: boolean): void {
 	render(
 		<QueryClientProvider client={queryClient}>
-			<PreviewDownloadableProvider downloadable={options.downloadable ?? true}>
+			<PreviewDownloadableProvider downloadable={downloadable ?? true}>
 				{/* Stands in for the overlay's own handler: it pages on Left/Right unless a preview surface has them. */}
 				<div
 					onKeyDown={event => {
@@ -199,13 +205,11 @@ function show(specs: EntrySpec[], options: { downloadable?: boolean; password?: 
 						}
 					}}
 				>
-					<ArchiveSourceBrowser source={SOURCE} />
+					<ArchiveSourceBrowser source={source} />
 				</div>
 			</PreviewDownloadableProvider>
 		</QueryClientProvider>
 	)
-
-	return session
 }
 
 // The entry viewer's own root: the surface the overlay leaves its keys to.
@@ -649,6 +653,89 @@ describe("an archive entry on its own", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /Back/ }))
 		expect(sdkApi.cancelPreviewDownload).toHaveBeenCalledWith(token)
+	})
+
+	it("browses an archive held in a stored entry in its place, crumbs running on through it, and leaves it again", async () => {
+		const outer = fakeSession(storeOf([{ path: "trip/inner.zip", size: 3 * MiB, access: DIRECT }]))
+		const inner = fakeSession(storeOf([{ path: "day1/photo.txt", size: 3, access: DIRECT }]))
+		const opened: ArchiveSource[] = []
+
+		archiveEntryAccess.mockResolvedValue("mapped")
+		openListingSession.mockImplementation((source: ArchiveSource) => {
+			opened.push(source)
+
+			return source.nested === null ? outer : inner
+		})
+		renderBrowser()
+
+		fireEvent.doubleClick(row("trip"))
+		fireEvent.doubleClick(row("inner.zip"))
+		expect(await screen.findByRole("listbox", { name: /inner\.zip/ })).toBeTruthy()
+
+		const nested = opened.at(-1)
+
+		expect(nested?.nested).toMatchObject({ index: 0, depth: 2 })
+		expect(nested?.uuid).toBe(`${TEST_ARCHIVE}/0`)
+
+		const crumbs = screen.getByRole("navigation", { name: "Location in the archive" })
+
+		expect(
+			within(crumbs)
+				.getAllByRole("button")
+				.map(button => button.textContent)
+		).toEqual(["bundle.7z", "trip", "inner.zip"])
+		expect(crumbs.querySelector("[data-archive-boundary]")).not.toBeNull()
+		// Nothing is extracted from an archive held in another.
+		expect(screen.getByText("This archive is inside another. Extract the outer archive to get its files.")).toBeTruthy()
+
+		fireEvent.click(within(crumbs).getByRole("button", { name: "trip" }))
+		expect(await screen.findByRole("listbox", { name: /trip/ })).toBeTruthy()
+		expect(row("inner.zip")).toBeTruthy()
+	})
+
+	it("shows an archive held in an entry read only whole as the card offering to extract the outer one", async () => {
+		show([{ path: "inner.tar.gz", size: 3 * MiB, access: DIRECT }])
+		archiveEntryAccess.mockResolvedValue("whole")
+
+		fireEvent.doubleClick(row("inner.tar.gz"))
+		expect(await screen.findByText(/can't be opened from inside this archive/)).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Extract to open" })).toBeTruthy()
+	})
+
+	it("confirms unpacking a large archive held in a compressed entry before browsing it", async () => {
+		const outer = fakeSession(storeOf([{ path: "big.zip", size: 300 * MiB, access: DIRECT }]))
+		const inner = fakeSession(storeOf([{ path: "a.txt", size: 3, access: DIRECT }]))
+
+		archiveEntryAccess.mockResolvedValue("seekable")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : inner))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("big.zip"))
+
+		const dialog = await screen.findByRole("alertdialog", { name: "Unpack this archive first?" })
+
+		expect(dialog.textContent).toContain("300 MiB")
+		fireEvent.click(within(dialog).getByRole("button", { name: "Browse" }))
+		expect(await screen.findByRole("listbox", { name: /big\.zip/ })).toBeTruthy()
+	})
+
+	it("offers no open for an archive three deep", () => {
+		const deep: ArchiveSource = {
+			...SOURCE,
+			uuid: `${TEST_ARCHIVE}/0/1`,
+			nested: {
+				parent: { ...SOURCE, uuid: `${TEST_ARCHIVE}/0`, nested: { parent: SOURCE, parentPassword: undefined, index: 0, depth: 2 } },
+				parentPassword: undefined,
+				index: 1,
+				depth: 3
+			}
+		}
+
+		openListingSession.mockReturnValue(fakeSession(storeOf([{ path: "inner.zip", size: 3, access: DIRECT }])))
+		renderBrowser(deep)
+
+		fireEvent.doubleClick(row("inner.zip"))
+		expect(archiveEntryAccess).not.toHaveBeenCalled()
 	})
 
 	it("previews but never saves from a link that allows no downloads", async () => {

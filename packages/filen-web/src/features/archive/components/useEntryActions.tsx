@@ -1,9 +1,13 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { formatBytes } from "@filen/shared"
 import { isFsaAvailable, canTransferStreams } from "@/features/drive/lib/saveDownload"
 import { toastDownloadFailed } from "@/features/transfers/lib/settle"
+import { asErrorDTO } from "@/lib/sdk/errors"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { entryAccessOf } from "@/features/archive/lib/archiveHandle"
+import { nestedTarget } from "@/features/archive/lib/archiveReaders"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
@@ -18,12 +22,14 @@ import {
 	extractsToRead,
 	entryAwaitsSniff,
 	entryPreviewCategory,
+	holdsNestedArchive,
 	isEncryptedEntry,
 	needsCostConfirm,
+	nestedOpening,
 	type ExtractReason
 } from "@/features/archive/lib/entryAccess.logic"
 import { defaultEntryDownloadDeps, entryRequest, runEntryDownload } from "@/features/archive/lib/entryDownload"
-import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
+import { nestedArchiveSource, type ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ViewedEntry } from "@/features/archive/components/archiveEntryViewer"
 import { ArchivePasswordPrompt } from "@/features/archive/components/archivePasswordPrompt"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -51,7 +57,7 @@ export interface EntryActions {
 	// A double-click or Enter on a file: opened when it previews, else saved; false when neither applies.
 	activate: (target: EntryTarget) => boolean
 	offers: (target: EntryTarget) => EntryOffers
-	// The cost confirm and the password prompt of a download.
+	// The cost confirms (a solid block's, an inner archive's inflate) and the password prompt of a download.
 	dialogs: ReactNode
 }
 
@@ -61,19 +67,85 @@ export interface EntryActionsInput {
 	// A link allowing no downloads still previews.
 	downloadable: boolean
 	isOnline: boolean
+	// Browses an archive held in an entry in this one's place (W6 §6.1 A); null where none is entered.
+	onEnterArchive: ((inner: ArchiveSource) => void) | null
 }
 
 // A single entry previewed or saved from the archive browser. A selection of several never comes here: it
 // extracts.
-export function useEntryActions({ source, session, downloadable, isOnline }: EntryActionsInput): EntryActions {
+export function useEntryActions({ source, session, downloadable, isOnline, onEnterArchive }: EntryActionsInput): EntryActions {
 	const { t } = useTranslation(["preview", "common"])
 	const cacheScope = usePreviewCacheScope()
 	const [viewing, setViewing] = useState<ViewedEntryState | null>(null)
 	const [costAsk, setCostAsk] = useState<(EntryTarget & { intent: EntryIntent }) | null>(null)
 	const [passwordAsk, setPasswordAsk] = useState<(EntryTarget & { wrong: boolean }) | null>(null)
+	// An inner archive in a seekable entry above NESTED_INFLATE_CONFIRM_BYTES, waiting for its inflate to be confirmed.
+	const [inflateAsk, setInflateAsk] = useState<{ inner: ArchiveSource; size: number } | null>(null)
+	// The access question of the inner archive asked last: a newer one, or the browser going, cancels it.
+	const entering = useRef<AbortController | null>(null)
 
-	function offers({ store, slot }: EntryTarget): EntryOffers {
-		return { open: canOpenEntry(store, slot), download: downloadable && isOnline && canReadEntry(store, slot) }
+	useEffect(
+		() => () => {
+			entering.current?.abort()
+		},
+		[]
+	)
+
+	// An archive held in the entry, opened in this one's place, no deeper than MAX_NESTED_DEPTH.
+	function entersArchive({ store, slot }: EntryTarget): boolean {
+		return onEnterArchive !== null && holdsNestedArchive(store, slot) && nestedTarget(source, undefined, store.index(slot)) !== null
+	}
+
+	function offers(target: EntryTarget): EntryOffers {
+		const { store, slot } = target
+
+		return {
+			open: canOpenEntry(store, slot) || entersArchive(target),
+			download: downloadable && isOnline && canReadEntry(store, slot)
+		}
+	}
+
+	// The inner archive opens by its entry's access kind (W6 §3.10): in this one's place when it is mapped, or seekable
+	// (its inflate confirmed above NESTED_INFLATE_CONFIRM_BYTES), else as the "Extract to open" card.
+	function enterArchive(target: EntryTarget): void {
+		const password = session()?.password()
+		const inner = nestedArchiveSource(source, password, target.store, target.slot)
+
+		if (inner === null || onEnterArchive === null) {
+			return
+		}
+
+		const controller = new AbortController()
+
+		entering.current?.abort()
+		entering.current = controller
+		void entryAccessOf(source, password, target.store.index(target.slot), controller.signal).then(
+			access => {
+				if (controller.signal.aborted) {
+					return
+				}
+
+				switch (nestedOpening(access, inner.size)) {
+					case "enter":
+						onEnterArchive(inner)
+
+						break
+					case "confirm":
+						setInflateAsk({ inner, size: inner.size })
+
+						break
+					case "extract":
+						open(target, "open")
+
+						break
+				}
+			},
+			(e: unknown) => {
+				if (!controller.signal.aborted) {
+					toast.error(errorLabel(asErrorDTO(e)))
+				}
+			}
+		)
 	}
 
 	// `extract`: it is not read from here (a block too large, E3), so it opens as the card offering to extract.
@@ -83,7 +155,8 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 		const awaitsSniff = entryAwaitsSniff(store, slot)
 		const category = awaitsSniff ? null : entryPreviewCategory(store.name(slot))
 
-		if (request === null || (category === null && !awaitsSniff)) {
+		// A card shows whatever the entry is; a viewer needs a kind to show it in.
+		if (request === null || (category === null && !awaitsSniff && extract === undefined)) {
 			return
 		}
 
@@ -153,6 +226,13 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 			return
 		}
 
+		// An inner archive costs no solid read to open: one in a solid block reads only whole, so it shows its card.
+		if (intent === "open" && !canOpenEntry(target.store, target.slot) && entersArchive(target)) {
+			enterArchive(target)
+
+			return
+		}
+
 		// Bytes already held cost nothing to show again; once the session accepted a cost, its later entries are asked
 		// no more (each stays bounded by its own listed skip).
 		const held = intent === "open" && getPreviewBytes(cacheScope, entryKey(source.uuid, target.store.index(target.slot))) !== undefined
@@ -216,6 +296,29 @@ export function useEntryActions({ source, session, downloadable, isOnline }: Ent
 						setCostAsk(null)
 						session()?.acceptCost()
 						run(costAsk, costAsk.intent)
+					}
+				}}
+			/>
+			<ConfirmDialog
+				open={inflateAsk !== null}
+				pending={false}
+				title={t("previewArchiveNestedInflateTitle")}
+				body={
+					inflateAsk === null
+						? ""
+						: t("previewArchiveNestedInflateBody", { name: inflateAsk.inner.name, size: formatBytes(inflateAsk.size) })
+				}
+				confirmLabel={t("previewArchiveNestedInflateOpen")}
+				cancelLabel={t("common:cancel")}
+				onOpenChange={next => {
+					if (!next) {
+						setInflateAsk(null)
+					}
+				}}
+				onConfirm={() => {
+					if (inflateAsk !== null) {
+						setInflateAsk(null)
+						onEnterArchive?.(inflateAsk.inner)
 					}
 				}}
 			/>

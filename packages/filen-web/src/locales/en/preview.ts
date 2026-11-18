@@ -844,10 +844,18 @@ export const preview = {
 	previewArchiveEntryExtractToPlayBody: "“{{name}}” can't be played from inside this archive. Extract the archive to play it.",
 	/** Archive entry card — extracts the archive to play the file */
 	previewArchiveEntryExtractToPlay: "Extract to play",
-	/** Archive entry card — a camera RAW photo the archive stores so its preview can't be read from here; {{name}} is the file */
+	/** Archive entry card — a camera RAW photo the archive stores so its preview can't be read from here, or an archive inside the archive stored so it can't be browsed from here (compressed so it reads only whole or front to back); {{name}} is the file */
 	previewArchiveEntryExtractToOpenBody: "“{{name}}” can't be opened from inside this archive. Extract the archive to open it.",
 	/** Archive entry card — extracts the archive to open the file */
 	previewArchiveEntryExtractToOpen: "Extract to open",
+	/** Archive inside an archive, confirm dialog title — browsing it means unpacking all of it first (its contents list sits at its end) */
+	previewArchiveNestedInflateTitle: "Unpack this archive first?",
+	/** Archive inside an archive, confirm dialog body; {{name}} is the inner archive, {{size}} its unpacked size */
+	previewArchiveNestedInflateBody: "“{{name}}” is compressed inside this archive. Browsing it unpacks all {{size}} of it first.",
+	/** Archive inside an archive, confirm dialog — browses it anyway */
+	previewArchiveNestedInflateOpen: "Browse",
+	/** Archive browser, inside an archive held in another — why its Extract buttons are off */
+	previewArchiveExtractNestedNote: "This archive is inside another. Extract the outer archive to get its files.",
 	/** Under an archive entry's player — the entry is compressed, so a seek decodes up to the new position */
 	previewArchiveMediaSeekNote: "Compressed in the archive · seeking may pause while it reads",
 	/** Toast — the file lies in a solid block of the archive too large to read it from here (above 512 MiB); {{name}} is the file */
