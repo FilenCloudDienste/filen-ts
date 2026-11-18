@@ -70,7 +70,8 @@ const EXTENSIONS: Record<string, readonly string[]> = {
 	document: ["pdf", "docx", "txt", "md", "xlsx", "csv", ...ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS]
 }
 
-const TEXT_EXTENSIONS = ["txt", "md", "csv", "json"]
+// Messages and mailboxes read as their parsed text extract, as the app's read_text_file returns it.
+const TEXT_EXTENSIONS = ["txt", "md", "csv", "json", "eml", "msg", "mbox"]
 
 // Screens where the web app's context names a current directory and a selection.
 const DRIVE_SCREENS: ReadonlySet<string> = new Set(["drive"])
