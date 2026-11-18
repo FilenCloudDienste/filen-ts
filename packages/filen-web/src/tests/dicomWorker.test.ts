@@ -187,4 +187,31 @@ describe("the DICOM worker", () => {
 		expect(await first).toBe("ok")
 		expect(await second).toBe("ok")
 	})
+
+	it("posts the page its status once an animation frame, however many changes come in one", async () => {
+		const { posted } = shellPort()
+		const file = dicomFile({
+			transferSyntax: EXPLICIT_LE,
+			elements: grayModule({ rows: 2, columns: 2, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false, frames: 2 }),
+			pixelData: new Uint8Array(8)
+		})
+
+		expect(api.open({ kind: "whole", bytes: file }, { decodeBytes: 64 * 1024 * 1024 }).info?.frames).toBe(2)
+		expect(await api.show(0)).toBe("ok")
+		await frameTurn()
+
+		const before = posted.length
+
+		// Play and pause, five times over, and a window dragged, all before the next frame.
+		for (let i = 0; i < 5; i++) {
+			api.play(true)
+			api.play(false)
+		}
+
+		for (let width = 100; width < 110; width++) api.setWindow({ center: 40, width })
+		await frameTurn()
+
+		expect(posted.length - before).toBe(1)
+		expect(posted.at(-1)).toMatchObject({ playing: false, window: { center: 40, width: 109 } })
+	})
 })

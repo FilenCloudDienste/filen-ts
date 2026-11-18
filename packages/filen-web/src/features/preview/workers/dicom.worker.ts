@@ -140,7 +140,18 @@ function send(message: WorkerToShell<DicomStatus>): void {
 	shell?.postMessage(message)
 }
 
+// The status post waiting for the next animation frame: however many changes come in one (a cine step, a drag of the
+// window, a toggle), the page hears of them once a frame.
+let statusFrame: number | null = null
+
 function postStatus(): void {
+	statusFrame ??= requestAnimationFrame(() => {
+		statusFrame = null
+		sendStatus()
+	})
+}
+
+function sendStatus(): void {
 	const status: DicomStatus = {
 		frame: current,
 		window: voiWindow,
