@@ -23,7 +23,9 @@ import {
 	messageBytes,
 	readHeaderHead,
 	readMessage,
-	type MboxCount
+	searchHeaders,
+	type MboxCount,
+	type MboxSearchResult
 } from "@/features/preview/lib/textPager/mbox.logic"
 import { readHeaderSummary, type EmailHeaderSummary } from "@/features/preview/lib/emailReading"
 
@@ -225,6 +227,48 @@ function isAbort(error: unknown): boolean {
 	)
 }
 
+// Rows `first` to `first + count` (at most MBOX_ROWS_AT_ONCE) of the list, among the messages found: sender, subject
+// and date, from each message's header block, kept in an LRU.
+async function mboxRowsAt(first: number, count: number): Promise<(EmailHeaderSummary | null)[]> {
+	const index = mailbox()
+	const { source } = file()
+	const rows: (EmailHeaderSummary | null)[] = []
+
+	for (let at = Math.max(0, first); at < Math.min(first + Math.min(count, MBOX_ROWS_AT_ONCE), index.count); at++) {
+		const kept = mboxRows.get(at)
+
+		if (kept !== undefined) {
+			// Most recently shown last.
+			mboxRows.delete(at)
+			mboxRows.set(at, kept)
+			rows.push(kept)
+			continue
+		}
+
+		const span = index.span(at)
+
+		if (span === null) {
+			rows.push(null)
+			continue
+		}
+
+		const block = headerBlock(await readHeaderHead(source, { start: span.start, end: span.end ?? source.size }))
+		const row = block === null ? { from: null, subject: null, date: null } : await readHeaderSummary(block)
+
+		mboxRows.set(at, row)
+
+		if (mboxRows.size > MBOX_ROWS_KEPT) {
+			const oldest = mboxRows.keys().next()
+
+			if (oldest.done !== true) mboxRows.delete(oldest.value)
+		}
+
+		rows.push(row)
+	}
+
+	return rows
+}
+
 const api = {
 	// Takes over `port` (a range port on the file's bytes) and reads the first block. `onLost` hears of the port's loss.
 	open: async (port: MessagePort, size: number, onLost: Lost): Promise<PagerOpen> => {
@@ -380,47 +424,43 @@ const api = {
 	mboxStop: (): void => {
 		mboxCount?.abort()
 	},
+	// Every message whose sender or subject holds `query` (at most MBOX_MATCH_CAP), finding messages as it goes; stopped
+	// by mboxStop() or another search. Progress hears the messages searched and the matches so far.
+	mboxSearch: async (
+		query: string,
+		onProgress: ((searched: number, found: number) => unknown) & Partial<Comlink.ProxyMethods>
+	): Promise<MboxSearchResult> => {
+		mboxCount?.abort()
+		mboxCount = new AbortController()
+
+		const signal = mboxCount.signal
+		const result = await searchHeaders(query, {
+			ensure: async want => {
+				const index = mailbox()
+
+				// Another scan is running (the list's): wait for it, then go on.
+				while (mboxScan !== null) await mboxScan.catch(() => undefined)
+
+				return index.count >= want || index.complete ? index.state() : await scanMailbox(want, signal, () => undefined)
+			},
+			row: async at => (await mboxRowsAt(at, 1))[0] ?? { from: null, subject: null },
+			signal,
+			onProgress: (searched, found) => {
+				void onProgress(searched, found)
+			}
+		}).catch((error: unknown): MboxSearchResult => {
+			if (!(error instanceof DOMException && error.name === "AbortError") && !isAbort(error)) throw error
+
+			return { matches: [], end: "stopped", searched: 0 }
+		})
+
+		onProgress[Comlink.releaseProxy]?.()
+
+		return result
+	},
 	// Rows `first` to `first + count` (at most MBOX_ROWS_AT_ONCE) of the list, among the messages found: sender, subject
 	// and date, from each message's header block.
-	mboxRows: async (first: number, count: number): Promise<(EmailHeaderSummary | null)[]> => {
-		const index = mailbox()
-		const { source } = file()
-		const rows: (EmailHeaderSummary | null)[] = []
-
-		for (let at = Math.max(0, first); at < Math.min(first + Math.min(count, MBOX_ROWS_AT_ONCE), index.count); at++) {
-			const kept = mboxRows.get(at)
-
-			if (kept !== undefined) {
-				// Most recently shown last.
-				mboxRows.delete(at)
-				mboxRows.set(at, kept)
-				rows.push(kept)
-				continue
-			}
-
-			const span = index.span(at)
-
-			if (span === null) {
-				rows.push(null)
-				continue
-			}
-
-			const block = headerBlock(await readHeaderHead(source, { start: span.start, end: span.end ?? source.size }))
-			const row = block === null ? { from: null, subject: null, date: null } : await readHeaderSummary(block)
-
-			mboxRows.set(at, row)
-
-			if (mboxRows.size > MBOX_ROWS_KEPT) {
-				const oldest = mboxRows.keys().next()
-
-				if (oldest.done !== true) mboxRows.delete(oldest.value)
-			}
-
-			rows.push(row)
-		}
-
-		return rows
-	},
+	mboxRows: (first: number, count: number): Promise<(EmailHeaderSummary | null)[]> => mboxRowsAt(first, count),
 	// Message `index`'s own bytes (unescaped), for the message viewer; its end found first when not yet.
 	mboxMessage: async (index: number): Promise<MboxMessage> => {
 		const messages = mailbox()

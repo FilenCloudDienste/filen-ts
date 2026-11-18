@@ -223,3 +223,60 @@ export async function readMessage(
 export async function readHeaderHead(source: PagerSource, span: { readonly start: number; readonly end: number }): Promise<Uint8Array> {
 	return await source.read(span.start, Math.min(span.end, span.start + HEADER_BYTES))
 }
+
+// A header search's bound: matches kept (message indexes, 4 bytes each).
+export const MBOX_MATCH_CAP = 10_000
+
+export type MboxSearchEnd = "done" | "capped" | "stopped"
+
+export interface MboxSearchResult {
+	// Matching message indexes, in file order.
+	readonly matches: readonly number[]
+	readonly end: MboxSearchEnd
+	// Messages whose headers were looked at.
+	readonly searched: number
+}
+
+// Whether a list row's sender or subject holds `query` (case-insensitive, as shown).
+export function headerMatches(row: { readonly from: string | null; readonly subject: string | null }, query: string): boolean {
+	const needle = query.toLocaleLowerCase()
+
+	return (row.from ?? "").toLocaleLowerCase().includes(needle) || (row.subject ?? "").toLocaleLowerCase().includes(needle)
+}
+
+export interface MboxSearchSteps {
+	// Messages found so far, scanning on (at least `want` if the file has them); the index's state after.
+	readonly ensure: (want: number) => Promise<MboxCount>
+	// Message `index`'s list row.
+	readonly row: (index: number) => Promise<{ readonly from: string | null; readonly subject: string | null }>
+	readonly signal: AbortSignal
+	readonly onProgress: (searched: number, found: number) => void
+}
+
+// Every message whose sender or subject holds `query`, from the first on, finding messages as it goes (the scan streams
+// through the file); at most MBOX_MATCH_CAP, stopped by `signal`. Progress every PROGRESS_EVERY messages.
+export async function searchHeaders(query: string, steps: MboxSearchSteps): Promise<MboxSearchResult> {
+	const matches: number[] = []
+	let index = 0
+
+	for (;;) {
+		if (steps.signal.aborted) return { matches, end: "stopped", searched: index }
+
+		const state = await steps.ensure(index + 1)
+
+		if (index >= state.count) return { matches, end: "done", searched: index }
+
+		if (headerMatches(await steps.row(index), query)) {
+			// One past the cap tells a full result from a capped one.
+			if (matches.length === MBOX_MATCH_CAP) return { matches, end: "capped", searched: index }
+
+			matches.push(index)
+		}
+
+		index++
+
+		if (index % PROGRESS_EVERY === 0) steps.onProgress(index, matches.length)
+	}
+}
+
+const PROGRESS_EVERY = 256

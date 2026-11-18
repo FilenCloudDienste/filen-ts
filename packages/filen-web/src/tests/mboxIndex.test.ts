@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest"
 import { SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
 import {
 	MAX_MESSAGES,
+	MBOX_MATCH_CAP,
 	MESSAGE_MAX_BYTES,
 	MboxIndex,
+	headerMatches,
+	searchHeaders,
 	headerBlock,
 	messageBytes,
 	readMessage
@@ -130,5 +133,54 @@ describe("mbox messages", () => {
 
 		expect(await readMessage(reader, { start: 0, end: MESSAGE_MAX_BYTES + 1 }, new AbortController().signal)).toBeNull()
 		expect(reader.reads).toHaveLength(0)
+	})
+})
+
+describe("searchHeaders", () => {
+	const rows = (subjects: readonly string[]) => ({
+		ensure: (want: number) =>
+			Promise.resolve({ count: Math.min(want, subjects.length), complete: want >= subjects.length, capped: false, scanned: 0 }),
+		row: (index: number) =>
+			Promise.resolve({ from: `Sender ${String(index)} <s${String(index)}@x.io>`, subject: subjects[index] ?? null })
+	})
+
+	it("finds the messages whose sender or subject holds the query, case-insensitively", async () => {
+		const progress: number[] = []
+		const result = await searchHeaders("budget", {
+			...rows(["Q3 Budget", "lunch", "budget review", "other"]),
+			signal: new AbortController().signal,
+			onProgress: searched => progress.push(searched)
+		})
+
+		expect(result).toEqual({ matches: [0, 2], end: "done", searched: 4 })
+		expect(headerMatches({ from: "Anna <A@X.io>", subject: null }, "a@x")).toBe(true)
+	})
+
+	it("stops at the cap, and only one past it says capped", async () => {
+		const exactly = await searchHeaders("x", {
+			...rows(Array.from({ length: MBOX_MATCH_CAP }, () => "x")),
+			signal: new AbortController().signal,
+			onProgress: () => undefined
+		})
+		const more = await searchHeaders("x", {
+			...rows(Array.from({ length: MBOX_MATCH_CAP + 1 }, () => "x")),
+			signal: new AbortController().signal,
+			onProgress: () => undefined
+		})
+
+		expect([exactly.end, exactly.matches.length]).toEqual(["done", MBOX_MATCH_CAP])
+		expect([more.end, more.matches.length]).toEqual(["capped", MBOX_MATCH_CAP])
+	})
+
+	it("stops when told", async () => {
+		const controller = new AbortController()
+
+		controller.abort()
+
+		expect(await searchHeaders("x", { ...rows(["x"]), signal: controller.signal, onProgress: () => undefined })).toEqual({
+			matches: [],
+			end: "stopped",
+			searched: 0
+		})
 	})
 })
