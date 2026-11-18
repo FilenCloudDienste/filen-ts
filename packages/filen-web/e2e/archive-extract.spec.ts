@@ -65,6 +65,7 @@ import {
 	descendInto,
 	gotoDirectory,
 	openTransfers,
+	pendingUploadsList,
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
@@ -575,6 +576,9 @@ test.describe("archive extract", () => {
 				dest,
 				letters.map(letter => `e2e-bulk-${letter}`)
 			)
+			// A directory's row lands as its extract starts: until every job ends, their block above the rows stands,
+			// and its leaving shifts the rows under a click aimed at them.
+			await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: ARCHIVE_JOB_TIMEOUT_MS })
 
 			for (const letter of letters) {
 				await descendInto(page, dest, `e2e-bulk-${letter}`)
@@ -592,6 +596,7 @@ test.describe("archive extract", () => {
 			await selectionBar(page).getByRole("button", { name: "Extract", exact: true }).click()
 			await page.getByRole("menuitem", { name: menuItemName("Extract here (each into its own directory)") }).click()
 			await expectEntries(scratch, [destName, ownA, ownB, archiveStem(ownA), archiveStem(ownB)])
+			await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: ARCHIVE_JOB_TIMEOUT_MS })
 			await expectTreeDirectory(page, scratch, archiveStem(ownA), treeReadmeText(runId))
 			await backTo(page, scratchName)
 			await expectTreeDirectory(page, scratch, archiveStem(ownB), treeReadmeText(runId))

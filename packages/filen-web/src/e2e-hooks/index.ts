@@ -18,7 +18,8 @@ import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
 import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
-import { patchedListingsWritten } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate, patchedListingsWritten } from "@/features/drive/queries/drive"
+import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { clearPhotosRoots } from "@/e2e-hooks/photosLibrary"
 import { probeNativeImage } from "@/lib/nativeImageSupport"
 import { refineDeviceProfile } from "@/lib/deviceProfile"
@@ -92,6 +93,10 @@ interface E2eHooks {
 	// the shared e2e account happens to already hold. `parentUuid` defaults to the drive root; callers
 	// nesting inside a scratch directory (net-zero on the shared account) pass its uuid explicitly.
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<File>
+	// Creates directories in `parentUuid` the way the New directory dialog does (its listing patched, so the rows
+	// show), all at once: the fixtures setup's scenario directories, without a dialog per directory. Throws when
+	// any create fails.
+	createTestDirectories: (parentUuid: string, names: readonly string[]) => Promise<void>
 	// Permanently removes a note by uuid — trashes then deletes — keeping the shared e2e account
 	// net-zero after a UI-driven create smoke test, bypassing the trash/delete menu UI for a faster,
 	// more direct teardown. No-op when the uuid isn't found.
@@ -275,6 +280,24 @@ export function installE2eHooks(): void {
 		createTestFile: ready((name, content, parentUuid = null) =>
 			sdkApi.uploadFile(parentUuid, crypto.randomUUID(), new File([content], name, { type: "text/plain" }))
 		),
+		createTestDirectories: ready(async (parentUuid, names) => {
+			const outcomes = await Promise.all(
+				names.map(name =>
+					runCreateDirectory(
+						{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
+						parentUuid,
+						name
+					)
+				)
+			)
+			const failed = outcomes.flatMap((outcome, index) =>
+				outcome.status === "error" ? [`${names[index] ?? ""}: ${outcome.dto.message}`] : []
+			)
+
+			if (failed.length > 0) {
+				throw new Error(`createTestDirectories: ${failed.join("; ")}`)
+			}
+		}),
 		deleteTestNoteByUuid: ready(async uuid => {
 			const note = await noteByUuid(uuid)
 

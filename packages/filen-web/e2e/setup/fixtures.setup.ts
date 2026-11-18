@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test as setup, expect, FIXTURES_DIR, FIXTURES_FILE, type FixtureManifest } from "../fixtures"
+import { waitForE2eHooks } from "../helpers/e2eHooks"
 import {
 	breadcrumb,
 	createDirectoryViaDialog,
@@ -34,8 +35,12 @@ setup.describe.configure({ retries: 0 })
 // before the SDK can release the account-wide `drive-write` lease (leaving it orphaned for its full
 // TTL), and skips every chromium lane depending on this project.
 //
-// 420s is about twice what a healthy build spends between the root create and its last upload (the
-// archive scenarios added six directories and ~21 MB to it), and leaves the ceiling room for the rest:
+// What a build spends grows with the scenario count, not the bytes: each scenario is a descent, its upload and a
+// way back, ~2.5s, where the uploads themselves are well under a second. Its directories are created in one
+// call up front rather than one New directory dialog each, which cost ~3s more per scenario (menu, dialog,
+// create, the dialog's close): with 76 scenarios that put a healthy build at ~400s, at this budget's edge.
+// 420s is about twice what one now spends between the root create and its last upload, and leaves the
+// ceiling room for the rest:
 // the root-create loop's own declared worst is 495s (3 attempts x 30s goto + 10s settle + 125s create),
 // so 495 + 420 = 915 of 960. The remaining 45s is slack for a directory create or descent still in
 // flight when the budget runs out — those are not pinned to it, they only spend it.
@@ -44,6 +49,28 @@ const UPLOAD_BUDGET_MS = 420_000
 // Named rather than left to the pin's own timeout text: the point of a self-imposed budget is that the
 // run says which file it was still waiting for, which a harness kill never does.
 const budgetExhausted = (name: FixtureFileName): string => `fixtures-setup: upload budget exhausted with "${name}" still missing`
+
+// A page.evaluate has no timeout of its own: bounded by the build's deadline, it fails naming what it waited for
+// instead of running into the project ceiling.
+async function withinBudget<T>(work: Promise<T>, deadline: number, message: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+
+	try {
+		return await Promise.race([
+			work,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => {
+						reject(new Error(message))
+					},
+					Math.max(0, deadline - Date.now())
+				)
+			})
+		])
+	} finally {
+		clearTimeout(timer)
+	}
+}
 
 // One upload per scenario through the SAME hidden file input a user's picker drives (uploadMenu.tsx),
 // targeting whatever directory the app is currently in — the createTestFile hook cannot be used, it
@@ -175,17 +202,33 @@ setup("build the shared read-only fixture tree", async ({ page }) => {
 
 	await descendInto(page, listbox, manifest.fixtureRoot)
 
-	const workDir = mkdtempSync(join(tmpdir(), "filen-e2e-fixtures-"))
-	const breadcrumbHome = breadcrumb(page).getByRole("link", { name: manifest.fixtureRoot, exact: true })
+	// The New directory dialog's own create, without its dialog: the rows show as they would (the listing is
+	// patched). The dialog itself is covered by the specs that test it; here it was most of the build's time.
+	const rootUuid = new URL(page.url()).pathname.split("/").at(-1) ?? ""
+
+	expect(rootUuid, "the fixture root's uuid, the last segment of its listing's URL").toMatch(/^[0-9a-f-]{36}$/)
 
 	// One deadline for the WHOLE build, not one per scenario: a per-scenario budget only moves the same
 	// multiplication down a level. Started once the root exists, so the create loop's retries above are
 	// bounded on their own rather than charged against this.
 	const uploadDeadline = Date.now() + UPLOAD_BUDGET_MS
+	const workDir = mkdtempSync(join(tmpdir(), "filen-e2e-fixtures-"))
+	const breadcrumbHome = breadcrumb(page).getByRole("link", { name: manifest.fixtureRoot, exact: true })
 
 	try {
+		await waitForE2eHooks(page)
+		await withinBudget(
+			page.evaluate(
+				async ({ parentUuid, names }) => {
+					await window.__filenE2E.createTestDirectories(parentUuid, names)
+				},
+				{ parentUuid: rootUuid, names: [...FIXTURE_SCENARIOS] }
+			),
+			uploadDeadline,
+			"fixtures-setup: upload budget exhausted creating the scenario directories"
+		)
+
 		for (const scenario of FIXTURE_SCENARIOS) {
-			await createDirectoryViaDialog(page, scenario, listbox)
 			await descendInto(page, listbox, scenario)
 			await uploadScenarioFiles(page, scenario, payloads, workDir, uploadDeadline)
 

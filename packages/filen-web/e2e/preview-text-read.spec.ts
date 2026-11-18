@@ -425,7 +425,9 @@ test("a mailbox lists its messages from its ranges and opens one in the email vi
 
 	// Filtered to its matches by sender or subject, and back.
 	await dialog.getByRole("searchbox", { name: "Search senders and subjects" }).fill("third")
-	await expect(dialog.getByText("1 match", { exact: true })).toBeVisible()
+	// Shown on the visible line (hidden from assistive technology) and announced once by the live region.
+	await expect(dialog.locator('[aria-hidden="true"]', { hasText: /^1 match$/ })).toBeVisible()
+	await expect(dialog.getByRole("status").filter({ hasText: /^1 match$/ })).toHaveCount(1)
 	await expect(list.getByText(MAILBOX_SUBJECTS[0])).toHaveCount(0)
 	await dialog.getByRole("searchbox", { name: "Search senders and subjects" }).fill("")
 	await expect(list.getByText(MAILBOX_SUBJECTS[0])).toBeVisible()

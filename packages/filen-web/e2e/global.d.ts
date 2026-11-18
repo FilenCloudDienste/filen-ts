@@ -22,6 +22,7 @@ interface E2eHooks {
 	clearPreviews: () => void
 	rawStringifiedClient: () => Promise<unknown>
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<unknown>
+	createTestDirectories: (parentUuid: string, names: readonly string[]) => Promise<void>
 	deleteTestNoteByUuid: (uuid: string) => Promise<void>
 	// Return type is trimmed to the one field notes.spec.ts actually reads (`uuid`) — same "mirror only
 	// what a spec needs" rule as rawStringifiedClient/createTestFile's own `unknown` above.

@@ -316,12 +316,13 @@ test.describe("archive browser", () => {
 		await expect(browser.status(/Showing the \d+ entr(y|ies) read before the damage\./)).toBeVisible()
 		await expect(tryAgain).toBeVisible()
 
+		// The overlay's title names the archive shown; the browser's root crumb carries the same name.
 		await next.click()
-		await expect(browser.overlay.getByText(EMPTY)).toBeVisible()
+		await expect(browser.overlay.getByRole("heading", { name: EMPTY, exact: true })).toBeVisible()
 		await expect(browser.status("This archive is empty.")).toBeVisible()
 
 		await next.click()
-		await expect(browser.overlay.getByText(GARBAGE)).toBeVisible()
+		await expect(browser.overlay.getByRole("heading", { name: GARBAGE, exact: true })).toBeVisible()
 		await expect(browser.status(/^This archive (is damaged|'s format isn't supported)\.$/)).toBeVisible()
 		await expect(tryAgain).toBeVisible()
 

@@ -256,7 +256,12 @@ function reopenChunks(layout: ReturnType<typeof writeResidentPdf>, shown: number
 // 20 pages of one 16 MiB image each (fixtures/largeFiles.ts): viewed in turn, pdf.js reads past the desktop's 256 MiB resident
 // limit. Once those reads settle the viewer opens the document again (a new pdf.js worker, the old one going once the
 // new one shows), on the page and at the zoom it was showing, and the new document reads only what is near the view.
-test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page }, testInfo) => {
+test("a ranged PDF that read past the resident limit reopens where it was shown", async ({ page, browserName }, testInfo) => {
+	// WebKit keeps ~40 MB of its own per 16-megapixel page drawn, on top of the bytes read, and a destroyed document
+	// does not give it back: plain pdf.js on these pages went from 0.7 to 1.6 GB by page 12 in WebKit, 0.5 to 0.6 GB in
+	// Chromium. WebKit's web process is killed past its memory limit before the 256 MiB read the reopen waits for.
+	// The reopen is the same code in every engine.
+	test.skip(browserName === "webkit", "WebKit's web process exceeds its memory limit before the resident limit is read")
 	// The write lane's 900s holds the scratch directory's brackets; on top of them a 320 MiB upload (its own budget)
 	// and twenty 16-megapixel page renders.
 	test.setTimeout(900_000 + LARGE_UPLOAD_TIMEOUT_MS + 300_000)
