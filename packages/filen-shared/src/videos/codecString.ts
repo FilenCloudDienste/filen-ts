@@ -9,8 +9,8 @@ function dec(value: number, digits: number): string {
 	return String(value).padStart(digits, "0")
 }
 
-// MSB-first bit reader over a byte array; null once a read would run past the end.
-// Reads big-endian bit fields and Exp-Golomb codes; reads past the end give null.
+// MSB-first bit reader over a byte array: big-endian bit fields and Exp-Golomb codes; null once a read would run past
+// the end.
 export class BitReader {
 	private position = 0
 	private readonly bytes: Uint8Array
@@ -668,6 +668,11 @@ const AVC_MAX_DPB_MBS: ReadonlyMap<number, number> = new Map([
 	[61, 696320],
 	[62, 696320]
 ])
+
+// Whether `level` is a level_idc H.264 defines (Table A-1).
+export function isAvcLevel(level: number): boolean {
+	return AVC_MAX_DPB_MBS.has(level)
+}
 
 // Profiles whose constraint_set3_flag marks an intra-only stream (H.264 A.2.8 to A.2.11, E.2.1).
 const AVC_INTRA_PROFILES = new Set([44, 86, 100, 110, 122, 244])

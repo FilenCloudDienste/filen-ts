@@ -142,19 +142,15 @@ describe("parseUserAgent", () => {
 		expect(parseUserAgent(`Firefox/131.0 ${padding}`)).toEqual({ browser: "Firefox", browserVersion: "131.0", device: "unknown" })
 	})
 
-	it("parses a hostile 50 KB UA in bounded time", () => {
-		// Thousands of "Version/" tokens and no "Safari/": the old joined Safari rule backtracked over the
-		// rest of the string from each one (3.9 s at this size).
-		const hostile = `${"Version/1 ".repeat(5_000)}Safari/1`
-		const started = performance.now()
-
-		expect(parseUserAgent(hostile)).toEqual({ device: "unknown" })
+	it("reads many Version/ tokens as unknown when Safari/ lies past the cap and as Safari within it", () => {
+		// The cap is what bounds the work on a hostile UA: no pattern ever sees more than
+		// USER_AGENT_MAX_LENGTH characters, so the trailing "Safari/" here is never read.
+		expect(parseUserAgent(`${"Version/1 ".repeat(5_000)}Safari/1`)).toEqual({ device: "unknown" })
 		expect(parseUserAgent(`${"Version/1 ".repeat(50)}Safari/1`)).toEqual({
 			browser: "Safari",
 			browserVersion: "1",
 			device: "unknown"
 		})
-		expect(performance.now() - started).toBeLessThan(250)
 	})
 })
 

@@ -5,9 +5,15 @@ import { parseNumbersFromString } from "./misc"
 // uuid-derived tiebreak number. Caches are module-level (one set per process, matching both apps).
 //
 // clearNaturalSortCaches() exists because the caches key on decrypted names (and uuids), which must
-// not carry one account's data into the next session. Mobile wires it into its logout flow. Web has
-// no equivalent call: its logout does a full `location.reload()`, which discards the whole module
-// graph (these Maps included) — that is a verified non-gap, not a missing wire-up, so don't add one.
+// not carry one account's data into the next session. Mobile wires it into its logout flow; web's
+// logout does a full `location.reload()`, which discards these Maps with the module graph.
+//
+// Growth is bounded separately: a session that stays open for days keeps adding every name it
+// lists, so a map that reaches NATURAL_SORT_CACHE_CAP entries is cleared before the next insert.
+// A clear mid-sort only costs re-parses (identity in comparePartsNumeric is a fast path, never the
+// answer). The cap sits well above the largest realistic listing so a single sort never thrashes.
+export const NATURAL_SORT_CACHE_CAP = 250_000
+
 const uuidCache = new Map<string, number>()
 const namePartsCache = new Map<string, (string | number)[]>()
 
@@ -21,6 +27,10 @@ export function getUuidNumber(uuid: string): number {
 
 	if (cached === undefined) {
 		cached = parseNumbersFromString(uuid)
+
+		if (uuidCache.size >= NATURAL_SORT_CACHE_CAP) {
+			uuidCache.clear()
+		}
 
 		uuidCache.set(uuid, cached)
 	}
@@ -68,6 +78,10 @@ export function getNameParts(key: string): (string | number)[] {
 
 		if (hasRun) {
 			cached.push(runIsDigit ? parseInt(str.slice(runStart), 10) : str.slice(runStart))
+		}
+
+		if (namePartsCache.size >= NATURAL_SORT_CACHE_CAP) {
+			namePartsCache.clear()
 		}
 
 		namePartsCache.set(key, cached)

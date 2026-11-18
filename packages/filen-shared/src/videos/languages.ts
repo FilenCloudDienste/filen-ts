@@ -208,6 +208,13 @@ const LEGACY: ReadonlyMap<string, string> = new Map([
 	["scr", "hr"]
 ])
 
+// Name lookups ignore combining marks, so "Español" and a decomposed "bokmål" meet their ASCII keys. Letters with no
+// decomposition (ø, æ, ß) need their own aliases.
+function foldName(name: string): string {
+	return name.normalize("NFD").replace(/\p{M}+/gu, "")
+}
+
+// Keys are folded (foldName).
 const NAME_ALIASES: ReadonlyMap<string, string> = new Map([
 	["castilian", "es"],
 	["flemish", "nl"],
@@ -219,8 +226,9 @@ const NAME_ALIASES: ReadonlyMap<string, string> = new Map([
 	["espanol", "es"],
 	["francais", "fr"],
 	["italiano", "it"],
-	["bokmål", "no"],
-	["norwegian bokmål", "no"],
+	["portugues", "pt"],
+	["bokmal", "no"],
+	["norwegian bokmal", "no"],
 	["farsi", "fa"],
 	["brazilian portuguese", "pt"],
 	["portuguese brazilian", "pt"],
@@ -277,7 +285,7 @@ function languageIndex(): LanguageIndex {
 		}
 
 		names.set(primary, name)
-		byName.set(name.toLowerCase(), primary)
+		byName.set(foldName(name.toLowerCase()), primary)
 	}
 
 	index = {
@@ -337,10 +345,12 @@ export function normalizeLanguage(input: string | null | undefined): string | nu
 	}
 
 	// English name, optionally followed by a qualifier like "(US)".
-	const name = value
-		.replace(/\s*[(,].*$/, "")
-		.replace(/-/g, " ")
-		.trim()
+	const name = foldName(
+		value
+			.replace(/\s*[(,].*$/, "")
+			.replace(/-/g, " ")
+			.trim()
+	)
 	const byName = idx.byName.get(name) ?? NAME_ALIASES.get(name)
 
 	return byName === undefined ? null : foldToCanonical(byName)
@@ -363,21 +373,6 @@ export function languagesMatch(a: string | null | undefined, b: string | null | 
 	const left = normalizeLanguage(a)
 
 	return left !== null && left === normalizeLanguage(b)
-}
-
-// Deduplicated normalised list, preserving preference order (for `navigator.languages`).
-export function normalizeLanguageList(list: readonly string[]): string[] {
-	const out: string[] = []
-
-	for (const entry of list) {
-		const normalized = normalizeLanguage(entry)
-
-		if (normalized !== null && !out.includes(normalized)) {
-			out.push(normalized)
-		}
-	}
-
-	return out
 }
 
 // Position of `lang` in an already-normalised preference list, -1 when absent or unknown.

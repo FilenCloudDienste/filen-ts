@@ -72,15 +72,45 @@ export interface SheetClipboardPurifier {
 }
 
 // A style element's content as Excel writes it, inside an HTML comment (for browsers without CSS): DOMPurify drops an
-// element whose content holds a comment's end, so the markers go first. The rules are the same without them.
-const STYLE_ELEMENT = /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/giu
+// element whose content holds a comment's end, so the markers go first. The rules are the same without them. A scan, not
+// one regex over the whole element: a lazy body retried from every unclosed opening is quadratic in the paste's length.
+const STYLE_OPEN = /<style\b/giu
+const STYLE_CLOSE = /<\/style\s*>/giu
 const COMMENT_MARKERS = /<!--|-->/gu
 
 function uncommentStyles(html: string): string {
-	return html.replace(
-		STYLE_ELEMENT,
-		(_whole, open: string, css: string, close: string) => open + css.replace(COMMENT_MARKERS, "") + close
-	)
+	let result = ""
+	let cursor = 0
+
+	for (;;) {
+		STYLE_OPEN.lastIndex = cursor
+
+		const open = STYLE_OPEN.exec(html)
+
+		if (!open) {
+			break
+		}
+
+		const bodyStart = html.indexOf(">", open.index + open[0].length) + 1
+
+		// No later opening has a ">" or a closing tag after it either.
+		if (bodyStart === 0) {
+			break
+		}
+
+		STYLE_CLOSE.lastIndex = bodyStart
+
+		const close = STYLE_CLOSE.exec(html)
+
+		if (!close) {
+			break
+		}
+
+		result += html.slice(cursor, bodyStart) + html.slice(bodyStart, close.index).replace(COMMENT_MARKERS, "") + close[0]
+		cursor = close.index + close[0].length
+	}
+
+	return cursor === 0 ? html : result + html.slice(cursor)
 }
 
 export function createSheetClipboardSanitizer(purifier: SheetClipboardPurifier): (html: string) => string {

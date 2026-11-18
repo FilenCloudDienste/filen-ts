@@ -3,14 +3,12 @@ import {
 	activeLibraryRoots,
 	emptyLibraryConfig,
 	libraryConfigMaxStamp,
-	libraryOverride,
-	libraryPref,
 	mergeLibraryConfig,
 	parseLibraryConfig,
 	parseLibraryConfigText,
+	rawLibraryOverride,
 	serializeLibraryConfig,
 	withLibraryOverride,
-	withLibraryPref,
 	withLibraryRoot,
 	withoutLibraryRoot,
 	type LibraryConfigDoc
@@ -53,8 +51,8 @@ describe("library config parsing", () => {
 		expect(parsed.roots["newer"]?.ty?.v).toBe("music")
 		expect(Object.keys(parsed.roots)).toEqual(["newer"])
 		expect(activeLibraryRoots(parsed)).toEqual([{ dirUuid: "newer", type: "auto", enabled: true, added: 5 }])
-		expect(libraryPref(parsed, "sort")).toBe("title")
-		expect(libraryOverride(parsed, "d:x")).toMatchObject({ title: "Fixed", note: "kept" })
+		expect(parsed.prefs["sort"]?.p?.v).toBe("title")
+		expect(rawLibraryOverride(parsed, "d:x")).toMatchObject({ title: "Fixed", note: "kept" })
 	})
 
 	it("an older client's edit of a newer entry keeps what it doesn't know", () => {
@@ -78,13 +76,10 @@ describe("library config parsing", () => {
 })
 
 describe("library config merge", () => {
-	const a = withLibraryPref({
-		doc: rooted(emptyLibraryConfig(), "r1", 10, "a"),
-		key: "sort",
-		value: "title",
-		stamp: stamp(11, "a"),
-		at: 11
-	})
+	const a: LibraryConfigDoc = {
+		...rooted(emptyLibraryConfig(), "r1", 10, "a"),
+		prefs: { sort: { p: { t: 11, d: "a", v: "title" } } }
+	}
 	const b = withLibraryOverride({
 		doc: rooted(emptyLibraryConfig(), "r2", 12, "b"),
 		key: "d:x",

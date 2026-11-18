@@ -41,7 +41,12 @@ describe("fileIconKey", () => {
 	})
 
 	// Every format a spreadsheet opens as: workbooks, templates, macro-enabled ones and tabular text.
-	it.each("xls xlsx xlsm xltx xltm xlt csv tsv tab".split(" "))("routes .%s to the spreadsheet glyph", ext => {
+	// Every format a document opens as: Word documents, templates, macro-enabled ones, OpenDocument text and rich text.
+	it.each("doc docx docm dotx dotm dot odt ott rtf".split(" "))("routes .%s to the document glyph", ext => {
+		expect(fileIconKey(ext, stubSets)).toBe("doc")
+	})
+
+	it.each("xls xlsx xlsm xltx xltm xlt csv tsv tab ods ots".split(" "))("routes .%s to the spreadsheet glyph", ext => {
 		expect(fileIconKey(ext, stubSets)).toBe("xls")
 	})
 

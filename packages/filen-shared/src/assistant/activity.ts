@@ -1,3 +1,4 @@
+import { isRecord } from "./internal"
 import type { AssistantTool } from "./tool"
 import { sanitizeUntrustedText, screenAssistantReply } from "./untrusted"
 
@@ -7,10 +8,6 @@ import { sanitizeUntrustedText, screenAssistantReply } from "./untrusted"
 // reply (links the user did not type are defanged) and shortened; the UI renders it as plain text.
 
 export const SUBJECT_MAX_CHARS = 48
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 export function labelText({
 	text,

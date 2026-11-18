@@ -1,4 +1,5 @@
-import { calendarDays, knownTimeZone, periodRange } from "./dates"
+import { calendarDays, isoDay, knownTimeZone, periodRange } from "./dates"
+import { DAY_MS } from "./internal"
 import { ASSISTANT_ROUTES, ASSISTANT_TOOL_GROUPS, assistantRouteDescription } from "./tools"
 
 // The prompts the eval (packages/filen-assistant-eval) measured, word for word: changing them changes
@@ -109,8 +110,6 @@ export function routerRequest({ message, earlier }: { message: string; earlier?:
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
-const DAY_MS = 86_400_000
-
 // The first day of the week (1 Monday to 7 Sunday) in a locale's calendar. getWeekInfo() is the current
 // name, weekInfo the older one; runtimes with neither (or without Intl.Locale) get Monday.
 export function localeWeekStart(locale: string): number {
@@ -145,7 +144,7 @@ export function assistantDateLine({
 }): string {
 	const zone = knownTimeZone(timeZone)
 	const { today, weekday, year, weekFirst } = calendarDays({ now, timeZone: zone, weekStart })
-	const day = (offset: number) => new Date(today + offset * DAY_MS).toISOString().slice(0, 10)
+	const day = (offset: number) => isoDay(today + offset * DAY_MS)
 	// Small models misname the weekday of a date, so the days people name most carry theirs.
 	const named = (offset: number) => `${WEEKDAYS[(weekday + offset + 7) % 7] ?? ""} ${day(offset)}`
 	const month = (period: "this_month" | "last_month") => periodRange(period, { now, timeZone: zone, weekStart }).from.slice(0, 7)

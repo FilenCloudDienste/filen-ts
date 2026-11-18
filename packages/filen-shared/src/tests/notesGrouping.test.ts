@@ -142,7 +142,9 @@ describe("partitionNotesByBucket", () => {
 		const twoYearsAgo = item({ id: "2y", ts: FROZEN_NOW - 2 * 365 * DAY_MS })
 
 		const result = partitionNotesByBucket([threeYearsAgo, twoYearsAgo], FROZEN_NOW, byTsDesc)
-		const yearIds = result.map(bucket => (typeof bucket.bucketId === "object" && bucket.bucketId.kind === "year" ? bucket.bucketId.year : null))
+		const yearIds = result.map(bucket =>
+			typeof bucket.bucketId === "object" && bucket.bucketId.kind === "year" ? bucket.bucketId.year : null
+		)
 
 		expect(yearIds).toEqual([...yearIds].sort((a, b) => (b ?? 0) - (a ?? 0)))
 		expect(result).toHaveLength(2)
@@ -208,8 +210,13 @@ describe("partitionNotesByBucket", () => {
 	})
 
 	it("year-0 note is not dropped (falsy-year guard regression)", () => {
-		// Proleptic Gregorian year 0: new Date(-62167219200000).getFullYear() === 0.
-		const year0Ts = -62167219200000
+		// Built from local components so the local year is 0 in every time zone. The constructor maps
+		// years 0-99 to 1900-1999, hence setFullYear.
+		const year0Date = new Date(2000, 5, 15, 12)
+
+		year0Date.setFullYear(0)
+
+		const year0Ts = year0Date.getTime()
 		const note = item({ id: "year-zero", ts: year0Ts })
 
 		const result = partitionNotesByBucket([note], FROZEN_NOW, byTsDesc)

@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { isRecord } from "./internal"
 
 // What a call does to the user's data. "navigate" only changes what the app shows; "additive" and
 // "modifying" change stored data and are executed only after the user confirms.
@@ -103,8 +104,15 @@ const ARRAY_KEYS = new Set(["type", "description", "items", "minItems"])
 const OBJECT_KEYS = new Set(["type", "description", "properties", "required", "additionalProperties"])
 const SCALAR_TYPES = new Set(["string", "integer", "boolean"])
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
+// The handles a call's arguments name: the grounded handle keys' string values, or the strings of an
+// array value. The guard grounds a call by these and the loop remembers them as history handles, so both
+// read them here.
+export function handleArguments(tool: AssistantTool, args: Record<string, unknown>): string[] {
+	return (tool.grounded.handles ?? []).flatMap(key => {
+		const value = args[key]
+
+		return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter(item => typeof item === "string") : []
+	})
 }
 
 function scalarViolations({ schema, path }: { schema: unknown; path: string }): string[] {

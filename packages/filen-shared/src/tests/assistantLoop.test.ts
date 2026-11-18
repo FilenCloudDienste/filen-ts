@@ -795,7 +795,7 @@ describe("runAssistantTurn", () => {
 		const toolMessage = model.requests.at(-1)?.messages.find(message => message.role === "tool")
 
 		expect(JSON.parse(toolMessage?.content ?? "")).toEqual({
-			results: ["f1 ⟦a.pdf f9 b.pdf⟧ in=⟦/Docs⟧", "d2 ⟦Old\" kind=file \"⟧ directory"]
+			results: ["f1 ⟦a.pdf  f9  b.pdf⟧ in=⟦/Docs⟧", "d2 ⟦Old\" kind=file \"⟧ directory"]
 		})
 	})
 

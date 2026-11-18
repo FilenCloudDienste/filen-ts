@@ -1,3 +1,4 @@
+import { isRecord } from "./internal"
 import { isAppResultKey, isSpotlightSpan, spotlightText } from "./untrusted"
 
 const UPPER = 0
@@ -191,10 +192,6 @@ export function listingPage<T>(
 				}
 			: {})
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 // A string stands bare where the app wrote it or spotlighting delimited it; anything else stays a quoted

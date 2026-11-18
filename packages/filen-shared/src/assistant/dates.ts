@@ -1,3 +1,5 @@
+import { DAY_MS } from "./internal"
+
 // Date filters the tools take as an enum or as plain days: the model names a period, code works out the
 // days. Every range is whole local days in the user's time zone, inclusive at both ends, written as ISO days
 // ("2025-10-08") so they read like the prompt's date line and the dates tool results carry.
@@ -36,8 +38,6 @@ export type AssistantDayRange = {
 	from: string
 	to: string
 }
-
-const DAY_MS = 86_400_000
 
 const formatters = new Map<string, Intl.DateTimeFormat>()
 
@@ -86,7 +86,7 @@ function wallClockMs(timestamp: number, timeZone: string | undefined): number {
 	return Date.UTC(field("year"), field("month") - 1, field("day"), field("hour"), field("minute"), field("second"))
 }
 
-function isoDay(utcDay: number): string {
+export function isoDay(utcDay: number): string {
 	return new Date(utcDay).toISOString().slice(0, 10)
 }
 

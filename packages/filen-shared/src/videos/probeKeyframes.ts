@@ -179,6 +179,8 @@ interface Mp4Loaded {
 	stts: Uint8Array
 	stss: Uint8Array | null
 	stsc: Uint8Array
+	// stsz's sample_size: one size for every sample, or 0 when each has its own.
+	fixedSize: number
 }
 
 function mp4Index(source: BlockSource, tables: SampleTables): ((timeSec: number) => Promise<KeyframeRef | null>) | null {
@@ -191,11 +193,20 @@ function mp4Index(source: BlockSource, tables: SampleTables): ((timeSec: number)
 	let loaded: Promise<Mp4Loaded> | null = null
 
 	return async timeSec => {
-		loaded ??= (async () => ({
-			stts: await tableEntries(source, stts, 8, MAX_TABLE_BYTES),
-			stss: stss === null ? null : await tableEntries(source, stss, 4, MAX_TABLE_BYTES),
-			stsc: await tableEntries(source, stsc, 12, MAX_TABLE_BYTES)
-		}))()
+		loaded ??= (async () => {
+			const tablesRead = {
+				stts: await tableEntries(source, stts, 8, MAX_TABLE_BYTES),
+				stss: stss === null ? null : await tableEntries(source, stss, 4, MAX_TABLE_BYTES),
+				stsc: await tableEntries(source, stsc, 12, MAX_TABLE_BYTES)
+			}
+
+			// sample_size, then sample_count, then the per-sample sizes when sample_size is 0.
+			if (stsz.end - stsz.start < 12) {
+				throw new MalformedError("sample size table too short")
+			}
+
+			return { ...tablesRead, fixedSize: uint32(await readBytes(source, stsz.start + 4, 4), 0) }
+		})()
 
 		const tablesRead = await loaded
 		const shown = sampleAtTime(tablesRead.stts, Math.max(0, timeSec) * timescale)
@@ -220,9 +231,7 @@ function mp4Index(source: BlockSource, tables: SampleTables): ((timeSec: number)
 
 		const offsetField = await readBytes(source, offsetAt, offsetBytes)
 		const chunkOffset = wideOffsets ? uint64(offsetField, 0) : uint32(offsetField, 0)
-		// sample_size, then sample_count, then the per-sample sizes when sample_size is 0.
-		const sizeHeader = await readBytes(source, stsz.start + 4, 8)
-		const fixedSize = uint32(sizeHeader, 0)
+		const { fixedSize } = tablesRead
 		let offset = chunkOffset
 		let size = fixedSize
 
@@ -592,7 +601,8 @@ function keyframeLookup(
 // The picture track's keyframe index, or null when the file has none this can use: no container this
 // reads, a fragmented MP4 without an mfra, Matroska without Cues or with encoded frames. The walk reads
 // headers the way a card probe does (a fragmented MP4's tail too); the other index bytes are read on the
-// first lookup. Failed downloads and an exhausted read budget throw.
+// first lookup. Failed downloads throw; a walk that runs out of read budget returns what it found (often null), and a
+// later lookup that runs out throws ReadBudgetError.
 export async function openKeyframeIndex(source: BlockSource): Promise<KeyframeIndex | null> {
 	const parsed = await walkContainer(source, "card", { keyframes: true })
 	const picture = parsed === null ? null : pictureTrack(parsed)
@@ -620,7 +630,7 @@ export function readKeyframe(source: BlockSource, ref: KeyframeRef): Promise<Uin
 // The picture track's keyframe times in seconds, ascending, from an index that lists them without reading a frame: a
 // Matroska file's Cues (cue points, which muxers put on keyframes) or a fragmented MP4's mfra (the sync samples tfra
 // lists). Null for anything else, an MP4 with sample tables included (its demuxer already holds stss). Failed
-// downloads and an exhausted read budget throw.
+// downloads throw; a walk that runs out of read budget returns what it found, often null.
 export async function indexedKeyframeTimes(source: BlockSource): Promise<Float64Array | null> {
 	const parsed = await walkContainer(source, "card", { keyframes: true })
 	const picture = parsed === null ? null : pictureTrack(parsed)

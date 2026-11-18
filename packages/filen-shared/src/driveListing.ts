@@ -1,11 +1,12 @@
-import type { DriveItemLike } from "./driveItem"
+import { nameCollisionKey, type DriveItemLike } from "./driveItem"
 
 function collisionName(name: string | undefined): string | undefined {
-	return name?.toLowerCase().trim()
+	return name === undefined ? undefined : nameCollisionKey(name)
 }
 
 // Insert an incoming item into a cached listing, replacing (never duplicating) the row it collides
-// with: the same item (uuid match) or a same-name duplicate it supersedes (case-insensitive, trimmed).
+// with: the same item (uuid match) or a same-name duplicate it supersedes (the server's collision key,
+// nameCollisionKey).
 //
 // The name arm only fires when BOTH names are present: an undecryptable item's name is
 // `undefined`, and `undefined === undefined` would wrongly collapse every undecryptable row into

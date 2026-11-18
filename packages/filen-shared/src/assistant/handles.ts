@@ -1,3 +1,4 @@
+import { escapeRegExp } from "./internal"
 import { isAppResultKey } from "./untrusted"
 
 // Handles ("f3", "c12") in replies. The model copies them from tool results into what it writes ("CV.pdf
@@ -53,10 +54,6 @@ const TIDY: readonly (readonly [RegExp, string])[] = [
 	[/[ \t]*\uE000/gu, ""]
 ]
 
-function escape(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
 function usable(name: string | undefined): string | undefined {
 	const value = name?.replace(/\s+/g, " ").trim()
 
@@ -65,7 +62,7 @@ function usable(name: string | undefined): string | undefined {
 
 // Text that ends with the item's name, give or take quotes, markdown and a colon.
 function endsWithName(text: string, name: string): boolean {
-	return new RegExp(String.raw`(?<![\p{L}\p{N}_])${escape(name)}${QUOTES}\s*[:：]?\s*$`, "iu").test(text)
+	return new RegExp(String.raw`(?<![\p{L}\p{N}_])${escapeRegExp(name)}${QUOTES}\s*[:：]?\s*$`, "iu").test(text)
 }
 
 // The reply as the user sees it, with the handles of the items `name` knows (those the app gave out and the
@@ -142,7 +139,7 @@ export function replyWithoutHandles(
 			continue
 		}
 
-		const named = escape(item)
+		const named = escapeRegExp(item)
 		const wrapped = open === close ? `${open}${item}${close}` : item
 		const gap = LABEL_GAP.exec(after)?.[0] ?? ""
 		const bracketed = new RegExp(String.raw`^\s*[(（]${QUOTES}${named}${QUOTES}[)）]`, "iu").exec(after)
@@ -246,7 +243,7 @@ export function replyWithHandles(reply: string, items: ReadonlyMap<string, strin
 		.sort((a, b) => Array.from(b.item).length - Array.from(a.item).length)
 
 	for (const { handle, item } of named) {
-		const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_])${escape(item)}(?![\p{L}\p{N}_]|[./\\@-][\p{L}\p{N}])${QUOTES}`, "gu")
+		const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_])${escapeRegExp(item)}(?![\p{L}\p{N}_]|[./\\@-][\p{L}\p{N}])${QUOTES}`, "gu")
 
 		for (const match of reply.matchAll(pattern)) {
 			const start = match.index

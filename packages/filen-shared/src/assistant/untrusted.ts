@@ -1,3 +1,4 @@
+import { escapeRegExp } from "./internal"
 import type { AssistantTool } from "./tool"
 
 // Tool results carry text other people wrote (shared items, chat messages, file contents). These
@@ -56,10 +57,6 @@ function neutralize(span: string): string {
 	return span.replace(/[<>|[\]]/g, char => NEUTRAL[char] ?? char)
 }
 
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
 const WORD_CHAR = /[\p{L}\p{M}]/u
 
 // A zero-width non-joiner or joiner inside a word: Persian, Arabic and Indic spelling needs it.
@@ -102,14 +99,15 @@ export type SpotlightOptions = {
 
 const DATAMARK = "ˆ"
 
-// The delimiters are stripped from the text first, so nothing inside a span can close it: an unguessable
-// marker in them would add no safety, only prompt tokens on every string.
+// The delimiters in the text become spaces first, so nothing inside a span can close it: an unguessable
+// marker in them would add no safety, only prompt tokens on every string. A space, not nothing: deleting
+// them would join the halves of a control token the sanitizer saw split ("<|im_end|⟦>").
 export function spotlightText(text: string, { mode }: SpotlightOptions): string {
 	if (mode === "datamark") {
 		return text.replaceAll(DATAMARK, "^").replace(/\s+/g, DATAMARK)
 	}
 
-	return `⟦${text.replace(/[⟦⟧]/g, "")}⟧`
+	return `⟦${text.replace(/[⟦⟧]/g, " ")}⟧`
 }
 
 // A whole value spotlightText delimited: nothing inside it can close it, so it can stand unquoted.

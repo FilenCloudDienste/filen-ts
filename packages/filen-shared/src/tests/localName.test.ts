@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { sanitizeFileName } from "@filen/shared"
 import { keepBothName, localCollisionKey, localName } from "@filen/shared/localName"
 
 const encoder = new TextEncoder()
@@ -134,11 +133,5 @@ describe("keepBothName", () => {
 describe("localCollisionKey", () => {
 	it("folds case and normalization", () => {
 		expect(localCollisionKey("Ä.txt".normalize("NFD"))).toBe(localCollisionKey("ä.TXT"))
-	})
-})
-
-describe("sanitizeFileName", () => {
-	it("still strips a leading dot", () => {
-		expect(sanitizeFileName(".hidden")).toBe("hidden")
 	})
 })

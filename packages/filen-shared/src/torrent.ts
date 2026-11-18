@@ -324,6 +324,11 @@ class Reader {
 
 let decoder: PlatformTextDecoder | null = null
 
+// The first `units` UTF-16 units, without a high surrogate left alone at the end (`encodeURIComponent` throws on one).
+function cutUnits(text: string, units: number): string {
+	return units > 0 && (text.charCodeAt(units - 1) & 0xfc00) === 0xd800 ? text.slice(0, units - 1) : text.slice(0, units)
+}
+
 // Lossy UTF-8 (a torrent's text is UTF-8 by convention, not by guarantee), its controls out, cut to `cap` units.
 function display(bytes: Uint8Array, cap: number): string {
 	decoder ??= platformTextDecoder("utf-8")
@@ -331,7 +336,7 @@ function display(bytes: Uint8Array, cap: number): string {
 	// A cap's worth of characters takes at most four bytes each.
 	const text = withoutFormatControls(decoder.decode(bytes.subarray(0, cap * 4)))
 
-	return text.length > cap ? `${text.slice(0, cap - 1)}…` : text
+	return text.length > cap ? `${cutUnits(text, cap - 1)}…` : text
 }
 
 function text(value: Value | undefined, cap: number): string | null {
@@ -372,7 +377,7 @@ function withPart(prefix: PathPrefix, part: string): PathPrefix {
 
 	return part.length <= room
 		? { path: `${prefix.path}/${part}`, cut: false }
-		: { path: `${`${prefix.path}/${part.slice(0, room + 1)}`.slice(0, MAX_PATH - 1)}…`, cut: true }
+		: { path: `${cutUnits(`${prefix.path}/${cutUnits(part, room + 1)}`, MAX_PATH - 1)}…`, cut: true }
 }
 
 // Whether another file's path is to be built: a file past the limit or the budget is only counted.

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { Semaphore, KeyedSemaphores } from "@filen/shared"
 
 describe("Semaphore", () => {
@@ -23,18 +23,6 @@ describe("Semaphore", () => {
 	})
 
 	describe("acquire", () => {
-		it("should resolve immediately when under max", async () => {
-			const sem = new Semaphore(2)
-			const fn = vi.fn()
-
-			await sem.acquire()
-
-			fn()
-
-			expect(fn).toHaveBeenCalled()
-			expect(sem.count()).toBe(1)
-		})
-
 		it("should block when at max capacity", async () => {
 			const sem = new Semaphore(1)
 

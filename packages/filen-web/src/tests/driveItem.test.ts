@@ -257,13 +257,22 @@ describe("upsertDriveItem", () => {
 		expect(result).toEqual([other, fresh])
 	})
 
-	it("replaces (not duplicates) an existing row on a case/space-insensitive name match, different uuid", () => {
-		const stale = namedDir("old-uuid", " Docs ")
+	it("replaces (not duplicates) an existing row on a case-insensitive name match, different uuid", () => {
+		const stale = namedDir("old-uuid", "Docs")
 		const fresh = namedDir("new-uuid", "docs")
 
 		const result = upsertDriveItem([stale], fresh)
 
 		expect(result).toEqual([fresh])
+	})
+
+	it("keeps a sibling whose name differs only by surrounding whitespace, as the server does", () => {
+		const twin = namedDir("old-uuid", " Docs ")
+		const fresh = namedDir("new-uuid", "docs")
+
+		const result = upsertDriveItem([twin], fresh)
+
+		expect(result).toEqual([twin, fresh])
 	})
 
 	it("never mutates the input array", () => {

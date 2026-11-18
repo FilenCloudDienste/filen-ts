@@ -14,8 +14,21 @@ describe("upsertItem", () => {
 		expect(upsertItem([item("same", "a.txt")], item("same", "b.txt"))).toEqual([item("same", "b.txt")])
 	})
 
-	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
-		expect(uuidsAfter(item("old", "  Notes.TXT "), item("new", "notes.txt"))).toEqual(["new"])
+	it("replaces an existing row with the same uuid, moving it to the end", () => {
+		const items = [item("a", "old.txt"), item("b", "other.txt")]
+		const incoming = item("a", "new.txt")
+
+		expect(upsertItem(items, incoming)).toEqual([item("b", "other.txt"), incoming])
+	})
+
+	it("drops an existing same-name (case-insensitive) duplicate with a different uuid", () => {
+		expect(uuidsAfter(item("old", "Notes.TXT"), item("new", "notes.txt"))).toEqual(["new"])
+	})
+
+	it("keeps a sibling whose name differs only by surrounding whitespace, as the server does", () => {
+		const items = [item("spaced", " a.txt"), item("upper", "A.TXT")]
+
+		expect(upsertItem(items, item("new", "a.txt")).map(row => row.data.uuid)).toEqual(["spaced", "new"])
 	})
 
 	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
@@ -43,10 +56,23 @@ describe("upsertItems", () => {
 
 	it("matches upsertItem applied to each incoming item in turn", () => {
 		const items = [item("a", "a.txt"), item("b", "B.txt"), item("u1"), item("c", "c.txt")]
-		const incoming = [item("n1", " b.TXT"), item("a", "renamed.txt"), item("n2", "b.txt"), item("u2"), item("n3", "fresh.txt")]
+		const incoming = [item("n1", "b.TXT"), item("a", "renamed.txt"), item("n2", "b.txt"), item("u2"), item("n3", "fresh.txt")]
 
 		expect(upsertItems(items, incoming)).toEqual(sequential(items, incoming))
 		expect(upsertItems(items, incoming).map(row => row.data.uuid)).toEqual(["u1", "c", "a", "n2", "u2", "n3"])
+	})
+
+	it("keeps a whitespace twin and still replaces a case twin", () => {
+		const items = [item("spaced", " a.txt"), item("upper", "A.TXT")]
+
+		expect(upsertItems(items, [item("new", "a.txt")]).map(row => row.data.uuid)).toEqual(["spaced", "new"])
+	})
+
+	it("appends several incoming items when nothing collides", () => {
+		const items = [item("a", "notes.txt")]
+		const incoming = [item("b", "other.txt"), item("c", "more.txt")]
+
+		expect(upsertItems(items, incoming)).toEqual([item("a", "notes.txt"), ...incoming])
 	})
 
 	it("keeps only the last of several incoming items sharing a uuid", () => {
@@ -66,29 +92,6 @@ describe("upsertItems", () => {
 		const items = [item("a", "a.txt")]
 
 		expect(upsertItems(items, [])).toBe(items)
-	})
-})
-
-describe("upsertItem", () => {
-	it("replaces an existing row with the same uuid", () => {
-		const items = [item("a", "old.txt"), item("b", "other.txt")]
-		const incoming = item("a", "new.txt")
-
-		expect(upsertItem(items, incoming)).toEqual([item("b", "other.txt"), incoming])
-	})
-
-	it("replaces a same-name duplicate under a different uuid", () => {
-		const items = [item("a", "notes.txt")]
-		const incoming = item("b", "Notes.TXT")
-
-		expect(upsertItem(items, incoming)).toEqual([incoming])
-	})
-
-	it("appends when nothing collides", () => {
-		const items = [item("a", "notes.txt")]
-		const incoming = item("b", "other.txt")
-
-		expect(upsertItem(items, incoming)).toEqual([item("a", "notes.txt"), incoming])
 	})
 })
 

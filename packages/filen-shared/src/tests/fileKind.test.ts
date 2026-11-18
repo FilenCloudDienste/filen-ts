@@ -175,6 +175,14 @@ describe("resolveFileKind", () => {
 	it("says nothing is sniffable for a .ts of unknown size", () => {
 		expect(resolveFileKind({ name: "clip.ts" }, kindOf).sniffable).toBe(false)
 	})
+
+	it("sniffs a .ts only when it is large enough and no declaration file, whatever its case", () => {
+		expect(resolveFileKind({ name: "lib.d.ts", size: 2 * MIB }, kindOf).sniffable).toBe(false)
+		expect(resolveFileKind({ name: "LIB.D.TS", size: 2 * MIB }, kindOf).sniffable).toBe(false)
+		expect(resolveFileKind({ name: "movie.ts", size: 2 * MIB }, kindOf).sniffable).toBe(true)
+		expect(resolveFileKind({ name: "movie.ts", size: 2n * BigInt(MIB) }, kindOf).sniffable).toBe(true)
+		expect(resolveFileKind({ name: "movie.ts", size: MIB - 1 }, kindOf).sniffable).toBe(false)
+	})
 })
 
 // The mobile app's table today: no .weba, .oga, .ogv, .mka or .m2ts.

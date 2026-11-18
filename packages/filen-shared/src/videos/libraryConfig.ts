@@ -219,14 +219,6 @@ export function activeLibraryRoots(doc: LibraryConfigDoc): ActiveLibraryRoot[] {
 	return out.sort((a, b) => a.added - b.added || (a.dirUuid < b.dirUuid ? -1 : a.dirUuid > b.dirUuid ? 1 : 0))
 }
 
-export function libraryPref(doc: LibraryConfigDoc, key: string): unknown {
-	return doc.prefs[key]?.p?.v
-}
-
-export function libraryOverride(doc: LibraryConfigDoc, key: string): LibraryOverride | null {
-	return doc.overrides[key]?.o ?? null
-}
-
 function isCount(value: unknown): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100_000
 }
@@ -384,32 +376,6 @@ export function withoutLibraryRoot({
 	}
 
 	return withRecord(doc, "roots", dirUuid, tombstoneRecord({ rec: record, stamp, at }))
-}
-
-// Sets (or, with `value` undefined, removes) a library preference.
-export function withLibraryPref({
-	doc,
-	key,
-	value,
-	stamp,
-	at
-}: {
-	doc: LibraryConfigDoc
-	key: string
-	value: unknown
-	stamp: Stamp
-	at: number
-}): LibraryConfigDoc {
-	const record = doc.prefs[key]
-
-	return withRecord(
-		doc,
-		"prefs",
-		key,
-		value === undefined
-			? tombstoneRecord({ rec: record, stamp, at })
-			: setRegister({ rec: record, key: "p", register: register(stamp, value) })
-	)
 }
 
 // Sets (or, with `override` null, removes) the correction stored under `key`.

@@ -13,17 +13,16 @@ import type { ParsedContainer, ParsedTrack, ProbeContainer, ProbeTier, ProbeVide
 
 // The container probe: which tier reads how much, and the record each tier yields.
 
-// A card shows badges for files scrolling past, so it never pays for more than this; a full or cover
-// probe starts here and is raised by the walk once the header's size is known (an MP4 `moov` read
-// header by header, a Matroska SeekHead jump, a hop between attachments).
+// Every tier starts at this budget. A card shows badges for files scrolling past, so it never pays for more; a full
+// or cover probe is raised by the walk once the header's size is known (an MP4 `moov` read header by header, a
+// Matroska SeekHead jump, a hop between attachments).
 export const CARD_BLOCK_READS = 4
-const INITIAL_BLOCK_READS: Readonly<Record<ProbeTier, number>> = { card: CARD_BLOCK_READS, full: 4, cover: 4 }
 
 // Tracks kept per kind, so a file with dozens of subtitle tracks still makes a small record.
 const MAX_TRACKS_PER_KIND = 64
 
-export function initialBlockReads(tier: ProbeTier): number {
-	return INITIAL_BLOCK_READS[tier]
+export function initialBlockReads(_tier: ProbeTier): number {
+	return CARD_BLOCK_READS
 }
 
 // The block source one probe of one file reads through, budgeted for its tier.

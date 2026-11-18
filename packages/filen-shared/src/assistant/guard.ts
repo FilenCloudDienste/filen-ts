@@ -1,4 +1,4 @@
-import { isConsequentialTool, type AssistantTool, type AssistantUntrustedOutput } from "./tool"
+import { handleArguments, isConsequentialTool, type AssistantTool, type AssistantUntrustedOutput } from "./tool"
 import { foreignLinks } from "./untrusted"
 
 // Deterministic injection policy, enforced by the dispatcher whatever the model says:
@@ -277,11 +277,7 @@ export class AssistantTurnGuard {
 	}
 
 	private argumentHandles({ tool, args }: { tool: AssistantTool; args: Record<string, unknown> }): string[] {
-		return (tool.grounded.handles ?? []).flatMap(key => {
-			const value = args[key]
-
-			return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter(item => typeof item === "string") : []
-		})
+		return handleArguments(tool, args)
 	}
 
 	private argumentsGrounded({

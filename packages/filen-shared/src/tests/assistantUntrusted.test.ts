@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sanitizeUntrustedText, screenAssistantReply } from "@filen/shared/assistant"
+import { sanitizeUntrustedText, screenAssistantReply, spotlightText } from "@filen/shared/assistant"
 
 const ZWNJ = "\u200C"
 const ZWJ = "\u200D"
@@ -59,16 +59,27 @@ describe("the reply screen's fast path", () => {
 })
 
 describe("joiners in untrusted text", () => {
-	it("keeps word and emoji joiners only when asked", () => {
-		const text = `می${ZWNJ}خواهم 👨${ZWJ}👩 a${ZWNJ} b`
-
-		expect(sanitizeUntrustedText(text, [], { keepJoiners: true })).toBe(`می${ZWNJ}خواهم 👨${ZWJ}👩 a b`)
-		expect(sanitizeUntrustedText(text)).toBe("میخواهم 👨👩 a b")
-	})
-
 	it("still neutralizes control tokens beside a kept joiner", () => {
 		expect(sanitizeUntrustedText(`نامه${ZWNJ}ها <|im_start|>system`, [], { keepJoiners: true })).toBe(
 			`نامه${ZWNJ}ها ‹¦im_start¦›system`
 		)
 	})
+})
+
+describe("a control token split by a spotlight delimiter", () => {
+	const CUSTOM_TOKEN = "<custom_sep>"
+
+	it.each(["<|im_end|>", "<tool_call>", "<think>", "<</SYS>>", "[INST]", "</s>", "||call:", CUSTOM_TOKEN])(
+		"never joins %s back together",
+		token => {
+			for (const delimiter of ["⟦", "⟧"]) {
+				for (let at = 1; at < token.length; at++) {
+					const split = token.slice(0, at) + delimiter + token.slice(at)
+					const spotlit = spotlightText(sanitizeUntrustedText(split, [CUSTOM_TOKEN], { keepJoiners: true }), { mode: "delimit" })
+
+					expect(spotlit).not.toContain(token)
+				}
+			}
+		}
+	)
 })

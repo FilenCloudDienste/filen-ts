@@ -168,6 +168,25 @@ describe("sanitizeFileName", () => {
 	it("removes C1 controls and the soft hyphen", () => {
 		expect(sanitizeFileName("a\u0085b\u00ADc")).toBe("abc")
 	})
+
+	it("never ends a truncated name on half of a surrogate pair", () => {
+		const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+		for (const extension of ["", ".txt"]) {
+			const result = sanitizeFileName("\u{1F600}".repeat(64) + extension)
+
+			expect(result).not.toMatch(loneSurrogate)
+			expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(255)
+			expect(result).toBe("\u{1F600}".repeat(extension ? 62 : 63) + extension)
+		}
+	})
+
+	it("keeps an astral extension whole and counts it by bytes", () => {
+		const result = sanitizeFileName("a".repeat(300) + ".\u{1F600}")
+
+		expect(result).toBe("a".repeat(250) + ".\u{1F600}")
+		expect(new TextEncoder().encode(result).length).toBe(255)
+	})
 })
 
 describe("findClosestIndexString", () => {

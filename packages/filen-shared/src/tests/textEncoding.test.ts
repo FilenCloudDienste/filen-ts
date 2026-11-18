@@ -5,9 +5,9 @@ import {
 	decodeUtf32,
 	editableAsIs,
 	encodeTextBytes,
+	ENCODING_FAMILIES,
 	isMultiByteLegacy,
 	looksLikeText,
-	needsLegacyGuess,
 	readBom,
 	textEncodingLabel,
 	TEXT_ENCODINGS
@@ -132,9 +132,14 @@ describe("decodeTextBytes", () => {
 
 		const prefix = bytes.subarray(0, block)
 
-		expect(decodeTextBytes(prefix, { prefix: true })).toMatchObject({ encoding: "utf-8", confident: true, writable: "yes", lossy: false })
+		expect(decodeTextBytes(prefix, { prefix: true })).toMatchObject({
+			encoding: "utf-8",
+			confident: true,
+			writable: "yes",
+			lossy: false
+		})
 		expect(decodeTextBytes(prefix, { prefix: true }).text.length).toBe(block - 1)
-		expect(needsLegacyGuess(prefix, { prefix: true })).toBe(false)
+		expect(decodeUnicodeText(prefix, { prefix: true })).not.toBeNull()
 		// Without `prefix` the cut sequence is not UTF-8.
 		expect(decodeTextBytes(prefix).encoding).toBe("windows-1252")
 	})
@@ -144,7 +149,7 @@ describe("decodeTextBytes", () => {
 		const bytes = Uint8Array.of(...body, 0xff, ...body)
 
 		expect(decodeTextBytes(bytes)).toMatchObject({ encoding: "utf-8", confident: false, writable: "convert", lossy: true })
-		expect(needsLegacyGuess(bytes)).toBe(false)
+		expect(decodeUnicodeText(bytes)).not.toBeNull()
 	})
 
 	it("falls back to the guess, the language's codepage, then windows-1252", () => {
@@ -159,7 +164,7 @@ describe("decodeTextBytes", () => {
 			lossy: false
 		})
 		expect(decodeTextBytes(Uint8Array.of(0x61, 0xe9))).toMatchObject({ text: "aé", encoding: "windows-1252", writable: "yes" })
-		expect(needsLegacyGuess(cyrillic)).toBe(true)
+		expect(decodeUnicodeText(cyrillic)).toBeNull()
 	})
 
 	it("never marks a multi-byte legacy decode or a codepage hole writable", () => {
@@ -178,7 +183,11 @@ describe("decodeTextBytes", () => {
 	})
 
 	it("honours a forced label, convert when it produced U+FFFD", () => {
-		expect(decodeTextBytes(enc.encode("ok"), { encoding: "UTF-8" })).toMatchObject({ encoding: "utf-8", writable: "yes", confident: false })
+		expect(decodeTextBytes(enc.encode("ok"), { encoding: "UTF-8" })).toMatchObject({
+			encoding: "utf-8",
+			writable: "yes",
+			confident: false
+		})
 		expect(decodeTextBytes(Uint8Array.of(0x61, 0xff), { encoding: "utf-8" })).toMatchObject({
 			text: "a�",
 			encoding: "utf-8",
@@ -195,6 +204,14 @@ describe("decodeTextBytes", () => {
 	it("only lists encodings the runtime can decode", () => {
 		for (const { label } of TEXT_ENCODINGS) {
 			expect(new TextDecoder(label).encoding).toBe(label)
+		}
+	})
+
+	// The UI names the family in its language and shows the technical name as is.
+	it("gives every encoding a known family and a technical name", () => {
+		for (const { family, short } of TEXT_ENCODINGS) {
+			expect(ENCODING_FAMILIES).toContain(family)
+			expect(short.trim()).not.toBe("")
 		}
 	})
 })

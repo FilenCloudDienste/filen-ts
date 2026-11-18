@@ -46,7 +46,7 @@ export function extraTypeForDirName(name: string): ExtraType | null {
 	return EXTRA_DIRS.get(name.toLowerCase().replace(DIR_NAME_NOISE, "")) ?? null
 }
 
-const EXTRA_SUFFIXES = new Map<string, ExtraType>([
+export const EXTRA_SUFFIXES: ReadonlyMap<string, ExtraType> = new Map<string, ExtraType>([
 	["trailer", "trailer"],
 	["teaser", "trailer"],
 	["featurette", "featurette"],
@@ -61,12 +61,22 @@ const EXTRA_SUFFIXES = new Map<string, ExtraType>([
 	["other", "unknown"]
 ])
 
+// Suffix words as one alternation, longest first so "deletedscene" is tried before "deleted". Letters only, so no
+// escaping.
+function alternation(words: Iterable<string>): string {
+	return Array.from(words)
+		.sort((a, b) => b.length - a.length)
+		.join("|")
+}
+
+// Words that mark a whole stem ("trailer", "trailer2"); words like "clip" or "short" alone are too common for
+// personal videos.
+const EXTRA_STEM_WORDS: readonly string[] = ["trailer", "teaser", "featurette", "behindthescenes", "deleted", "deletedscene", "interview"]
+
 // "-trailer", " - Featurette 2". Only a hyphen introduces the suffix: dots and underscores separate title words
 // ("The.Big.Short").
-const EXTRA_SUFFIX =
-	/-\s*(trailer|teaser|featurette|behindthescenes|deleted(?:scene)?|interview|scene|short|clip|extra|other)[\s._-]*\d*$/iu
-// A whole stem ("trailer", "trailer2"); words like "clip" or "short" alone are too common for personal videos.
-const EXTRA_STEM = /^(trailer|teaser|featurette|behindthescenes|deleted(?:scene)?|interview)[\s._-]*\d*$/iu
+const EXTRA_SUFFIX = new RegExp(`-\\s*(${alternation(EXTRA_SUFFIXES.keys())})[\\s._-]*\\d*$`, "iu")
+const EXTRA_STEM = new RegExp(`^(${alternation(EXTRA_STEM_WORDS)})[\\s._-]*\\d*$`, "iu")
 
 export interface ExtraName {
 	type: ExtraType
@@ -81,6 +91,7 @@ export function parseExtraName(stem: string): ExtraName | null {
 		return null
 	}
 
+	// Both patterns are built from the map's words, so this only narrows the type.
 	const type = EXTRA_SUFFIXES.get((match[1] ?? "").toLowerCase())
 
 	if (type === undefined) {

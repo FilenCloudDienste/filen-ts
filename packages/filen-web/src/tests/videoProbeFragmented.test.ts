@@ -88,6 +88,21 @@ describe("fragmented MP4 probe", () => {
 		}
 	})
 
+	it("takes a zero mehd as unknown and derives the duration from the mfra and the last moof", async () => {
+		const bytes = await fragmentedMp4({ seconds: 7, audio: true, expectedDuration: 0 })
+		const mehd = Buffer.from(bytes).indexOf("mehd")
+
+		expect(mehd).toBeGreaterThan(0)
+		expect(new DataView(bytes.buffer, bytes.byteOffset).getUint32(mehd + 8)).toBe(0)
+
+		for (const tier of ["card", "full", "cover"] as const) {
+			const { record } = await probe(bytes, tier)
+
+			expect(record?.durationSec).toBeCloseTo(7, 1)
+			expect(record?.index).toBe("mfra")
+		}
+	})
+
 	it("indexes every fragment's keyframe per track", async () => {
 		const bytes = await fragmentedMp4({ seconds: 8, audio: false })
 		const access = await readMfra(new BlockSource(bytes.length, bytesReadRange(bytes)))

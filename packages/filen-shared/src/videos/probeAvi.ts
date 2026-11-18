@@ -286,8 +286,9 @@ export interface AviLists {
 	idx1: ByteRange | null
 }
 
-// The hdrl and movi lists among the top-level chunks, by their headers alone, and the idx1 chunk after movi.
-export async function aviLists(read: ReadAt, size: number): Promise<AviLists> {
+// The hdrl and movi lists among the top-level chunks, by their headers alone, and the idx1 chunk after movi unless
+// `idx1` is false (the header after movi usually sits in a block the caller would not otherwise read).
+export async function aviLists(read: ReadAt, size: number, { idx1 = true }: { idx1?: boolean } = {}): Promise<AviLists> {
 	const riff = await read(4, 4)
 	const riffEnd = Math.min(size, 8 + (riff === null ? 0 : uint32le(riff, 0)))
 	const found: AviLists = { hdrl: null, movi: null, idx1: null }
@@ -316,7 +317,7 @@ export async function aviLists(read: ReadAt, size: number): Promise<AviLists> {
 		at += 8 + size + (size & 1)
 	}
 
-	const movi = found.movi
+	const movi = idx1 ? found.movi : null
 	const after = movi === null ? null : movi.end + ((movi.end - movi.start) & 1)
 	const next = after === null || after + 8 > size ? null : await read(after, 8)
 
@@ -356,7 +357,7 @@ export function parseAviHeader(bytes: Uint8Array): AviHeader {
 // "idx" when the header says an idx1 follows the movi list or a stream has an OpenDML super index.
 export async function walkAvi(source: BlockSource, result: ParsedContainer): Promise<void> {
 	const read: ReadAt = (start, length) => readBytes(source, start, length)
-	const { hdrl, movi } = await aviLists(read, source.size)
+	const { hdrl, movi } = await aviLists(read, source.size, { idx1: false })
 
 	result.index = "none"
 

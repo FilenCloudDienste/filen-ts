@@ -67,26 +67,38 @@ describe("run", () => {
 			expect(cleanup).toHaveBeenCalledOnce()
 		})
 
-		it("should handle async deferred functions", async () => {
-			const order: number[] = []
+		it("should await each async deferred function before starting the previous one", async () => {
+			const order: string[] = []
+			const gate = Promise.withResolvers<void>()
+			const secondStarted = Promise.withResolvers<void>()
 
-			await run(async defer => {
-				defer(async () => {
-					await new Promise(resolve => setTimeout(resolve, 10))
-
-					order.push(1)
+			const pending = run(async defer => {
+				defer(() => {
+					order.push("first:start")
 				})
 
 				defer(async () => {
-					await new Promise(resolve => setTimeout(resolve, 5))
+					order.push("second:start")
 
-					order.push(2)
+					secondStarted.resolve()
+
+					await gate.promise
+
+					order.push("second:end")
 				})
 
 				return "done"
 			})
 
-			expect(order).toEqual([2, 1])
+			await secondStarted.promise
+
+			expect(order).toEqual(["second:start"])
+
+			gate.resolve()
+
+			await pending
+
+			expect(order).toEqual(["second:start", "second:end", "first:start"])
 		})
 
 		it("should continue executing other deferred functions if one fails", async () => {
@@ -141,59 +153,6 @@ describe("run", () => {
 			).rejects.toThrow()
 
 			expect(cleanup).toHaveBeenCalled()
-		})
-	})
-
-	describe("real-world scenarios", () => {
-		it("should handle file operations", async () => {
-			const file = {
-				close: vi.fn()
-			}
-
-			const openFile = vi.fn().mockResolvedValue(file)
-			const readFile = vi.fn().mockResolvedValue("content")
-
-			const result = await run(async defer => {
-				const f = await openFile("test.txt")
-
-				defer(() => f.close())
-
-				const content = await readFile(f)
-
-				return content
-			})
-
-			expect(result.success).toBe(true)
-			expect(result.success && result.data).toBe("content")
-			expect(file.close).toHaveBeenCalled()
-		})
-
-		it("should handle database transactions", async () => {
-			const connection = {
-				close: vi.fn(),
-				beginTransaction: vi.fn(),
-				commit: vi.fn(),
-				rollback: vi.fn()
-			}
-
-			const db = {
-				connect: vi.fn().mockResolvedValue(connection)
-			}
-
-			await run(async defer => {
-				const conn = await db.connect()
-
-				defer(() => conn.close())
-
-				await conn.beginTransaction()
-
-				defer(() => conn.rollback())
-
-				await conn.commit()
-			})
-
-			expect(connection.rollback).toHaveBeenCalled()
-			expect(connection.close).toHaveBeenCalled()
 		})
 	})
 })
@@ -349,6 +308,54 @@ describe("runEffect", () => {
 			result.cleanup()
 
 			expect(cleanup).toHaveBeenCalled()
+		})
+
+		it("should rethrow after the automatic cleanup when throw option is true", () => {
+			const order: string[] = []
+			const error = new Error("failed")
+
+			try {
+				runEffect(
+					defer => {
+						defer(() => {
+							order.push("cleanup")
+						})
+
+						throw error
+					},
+					{
+						throw: true,
+						automaticCleanup: true
+					}
+				)
+
+				order.push("returned")
+			} catch (e) {
+				expect(e).toBe(error)
+
+				order.push("caught")
+			}
+
+			expect(order).toEqual(["cleanup", "caught"])
+		})
+
+		it("should continue executing other deferred functions if one fails", () => {
+			const order: number[] = []
+
+			const result = runEffect(defer => {
+				defer(() => order.push(1))
+
+				defer(() => {
+					throw new Error("middle cleanup failed")
+				})
+
+				defer(() => order.push(3))
+
+				return "done"
+			})
+
+			expect(() => result.cleanup()).not.toThrow()
+			expect(order).toEqual([3, 1])
 		})
 	})
 })

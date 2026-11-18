@@ -34,44 +34,74 @@ export interface DecodeTextOptions {
 	prefix?: boolean
 }
 
-// The encodings the subtitle picker offers (label = WHATWG name).
-export const SUBTITLE_ENCODINGS: readonly { label: string; name: string }[] = [
-	{ label: "utf-8", name: "Unicode (UTF-8)" },
-	{ label: "utf-16le", name: "Unicode (UTF-16 LE)" },
-	{ label: "utf-16be", name: "Unicode (UTF-16 BE)" },
-	{ label: "windows-1250", name: "Central European (Windows-1250)" },
-	{ label: "windows-1251", name: "Cyrillic (Windows-1251)" },
-	{ label: "windows-1252", name: "Western European (Windows-1252)" },
-	{ label: "windows-1253", name: "Greek (Windows-1253)" },
-	{ label: "windows-1254", name: "Turkish (Windows-1254)" },
-	{ label: "windows-1255", name: "Hebrew (Windows-1255)" },
-	{ label: "windows-1256", name: "Arabic (Windows-1256)" },
-	{ label: "windows-1257", name: "Baltic (Windows-1257)" },
-	{ label: "windows-1258", name: "Vietnamese (Windows-1258)" },
-	{ label: "windows-874", name: "Thai (Windows-874)" },
-	{ label: "koi8-r", name: "Cyrillic (KOI8-R)" },
-	{ label: "gb18030", name: "Chinese Simplified (GB18030)" },
-	{ label: "big5", name: "Chinese Traditional (Big5)" },
-	{ label: "shift_jis", name: "Japanese (Shift JIS)" },
-	{ label: "euc-jp", name: "Japanese (EUC-JP)" },
-	{ label: "euc-kr", name: "Korean (EUC-KR)" }
+// The script or region an encoding is for; the app names it in the UI language.
+export const ENCODING_FAMILIES = [
+	"unicode",
+	"centralEuropean",
+	"cyrillic",
+	"westernEuropean",
+	"greek",
+	"turkish",
+	"hebrew",
+	"arabic",
+	"baltic",
+	"vietnamese",
+	"thai",
+	"chineseSimplified",
+	"chineseTraditional",
+	"japanese",
+	"korean",
+	"nordic"
+] as const
+
+export type EncodingFamily = (typeof ENCODING_FAMILIES)[number]
+
+export interface TextEncodingEntry {
+	// WHATWG name.
+	readonly label: string
+	readonly family: EncodingFamily
+	// The technical name ("Windows-1251", "UTF-16 LE"), the same in every language.
+	readonly short: string
+}
+
+// The encodings the subtitle picker offers.
+export const SUBTITLE_ENCODINGS: readonly TextEncodingEntry[] = [
+	{ label: "utf-8", family: "unicode", short: "UTF-8" },
+	{ label: "utf-16le", family: "unicode", short: "UTF-16 LE" },
+	{ label: "utf-16be", family: "unicode", short: "UTF-16 BE" },
+	{ label: "windows-1250", family: "centralEuropean", short: "Windows-1250" },
+	{ label: "windows-1251", family: "cyrillic", short: "Windows-1251" },
+	{ label: "windows-1252", family: "westernEuropean", short: "Windows-1252" },
+	{ label: "windows-1253", family: "greek", short: "Windows-1253" },
+	{ label: "windows-1254", family: "turkish", short: "Windows-1254" },
+	{ label: "windows-1255", family: "hebrew", short: "Windows-1255" },
+	{ label: "windows-1256", family: "arabic", short: "Windows-1256" },
+	{ label: "windows-1257", family: "baltic", short: "Windows-1257" },
+	{ label: "windows-1258", family: "vietnamese", short: "Windows-1258" },
+	{ label: "windows-874", family: "thai", short: "Windows-874" },
+	{ label: "koi8-r", family: "cyrillic", short: "KOI8-R" },
+	{ label: "gb18030", family: "chineseSimplified", short: "GB18030" },
+	{ label: "big5", family: "chineseTraditional", short: "Big5" },
+	{ label: "shift_jis", family: "japanese", short: "Shift JIS" },
+	{ label: "euc-jp", family: "japanese", short: "EUC-JP" },
+	{ label: "euc-kr", family: "korean", short: "EUC-KR" }
 ]
 
 // Every encoding a text file may be read with.
-export const TEXT_ENCODINGS: readonly { label: string; name: string }[] = [
+export const TEXT_ENCODINGS: readonly TextEncodingEntry[] = [
 	...SUBTITLE_ENCODINGS,
-	{ label: "koi8-u", name: "Cyrillic (KOI8-U)" },
-	{ label: "ibm866", name: "Cyrillic (IBM 866)" },
-	{ label: "iso-8859-2", name: "Central European (ISO 8859-2)" },
-	{ label: "iso-8859-4", name: "Baltic (ISO 8859-4)" },
-	{ label: "iso-8859-5", name: "Cyrillic (ISO 8859-5)" },
-	{ label: "iso-8859-6", name: "Arabic (ISO 8859-6)" },
-	{ label: "iso-8859-7", name: "Greek (ISO 8859-7)" },
-	{ label: "iso-8859-8", name: "Hebrew (ISO 8859-8)" },
-	{ label: "iso-8859-10", name: "Nordic (ISO 8859-10)" },
-	{ label: "iso-8859-13", name: "Baltic (ISO 8859-13)" },
-	{ label: "iso-8859-15", name: "Western European (ISO 8859-15)" },
-	{ label: "macintosh", name: "Western European (Mac OS Roman)" }
+	{ label: "koi8-u", family: "cyrillic", short: "KOI8-U" },
+	{ label: "ibm866", family: "cyrillic", short: "IBM 866" },
+	{ label: "iso-8859-2", family: "centralEuropean", short: "ISO 8859-2" },
+	{ label: "iso-8859-4", family: "baltic", short: "ISO 8859-4" },
+	{ label: "iso-8859-5", family: "cyrillic", short: "ISO 8859-5" },
+	{ label: "iso-8859-6", family: "arabic", short: "ISO 8859-6" },
+	{ label: "iso-8859-7", family: "greek", short: "ISO 8859-7" },
+	{ label: "iso-8859-8", family: "hebrew", short: "ISO 8859-8" },
+	{ label: "iso-8859-10", family: "nordic", short: "ISO 8859-10" },
+	{ label: "iso-8859-13", family: "baltic", short: "ISO 8859-13" },
+	{ label: "iso-8859-15", family: "westernEuropean", short: "ISO 8859-15" },
+	{ label: "macintosh", family: "westernEuropean", short: "Mac OS Roman" }
 ]
 
 const KNOWN_LABELS: ReadonlySet<string> = new Set(TEXT_ENCODINGS.map(encoding => encoding.label))
@@ -473,11 +503,6 @@ export function decodeUnicodeText(bytes: Uint8Array, options?: { prefix?: boolea
 	const result = decodeUnicode(bytes, options?.prefix === true)
 
 	return "decoded" in result ? result.decoded : null
-}
-
-// No Unicode reading fits (BOM, UTF-16, UTF-8 even with a few errors): a legacy codepage has to be picked.
-export function needsLegacyGuess(bytes: Uint8Array, options?: { prefix?: boolean }): boolean {
-	return !("decoded" in decodeUnicode(bytes, options?.prefix === true))
 }
 
 // A NUL byte near the start marks a binary file, unless a BOM or the UTF-16 sniff (confirmed by a strict decode of the

@@ -260,6 +260,31 @@ describe("openKeyframeIndex", () => {
 		expect(await readKeyframe(source, ref)).toEqual(sampleBytes(4, 103))
 	})
 
+	it("reads the stsz header once, not on every lookup", async () => {
+		const { bytes, sampleOffsets } = mp4()
+		const reads: number[] = []
+
+		class CountingSource extends BlockSource {
+			public override read(target: Uint8Array, position: number, length: number): Promise<void> {
+				reads.push(position)
+
+				return super.read(target, position, length)
+			}
+		}
+
+		const source = new CountingSource(bytes.length, bytesReadRange(bytes), { maxBlockReads: 8 })
+		const index = await openKeyframeIndex(source)
+		// sample_size sits after the stsz box's fourcc and its version/flags.
+		const sampleSizeAt = Buffer.from(bytes).indexOf("stsz") + 8
+
+		expect(await index?.keyframeAt(5.5)).toEqual({ offset: sampleOffsets[3], size: 103, timeSec: 3 })
+		expect(reads.filter(position => position === sampleSizeAt)).toHaveLength(1)
+
+		expect(await index?.keyframeAt(9.9)).toEqual({ offset: sampleOffsets[9], size: 109, timeSec: 9 })
+		expect(await index?.keyframeAt(7.2)).toEqual({ offset: sampleOffsets[6], size: 106, timeSec: 6 })
+		expect(reads.filter(position => position === sampleSizeAt)).toHaveLength(1)
+	})
+
 	it("finds a Matroska keyframe through the Cues, with and without a relative position", async () => {
 		const { bytes, frames, frameOffsets } = mkv()
 		const source = new BlockSource(bytes.length, bytesReadRange(bytes), { maxBlockReads: 8 })

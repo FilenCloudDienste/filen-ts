@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BLOCK_BYTES, BlockSource, bytesReadRange, probeVideo, type VideoProbe } from "@filen/shared/videos"
+import { aviLists, BLOCK_BYTES, BlockSource, bytesReadRange, probeVideo, readBytes, type VideoProbe } from "@filen/shared/videos"
 
 const encoder = new TextEncoder()
 
@@ -75,7 +75,7 @@ function waveFormat(tag: number, channels: number, rate: number, extra: number[]
 	return [...le(tag, 2), ...le(channels, 2), ...le(rate, 4), ...le(0, 4), ...le(0, 2), ...le(16, 2), ...le(extra.length, 2), ...extra]
 }
 
-function avi(video: string, withSps: boolean, flags = 0x10): Uint8Array {
+function avi(video: string, withSps: boolean, flags = 0x10, junk = 0, idx1: Uint8Array | null = null): Uint8Array {
 	const avih = riffChunk("avih", concat(le(40000, 4), new Uint8Array(8), le(flags, 4), new Uint8Array(40)))
 	const hdrl = riffList(
 		"hdrl",
@@ -89,8 +89,13 @@ function avi(video: string, withSps: boolean, flags = 0x10): Uint8Array {
 		)
 	)
 	const picture = withSps ? [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1, ...SPS, 0, 0, 0, 1, ...PPS] : [0, 0, 0, 1, 0x65, 0x88]
-	const movi = riffList("movi", riffChunk("01wb", new Uint8Array(32)), riffChunk("00dc", picture))
-	const body = concat(text("AVI "), hdrl, movi)
+	const movi = riffList(
+		"movi",
+		riffChunk("01wb", new Uint8Array(32)),
+		riffChunk("00dc", picture),
+		...(junk > 0 ? [riffChunk("JUNK", new Uint8Array(junk))] : [])
+	)
+	const body = concat(text("AVI "), hdrl, movi, ...(idx1 === null ? [] : [riffChunk("idx1", idx1)]))
 
 	return concat(text("RIFF"), le(body.length, 4), body)
 }
@@ -111,6 +116,28 @@ describe("probeVideo — AVI", () => {
 		expect((await probe(avi("XVID", false, 0)))?.video).toMatchObject({ codec: "mpeg4", codecString: null })
 		expect(await probe(avi("XVID", false, 0))).toMatchObject({ index: "none" })
 		expect((await probe(avi("avc1", false)))?.video).toMatchObject({ codec: "h264", codecString: null })
+	})
+
+	it("reads only the head block for a card, and the idx1 after movi only when asked", async () => {
+		const file = avi("H264", true, 0x10, 2 * BLOCK_BYTES, new Uint8Array(32))
+		const read = bytesReadRange(file)
+		const reads: number[] = []
+		const source = new BlockSource(
+			file.length,
+			(start, end) => {
+				reads.push(start)
+
+				return read(start, end)
+			},
+			{ maxBlockReads: 4 }
+		)
+
+		expect(await probeVideo(source, "card")).toMatchObject({ index: "idx", video: { codecString: "avc1.64001f" } })
+		expect(reads).toEqual([0])
+
+		const lists = await aviLists((start, length) => readBytes(source, start, length), file.length)
+
+		expect(lists.idx1).toEqual({ start: file.length - 32, end: file.length })
 	})
 
 	it("survives truncation", async () => {
@@ -379,6 +406,65 @@ describe("probeVideo — MPEG-PS", () => {
 	it("tells MPEG-1 video by its missing sequence extension, and reads a tail blocks away", async () => {
 		expect((await probe(mpegPs(false, 3 * BLOCK_BYTES)))?.video?.codec).toBe("mpeg1")
 		expect(await probe(mpegPs(false, 3 * BLOCK_BYTES))).toMatchObject({ durationSec: 60 })
+	})
+
+	it("reads past MPEG-2 slice start codes that share an SPS's low bits to the sequence header", async () => {
+		const slices = Array.from({ length: 16 }, (_, i) => [0, 0, 1, i + 1, 0x0a, 0xff, 0xff, 0xff]).flat()
+		const file = Uint8Array.from([...pack(), ...pes(0xe0, 90_000, [...slices, ...sequenceHeader(true), 0, 0, 1, 0])])
+
+		expect((await probe(file))?.video).toMatchObject({ codec: "mpeg2", fourcc: "mp2v", w: 720, h: 576 })
+	})
+
+	it("still names a map-less Annex B H.264 stream", async () => {
+		const file = Uint8Array.from([
+			...pack(),
+			...pes(0xe0, 90_000, [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1, ...SPS, 0, 0, 0, 1, ...PPS, 0, 0, 1, 0x65, 0x88])
+		])
+
+		expect((await probe(file))?.video).toMatchObject({ codec: "h264", codecString: "avc1.64001f", w: 1280, h: 720 })
+	})
+
+	it("finds a sequence header past the first 64 KiB of video payload and across the window's edge", async () => {
+		const filler = (length: number): number[] => pes(0xe0, 90_000, new Array<number>(length).fill(0xff))
+
+		for (const lead of [0, 1530]) {
+			const file = Uint8Array.from([
+				...pack(),
+				...Array.from({ length: 32 }, () => filler(2000)).flat(),
+				...(lead === 0 ? filler(2000) : []),
+				...pes(0xe0, 90_000, [...new Array<number>(lead).fill(0xff), ...sequenceHeader(true), 0, 0, 1, 0])
+			])
+
+			expect((await probe(file))?.video).toMatchObject({ codec: "mpeg2", w: 720, h: 576 })
+		}
+	})
+
+	it("reads a sequence header split across two PES packets", async () => {
+		const header = [...sequenceHeader(true), 0, 0, 1, 0]
+		const file = Uint8Array.from([...pack(), ...pes(0xe0, 90_000, header.slice(0, 6)), ...pes(0xe0, 90_000, header.slice(6))])
+
+		expect((await probe(file))?.video).toMatchObject({ codec: "mpeg2", w: 720, h: 576 })
+	})
+
+	it("reads past a slice whose bytes parse as an SPS with an undefined level or set reserved bits", async () => {
+		// Baseline, 16x16 once parsed: level 29 is not in Table A-1, and C3 sets reserved_zero_2bits.
+		for (const [constraints, level] of [
+			[0xc0, 0x1d],
+			[0xc3, 0x1e]
+		] as const) {
+			const slice = [0, 0, 1, 0x27, 0x42, constraints, level, ...new Array<number>(16).fill(0xff)]
+			const file = Uint8Array.from([...pack(), ...pes(0xe0, 90_000, [...slice, ...sequenceHeader(true), 0, 0, 1, 0])])
+
+			expect((await probe(file))?.video).toMatchObject({ codec: "mpeg2", w: 720, h: 576 })
+		}
+	})
+
+	it("leaves a head that ends inside a sequence header's size fields partial and unnamed, not 0-sized", async () => {
+		for (const cut of [4, 5, 7]) {
+			const record = await probe(Uint8Array.from([...pack(), ...pes(0xe0, 90_000, sequenceHeader(true).slice(0, cut))]))
+
+			expect(record).toMatchObject({ partial: true, video: { codec: null } })
+		}
 	})
 
 	it("survives truncation", async () => {

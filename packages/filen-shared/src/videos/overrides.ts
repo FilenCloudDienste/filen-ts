@@ -50,17 +50,27 @@ export interface OverriddenLibrary {
 	autoMerged: ReadonlyMap<string, number>
 }
 
+// Key prefixes. Override keys are persisted and shared across clients: these never change.
+const DIRECTORY_KEY_PREFIX = "d:"
+const STABLE_UUID_KEY_PREFIX = "s:"
+const MERGE_KEY_PREFIX = "m:"
+
 export function seriesOverrideKey(id: string): string {
-	return `d:${id}`
+	return `${DIRECTORY_KEY_PREFIX}${id}`
 }
 
 export function episodeOverrideKey(stableUuid: string): string {
-	return `s:${stableUuid}`
+	return `${STABLE_UUID_KEY_PREFIX}${stableUuid}`
 }
 
 // Where "keep same-titled series apart" is stored: by the series' merge key, the same whichever root came first.
 export function splitOverrideKey(mergeKey: string): string {
-	return `m:${mergeKey}`
+	return `${MERGE_KEY_PREFIX}${mergeKey}`
+}
+
+// What a key holds after its prefix, or null when it has another one.
+function stripPrefix(key: string, prefix: string): string | null {
+	return key.startsWith(prefix) ? key.slice(prefix.length) : null
 }
 
 // The id of the series a title made an episode of no existing series starts: its own, so the title's key (which
@@ -74,11 +84,11 @@ export function newSeriesId(sourceId: string): string {
 export function titleOverrideKey({ id, stableUuids }: { id: string; stableUuids: Iterable<string> }): string {
 	for (const stableUuid of stableUuids) {
 		if (stableUuid === id) {
-			return `s:${id}`
+			return episodeOverrideKey(id)
 		}
 	}
 
-	return `d:${id}`
+	return seriesOverrideKey(id)
 }
 
 // The merge keys a correction keeps apart, for the classifier.
@@ -86,8 +96,10 @@ export function splitMergeKeysOf(overrides: Readonly<Record<string, LibraryOverr
 	const out = new Set<string>()
 
 	for (const key in overrides) {
-		if (key.startsWith("m:") && overrides[key]?.split === true) {
-			out.add(key.slice(2))
+		const mergeKey = stripPrefix(key, MERGE_KEY_PREFIX)
+
+		if (mergeKey !== null && overrides[key]?.split === true) {
+			out.add(mergeKey)
 		}
 	}
 
@@ -589,7 +601,7 @@ function finishSeries(ctx: Context, build: SeriesBuild): LibrarySeries | null {
 }
 
 function idOfSeriesKey(key: string | null): string | null {
-	return key?.startsWith("d:") === true ? key.slice(2) : null
+	return key === null ? null : stripPrefix(key, DIRECTORY_KEY_PREFIX)
 }
 
 // The series a series' merge chain ends at: itself when it isn't merged, when the chain leaves the known series, or

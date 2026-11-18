@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CLASSIFIER_VERSION, NO_FILE, classifyVideoLibrary, classifyVideoLibrarySteps } from "@filen/shared/videos"
-import { classifyPaths, fixtureInput } from "./libraryFixture"
+import { classifyPaths, fixtureInput, summarize } from "./libraryFixture"
 
 describe("movies", () => {
 	it("reads movie directories, loose titles, stacks and camera clips", () => {
@@ -1065,7 +1065,7 @@ describe("output shape", () => {
 })
 
 describe("classifyVideoLibrarySteps", () => {
-	it("yields between directories and ends with what classifyVideoLibrary returns", () => {
+	it("yields between directories and ends with every movie classified", () => {
 		const input = {
 			roots: [{ uuid: "root", name: "Library", type: "auto" as const }],
 			dirs: Array.from({ length: 20 }, (_, index) => ({
@@ -1091,10 +1091,22 @@ describe("classifyVideoLibrarySteps", () => {
 		}
 
 		expect(yields).toBeGreaterThan(20)
-		expect(step.value).toEqual(classifyVideoLibrary(input))
+
+		const summary = summarize(step.value, input)
+
+		expect(summary.series).toEqual([])
+		expect(summary.others).toEqual([])
+		expect(summary.movies).toEqual(
+			Array.from({ length: 20 }, (_, index) => ({
+				title: `Movie ${String(index)}`,
+				year: 2001,
+				versions: [`f${String(index)}`],
+				extras: []
+			}))
+		)
 	})
 
-	it("yields while indexing, passing thousands of empty directories and assembling, with the same result", () => {
+	it("yields while indexing, passing thousands of empty directories and assembling", () => {
 		const input = {
 			roots: [{ uuid: "root", name: "Library", type: "auto" as const }],
 			dirs: [
@@ -1127,7 +1139,8 @@ describe("classifyVideoLibrarySteps", () => {
 
 		// 6000 directories and 6000 files indexed, then 6000 children passed, a few hundred per step.
 		expect(yields).toBeGreaterThan(30)
-		expect(step.value).toEqual(classifyVideoLibrary(input))
 		expect(step.value.movies.map(movie => movie.title)).toEqual(["Holiday"])
+		expect(step.value.series).toEqual([])
+		expect(step.value.others).toEqual([])
 	})
 })

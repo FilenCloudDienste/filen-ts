@@ -218,12 +218,13 @@ describe("save port pull protocol", () => {
 	it("keeps the upload open while a live writer prepares for longer than the stall, then streams its bytes", async () => {
 		const { writerEnd, readerEnd } = channel()
 		const writer = savePortWriter(writerEnd, { aliveMs: 10 })
-		const reader = savePortReader(readerEnd, { stallMs: 40 })
+		const reader = savePortReader(readerEnd, { stallMs: 250 })
 		const source = pattern(MiB + 5, 3)
 		const received = drain(reader)
 
-		// The writer checks its package whole before the first byte (four stalls long).
-		await new Promise(resolve => setTimeout(resolve, 160))
+		// The writer checks its package whole before the first byte (longer than a stall). The stall stays far above the
+		// beat so a loaded event loop holding one beat back cannot pass for a quiet writer.
+		await new Promise(resolve => setTimeout(resolve, 400))
 		await writer.write(source)
 		await writer.close()
 		writer.commit()
@@ -234,15 +235,15 @@ describe("save port pull protocol", () => {
 	it("keeps the upload open while a slow producer goes longer than the stall between two chunks", async () => {
 		const { writerEnd, readerEnd } = channel()
 		const writer = savePortWriter(writerEnd, { aliveMs: 10 })
-		const reader = savePortReader(readerEnd, { stallMs: 40 })
+		const reader = savePortReader(readerEnd, { stallMs: 250 })
 		const first = pattern(SAVE_PORT_CHUNK, 5)
 		const second = pattern(MiB / 2, 9)
 		const received = drain(reader)
 
-		// One chunk out, then an encoder that takes four stalls for the next: the heartbeat is the writer's own timer,
-		// not a side effect of sending.
+		// One chunk out, then an encoder that takes longer than a stall for the next: the heartbeat is the writer's own
+		// timer, not a side effect of sending.
 		await writer.write(first)
-		await new Promise(resolve => setTimeout(resolve, 160))
+		await new Promise(resolve => setTimeout(resolve, 400))
 		await writer.write(second)
 		await writer.close()
 		writer.commit()

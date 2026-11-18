@@ -1,3 +1,5 @@
+import { utf8Length, utf8Prefix } from "./utf8"
+
 export function parseNumbersFromString(string: string): number {
 	let result = 0
 	let digitCount = 0
@@ -66,7 +68,6 @@ const WHITESPACE_RUN_RE = /\s+/g
 const TRUNCATION_EXTENSION_RE = /(\.[^.]{1,10})$/
 const FILE_NAME_REPLACEMENT = "_"
 const MAX_FILE_NAME_BYTES = 255
-const fileNameEncoder = new TextEncoder()
 
 /**
  * Make `filename` safe to write as a single path component on APFS, ext4, F2FS, FAT32 and exFAT:
@@ -94,16 +95,11 @@ export function sanitizeFileName(filename: string): string {
 	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RUN_RE, FILE_NAME_REPLACEMENT)
 
 	// Filesystem limits count bytes, not characters
-	if (fileNameEncoder.encode(sanitizedFilename).length > MAX_FILE_NAME_BYTES) {
+	if (utf8Length(sanitizedFilename) > MAX_FILE_NAME_BYTES) {
 		const extension = sanitizedFilename.match(TRUNCATION_EXTENSION_RE)?.[1] ?? ""
-		const maxNameBytes = MAX_FILE_NAME_BYTES - fileNameEncoder.encode(extension).length
-		let baseName = extension ? sanitizedFilename.slice(0, -extension.length) : sanitizedFilename
+		const baseName = extension ? sanitizedFilename.slice(0, -extension.length) : sanitizedFilename
 
-		while (fileNameEncoder.encode(baseName).length > maxNameBytes && baseName.length > 0) {
-			baseName = baseName.slice(0, -1)
-		}
-
-		sanitizedFilename = baseName + extension
+		sanitizedFilename = utf8Prefix(baseName, MAX_FILE_NAME_BYTES - utf8Length(extension)) + extension
 	}
 
 	if (!sanitizedFilename || sanitizedFilename === "." || sanitizedFilename === "..") {
@@ -185,7 +181,8 @@ export function createExecutableTimeout(callback: () => void, delay?: number) {
 }
 
 /**
- * Fast replacement for string.localeCompare(string, "en", { numeric: true })
+ * Fast numeric-aware comparator: digit runs compare by value, A-Z folds to a-z (case breaks ties), and every other
+ * character compares by raw UTF-16 code unit. Not locale-aware, so it does not match `localeCompare` outside ASCII.
  */
 export function fastLocaleCompare(a: string, b: string): number {
 	// Fast path: identical strings

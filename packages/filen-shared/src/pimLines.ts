@@ -339,9 +339,11 @@ export function displayText(text: string, max: number): string {
 	for (const char of withoutFormatControls(text)) {
 		const code = char.codePointAt(0) ?? 0
 
-		if (code >= 0x20 || code === 0x09 || code === 0x0a) out += char
+		if (code < 0x20 && code !== 0x09 && code !== 0x0a) continue
 
-		if (out.length >= max) return `${out.slice(0, max)}…`
+		if (out.length + char.length > max) return `${out}…`
+
+		out += char
 	}
 
 	return out

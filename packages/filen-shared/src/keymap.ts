@@ -257,9 +257,9 @@ export function chordModifiers(chord: Chord): ModifierToken[] {
 	return MODIFIER_ORDER.filter(modifier => chord[modifier])
 }
 
-// A chord's modifiers in the order a platform shows them.
+// A chord's modifiers in the order a platform shows them. Off a Mac Mod is Ctrl, so a chord with both shows one Ctrl.
 export function displayModifiers(chord: Chord, mac: boolean): ModifierToken[] {
-	return (mac ? MAC_DISPLAY_ORDER : MODIFIER_ORDER).filter(modifier => chord[modifier])
+	return (mac ? MAC_DISPLAY_ORDER : MODIFIER_ORDER).filter(modifier => chord[modifier] && !(modifier === "ctrl" && !mac && chord.mod))
 }
 
 // The numpad's character keys, which type as the writing-system keys do.

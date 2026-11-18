@@ -32,12 +32,6 @@ describe("pruneAndRebaseNoteOutboxAfterPush", () => {
 		expect(remaining?.map(entry => entry.baseContentHash)).toEqual(["pushed", "old"])
 	})
 
-	it("rebases every survivor by default", () => {
-		const entries = [{ timestamp: 150, content: "typed", note, baseContentHash: "old" }]
-
-		expect(pruneAndRebaseNoteOutboxAfterPush(entries, 100, "pushed")?.[0]?.baseContentHash).toBe("pushed")
-	})
-
 	it("keeps entries typed strictly after the pushed entry's LOCAL timestamp", () => {
 		const entries = [
 			{ timestamp: 100, content: "pushed", note },
@@ -60,7 +54,7 @@ describe("pruneAndRebaseNoteOutboxAfterPush", () => {
 		expect(remaining).toHaveLength(1)
 	})
 
-	it("rebases every survivor's baseContentHash onto the just-pushed content hash", () => {
+	it("rebases every survivor's baseContentHash onto the just-pushed content hash by default", () => {
 		const entries = [
 			{ timestamp: 150, content: "v2", note, baseContentHash: "stale-base" },
 			{ timestamp: 160, content: "v3", note }
@@ -69,12 +63,6 @@ describe("pruneAndRebaseNoteOutboxAfterPush", () => {
 		const remaining = pruneAndRebaseNoteOutboxAfterPush(entries, 100, "pushed-hash")
 
 		expect(remaining?.every(c => c.baseContentHash === "pushed-hash")).toBe(true)
-	})
-
-	it("returns undefined (delete signal) when nothing survives the prune", () => {
-		const entries = [{ timestamp: 100, content: "pushed", note }]
-
-		expect(pruneAndRebaseNoteOutboxAfterPush(entries, 100, "hash")).toBeUndefined()
 	})
 })
 

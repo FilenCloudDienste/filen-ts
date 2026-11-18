@@ -178,3 +178,74 @@ describe("moof", () => {
 		expect(fragmentEnd(bytes, { defaults: new Map(), timescales: index.timescales })).toBeNull()
 	})
 })
+
+describe("truns without per-sample fields", () => {
+	const MAX_COUNT = 0xffffffff
+	const index = {
+		defaults: new Map([[1, { duration: 3, size: 5 }]]),
+		timescales: new Map([[1, 1000]])
+	}
+
+	// One traf of track 1 (base is the moof, tfhd defaults of duration 2 and size 4 unless given) whose truns
+	// state only a sample count.
+	function strideless(runs: number, count = MAX_COUNT, fallback = [2, 4]): Uint8Array {
+		const trun = fullBox("trun", 0, 0, u32(count))
+		const truns = Array.from({ length: runs }, () => trun)
+
+		return box(
+			"moof",
+			box(
+				"traf",
+				fullBox("tfhd", 0, TFHD_BASE_IS_MOOF | 0x8 | 0x10, u32(1), u32(fallback[0] ?? 0), u32(fallback[1] ?? 0)),
+				fullBox("tfdt", 0, 0, u32(0)),
+				...truns
+			)
+		)
+	}
+
+	it("times a run by its count at once", () => {
+		expect(fragmentEnd(strideless(1), index)).toBe((MAX_COUNT * 2) / 1000)
+	})
+
+	it("places a sample by its number, and refuses one past the run", () => {
+		const bytes = strideless(2)
+
+		expect(locateSample(bytes, 100, { track: 1, traf: 1, trun: 1, sample: 1 }, undefined)).toEqual({ offset: 100, size: 4 })
+		expect(locateSample(bytes, 100, { track: 1, traf: 1, trun: 1, sample: MAX_COUNT }, undefined)).toEqual({
+			offset: 100 + (MAX_COUNT - 1) * 4,
+			size: 4
+		})
+		expect(locateSample(bytes, 100, { track: 1, traf: 1, trun: 2, sample: 3 }, undefined)).toEqual({
+			offset: 100 + MAX_COUNT * 4 + 8,
+			size: 4
+		})
+		expect(locateSample(bytes, 100, { track: 1, traf: 1, trun: 1, sample: 0 }, undefined)).toBeNull()
+		expect(locateSample(strideless(1, 3), 100, { track: 1, traf: 1, trun: 1, sample: 4 }, undefined)).toBeNull()
+	})
+
+	it("refuses a size of zero", () => {
+		const bytes = box("moof", box("traf", fullBox("tfhd", 0, TFHD_BASE_IS_MOOF | 0x10, u32(1), u32(0)), fullBox("trun", 0, 0, u32(10))))
+
+		expect(locateSample(bytes, 0, { track: 1, traf: 1, trun: 1, sample: 2 }, undefined)).toBeNull()
+	})
+
+	it("walks thousands of such runs promptly", () => {
+		const bytes = strideless(60_000)
+
+		expect(fragmentEnd(bytes, index)).toBe((60_000 * MAX_COUNT * 2) / 1000)
+		expect(locateSample(bytes, 0, { track: 1, traf: 1, trun: 60_000, sample: 2 }, undefined)).toEqual({
+			offset: 59_999 * MAX_COUNT * 4 + 4,
+			size: 4
+		})
+	})
+
+	it("gives up once the sums leave the safe integers", () => {
+		// 2^32 - 1 samples of 2^32 - 1 ticks and bytes each pass 2^53.
+		const bytes = strideless(2, MAX_COUNT, [MAX_COUNT, MAX_COUNT])
+
+		expect(fragmentEnd(bytes, index)).toBeNull()
+		expect(locateSample(bytes, 0, { track: 1, traf: 1, trun: 1, sample: 1 }, undefined)).toEqual({ offset: 0, size: MAX_COUNT })
+		expect(locateSample(bytes, 0, { track: 1, traf: 1, trun: 1, sample: MAX_COUNT }, undefined)).toBeNull()
+		expect(locateSample(bytes, 0, { track: 1, traf: 1, trun: 2, sample: 1 }, undefined)).toBeNull()
+	})
+})

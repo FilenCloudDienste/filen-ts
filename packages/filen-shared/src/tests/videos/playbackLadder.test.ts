@@ -440,13 +440,6 @@ describe("rung C: remux + audio transcode", () => {
 
 		expect(decision.audio).toMatchObject({ mode: "transcode", target: "aac", codecString: "mp4a.40.2" })
 	})
-
-	it("honours a custom decoder list", () => {
-		const custom = { ...caps({ mse, encoders: ["aac"] }), audioDecoders: ["aac"] }
-
-		expect(decidePlayback(probe("mkv", H264, FLAC), sel(), custom).path).toBe("video-only")
-		expect(decidePlayback(probe("mkv", H264, DTS), sel(), custom).path).toBe("remux+transcode")
-	})
 })
 
 describe("rung 3 and 4", () => {

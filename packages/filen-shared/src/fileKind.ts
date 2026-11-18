@@ -1,7 +1,7 @@
 import { extensionStart } from "./fileExtensions"
 import { TRACKER_SNIFFED } from "./fileFamilies"
 import { extensionForExactFileName, extensionForFileName, extensionForMime } from "./fileType"
-import { MIN_TRANSPORT_STREAM_BYTES } from "./videos/transportStream"
+import { MIN_TRANSPORT_STREAM_BYTES, mayBeTransportStream } from "./videos/transportStream"
 
 export { MIN_TRANSPORT_STREAM_BYTES }
 
@@ -354,9 +354,8 @@ function sniffable(ambiguity: Ambiguity, base: string, extension: string, size: 
 		return true
 	}
 
-	const stem = base.slice(0, base.length - extension.length - 1)
-
-	return size !== undefined && Number(size) >= MIN_TRANSPORT_STREAM_BYTES && !stem.endsWith(".d")
+	// `base` is already lowercase.
+	return size !== undefined && mayBeTransportStream(Number(size), base.slice(0, base.length - extension.length - 1))
 }
 
 function fileKind<K>(kind: K | null, extension: string, source: FileKindSource, ambiguous: boolean, canSniff: boolean): FileKind<K> {

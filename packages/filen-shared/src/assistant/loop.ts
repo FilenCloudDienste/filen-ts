@@ -15,6 +15,7 @@ import {
 	routerRequest
 } from "./prompts"
 import {
+	handleArguments,
 	isConsequentialTool,
 	parseToolInput,
 	toolInputJsonSchema,
@@ -343,13 +344,7 @@ function callHandles(calls: readonly AssistantHistoryCall[] = []): string[] {
 		const tool = assistantToolByName(call.name)
 		const args = tool === undefined ? null : parseArguments(call.arguments)
 
-		return tool === undefined || args === null
-			? []
-			: (tool.grounded.handles ?? []).flatMap(key => {
-					const value = args[key]
-
-					return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter(item => typeof item === "string") : []
-				})
+		return tool === undefined || args === null ? [] : handleArguments(tool, args)
 	})
 }
 

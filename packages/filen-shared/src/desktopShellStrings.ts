@@ -5,6 +5,72 @@
  * i18next's syntax. Import-free; reachable only through "@filen/shared/desktopShellStrings".
  */
 export const DESKTOP_SHELL_STRINGS = {
+	/** macOS menu bar menu with Close. */
+	shellMenuFile: "File",
+	/** macOS menu bar menu with undo, the clipboard and selection. */
+	shellMenuEdit: "Edit",
+	/** macOS menu bar menu with zoom, full screen, the theme and the panels. */
+	shellMenuView: "View",
+	/** macOS menu bar menu with minimize, zoom and the list of open windows. */
+	shellMenuWindow: "Window",
+	/** macOS menu bar menu with the keyboard shortcuts, the website and the system's help search. */
+	shellMenuHelp: "Help",
+	/** macOS app menu item that shows the app's name, version and copyright. */
+	shellMenuAbout: "About Filen",
+	/** macOS app menu submenu listing the system's services for the selection. */
+	shellMenuServices: "Services",
+	/** macOS app menu item that hides the app's windows. */
+	shellMenuHide: "Hide Filen",
+	/** macOS app menu item that hides every other app's windows. */
+	shellMenuHideOthers: "Hide Others",
+	/** macOS app menu item that shows every hidden app again. */
+	shellMenuShowAll: "Show All",
+	/** macOS Edit menu item that undoes the last change. */
+	shellMenuUndo: "Undo",
+	/** macOS Edit menu item that redoes the last undone change. */
+	shellMenuRedo: "Redo",
+	/** macOS Edit menu item that cuts the selection to the clipboard. */
+	shellMenuCut: "Cut",
+	/** macOS Edit menu item that copies the selection to the clipboard. */
+	shellMenuCopy: "Copy",
+	/** macOS Edit menu item that pastes the clipboard. */
+	shellMenuPaste: "Paste",
+	/** macOS Edit menu item that pastes the clipboard's text in the surrounding text's style. */
+	shellMenuPasteAndMatchStyle: "Paste and Match Style",
+	/** macOS Edit menu item that deletes the selection. */
+	shellMenuDelete: "Delete",
+	/** macOS Edit menu item that selects everything in the focused field or page. */
+	shellMenuSelectAll: "Select All",
+	/** macOS Edit menu submenu of the system's typing substitutions. */
+	shellMenuSubstitutions: "Substitutions",
+	/** macOS Substitutions submenu item that opens the system's substitutions panel. */
+	shellMenuShowSubstitutions: "Show Substitutions",
+	/** macOS Substitutions submenu toggle that turns straight quotes into curly ones while typing. */
+	shellMenuSmartQuotes: "Smart Quotes",
+	/** macOS Substitutions submenu toggle that turns double hyphens into dashes while typing. */
+	shellMenuSmartDashes: "Smart Dashes",
+	/** macOS Substitutions submenu toggle that applies the system's text replacements while typing. */
+	shellMenuTextReplacement: "Text Replacement",
+	/** macOS Edit menu submenu that reads the selection aloud. */
+	shellMenuSpeech: "Speech",
+	/** macOS Speech submenu item that starts reading the selection aloud. */
+	shellMenuStartSpeaking: "Start Speaking",
+	/** macOS Speech submenu item that stops reading aloud. */
+	shellMenuStopSpeaking: "Stop Speaking",
+	/** macOS View menu item that resets the window's zoom to 100%. */
+	shellMenuActualSize: "Actual Size",
+	/** macOS View menu item that zooms the window in. */
+	shellMenuZoomIn: "Zoom In",
+	/** macOS View menu item that zooms the window out. */
+	shellMenuZoomOut: "Zoom Out",
+	/** macOS View menu item that enters or leaves full screen. */
+	shellMenuToggleFullScreen: "Toggle Full Screen",
+	/** macOS Window menu item that minimizes the window to the Dock. */
+	shellMenuMinimize: "Minimize",
+	/** macOS Window menu item that grows or restores the window (the green button's zoom, not the page's). */
+	shellMenuZoom: "Zoom",
+	/** macOS Window menu item that brings all of the app's windows to the front. */
+	shellMenuBringAllToFront: "Bring All to Front",
 	/** macOS app menu item that opens Settings; the ellipsis marks that it opens a window. */
 	shellMenuSettings: "Settings…",
 	/** macOS Help menu item that lists the keyboard shortcuts. */
@@ -64,7 +130,8 @@ export const DESKTOP_SHELL_STRINGS = {
 	/** Dialog title when signing out while the network drive still uploads. */
 	shellSignOutUploadingTitle: "The network drive is still uploading",
 	/** Dialog body when signing out while one file still uploads from the network drive. */
-	shellSignOutUploadingDetail_one: "{{count}} file is not uploaded yet. If you sign out now, it finishes uploading when you sign in again.",
+	shellSignOutUploadingDetail_one:
+		"{{count}} file is not uploaded yet. If you sign out now, it finishes uploading when you sign in again.",
 	/** Dialog body when signing out while several files still upload from the network drive. */
 	shellSignOutUploadingDetail_other:
 		"{{count}} files are not uploaded yet. If you sign out now, they finish uploading when you sign in again.",
@@ -117,7 +184,14 @@ export const DESKTOP_SHELL_STRINGS = {
 	shellRepeat: "Repeat",
 	/** Controls menu and tray menu item that turns on or off blending the end of each track into the next one (a
 	 * crossfade; it never picks songs). */
-	shellSmoothTransitions: "Smooth Transitions"
+	shellSmoothTransitions: "Smooth Transitions",
+	/** Windows taskbar button's accessible description when one item is unread (the overlay is a dot without a number;
+	 * screen readers read this). */
+	shellBadgeUnread_one: "{{count}} unread",
+	/** Windows taskbar button's accessible description when several items are unread. */
+	shellBadgeUnread_other: "{{count}} unread",
+	/** Finder's alert when an item dragged from Filen onto Finder could not be downloaded there. */
+	shellDragOutFailed: "Filen could not download this item."
 } as const
 
 export type DesktopShellStringKey = keyof typeof DESKTOP_SHELL_STRINGS

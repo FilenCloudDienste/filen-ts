@@ -1,4 +1,4 @@
-import { avcConfigCodecString, hevcConfigCodecString, parseAvcSps, parseHevcSps, type SpsPicture } from "./codecString"
+import { avcConfigCodecString, hevcConfigCodecString, isAvcLevel, parseAvcSps, parseHevcSps, type SpsPicture } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
 import { AUDIO_HEADERS, pesStart, pesTimestamp, type ElementaryAudio } from "./probeElementary"
 import { readBytes, seconds, transferKind, uint16 } from "./probeBytes"
@@ -36,6 +36,11 @@ export interface MpegPsStream {
 	picture: SpsPicture | null
 	buffer: Uint8Array | null
 	length: number
+	// Video: where the next start code search begins in `buffer`, a header waiting for its end there (-1 for none),
+	// and whether an MPEG-1/2-only start code came first.
+	searched: number
+	pending: number
+	mpegOnly: boolean
 }
 
 type Stream = MpegPsStream
@@ -106,7 +111,22 @@ function readMap(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 }
 
 function newStream(key: number, kind: Stream["kind"], codec: MediaCodec | null, need: Stream["need"], fourcc = ""): Stream {
-	return { key, kind, codec, codecString: null, fourcc, need, ch: null, rate: null, picture: null, buffer: null, length: 0 }
+	return {
+		key,
+		kind,
+		codec,
+		codecString: null,
+		fourcc,
+		need,
+		ch: null,
+		rate: null,
+		picture: null,
+		buffer: null,
+		length: 0,
+		searched: 0,
+		pending: -1,
+		mpegOnly: false
+	}
 }
 
 // What a stream id (and, in private stream 1, its sub-stream id) carries; null for navigation, subpictures and
@@ -148,64 +168,190 @@ function classify(walk: Walk, id: number, sub: number): Stream | null {
 	return sub >= 0xa0 && sub <= 0xa7 ? newStream(key, "audio", "pcm", null) : null
 }
 
+// H.264 profile_idc values (Annex A and the SVC/MVC annexes); anything else in a map-less stream is not an SPS.
+const AVC_PROFILES = new Set([44, 66, 77, 83, 86, 88, 100, 110, 118, 122, 128, 134, 135, 138, 139, 244])
+// A sequence header with both quantiser matrices, and the start code that follows it.
+const SEQUENCE_HEADER_SPAN = 12 + 128 + 4
+
+// The first 00 00 01 at or after `from` with its code byte within `data`; -1 without one.
+function startCodeAt(data: Uint8Array, from: number): number {
+	for (let at = from; at + 3 < data.length; at++) {
+		if (data[at] === 0 && data[at + 1] === 0 && data[at + 2] === 1) {
+			return at
+		}
+	}
+
+	return -1
+}
+
+// Where the NAL unit ends: the next 00 00 00 or 00 00 01 at or after `from` (emulation prevention keeps both out of a
+// NAL unit); -1 when `data` holds none.
+function nalEndAt(data: Uint8Array, from: number): number {
+	for (let at = from; at + 2 < data.length; at++) {
+		if (data[at] === 0 && data[at + 1] === 0 && (data[at + 2] ?? 2) <= 1) {
+			return at
+		}
+	}
+
+	return -1
+}
+
+function isSpsCandidate(stream: Stream, code: number): boolean {
+	switch (stream.need) {
+		case "avc":
+			return (code & 0x1f) === 7
+		case "hevc":
+			return ((code >> 1) & 0x3f) === 33
+		case "mpeg-video":
+			// MPEG-1/2 slice start codes share the low bits; an SPS has a clear forbidden bit and a non-zero nal_ref_idc,
+			// and never follows a picture start code or a 0xB0+ code in the same stream.
+			return (code & 0x1f) === 7 && (code & 0x80) === 0 && (code & 0x60) !== 0 && !stream.mpegOnly
+		default:
+			return false
+	}
+}
+
+function resolveVideo(stream: Stream): void {
+	stream.need = null
+	stream.pending = -1
+}
+
+// The sequence header at `stream.pending`: MPEG-2 when the next start code is a sequence extension (B5). Waits for that
+// start code unless `final` or a full header's span is already buffered. False while waiting.
+function finishSequenceHeader(stream: Stream, data: Uint8Array, final: boolean): boolean {
+	const at = stream.pending
+
+	// Start code, 12-bit width and height, aspect and rate: without all 8 bytes the size would read as 0. Only a final
+	// head gets here short; skip the header and leave the stream undecided so the record stays partial.
+	if (at + 8 > data.length) {
+		if (!final) {
+			stream.searched = Math.max(stream.searched, data.length - 3)
+
+			return false
+		}
+
+		stream.pending = -1
+		stream.searched = data.length
+
+		return true
+	}
+
+	const next = startCodeAt(data, Math.max(stream.searched, at + 4))
+
+	if (next < 0 && !final && data.length - at < SEQUENCE_HEADER_SPAN) {
+		stream.searched = Math.max(stream.searched, data.length - 3)
+
+		return false
+	}
+
+	const mpeg2 = next >= 0 && data[next + 3] === 0xb5
+
+	stream.codec = mpeg2 ? "mpeg2" : "mpeg1"
+	stream.fourcc = mpeg2 ? "mp2v" : "mp1v"
+	stream.picture = {
+		width: (uint16(data, at + 4) >> 4) & 0xfff,
+		height: uint16(data, at + 5) & 0xfff,
+		bitDepth: 8,
+		par: 1,
+		transfer: null
+	}
+	resolveVideo(stream)
+
+	return true
+}
+
+// The SPS candidate at `stream.pending`, once its NAL unit ends (or `final`). A map-typed stream takes it as found; a
+// map-less one only when it parses as a plausible SPS, and otherwise scans on past it. False while waiting.
+function finishSps(stream: Stream, data: Uint8Array, final: boolean): boolean {
+	const at = stream.pending
+	const found = nalEndAt(data, Math.max(stream.searched, at + 4))
+
+	if (found < 0 && !final) {
+		stream.searched = Math.max(stream.searched, data.length - 2)
+
+		return false
+	}
+
+	const end = found < 0 ? data.length : found
+	const nal = data.subarray(at + 3, end)
+
+	if (stream.need === "hevc") {
+		const sps = parseHevcSps(nal)
+
+		stream.picture = sps
+		stream.codecString = sps === null ? null : hevcConfigCodecString("hvc1", sps)
+		resolveVideo(stream)
+
+		return true
+	}
+
+	const sps = parseAvcSps(nal)
+
+	if (
+		stream.need === "mpeg-video" &&
+		(sps === null ||
+			!AVC_PROFILES.has(sps.profile) ||
+			(sps.compatibility & 0x03) !== 0 ||
+			!isAvcLevel(sps.level) ||
+			sps.width === 0 ||
+			sps.height === 0)
+	) {
+		stream.pending = -1
+		stream.searched = found < 0 ? Math.max(at + 3, data.length - 3) : found
+
+		return true
+	}
+
+	stream.codec = "h264"
+	stream.fourcc = "avc1"
+	stream.picture = sps
+	stream.codecString = sps === null ? null : avcConfigCodecString("avc1", sps)
+	resolveVideo(stream)
+
+	return true
+}
+
 // MPEG-1/2 video by its sequence header (00 00 01 B3), MPEG-2 when a sequence extension (B5) follows; H.264 or HEVC
-// where an SPS appears instead, for a stream no map types.
-function inspectVideo(stream: Stream, data: Uint8Array): void {
-	for (let at = 0; at + 4 < data.length; at++) {
-		if (data[at] !== 0 || data[at + 1] !== 0 || data[at + 2] !== 1) {
+// where an SPS appears instead, for a stream no map types. Resumes where the last call stopped; `final` decides a
+// header whose end is not buffered.
+function inspectVideo(stream: Stream, final: boolean): void {
+	const { buffer } = stream
+
+	if (buffer === null) {
+		return
+	}
+
+	const data = buffer.subarray(0, stream.length)
+
+	while (stream.need !== null) {
+		if (stream.pending >= 0) {
+			const done = data[stream.pending + 3] === 0xb3 ? finishSequenceHeader(stream, data, final) : finishSps(stream, data, final)
+
+			if (!done) {
+				return
+			}
+
 			continue
+		}
+
+		const at = startCodeAt(data, stream.searched)
+
+		if (at < 0) {
+			stream.searched = Math.max(stream.searched, data.length - 3)
+
+			return
 		}
 
 		const code = data[at + 3] ?? 0
 
+		stream.searched = at + 3
+
 		if (stream.need === "mpeg-video" && code === 0xb3) {
-			const mpeg2 = data
-				.subarray(at + 4)
-				.some((_, i, rest) => rest[i] === 0 && rest[i + 1] === 0 && rest[i + 2] === 1 && rest[i + 3] === 0xb5)
-
-			stream.codec = mpeg2 ? "mpeg2" : "mpeg1"
-			stream.fourcc = mpeg2 ? "mp2v" : "mp1v"
-			stream.picture = {
-				width: (uint16(data, at + 4) >> 4) & 0xfff,
-				height: uint16(data, at + 5) & 0xfff,
-				bitDepth: 8,
-				par: 1,
-				transfer: null
-			}
-			stream.need = null
-
-			return
-		}
-
-		const avc = (code & 0x1f) === 7 && (stream.need === "avc" || stream.need === "mpeg-video")
-		const hevc = ((code >> 1) & 0x3f) === 33 && stream.need === "hevc"
-
-		if (avc || hevc) {
-			let end = at + 4
-
-			while (end + 2 < data.length && !(data[end] === 0 && data[end + 1] === 0 && (data[end + 2] ?? 2) <= 1)) {
-				end++
-			}
-
-			const nal = data.subarray(at + 3, end)
-
-			if (avc) {
-				const sps = parseAvcSps(nal)
-
-				stream.codec = "h264"
-				stream.fourcc = "avc1"
-				stream.picture = sps
-				stream.codecString = sps === null ? null : avcConfigCodecString("avc1", sps)
-			} else {
-				const sps = parseHevcSps(nal)
-
-				stream.picture = sps
-				stream.codecString = sps === null ? null : hevcConfigCodecString("hvc1", sps)
-			}
-
-			stream.need = null
-
-			return
+			stream.pending = at
+		} else if (stream.need === "mpeg-video" && (code === 0 || code >= 0xb0)) {
+			stream.mpegOnly = true
+		} else if (isSpsCandidate(stream, code)) {
+			stream.pending = at
 		}
 	}
 }
@@ -217,11 +363,10 @@ function inspect(stream: Stream, complete: boolean): void {
 		return
 	}
 
-	const data = buffer.subarray(0, length)
-
 	if (stream.kind === "video") {
-		inspectVideo(stream, data)
+		inspectVideo(stream, complete)
 	} else if (need !== "avc" && need !== "hevc" && need !== "mpeg-video") {
+		const data = buffer.subarray(0, length)
 		const header = AUDIO_HEADERS[need]
 
 		for (let at = 0; at + header.bytes <= length; at++) {
@@ -239,7 +384,44 @@ function inspect(stream: Stream, complete: boolean): void {
 		}
 	}
 
-	if (stream.need === null || complete || length >= buffer.length) {
+	if (stream.need === null || complete) {
+		stream.buffer = null
+	}
+}
+
+// Appends a video PES payload to the stream's window and inspects it. A full window drops what was scanned, keeping a
+// pending header and the bytes a split start code needs; a window a pending header fills is decided as it stands.
+function feedVideo(stream: Stream, buffer: Uint8Array, payload: Uint8Array): void {
+	let rest = payload
+
+	while (rest.length > 0 && stream.need !== null) {
+		if (stream.length === buffer.length) {
+			const keep = stream.pending >= 0 ? stream.pending : stream.searched
+
+			if (keep === 0) {
+				inspectVideo(stream, true)
+
+				continue
+			}
+
+			buffer.copyWithin(0, keep, stream.length)
+			stream.length -= keep
+			stream.searched -= keep
+
+			if (stream.pending >= 0) {
+				stream.pending -= keep
+			}
+		}
+
+		const take = Math.min(rest.length, buffer.length - stream.length)
+
+		buffer.set(rest.subarray(0, take), stream.length)
+		stream.length += take
+		rest = rest.subarray(take)
+		inspectVideo(stream, false)
+	}
+
+	if (stream.need === null) {
 		stream.buffer = null
 	}
 }
@@ -294,11 +476,22 @@ function feed(walk: Walk, bytes: Uint8Array, at: number, end: number): void {
 	// Private stream 1 audio: the sub-stream id, frame count and first access unit come before the frames.
 	const data = bytes.subarray(pes.data + (id === PRIVATE_1 ? 4 : 0), end)
 
-	stream.buffer ??= new Uint8Array(stream.kind === "video" ? VIDEO_PREFIX_BYTES : AUDIO_PREFIX_BYTES)
+	const buffer = (stream.buffer ??= new Uint8Array(stream.kind === "video" ? VIDEO_PREFIX_BYTES : AUDIO_PREFIX_BYTES))
 
-	const take = Math.min(data.length, stream.buffer.length - stream.length)
+	if (stream.kind === "video") {
+		feedVideo(stream, buffer, data)
 
-	stream.buffer.set(data.subarray(0, take), stream.length)
+		return
+	}
+
+	// Audio reads its first frame header from the stream's first bytes; once those are full it waits for the end.
+	const take = Math.min(data.length, buffer.length - stream.length)
+
+	if (take === 0) {
+		return
+	}
+
+	buffer.set(data.subarray(0, take), stream.length)
 	stream.length += take
 	inspect(stream, false)
 }

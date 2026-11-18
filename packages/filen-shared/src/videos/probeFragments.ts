@@ -347,14 +347,29 @@ export function fragmentEnd(moof: Uint8Array, index: Pick<FragmentIndex, "defaul
 				const run = runLayout(moof, child.dataStart, child.end)
 				const fallback = header.defaultDuration ?? index.defaults.get(header.track)?.duration ?? null
 
-				if (run === null || (run.duration === null && fallback === null)) {
+				if (run === null) {
 					complete = false
 
 					continue
 				}
 
-				for (let i = 0; i < run.count; i++) {
-					total += sampleField(moof, run, i, run.duration, fallback) ?? 0
+				// Without per-sample durations the count is bounded by nothing in the box, so it is not walked.
+				if (run.duration === null) {
+					if (fallback === null) {
+						complete = false
+
+						continue
+					}
+
+					total += run.count * fallback
+				} else {
+					for (let i = 0; i < run.count; i++) {
+						total += sampleField(moof, run, i, run.duration, null) ?? 0
+					}
+				}
+
+				if (!Number.isSafeInteger(total)) {
+					complete = false
 				}
 			}
 		}
@@ -421,17 +436,30 @@ export function locateSample(
 
 				const target = ++trunNumber === at.trun ? at.sample : 0
 
-				for (let i = 0; i < run.count; i++) {
-					const size = sampleField(moof, run, i, run.size, fallback) ?? 0
+				// Without per-sample sizes the count is bounded by nothing in the box, so the place is computed.
+				if (run.size === null) {
+					const size = fallback ?? 0
 
-					if (i + 1 === target) {
-						return size > 0 ? { offset, size } : null
+					if (target >= 1 && target <= run.count) {
+						const sampleOffset = offset + (target - 1) * size
+
+						return size > 0 && Number.isSafeInteger(sampleOffset) ? { offset: sampleOffset, size } : null
 					}
 
-					offset += size
+					offset += run.count * size
+				} else {
+					for (let i = 0; i < run.count; i++) {
+						const size = sampleField(moof, run, i, run.size, null) ?? 0
+
+						if (i + 1 === target) {
+							return size > 0 ? { offset, size } : null
+						}
+
+						offset += size
+					}
 				}
 
-				if (target !== 0) {
+				if (target !== 0 || !Number.isSafeInteger(offset)) {
 					return null
 				}
 

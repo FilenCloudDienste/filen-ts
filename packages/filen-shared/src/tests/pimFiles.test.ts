@@ -289,4 +289,16 @@ describe("readContacts", () => {
 		expect(readContacts(cards).contacts).toHaveLength(10_000)
 		expect(readContacts(phones).contacts[0]?.phones).toHaveLength(50)
 	})
+
+	it("caps display text without an ellipsis on uncut text or a split surrogate pair", () => {
+		const birthday = (value: string): string | null | undefined =>
+			readContacts(CRLF(["BEGIN:VCARD", "VERSION:4.0", "FN:Ada", `BDAY:${value}`, "END:VCARD"])).contacts[0]?.birthday
+		const exact = "1".repeat(64)
+
+		expect(birthday(exact)).toBe(exact)
+		expect(birthday(`${exact}2`)).toBe(`${exact}…`)
+		expect(birthday(`${"1".repeat(63)}😀`)).toBe(`${"1".repeat(63)}…`)
+		expect(birthday(`${"1".repeat(62)}😀`)).toBe(`${"1".repeat(62)}😀`)
+		expect(birthday(`${exact}\u0001`)).toBe(exact)
+	})
 })

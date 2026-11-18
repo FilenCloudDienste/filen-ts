@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getUuidNumber, getNameParts, comparePartsNumeric, clearNaturalSortCaches } from "@filen/shared"
+import { getUuidNumber, getNameParts, comparePartsNumeric, clearNaturalSortCaches, NATURAL_SORT_CACHE_CAP } from "@filen/shared"
 
 describe("getNameParts", () => {
 	it("splits a name into alternating string/number runs", () => {
@@ -86,5 +86,54 @@ describe("clearNaturalSortCaches", () => {
 
 		expect(after).not.toBe(before)
 		expect(after).toEqual(before)
+	})
+})
+
+describe("cache bound", () => {
+	const sortNames = (names: string[]): string[] => names.slice().sort((a, b) => comparePartsNumeric(getNameParts(a), getNameParts(b)))
+
+	it("clears the name-parts cache once it holds NATURAL_SORT_CACHE_CAP entries", () => {
+		clearNaturalSortCaches()
+
+		const first = getNameParts("bound-first")
+
+		for (let i = 1; i < NATURAL_SORT_CACHE_CAP; i++) {
+			getNameParts(`bound-${i}`)
+		}
+
+		// Exactly at the cap: nothing evicted yet
+		expect(getNameParts("bound-first")).toBe(first)
+
+		getNameParts("bound-overflow")
+
+		const after = getNameParts("bound-first")
+
+		expect(after).not.toBe(first)
+		expect(after).toEqual(first)
+	})
+
+	it("sorts identically before and after an overflow clear", () => {
+		clearNaturalSortCaches()
+
+		const names = ["img10.png", "img2.png", "IMG1.png", "a", "b10", "b9", "img2.png"]
+		const before = sortNames(names)
+
+		for (let i = 0; i <= NATURAL_SORT_CACHE_CAP; i++) {
+			getNameParts(`overflow-${i}`)
+		}
+
+		expect(sortNames(names)).toEqual(before)
+	})
+
+	it("keeps uuid numbers correct across an overflow clear", () => {
+		clearNaturalSortCaches()
+
+		const value = getUuidNumber("1a2b3c")
+
+		for (let i = 0; i <= NATURAL_SORT_CACHE_CAP; i++) {
+			getUuidNumber(`uuid-${i}`)
+		}
+
+		expect(getUuidNumber("1a2b3c")).toBe(value)
 	})
 })

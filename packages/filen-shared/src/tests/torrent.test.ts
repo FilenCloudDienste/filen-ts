@@ -146,16 +146,34 @@ describe("readTorrent", () => {
 	it("keeps the heap small for a file full of values", () => {
 		const bomb = Buffer.from(`l${"de".repeat(999_998)}e`)
 		const before = process.memoryUsage().heapUsed
-		let peak = before
 
-		try {
-			readTorrent(bomb)
-		} catch (e) {
-			peak = Math.max(peak, process.memoryUsage().heapUsed)
-			expect(e).toMatchObject({ kind: "malformed" })
-		}
+		expect(() => readTorrent(bomb)).toThrow(expect.objectContaining({ kind: "malformed" }))
+		expect(process.memoryUsage().heapUsed - before).toBeLessThan(200 * 1024 * 1024)
+	})
 
-		expect(peak - before).toBeLessThan(200 * 1024 * 1024)
+	// An emoji across a cut: the name, a tracker and a path stay well formed, so the magnet link encodes.
+	it("cuts names, trackers and paths between characters, not inside one", async () => {
+		const emoji = "\u{1F600}"
+		const name = `${"a".repeat(1022)}${emoji}${"z".repeat(10)}`
+		const tracker = `https://t.example/${"t".repeat(2028)}${emoji}${"z".repeat(10)}`
+		const bytes = bencode({
+			announce: tracker,
+			info: {
+				name,
+				"piece length": 16384,
+				pieces: new Uint8Array(20),
+				files: [{ length: 1, path: ["p".repeat(1000), "p".repeat(1000), "p".repeat(1000), `${"b".repeat(67)}${emoji}x`] }]
+			}
+		})
+		const info = readTorrent(bytes)
+		const magnet = torrentMagnet(info, await torrentHashes(new Uint8Array(bytes), info, digest))
+		const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+		expect(info.name).toBe(`${"a".repeat(1022)}…`)
+		expect(info.trackers[0]).toBe(`https://t.example/${"t".repeat(2028)}…`)
+		expect(info.files[0]?.path.endsWith(`${"b".repeat(67)}…`)).toBe(true)
+		expect(lone.test(info.files[0]?.path ?? "")).toBe(false)
+		expect(new URLSearchParams(magnet.slice("magnet:?".length)).get("dn")).toBe(info.name)
 	})
 
 	// A long name repeated into every path, or a path per file, cannot grow past the caps.

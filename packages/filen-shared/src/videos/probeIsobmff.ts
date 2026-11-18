@@ -928,8 +928,14 @@ async function walkMoov(walk: Walk, moov: Box): Promise<void> {
 			await forEachChild(walk, box, 2, async child => {
 				if (child.type === "mehd") {
 					const bytes = await payload(walk, child, 12)
+					const version = bytes[0] ?? 0
+					const duration = version === 1 ? uint64(bytes, 4) : uint32(bytes, 4)
 
-					walk.fragmentDuration = (bytes[0] ?? 0) === 1 ? uint64(bytes, 4) : uint32(bytes, 4)
+					// As in mvhd: zero (a live muxer's placeholder) and version 0's all ones are unknown, which
+					// leaves the duration to the tail's last fragment.
+					if (duration !== null && duration > 0 && (version === 1 || duration !== 0xffffffff)) {
+						walk.fragmentDuration = duration
+					}
 				} else if (child.type === "trex" && child.end - child.dataStart >= 24) {
 					const bytes = await payload(walk, child, 24)
 

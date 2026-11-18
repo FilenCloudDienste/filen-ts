@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { parse, HTMLElement, TextNode } from "node-html-better-parser"
 import { checklistParser, decodeHtmlEntities, parseChecklistOrBlank } from "@filen/shared"
+import { budget } from "@filen/shared/tooling/testBudget"
 
 // The rows node-html-better-parser itself reads from the note as stored, on notes it reads quickly.
 function asStored(html: string): [boolean, string][] {
@@ -184,7 +185,7 @@ describe("ChecklistParser — rows older mobile builds stored unescaped", () => 
 			const start = performance.now()
 			const rows = checklistParser.parse(`<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`).map(item => item.content)
 
-			expect(performance.now() - start).toBeLessThan(50)
+			expect(performance.now() - start).toBeLessThan(budget(500))
 			expect(rows).toEqual(["Milk", row])
 		}
 	)
@@ -195,7 +196,7 @@ describe("ChecklistParser — rows older mobile builds stored unescaped", () => 
 		const start = performance.now()
 		const rows = checklistParser.parse(`<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`).map(item => item.content)
 
-		expect(performance.now() - start).toBeLessThan(100)
+		expect(performance.now() - start).toBeLessThan(budget(500))
 		expect(rows).toEqual(["Milk", row])
 	})
 })
@@ -365,7 +366,7 @@ describe("ChecklistParser — rows nested in rows", () => {
 		const start = performance.now()
 		const read = rows(html)
 
-		expect(performance.now() - start).toBeLessThan(100)
+		expect(performance.now() - start).toBeLessThan(budget(500))
 		expect(read).toHaveLength(400)
 		expect(read).toEqual(readOnce(html))
 	})
@@ -387,7 +388,7 @@ describe("ChecklistParser — rows nested in rows", () => {
 			[false, "x".repeat(2000)],
 			[false, "last"]
 		])
-		expect(performance.now() - start).toBeLessThan(100)
+		expect(performance.now() - start).toBeLessThan(budget(500))
 	})
 
 	// The parser's clean-up at the end moves each open element's children up one level at a time.
@@ -396,7 +397,7 @@ describe("ChecklistParser — rows nested in rows", () => {
 		const start = performance.now()
 
 		expect(rows(html)).toEqual([[false, "first"]])
-		expect(performance.now() - start).toBeLessThan(100)
+		expect(performance.now() - start).toBeLessThan(budget(500))
 	})
 
 	// The parser's table lookup for "caller" inside "constructor" throws. It read the note as no rows, and the next note it

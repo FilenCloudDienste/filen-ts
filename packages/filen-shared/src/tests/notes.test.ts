@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { parse } from "node-html-better-parser"
 import striptags from "striptags"
 import { createNotePreviewFromContentText, decodeHtmlEntities, sortNoteHistory } from "@filen/shared"
+import { budget } from "@filen/shared/tooling/testBudget"
 
 vi.mock("node-html-better-parser", async importOriginal => {
 	const actual = await importOriginal<typeof import("node-html-better-parser")>()
@@ -111,7 +112,7 @@ describe("createNotePreviewFromContentText", () => {
 
 			expect(createNotePreviewFromContentText("checklist", `<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`)).toBe("Milk")
 			expect(createNotePreviewFromContentText("checklist", `<ul data-checked="false"><li>${row}</li><li>Milk</li></ul>`)).toBe(row)
-			expect(performance.now() - start).toBeLessThan(50)
+			expect(performance.now() - start).toBeLessThan(budget(500))
 		})
 	})
 

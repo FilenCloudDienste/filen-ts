@@ -5,7 +5,7 @@
 // JS `\b` only knows ASCII word characters even under /u, so token edges are lookarounds on \p{L}\p{N}. Underscores
 // count as separators: file names use them in place of spaces.
 
-import { MIN_TRANSPORT_STREAM_BYTES } from "./transportStream"
+import { MIN_TRANSPORT_STREAM_BYTES, mayBeTransportStream } from "./transportStream"
 import type { ProbeContainer } from "./probeTypes"
 
 export type VideoFileKind = "video" | "unsupportedVideo" | "subtitle" | "image" | "nfo" | "edl"
@@ -110,10 +110,7 @@ export function videoFileKind(extension: string, size: number, lowerStem: string
 		return null
 	}
 
-	if (
-		TRANSPORT_STREAM_EXTENSIONS.has(extension) &&
-		(size < MIN_TRANSPORT_STREAM_BYTES || lowerStem.endsWith(".d") || notTransportStream)
-	) {
+	if (TRANSPORT_STREAM_EXTENSIONS.has(extension) && (notTransportStream || !mayBeTransportStream(size, lowerStem))) {
 		return null
 	}
 
@@ -869,9 +866,10 @@ export function episodeSeriesKey(stem: string, match: EpisodeMatch): string {
 	return year > 0 && key.endsWith(` ${year}`) ? identityKey(title) : key
 }
 
-const SEASON_WORD =
-	/(?<![\p{L}\p{N}])(?:season|saison|staffel|temporada|stagione|seizoen|sezon|series|säsong|sæson|sesong|kausi)[ ._-]*(\d{1,4})(?!\p{N})/iu
-const SEASON_WORD_WHOLE = /^(?:season|saison|staffel|temporada|stagione|seizoen|sezon|series|säsong|sæson|sesong|kausi)[ ._-]*(\d{1,4})$/iu
+// One list for both patterns: a word that is a season inside a series is one outside it too.
+const SEASON_WORDS = "season|saison|staffel|temporada|stagione|seizoen|sezon|series|säsong|sæson|sesong|kausi"
+const SEASON_WORD = new RegExp(`(?<![\\p{L}\\p{N}])(?:${SEASON_WORDS})[ ._-]*(\\d{1,4})(?!\\p{N})`, "iu")
+const SEASON_WORD_WHOLE = new RegExp(`^(?:${SEASON_WORDS})[ ._-]*(\\d{1,4})$`, "iu")
 const SEASON_SHORT = /(?<![\p{L}\p{N}])s(\d{1,4})(?![\p{L}\p{N}])/iu
 const SEASON_SHORT_WHOLE = /^s(\d{1,4})$/iu
 const SEASON_SPECIALS = /^(?:season[ ._-]*)?specials?$/iu

@@ -27,8 +27,6 @@ export interface PlaybackCapabilities {
 	decodingInfoMediaSource: Readonly<Record<string, DecodingVerdict>>
 	// Targets whose `AudioEncoder.isConfigSupported` passed (wasm AAC only after native failed).
 	audioEncoders: readonly AudioTarget[]
-	// Codec names the browser can decode for transcoding; defaults to `isAudioDecodable`. AC-3, E-AC-3, DTS, WMA, MP1/MP2, AMR and ADPCM always have wasm decoders.
-	audioDecoders?: readonly string[]
 }
 
 export interface LadderVideo {
@@ -326,16 +324,10 @@ function isPcmFamily(codec: string): boolean {
 	return codec === "pcm" || codec.startsWith("pcm-") || codec === "ulaw" || codec === "alaw"
 }
 
-// Whether an audio codec name can be decoded for transcoding with the default decoder set (WebCodecs, raw PCM, wasm AC-3/E-AC-3/DTS).
+// Whether an audio codec name can be decoded for transcoding: WebCodecs, the PCM family, or one of WASM_AUDIO_DECODERS.
 // ALAC and TrueHD have no decoder.
 export function isAudioDecodable(codec: string): boolean {
 	return WASM_AUDIO_DECODERS.has(codec) || WEBCODECS_AUDIO_DECODERS.has(codec) || isPcmFamily(codec)
-}
-
-function canDecodeForTranscode(audio: LadderAudio, caps: PlaybackCapabilities): boolean {
-	return caps.audioDecoders === undefined
-		? isAudioDecodable(audio.codec)
-		: WASM_AUDIO_DECODERS.has(audio.codec) || caps.audioDecoders.includes(audio.codec)
 }
 
 // Pure playback path decision: direct (service worker range), remux to fMP4 over MSE, remux with audio transcode, video only, or unsupported.
@@ -479,7 +471,7 @@ export function decidePlayback(probe: LadderProbe, selection: LadderSelection, c
 	}
 
 	// Rung C: decode + re-encode to stereo 48 kHz.
-	if (!canDecodeForTranscode(audio, caps)) {
+	if (!isAudioDecodable(audio.codec)) {
 		return {
 			path: "video-only",
 			reasons: [...reasons, "audio-not-transcodable", ...informational],

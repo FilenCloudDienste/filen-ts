@@ -643,7 +643,7 @@ describe("drive.move", () => {
 		expect(after[after.length - 1]!.data.uuid).toBe("dir-0001")
 	})
 
-	it("destination updater trims whitespace in names before dedup comparison", async () => {
+	it("destination updater keeps a sibling whose name differs only by surrounding whitespace", async () => {
 		const item = makeDirItem({ uuid: "dir-trim-0001", name: "  notes  " })
 		const existing = makeDirItem({ uuid: "dir-existing-0001", name: "notes" })
 		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
@@ -661,8 +661,8 @@ describe("drive.move", () => {
 		const updater = destUpdate![0].updater as (prev: DriveItem[]) => DriveItem[]
 		const after = updater([existing])
 
-		// 'notes' matches trimmed '  notes  ' → removed
-		expect(after.some(i => i.data.uuid === "dir-existing-0001")).toBe(false)
+		// The server's collision key is the lowercased name only, so 'notes' and '  notes  ' are two items
+		expect(after.some(i => i.data.uuid === "dir-existing-0001")).toBe(true)
 	})
 
 	it("throws 'Invalid item type' for sharedFile", async () => {

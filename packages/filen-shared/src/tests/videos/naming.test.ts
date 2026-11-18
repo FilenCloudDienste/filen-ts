@@ -307,13 +307,7 @@ describe("parseEpisode inside a series", () => {
 	})
 
 	it.each(["Show - 2019", "Show 1080p", "Pilot", "Show 2020-13-45 Extended"])("%s → no episode", stem => {
-		const match = parseEpisode(stem, true)
-
-		expect(match === null || match.date === 0).toBe(true)
-
-		if (stem !== "Show 2020-13-45 Extended") {
-			expect(match).toBeNull()
-		}
+		expect(parseEpisode(stem, true)).toBeNull()
 	})
 })
 

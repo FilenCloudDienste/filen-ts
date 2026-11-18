@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { languageName, languagePreferenceRank, languagesMatch, normalizeLanguage, normalizeLanguageList } from "@filen/shared/videos"
+import { languageName, languagePreferenceRank, languagesMatch, normalizeLanguage } from "@filen/shared/videos"
 
 describe("normalizeLanguage", () => {
 	it.each([
@@ -96,12 +96,8 @@ describe("language helpers", () => {
 		expect(languagesMatch(null, "en")).toBe(false)
 	})
 
-	it("normalises navigator.languages, deduplicating in order", () => {
-		expect(normalizeLanguageList(["de-DE", "de", "en-US", "en", "xx", "fr"])).toEqual(["de", "en", "fr"])
-	})
-
 	it("ranks against a preference list", () => {
-		const preferred = normalizeLanguageList(["de-DE", "en-US"])
+		const preferred = ["de", "en"]
 
 		expect(languagePreferenceRank("eng", preferred)).toBe(1)
 		expect(languagePreferenceRank("ger", preferred)).toBe(0)
@@ -127,5 +123,23 @@ describe("extra names and legacy codes", () => {
 		["fas", "fa"]
 	])("%s -> %s", (input, expected) => {
 		expect(normalizeLanguage(input)).toBe(expected)
+	})
+})
+
+describe("names with diacritics", () => {
+	it.each([
+		["Español", "es"],
+		["Français", "fr"],
+		["Bokmål", "no"],
+		["Bokma\u030al", "no"],
+		["Norwegian Bokma\u030al", "no"],
+		["Português", "pt"],
+		["Português (Brasil)", "pt"]
+	])("%s -> %s", (input, expected) => {
+		expect(normalizeLanguage(input)).toBe(expected)
+	})
+
+	it("leaves a name in another script unknown", () => {
+		expect(normalizeLanguage("Ελληνικά")).toBeNull()
 	})
 })

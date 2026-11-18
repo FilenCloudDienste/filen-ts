@@ -227,7 +227,14 @@ describe("keyLabel", () => {
 		expect(chord && chordLabels(chord, true)).toEqual(["⇧", "⌘", ","])
 		expect(chord && chordLabels(chord, false, FRENCH, false)).toEqual(["Ctrl", "Shift", ";"])
 		expect(all && chordLabels(all, true)).toEqual(["⌃", "⌥", "⇧", "⌘", "K"])
-		expect(all && chordLabels(all, false, null, false)).toEqual(["Ctrl", "Ctrl", "Alt", "Shift", "K"])
+		expect(all && chordLabels(all, false, null, false)).toEqual(["Ctrl", "Alt", "Shift", "K"])
+	})
+
+	it("shows Mod and Ctrl as one key off a Mac", () => {
+		const [chord] = parseCombo("mod+ctrl+equal")
+
+		expect(chord && chordLabels(chord, false, null, false)).toEqual(["Ctrl", "="])
+		expect(chord && chordLabels(chord, true)).toEqual(["⌃", "⌘", "="])
 	})
 
 	it("names the Windows key Super on Linux", () => {

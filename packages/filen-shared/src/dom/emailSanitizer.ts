@@ -13,7 +13,7 @@
 // frame can never navigate, and the host opens it through its own gate. They are also returned, once each, labelled
 // by their visible text, for the host to list beside the frame (a script-less frame runs no listener in WebKit).
 
-import { cssValueLoads, keptCss } from "./cssLoads"
+import { cssCid, cssValueLoads, keptCss } from "./cssLoads"
 
 export interface EmailLink {
 	readonly href: string
@@ -91,7 +91,6 @@ const SVG_HREF_LOADS: ReadonlySet<string> = new Set(["image", "use", "feimage"])
 const PRESENTATION_ATTRIBUTES = ["fill", "stroke", "filter", "mask", "clip-path", "marker-start", "marker-mid", "marker-end", "cursor"]
 
 const DATA_IMAGE = /^\s*data:image\//i
-const CID = /^\s*cid:\s*<?([^>\s]+)>?\s*$/i
 const LINK_SCHEMES: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"])
 
 interface Run {
@@ -105,9 +104,9 @@ function localUrl(value: string, run: Run): string | null {
 		return value
 	}
 
-	const cid = CID.exec(value)?.[1]
+	const cid = cssCid(value)
 
-	return cid === undefined ? null : run.resolveCid(cid)
+	return cid === null ? null : run.resolveCid(cid)
 }
 
 // CSS with every chunk that could load from outside the message dropped whole and counted: a style element's rules (an

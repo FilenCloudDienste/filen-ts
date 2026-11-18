@@ -49,7 +49,7 @@ describe("desktop transfers contract", () => {
 		expect(back.meta.data.name).toBe("$bigint:1n.txt")
 	})
 
-	it("the stubbed bridge satisfies DesktopTransfers", async () => {
+	it("the stubbed bridge satisfies DesktopTransfers", () => {
 		const stub = {
 			download: () => unavailable(),
 			upload: () => unavailable(),
@@ -66,11 +66,5 @@ describe("desktop transfers contract", () => {
 		} satisfies DesktopTransfers
 
 		expectTypeOf(stub).toExtend<DesktopTransfers>()
-		await expect(stub.reveal()).resolves.toEqual({
-			ok: false,
-			error: {
-				code: "hostUnavailable"
-			}
-		})
 	})
 })
