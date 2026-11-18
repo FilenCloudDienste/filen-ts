@@ -126,4 +126,43 @@ describe("LargeTextRows", () => {
 		expect(scroller.querySelectorAll("mark").length).toBeLessThanOrEqual(2001)
 		expect(scroller.querySelector("[data-active-match]")).not.toBeNull()
 	})
+
+	it("leaves Ctrl with the wheel to the browser's zoom, and scrolls sideways with Shift", async () => {
+		const position = positionStore()
+
+		render(
+			<LargeTextRows
+				reading={reading()}
+				alt="big.log"
+				fontSize={13}
+				pattern={null}
+				jump={null}
+				linesVersion={0}
+				position={position}
+			/>
+		)
+
+		const scroller = screen.getByRole("document", { name: "big.log" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const before = position.get()
+		const zoom = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, cancelable: true, bubbles: true })
+
+		scroller.dispatchEvent(zoom)
+		expect(zoom.defaultPrevented).toBe(false)
+
+		const sideways = new WheelEvent("wheel", { deltaY: 100, shiftKey: true, cancelable: true, bubbles: true })
+
+		scroller.dispatchEvent(sideways)
+		await act(async () => {
+			await Promise.resolve()
+		})
+		expect(sideways.defaultPrevented).toBe(true)
+		expect(scroller.scrollLeft).toBe(100)
+		// Neither moved the rows.
+		expect(position.get()).toBe(before)
+	})
 })

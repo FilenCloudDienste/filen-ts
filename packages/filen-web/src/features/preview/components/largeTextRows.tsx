@@ -305,13 +305,26 @@ export function LargeTextRows({
 	}, [activeStart, activeColumn, view.generation])
 
 	const onWheel = useEffectEvent((event: WheelEvent) => {
-		// A sideways scroll stays the browser's: the rows scroll horizontally on their own.
-		if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+		// Ctrl with the wheel (a trackpad pinch) is the browser's zoom; a sideways scroll stays the browser's too: the rows
+		// scroll horizontally on their own.
+		if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
 			return
 		}
 
+		const pixels = event.deltaY * (event.deltaMode === 1 ? rowHeight : event.deltaMode === 2 ? height : 1)
+
 		event.preventDefault()
-		scrollBy(event.deltaY * (event.deltaMode === 1 ? rowHeight : event.deltaMode === 2 ? height : 1))
+
+		// Shift with the wheel scrolls sideways where the browser reports it as vertical.
+		if (event.shiftKey) {
+			const scroller = scrollerRef.current
+
+			if (scroller !== null) scroller.scrollLeft += pixels
+
+			return
+		}
+
+		scrollBy(pixels)
 	})
 
 	useEffect(() => {
