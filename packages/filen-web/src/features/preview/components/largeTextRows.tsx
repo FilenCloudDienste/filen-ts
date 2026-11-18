@@ -263,11 +263,30 @@ export function LargeTextRows({
 
 	useEffect(() => {
 		publish(view)
-
-		if (view.active !== null) {
-			scrollerRef.current?.querySelector("[data-active-match]")?.scrollIntoView({ block: "nearest", inline: "center" })
-		}
 	}, [view])
+
+	const activeStart = view.active?.start ?? null
+	const activeColumn = view.active?.column ?? null
+
+	// A match just made active is brought into view sideways, once: scrolling afterwards is the user's. Only this
+	// scroller moves (its rows are always in view vertically), never an ancestor.
+	useEffect(() => {
+		const scroller = scrollerRef.current
+		const mark = activeStart === null ? null : (scroller?.querySelector<HTMLElement>("[data-active-match]") ?? null)
+
+		if (scroller === null || mark === null) {
+			return
+		}
+
+		const gutter = mark.closest("[data-row]")?.firstElementChild?.getBoundingClientRect().width ?? 0
+		const left = mark.getBoundingClientRect().left - scroller.getBoundingClientRect().left + scroller.scrollLeft - gutter
+		const width = mark.getBoundingClientRect().width
+		const room = scroller.clientWidth - gutter
+
+		if (left < scroller.scrollLeft || left + width > scroller.scrollLeft + room) {
+			scroller.scrollLeft = Math.max(0, left - Math.max(0, (room - width) / 2))
+		}
+	}, [activeStart, activeColumn, view.generation])
 
 	const onWheel = useEffectEvent((event: WheelEvent) => {
 		// A sideways scroll stays the browser's: the rows scroll horizontally on their own.
@@ -416,6 +435,7 @@ export function LargeTextRows({
 					{rows.map(row => (
 						<div
 							key={row.start}
+							data-row
 							className="flex"
 							style={{ height: `${String(rowHeight)}px` }}
 						>
