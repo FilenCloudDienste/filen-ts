@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
+import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import {
 	declaredPixels,
@@ -154,7 +156,17 @@ describe("codestream headers", () => {
 	})
 
 	it("reads JPEG 2000's SIZ and COD, refusing subsampled components", () => {
-		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({ rows: 48, columns: 64, components: 3, bits: 12, levels: 5, x0: 0, y0: 0 })
+		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({
+			rows: 48,
+			columns: 64,
+			components: 3,
+			bits: 12,
+			levels: 5,
+			x0: 0,
+			y0: 0,
+			tiles: 1,
+			codeBlock: 64
+		})
 		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, { subsampled: true }))).toBeNull()
 
 		// One-pixel tiles over a large image: more tiles than a codestream can index.
@@ -327,6 +339,17 @@ describe("the codecs", () => {
 		).rejects.toMatchObject({
 			reason: "damaged"
 		})
+	})
+
+	it("refuses a codestream in 4 × 4 code blocks itself, before OpenJPH sets aside 430 MiB for it", async () => {
+		// The verification's hostile stream (src/tests/dicomFile.test.ts says how it was written).
+		const stream = new Uint8Array(readFileSync(join(__dirname, "fixtures", "dicom", "ht-cb4.j2c")))
+		const tags = { ...grayModule(16, 16, 8), bitsAllocated: 8 }
+
+		await expect(decodeCompressed(stream, tags, "gray", "htj2k", 10_000)).rejects.toMatchObject({ reason: "unsupported" })
+		expect(openjphModules.every(loaded => (loaded as unknown as { HEAPU8: Uint8Array }).HEAPU8.byteLength <= 50 * 1024 * 1024)).toBe(
+			true
+		)
 	})
 
 	it("asks OpenJPH for a reduced resolution by its decomposition levels alone, as its binding takes them", async () => {

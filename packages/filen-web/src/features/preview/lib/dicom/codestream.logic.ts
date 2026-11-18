@@ -18,6 +18,14 @@ export interface CodestreamHeader {
 	readonly y0: number
 }
 
+// A JPEG 2000 codestream's structure, which its decoders allocate for whatever the frame's size: its tiles, and its
+// smallest code block.
+export interface Jpeg2000Header extends CodestreamHeader {
+	readonly tiles: number
+	// The smallest code-block side any COD or COC sets, in pixels.
+	readonly codeBlock: number
+}
+
 function u16(bytes: Uint8Array, at: number): number | null {
 	const high = bytes[at]
 	const low = bytes[at + 1]
@@ -232,7 +240,7 @@ export function jpegLsHeader(bytes: Uint8Array): CodestreamHeader | null {
 // JPEG 2000 Part 1 / HTJ2K (Part 15): a raw codestream, SOC then SIZ, every component at full resolution and of one
 // depth, at most 65,535 tiles; the fewest decomposition levels any COD or COC sets, in the main header or the header
 // of any tile part in `bytes`.
-export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
+export function jpeg2000Header(bytes: Uint8Array): Jpeg2000Header | null {
 	if (u16(bytes, 0) !== 0xff4f || u16(bytes, 2) !== 0xff51) return null
 
 	const sizLength = u16(bytes, 4)
@@ -250,7 +258,11 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 	if (xtsiz === null || ytsiz === null || xtosiz === null || ytosiz === null) return null
 	if (components < 1 || sizLength !== 38 + components * 3 || xosiz >= xsiz || yosiz >= ysiz) return null
 	// A tile part's index is 16 bits: the decoders refuse more tiles (OpenJPEG before allocating its tile array).
-	if (xtsiz < 1 || ytsiz < 1 || Math.ceil((xsiz - xtosiz) / xtsiz) * Math.ceil((ysiz - ytosiz) / ytsiz) > 65_535) return null
+	if (xtsiz < 1 || ytsiz < 1) return null
+
+	const tiles = Math.ceil((xsiz - xtosiz) / xtsiz) * Math.ceil((ysiz - ytosiz) / ytsiz)
+
+	if (tiles > 65_535) return null
 
 	let bits = 0
 
@@ -271,6 +283,7 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 	// The main header's COD, and any COC (a component's own levels) after it.
 	const main = codingLevels(bytes, 4 + sizLength, components)
 	let levels = main.cod < 0 ? -1 : Math.min(main.cod, main.coc)
+	let codeBlock = main.codeBlock
 
 	// Each tile part's header may code with fewer levels still (its own COD or COC): a reduction past them fails. Tile
 	// parts are found by their lengths (Psot), as far as the bytes in hand reach.
@@ -279,6 +292,7 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 		const tile = codingLevels(bytes, part + 12, components)
 
 		levels = Math.min(levels, tile.cod < 0 ? levels : tile.cod, tile.coc)
+		codeBlock = Math.min(codeBlock, tile.codeBlock)
 
 		// Psot 0: the last tile part, up to EOC.
 		if (length === null || length < 14) break
@@ -288,18 +302,21 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 
 	if (levels < 0) return null
 
-	return { rows: ysiz - yosiz, columns: xsiz - xosiz, components, bits, levels, x0: xosiz, y0: yosiz }
+	return { rows: ysiz - yosiz, columns: xsiz - xosiz, components, bits, levels, x0: xosiz, y0: yosiz, tiles, codeBlock }
 }
 
 // At most 255 tile parts for each of 65,535 tiles.
 const MAX_TILE_PARTS = 65_535 * 255
 
 // The decomposition levels a header's marker segments from `start` set, up to its end (SOT or SOD): COD's (-1 without
-// one), the fewest of any COC's (Infinity without one), and where the header ends.
-function codingLevels(bytes: Uint8Array, start: number, components: number): { cod: number; coc: number; end: number } {
+// one), the fewest of any COC's (Infinity without one), the smallest code-block side either sets (Infinity without
+// one; each is 2^(xcb + 2) × 2^(ycb + 2), the two bytes after the levels), and where the header ends.
+function codingLevels(bytes: Uint8Array, start: number, components: number): { cod: number; coc: number; codeBlock: number; end: number } {
 	let cod = -1
 	let coc = Number.POSITIVE_INFINITY
+	let codeBlock = Number.POSITIVE_INFINITY
 	let at = start
+	const side = (levelsAt: number): number => 2 ** (Math.min(bytes[levelsAt + 1] ?? 0, bytes[levelsAt + 2] ?? 0) + 2)
 
 	for (;;) {
 		const marker = u16(bytes, at)
@@ -310,15 +327,23 @@ function codingLevels(bytes: Uint8Array, start: number, components: number): { c
 
 		if (length === null || length < 2) break
 
-		if (marker === 0xff52) cod = bytes[at + 9] ?? -1
+		if (marker === 0xff52) {
+			cod = bytes[at + 9] ?? -1
+			codeBlock = Math.min(codeBlock, side(at + 9))
+		}
 
 		// Ccoc is one byte for fewer than 257 components, else two; Scoc follows, then the levels.
-		if (marker === 0xff53) coc = Math.min(coc, bytes[at + (components < 257 ? 6 : 7)] ?? 0)
+		if (marker === 0xff53) {
+			const levelsAt = at + (components < 257 ? 6 : 7)
+
+			coc = Math.min(coc, bytes[levelsAt] ?? 0)
+			codeBlock = Math.min(codeBlock, side(levelsAt))
+		}
 
 		at += 2 + length
 	}
 
-	return { cod, coc, end: at }
+	return { cod, coc, codeBlock, end: at }
 }
 
 // Whether a codestream ends with its end marker (JPEG's EOI, JPEG 2000's EOC: FFD9), allowing the one byte a fragment is

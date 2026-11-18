@@ -20,7 +20,7 @@ import {
 	type CodestreamHeader
 } from "@/features/preview/lib/dicom/codestream.logic"
 import { DicomFrameFailure, type CompressedDecoder } from "@/features/preview/lib/dicom/frameDecode"
-import { DICOM_CODEC_INITIAL_HEAP } from "@/features/preview/lib/dicom/budget.logic"
+import { DICOM_CODEC_INITIAL_HEAP, DICOM_MIN_CODE_BLOCK } from "@/features/preview/lib/dicom/budget.logic"
 import type { DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import type { FrameSamples, SampleColor } from "@/features/preview/lib/dicom/pixels.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
@@ -271,6 +271,9 @@ async function jpeg2000(
 
 	if (header === null) unreadableHeader()
 	if (!matchesTags(header, module)) mismatch()
+	// Smaller code blocks make OpenJPH set aside hundreds of MiB whatever the frame's size.
+	if (header.codeBlock < DICOM_MIN_CODE_BLOCK)
+		throw new DicomFrameFailure("unsupported", "code blocks smaller than the decoders are given")
 	// A codestream cut short still decodes, to a frame with its last tiles or code blocks missing: refused unread.
 	if (!endsCodestream(encoded)) damaged()
 

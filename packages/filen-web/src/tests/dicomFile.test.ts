@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import {
 	DICOM_HEADER_HEAP_PER_BYTE,
@@ -18,6 +20,8 @@ import {
 	nativeFrame,
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
+import { DICOM_MIN_CODE_BLOCK, structureBytes } from "@/features/preview/lib/dicom/budget.logic"
+import { jpeg2000Header } from "@/features/preview/lib/dicom/codestream.logic"
 import { TAG_VALUE_CHARS, tagLevel, tagValue, textOf } from "@/features/preview/lib/dicom/tagTree"
 import { DICOM_WHOLE_MAX_BYTES, type DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import {
@@ -25,6 +29,7 @@ import {
 	EXPLICIT_BE,
 	EXPLICIT_LE,
 	IMPLICIT_LE,
+	HTJ2K,
 	JPEG_2000,
 	JPEG_BASELINE,
 	RLE,
@@ -45,7 +50,7 @@ import {
 
 const MIB = 1024 * 1024
 const DECODE = 1024 * MIB
-const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpeg2000"])
+const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpeg2000", "htj2k"])
 
 // A 3×2 CT frame stored 12 bits in 16, signed, with a rescale to Hounsfield units.
 function ctFile(syntax: string, extra: ReturnType<typeof text>[] = []): Uint8Array {
@@ -390,8 +395,91 @@ describe("frames", () => {
 		if (index === null) throw new Error("no fragments")
 
 		await encapsulatedFrame({ ...frame, compressed: () => Promise.resolve(decoded), budget: { ...frame.budget, settle } }, index, 0)
-		// OpenJPEG: 10 bytes a 16-bit pixel and the encoded frame, in its heap.
-		expect(settle).toHaveBeenCalledWith("jpeg2000", 8 * 10 + codestream.length + (codestream.length % 2))
+		// OpenJPEG: 10 bytes a 16-bit pixel, the encoded frame, and its one tile and code block, in its heap.
+		const structure = structureBytes("jpeg2000", { rows: 2, columns: 4, components: 1, tiles: 1, codeBlock: 64 })
+
+		expect(settle).toHaveBeenCalledWith("jpeg2000", 8 * 10 + codestream.length + (codestream.length % 2) + structure)
+	})
+
+	// Hostile codestreams of a few hundred bytes that pass every header check and grow a decoder's heap far past a
+	// phone's budget, written by the codecs' own encoders (cornerstone codec-openjph 2.4.11 and codec-openjpeg 1.3.6,
+	// flat 8-bit content): ht-cb4.j2c, 16 × 16 in 4 × 4 code blocks (OpenJPH's heap: 430 MiB); oj-siz-tiles-1.j2k and
+	// -3.j2k, 255 × 256 with SIZ patched to one-pixel tiles, 65,280 of them (OpenJPEG's: 604 and 796 MiB);
+	// ht-tile1-head.j2c, the first 4 KiB of a 255 × 256 HTJ2K stream encoded in one-pixel tiles (OpenJPH's: 1.30 GiB).
+	const hostile = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", "dicom", name)))
+	const MOBILE = 384 * MIB
+
+	it.each([
+		["oj-siz-tiles-1.j2k", JPEG_2000, 1, 604 * MIB],
+		["oj-siz-tiles-3.j2k", JPEG_2000, 3, 796 * MIB],
+		["ht-tile1-head.j2c", HTJ2K, 1, 1.3 * 1024 * MIB]
+	] as const)(
+		"counts %s's tiles in its codec's heap, refusing it on a phone before it is decoded",
+		async (name, syntax, components, measured) => {
+			const codestream = hostile(name)
+			const header = jpeg2000Header(codestream)
+
+			expect(header).toMatchObject({ rows: 256, columns: 255, components, tiles: 65_280 })
+
+			if (header === null) throw new Error("no header")
+
+			// What it is charged covers what it was measured to take.
+			expect(structureBytes(syntax === HTJ2K ? "htj2k" : "jpeg2000", header)).toBeGreaterThanOrEqual(measured)
+
+			const pixelModule =
+				components === 1
+					? grayModule({ rows: 256, columns: 255, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false })
+					: [
+							us(0x00280002, 3),
+							text(0x00280004, "CS", "RGB"),
+							us(0x00280006, 0),
+							us(0x00280010, 256),
+							us(0x00280011, 255),
+							us(0x00280100, 8),
+							us(0x00280101, 8),
+							us(0x00280102, 7),
+							us(0x00280103, 0)
+						]
+			const file = dicomFile({ transferSyntax: syntax, elements: pixelModule, pixelData: encapsulated([codestream]) })
+			const { context: frame } = context(file, MOBILE)
+			const decode = vi.fn()
+			const index = fragmentIndex(frame)
+
+			if (index === null) throw new Error("no fragments")
+
+			await expect(encapsulatedFrame({ ...frame, compressed: decode }, index, 0)).rejects.toMatchObject({ reason: "tooLarge" })
+			expect(decode).not.toHaveBeenCalled()
+		}
+	)
+
+	it("refuses code blocks under 16 pixels a side before they reach a decoder", async () => {
+		const codestream = hostile("ht-cb4.j2c")
+		const header = jpeg2000Header(codestream)
+
+		expect(header).toMatchObject({ rows: 16, columns: 16, codeBlock: 4 })
+		expect(DICOM_MIN_CODE_BLOCK).toBe(16)
+		// Were it decoded, its code blocks would be charged what OpenJPH was measured to take.
+		if (header !== null) expect(structureBytes("htj2k", header)).toBeGreaterThanOrEqual(430 * MIB)
+
+		const file = dicomFile({
+			transferSyntax: HTJ2K,
+			elements: grayModule({ rows: 16, columns: 16, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false }),
+			pixelData: encapsulated([codestream])
+		})
+		const { context: frame } = context(file, MOBILE)
+		const decode = vi.fn()
+		const index = fragmentIndex(frame)
+
+		if (index === null) throw new Error("no fragments")
+
+		await expect(encapsulatedFrame({ ...frame, compressed: decode }, index, 0)).rejects.toMatchObject({ reason: "unsupported" })
+		expect(decode).not.toHaveBeenCalled()
+
+		// A component's own COC setting 8-pixel-wide blocks under COD's 64 × 64: its xcb, 6 bytes from the end.
+		const main = siz(64, 48, 1, 8, 2, { componentLevels: [{ component: 0, levels: 2 }] })
+
+		main[main.length - 6] = 1
+		expect(jpeg2000Header(main)?.codeBlock).toBe(8)
 	})
 
 	it("reads a range only within the file, allocating nothing for a read past its end", () => {

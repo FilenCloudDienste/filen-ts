@@ -20,6 +20,43 @@ export const DICOM_CODEC_GROWTH = 1.2
 // The RGBA drawn from a frame: the ImageData and the canvas it is put into, at most the backing side squared.
 const DRAWN_BYTES_PER_PIXEL = 8
 
+const KIB = 1024
+
+// The smallest code block decoded: OpenJPH sets aside state for code blocks of its smallest size whatever the frame's
+// (measured: 4 × 4 blocks grow its heap to 430 MiB from a 199-byte stream, 8 × 8 to 108 MiB), and nothing encodes
+// smaller than 16 × 16 for medical images.
+export const DICOM_MIN_CODE_BLOCK = 16
+
+// What each tile costs in a codec's heap, measured on 255 × 256 frames of 65,280 one-pixel tiles: OpenJPEG grew to
+// 604 MiB with one component and 796 MiB with three (its per-tile coding parameters, allocated at SIZ), OpenJPH to
+// 1.30 GiB with one.
+const OPENJPEG_TILE_BYTES = 9 * KIB
+const OPENJPEG_TILE_COMPONENT_BYTES = 3 * KIB
+const OPENJPH_TILE_COMPONENT_BYTES = 24 * KIB
+// OpenJPH's code-block state, inversely as a code block's area: 430 MiB at 4 × 4 (27 MiB at 16 × 16).
+const OPENJPH_CODE_BLOCK_AREA_BYTES = 430 * MIB * 16
+// Each code block's own state, in either codec, over every resolution (a third more than the full one).
+const CODE_BLOCK_BYTES = 256
+
+export interface Jpeg2000Structure {
+	readonly rows: number
+	readonly columns: number
+	readonly components: number
+	readonly tiles: number
+	readonly codeBlock: number
+}
+
+// The heap a JPEG 2000 codestream's tiles and code blocks take in its decoder, apart from its pixels.
+export function structureBytes(decoder: "jpeg2000" | "htj2k", header: Jpeg2000Structure): number {
+	const { rows, columns, components, tiles, codeBlock } = header
+	// Every tile cuts the code blocks it crosses: at most one more of each a tile.
+	const perBlock = (Math.ceil(rows / codeBlock) * Math.ceil(columns / codeBlock) + tiles) * components * (4 / 3) * CODE_BLOCK_BYTES
+
+	if (decoder === "jpeg2000") return tiles * (OPENJPEG_TILE_BYTES + components * OPENJPEG_TILE_COMPONENT_BYTES) + perBlock
+
+	return tiles * components * OPENJPH_TILE_COMPONENT_BYTES + OPENJPH_CODE_BLOCK_AREA_BYTES / (codeBlock * codeBlock) + perBlock
+}
+
 export interface DecoderCost {
 	// Bytes a decoded pixel costs in JS: the samples the worker keeps and every copy the decode makes on the way.
 	readonly js: number
@@ -83,13 +120,15 @@ export interface BudgetInput {
 	// The codec's heap now (or the one it will start with), 0 for a decoder without one.
 	readonly heap: number
 	readonly encodedBytes: number
+	// The heap the codestream's structure takes in the codec (structureBytes), apart from its pixels.
+	readonly structure?: number
 	// The most pixels drawn: the backing side squared.
 	readonly drawnPixels: number
 }
 
 // What a frame of `pixels` decoded pixels costs on top of what is held.
 export function frameCost(cost: DecoderCost, input: BudgetInput, pixels: number): number {
-	const need = cost.wasm * pixels + cost.encodedWasm * input.encodedBytes
+	const need = heapNeed(cost, pixels, input.encodedBytes, input.structure ?? 0)
 	// A heap that has to grow for it grows past what is asked: Emscripten adds up to a fifth of the heap at a time.
 	const wasm = need > input.heap ? need * DICOM_CODEC_GROWTH : input.heap
 
@@ -121,8 +160,8 @@ export function framePixels(cost: DecoderCost, input: BudgetInput): number {
 }
 
 // The heap a frame's decode needs inside the codec.
-export function heapNeed(cost: DecoderCost, pixels: number, encodedBytes: number): number {
-	return cost.wasm * pixels + cost.encodedWasm * encodedBytes
+export function heapNeed(cost: DecoderCost, pixels: number, encodedBytes: number, structure = 0): number {
+	return cost.wasm * pixels + cost.encodedWasm * encodedBytes + structure
 }
 
 // Whether to let the codec's heap go once a frame is decoded: grown past what the next frame needs, cine not playing.

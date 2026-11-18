@@ -5,12 +5,18 @@ import {
 	nativeFrameBytes,
 	nativeFrameSpan,
 	spansLength,
-	DicomFrameError,
-	type Span
+	DicomFrameError
 } from "@/features/preview/lib/dicom/frames.logic"
-import { jpeg2000Header, matchesTags, reductionWithin } from "@/features/preview/lib/dicom/codestream.logic"
+import { jpeg2000Header, matchesTags, reductionWithin, type Jpeg2000Header } from "@/features/preview/lib/dicom/codestream.logic"
 import { decodeRle, DicomRleError } from "@/features/preview/lib/dicom/rle.logic"
-import { decoderCost, framePixels, heapNeed, type DecoderCost } from "@/features/preview/lib/dicom/budget.logic"
+import {
+	DICOM_MIN_CODE_BLOCK,
+	decoderCost,
+	framePixels,
+	heapNeed,
+	structureBytes,
+	type DecoderCost
+} from "@/features/preview/lib/dicom/budget.logic"
 import { MAX_BACKING_SIDE } from "@/features/preview/components/canvasViewerShell.logic"
 import type { FrameSamples, SampleColor } from "@/features/preview/lib/dicom/pixels.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
@@ -93,6 +99,8 @@ function tooLarge(): never {
 interface Budgeted {
 	readonly cost: DecoderCost
 	readonly pixels: number
+	// The heap a JPEG 2000 frame's tiles and code blocks take.
+	readonly structure?: number
 }
 
 // The decoded pixels left for a frame of `encodedBytes`, checked before any of them is read: none left refuses the
@@ -100,7 +108,7 @@ interface Budgeted {
 // Bytes a fragment's span takes while its frame is read (the object and its two numbers).
 const SPAN_BYTES = 48
 
-function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace: boolean, indexBytes = 0): Budgeted {
+function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace: boolean, indexBytes = 0, structure = 0): Budgeted {
 	const { module, syntax, source, budget } = context
 	const { rows, columns, samplesPerPixel, bitsAllocated } = module
 	const { decoder } = syntax
@@ -118,6 +126,7 @@ function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace
 		held: budget.held() + indexBytes,
 		heap: budget.heap(decoder),
 		encodedBytes,
+		structure,
 		drawnPixels: MAX_BACKING_SIDE * MAX_BACKING_SIDE
 	})
 
@@ -126,19 +135,35 @@ function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace
 	return { cost, pixels }
 }
 
-// A JPEG 2000 frame's main header, read from the head of its first fragment, against the tags and the budget before
-// the frame itself is read: refused when even its most reduced resolution does not fit.
-function checkReducible(context: FrameContext, spans: readonly Span[], pixels: number): void {
-	const [first] = spans
-
-	if (first === undefined) throw new DicomFrameFailure("damaged", "a frame without fragments")
-
-	const header = jpeg2000Header(context.source.read(first.offset, Math.min(first.length, DICOM_J2K_HEAD_BYTES)))
+// A JPEG 2000 codestream's header against the tags and what its decoder can be given: no code block smaller than
+// DICOM_MIN_CODE_BLOCK.
+function checkedJpeg2000(context: FrameContext, bytes: Uint8Array): Jpeg2000Header {
+	const header = jpeg2000Header(bytes)
 
 	if (header === null) throw new DicomFrameFailure("damaged", "the codestream header could not be read")
 	if (!matchesTags(header, context.module)) throw new DicomFrameFailure("mismatch", "the codestream header does not match the tags")
+	if (header.codeBlock < DICOM_MIN_CODE_BLOCK)
+		throw new DicomFrameFailure("unsupported", "code blocks smaller than the decoders are given")
 
-	if (reductionWithin(header, pixels) === null) tooLarge()
+	return header
+}
+
+// A JPEG 2000 frame's budget once its header is read: its tiles and code blocks counted in its codec's heap, refused
+// when even its most reduced resolution does not fit.
+function checkReducible(context: FrameContext, header: Jpeg2000Header, encoded: EncodedFrame): Budgeted {
+	const decoder = context.syntax.decoder === "htj2k" ? "htj2k" : "jpeg2000"
+	const structure = structureBytes(decoder, header)
+	const budgeted = checkBudget(context, encoded.bytes, encoded.inPlace, encoded.indexBytes, structure)
+
+	if (reductionWithin(header, budgeted.pixels) === null) tooLarge()
+
+	return { ...budgeted, structure }
+}
+
+interface EncodedFrame {
+	readonly bytes: number
+	readonly inPlace: boolean
+	readonly indexBytes: number
 }
 
 function rethrow(error: unknown): never {
@@ -197,18 +222,30 @@ export async function encapsulatedFrame(context: FrameContext, fragments: Fragme
 
 	try {
 		const spans = fragments.frame(index)
-		const encodedBytes = spansLength(spans)
-		// The fragment index and this frame's spans are held while it decodes too.
-		const { cost, pixels } = checkBudget(
-			context,
-			encodedBytes,
-			source.inMemory && spans.length === 1,
-			fragments.bytes + spans.length * SPAN_BYTES
-		)
+		const frame: EncodedFrame = {
+			bytes: spansLength(spans),
+			inPlace: source.inMemory && spans.length === 1,
+			// The fragment index and this frame's spans are held while it decodes too.
+			indexBytes: fragments.bytes + spans.length * SPAN_BYTES
+		}
+		let budgeted = checkBudget(context, frame.bytes, frame.inPlace, frame.indexBytes)
+		const [first] = spans
 
-		if (REDUCIBLE.has(syntax.decoder)) checkReducible(context, spans, pixels)
+		// A JPEG 2000 frame's main header, from the head of its first fragment, before the frame itself is read.
+		if (REDUCIBLE.has(syntax.decoder) && first !== undefined) {
+			budgeted = checkReducible(
+				context,
+				checkedJpeg2000(context, source.read(first.offset, Math.min(first.length, DICOM_J2K_HEAD_BYTES))),
+				frame
+			)
+		}
 
 		const encoded = joinSpans((offset, length) => source.read(offset, length), spans)
+
+		// Its tile parts may code with smaller blocks than its main header, and it may have more of them than the head held.
+		if (REDUCIBLE.has(syntax.decoder)) budgeted = checkReducible(context, checkedJpeg2000(context, encoded), frame)
+
+		const { cost, pixels } = budgeted
 
 		if (syntax.decoder === "rle") {
 			const decoded = decodeRle(encoded, { rows, columns, samplesPerPixel, bytesPerSample: bitsAllocated / 8 })
@@ -236,7 +273,7 @@ export async function encapsulatedFrame(context: FrameContext, fragments: Fragme
 
 			return decoded
 		} finally {
-			if (cost.heap) context.budget.settle(syntax.decoder, heapNeed(cost, decodedPixels, encodedBytes))
+			if (cost.heap) context.budget.settle(syntax.decoder, heapNeed(cost, decodedPixels, frame.bytes, budgeted.structure ?? 0))
 		}
 	} catch (error) {
 		return rethrow(error)
