@@ -1281,6 +1281,50 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		}
 	})
 
+	it("routes a read that names a file to files, whatever word for mail pulled the router to chats", async () => {
+		for (const message of [
+			"¿Qué dice el primer correo de avisos.mbox?",
+			"Was steht in der Nachricht Rechnung_Oktober.eml?",
+			"打ち合わせ.emlのメールには何が書いてありますか？",
+			"Summarize the message in notes.txt."
+		]) {
+			const { result } = await turn({
+				model: new ScriptedModel({ route: "chats read", steps: ["Done."] }),
+				executor: new FakeExecutor({ items: [] }),
+				message
+			})
+
+			expect(result.route).toBe("files")
+		}
+	})
+
+	it("keeps chats for a change that names a file, and for a read that names only addresses", async () => {
+		for (const [route, message] of [
+			["chats change", "Tell Tom that avisos.mbox is ready"],
+			["chats read", "What did carlos.ruiz@example.com write about https://filen.io?"],
+			["chats read", "Was hat Tom z.B. über die 1.240 EUR geschrieben?"]
+		] as const) {
+			const { result } = await turn({
+				model: new ScriptedModel({ route, steps: ["Done."] }),
+				executor: new FakeExecutor({ items: [] }),
+				message
+			})
+
+			expect(result.route).toBe("chats")
+		}
+	})
+
+	it("routes a short follow-up to a request that named a file to files", async () => {
+		const { result } = await turn({
+			model: new ScriptedModel({ route: "chats read", steps: ["Done."] }),
+			executor: new FakeExecutor({ items: [] }),
+			message: "¿Y el segundo correo?",
+			history: [{ user: "¿Qué dice el primer correo de avisos.mbox?", reply: "Su extracto está disponible." }]
+		})
+
+		expect(result.route).toBe("files")
+	})
+
 	it("counts wide characters twice when it decides a follow-up is short", async () => {
 		const model = new ScriptedModel({ route: ["chats read", "notes read"], steps: ["Summary."] })
 

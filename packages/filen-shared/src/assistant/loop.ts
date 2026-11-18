@@ -578,6 +578,25 @@ export function parseRoute(raw: string): { route: AssistantRoute | null; intent:
 	}
 }
 
+// A file name with its extension: something before the last dot, then 2 to 5 ASCII letters and digits with at least
+// one letter, ending the word ("avisos.mbox?", "打ち合わせ.emlには"). Read per whitespace-separated word, so an email
+// address or a web address is never one; "z.B.", "1.240" and "v2.0" are not either.
+const FILE_NAME = /[^.]\.(?=[0-9]*[A-Za-z])[A-Za-z0-9]{2,5}(?![A-Za-z0-9])/
+const WEB_ADDRESS = /@|:\/\/|^www\./i
+
+function namesFile(text: string): boolean {
+	return text.split(/\s+/).some(word => !WEB_ADDRESS.test(word) && FILE_NAME.test(word))
+}
+
+type ParsedRoute = ReturnType<typeof parseRoute>
+
+// A request that names a file (avisos.mbox, Rechnung_Oktober.eml, notas.txt) reads that file, whatever word for mail
+// or a message ("correo", "Nachricht") pulled the router to chats: decided on the user's own words, as the route is.
+// A change stays with chats, where the file is what a message to someone is about.
+function fileRoute(routed: ParsedRoute, userWords: readonly string[]): ParsedRoute {
+	return routed.route === "chats" && routed.intent === "read" && userWords.some(namesFile) ? { route: "files", intent: "read" } : routed
+}
+
 // Every handle a tool result exposes, with the name or title next to it.
 function handlesIn(value: unknown, found = new Map<string, string>()): Map<string, string> {
 	if (Array.isArray(value)) {
@@ -925,7 +944,7 @@ export async function runAssistantTurn({
 		routed = await routeBy(previous)
 	}
 
-	const { route, intent } = parseRoute(routed.content)
+	const { route, intent } = fileRoute(parseRoute(routed.content), beside && previous !== undefined ? [message, previous] : [message])
 
 	onEvent({
 		type: "route",
