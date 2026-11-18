@@ -13,6 +13,7 @@ import {
 	THIRD_PARTY_NOTICES_SDK_VERSION
 } from "@/features/settings/lib/thirdPartyNotices"
 import { noticeLacksCopyright, noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
+import { NPM_LICENSE_OVERRIDES, NPM_NOT_SHIPPED } from "@/features/settings/lib/thirdPartyNpmRules"
 import ffmpegManifest from "@/vendor/ffmpeg-decoders/manifest.json"
 import libopenmptManifest from "@/vendor/libopenmpt/manifest.json"
 import wllamaManifest from "@/vendor/wllama/manifest.json"
@@ -38,7 +39,7 @@ let lockEntries: number
 // covers it.
 beforeAll(() => {
 	installed = listInstalledNpm("@filen/web")
-	lockIds = new Set(installed.map(entry => `${entry.name}@${entry.version}`))
+	lockIds = new Set(installed.filter(entry => !NPM_NOT_SHIPPED.has(entry.name)).map(entry => `${entry.name}@${entry.version}`))
 	lockEntries = installed.length
 }, 60_000)
 
@@ -62,6 +63,21 @@ function multiVersionNames(): string[] {
 }
 
 describe("third-party notices drift guard", () => {
+	it("lists no package that ships in no build, and names an override's license", () => {
+		const payload = thirdPartyNoticesPayload()
+
+		for (const name of NPM_NOT_SHIPPED) {
+			expect(
+				payload.notices.some(notice => notice.name === name),
+				name
+			).toBe(false)
+		}
+
+		for (const [name, license] of NPM_LICENSE_OVERRIDES) {
+			expect(payload.notices.find(notice => notice.name === name)?.license, name).toBe(license)
+		}
+	})
+
 	it("covers exactly the installed npm packages that ship", () => {
 		// The drift guard, and the reason this file exists: add, remove or bump a runtime dependency without
 		// re-running the generator and this fails, naming what went missing or appeared. No tolerance.

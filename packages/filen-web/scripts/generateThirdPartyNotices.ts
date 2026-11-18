@@ -22,6 +22,7 @@ import {
 import type { AssistantModelManifest } from "../src/features/assistant/runtime/manifest"
 import { QWEN35_4B } from "../src/features/assistant/runtime/models"
 import { CLDR_WINDOWS_ZONES_COMMIT } from "./windowsZonesSource"
+import { NPM_LICENSE_OVERRIDES, NPM_NOT_SHIPPED } from "../src/features/settings/lib/thirdPartyNpmRules"
 
 /**
  * Emits the third-party attribution payload the Third party notices dialog renders.
@@ -97,11 +98,14 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 	for (const { name, version, dir } of installed) {
 		const id = `${name}@${version}`
 
-		if (seen.has(id) || dir === null) {
+		if (seen.has(id) || dir === null || NPM_NOT_SHIPPED.has(name)) {
 			continue
 		}
 
-		const entry = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY)
+		const described = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY)
+		const license = NPM_LICENSE_OVERRIDES.get(name)
+		// A package naming no license keeps the text it ships; the override only names that text's SPDX id.
+		const entry = described !== null && license !== undefined && described.license === "UNKNOWN" ? { ...described, license } : described
 
 		// Marked seen only once actually described: an id pnpm reports but no directory can supply stays
 		// undescribed and fails the payload's drift guard loudly rather than silently.
