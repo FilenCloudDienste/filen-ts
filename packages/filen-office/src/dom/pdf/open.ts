@@ -139,6 +139,17 @@ function hasInThreadWorker(): boolean {
 	return typeof worker === "object" && worker !== null && typeof Reflect.get(worker, "WorkerMessageHandler") === "function"
 }
 
+// WebKit outside Apple platforms (WPE, WebKitGTK: Epiphany, Playwright's Linux WebKit): pdf.js's worker decodes images
+// onto an OffscreenCanvas there, which that port keeps about 1.2 GB of for the first 16-megapixel page and 90 MB for each
+// after, past the document's destroy. Safari's port and Chromium do not.
+export function isNonAppleWebKit(userAgent: string): boolean {
+	return /AppleWebKit\//u.test(userAgent) && !/Chrome|Chromium|Edg/u.test(userAgent) && !/Macintosh|iPhone|iPad|iPod/u.test(userAgent)
+}
+
+function userAgent(): string {
+	return typeof navigator === "object" ? navigator.userAgent : ""
+}
+
 export function pdfDocumentParams(
 	source: PdfSource,
 	assets: PdfAssets,
@@ -180,6 +191,8 @@ export function pdfDocumentParams(
 
 	if (options.maxImageSize !== undefined) params.maxImageSize = options.maxImageSize
 	if (options.canvasMaxAreaInBytes !== undefined) params.canvasMaxAreaInBytes = options.canvasMaxAreaInBytes
+	// Images reach the page as pixels instead: 0.7 GB at page 20 of 16-megapixel pages, not over 3 GB, and faster.
+	if (isNonAppleWebKit(userAgent())) params.isOffscreenCanvasSupported = false
 
 	return params
 }

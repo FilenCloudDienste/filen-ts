@@ -8,6 +8,7 @@ import {
 	type PdfJs,
 	type PdfRangeTransport
 } from "../dom/pdf/index"
+import { isNonAppleWebKit } from "../dom/pdf/open"
 
 interface FakeTask {
 	params: unknown
@@ -135,6 +136,49 @@ describe("pdf document parameters", () => {
 			canvasMaxAreaInBytes: 1024
 		})
 		expect(params.useWorkerFetch).toBeUndefined()
+	})
+
+	it("turns OffscreenCanvas off on WebKit outside Apple platforms only", () => {
+		const agents = {
+			linuxWebKit: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+			epiphany:
+				"Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 Epiphany/605.1.15",
+			macSafari:
+				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+			iPhone: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+			iPad: "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+			linuxChrome: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+			headlessChrome: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/142.0.0.0 Safari/537.36",
+			windowsEdge:
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+			linuxFirefox: "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0"
+		}
+		const offscreen = (userAgent: string): boolean | undefined => {
+			vi.stubGlobal("navigator", { userAgent })
+
+			try {
+				return pdfDocumentParams({ kind: "bytes", bytes: new Uint8Array(1) }, { kind: "none" }, {}).isOffscreenCanvasSupported
+			} finally {
+				vi.unstubAllGlobals()
+			}
+		}
+
+		expect(isNonAppleWebKit(agents.linuxWebKit)).toBe(true)
+		expect(isNonAppleWebKit(agents.epiphany)).toBe(true)
+		expect(offscreen(agents.linuxWebKit)).toBe(false)
+
+		for (const agent of [
+			agents.macSafari,
+			agents.iPhone,
+			agents.iPad,
+			agents.linuxChrome,
+			agents.headlessChrome,
+			agents.windowsEdge,
+			agents.linuxFirefox
+		]) {
+			expect(isNonAppleWebKit(agent)).toBe(false)
+			expect(offscreen(agent)).toBeUndefined()
+		}
 	})
 
 	it("turns streaming and read-ahead off together for a ranged source", () => {

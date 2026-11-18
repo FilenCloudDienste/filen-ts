@@ -112,6 +112,7 @@ export interface PdfDocumentParams {
 	readonly useSystemFonts?: boolean
 	readonly maxImageSize?: number
 	readonly canvasMaxAreaInBytes?: number
+	readonly isOffscreenCanvasSupported?: boolean
 	readonly enableXfa?: boolean
 	readonly verbosity?: number
 	// A pdf.js PDFWorker the host keeps: destroying the document leaves it running.
