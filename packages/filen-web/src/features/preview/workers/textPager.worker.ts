@@ -236,6 +236,12 @@ const api = {
 		return await withLines(await rowsBefore(source, encoding, end, count), Number.POSITIVE_INFINITY, line)
 	},
 	lines: (): PagerLines => lines(reading().index),
+	// The 1-based line holding `offset`, when the counted prefix reaches it.
+	lineOf: async (offset: number): Promise<{ readonly line: number | null; readonly frontier: number }> => {
+		const { source, index } = reading()
+
+		return { line: offset < index.frontier ? await index.lineAt(source, offset) : null, frontier: index.frontier }
+	},
 	// Counts every line; stopped by stop() or another scan.
 	countLines: async (onProgress: Progress): Promise<PagerLines> => {
 		const signal = startScan()

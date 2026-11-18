@@ -15,6 +15,7 @@ import type { PagerRowView } from "@/features/preview/workers/textPager.worker"
 import {
 	appendRows,
 	nextLine,
+	numberRows,
 	placedWindow,
 	prependRows,
 	scrollWindow,
@@ -255,7 +256,8 @@ export function LargeTextRows({
 		fill(view)
 	}, [view, height, rowHeight])
 
-	// The rows held, asked for again once lines are counted further, so their numbers show.
+	// The rows held, numbered once lines are counted further: only their numbers change, never their cuts, so nothing
+	// moves.
 	const renumber = useEffectEvent(() => {
 		const first = view.rows[0]
 		const seq = view.generation
@@ -265,12 +267,12 @@ export function LargeTextRows({
 		}
 
 		void pager
-			.run(remote => remote.after(first.start, first.continuation, view.rows.length, null))
+			.run(remote => remote.lineOf(first.start))
 			.then(
-				rows => {
+				({ line, frontier }) => {
 					setView(previous =>
-						previous.generation === seq && previous.rows[0]?.start === first.start && rows.length === previous.rows.length
-							? { ...previous, rows }
+						previous.generation === seq && previous.rows[0]?.start === first.start
+							? { ...previous, rows: numberRows(previous.rows, line, frontier) }
 							: previous
 					)
 				},

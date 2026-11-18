@@ -120,6 +120,14 @@ describe("textPager search", () => {
 		])
 	})
 
+	it("is not capped at exactly the match cap", async () => {
+		const { end, matches } = await search(utf8("ab ".repeat(MATCH_CAP)), "ab")
+
+		expect(end).toBe("done")
+		expect(matches.count).toBe(MATCH_CAP)
+		expect(matches.capped).toBe(false)
+	})
+
 	it("stops at the match cap", async () => {
 		const bytes = utf8("ab ".repeat(MATCH_CAP + 5))
 		const { end, matches } = await search(bytes, "ab")

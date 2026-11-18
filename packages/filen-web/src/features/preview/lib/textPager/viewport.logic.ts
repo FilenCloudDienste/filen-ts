@@ -93,6 +93,20 @@ export function appendRows<Row extends WindowRow>(window: PagerWindow<Row>, more
 	return { rows: drop === 0 ? rows : rows.slice(drop), top: window.top - drop, shift: window.shift }
 }
 
+// The rows with their lines from `first` (the first row's), each kept only where the counted prefix (to `frontier`)
+// reaches it. The rows themselves (their cuts) stay as they are.
+export function numberRows<Row extends WindowRow>(rows: readonly Row[], first: number | null, frontier: number): Row[] {
+	let line = first
+
+	return rows.map(row => {
+		const numbered = { ...row, line: line !== null && row.start < frontier ? line : null }
+
+		line = line === null ? null : line + (row.breaks ? 1 : 0)
+
+		return numbered
+	})
+}
+
 // The line the row after `row` is on.
 export function nextLine(row: WindowRow): number | null {
 	return row.line === null ? null : row.line + (row.breaks ? 1 : 0)

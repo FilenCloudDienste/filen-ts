@@ -15,18 +15,22 @@ export class MatchList {
 	private readonly offsets = new Float64Array(MATCH_CAP)
 	private readonly lines = new Float64Array(MATCH_CAP)
 	private length = 0
+	private overflowed = false
 
 	public get count(): number {
 		return this.length
 	}
 
+	// A match past the cap was found: there are more than `count`. Exactly MATCH_CAP of them is not capped.
 	public get capped(): boolean {
-		return this.length === MATCH_CAP
+		return this.overflowed
 	}
 
 	// false once full.
 	public push(offset: number, line: number): boolean {
 		if (this.length === MATCH_CAP) {
+			this.overflowed = true
+
 			return false
 		}
 

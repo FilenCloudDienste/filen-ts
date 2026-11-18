@@ -48,6 +48,7 @@ const remote = vi.hoisted(() => ({
 			? Promise.reject(new Error("range port closed"))
 			: Promise.resolve({ rows: [row(0, "first line", null), row(11, "second line", null)], focus: 0, column: 0 }),
 	after: () => Promise.resolve([]),
+	lineOf: () => Promise.resolve({ line: 1, frontier: 100 }),
 	before: () => Promise.resolve([]),
 	lines: () => Promise.resolve({ lines: 1, complete: false, frontier: 0 }),
 	stop: () => Promise.resolve(),

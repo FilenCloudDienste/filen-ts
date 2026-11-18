@@ -3,6 +3,7 @@ import {
 	appendRows,
 	maxHeldRows,
 	nextLine,
+	numberRows,
 	placedWindow,
 	positionStore,
 	prependRows,
@@ -91,5 +92,18 @@ describe("textPager viewport", () => {
 		unsubscribe()
 		store.set(20)
 		expect([calls, store.get()]).toEqual([1, 20])
+	})
+
+	it("numbers rows from the first one's line, within the counted prefix only, keeping the rows", () => {
+		const held = [
+			{ start: 0, end: 10, breaks: false, line: null },
+			{ start: 10, end: 20, breaks: true, line: null },
+			{ start: 20, end: 30, breaks: true, line: null },
+			{ start: 30, end: 40, breaks: true, line: null }
+		]
+		const numbered = numberRows(held, 7, 25)
+
+		expect(numbered.map(row => row.line)).toEqual([7, 7, 8, null])
+		expect(numbered.map(row => row.start)).toEqual(held.map(row => row.start))
 	})
 })

@@ -24,6 +24,7 @@ function reading(rows: readonly PagerRowView[] = ROWS, column = 151): TextPagerR
 	const remote = {
 		locate: (): Promise<PagerRows> => Promise.resolve({ rows, focus: 5, column }),
 		after: () => Promise.resolve([]),
+		lineOf: () => Promise.resolve({ line: 1, frontier: SIZE }),
 		before: () => Promise.resolve([])
 	}
 
@@ -233,5 +234,45 @@ describe("LargeTextRows", () => {
 			await new Promise(resolve => setTimeout(resolve, 150))
 		})
 		expect(position.get()).toBeGreaterThan(released)
+	})
+
+	it("numbers the rows it holds once lines are counted, without moving them", async () => {
+		const props = {
+			reading: reading(),
+			alt: "big.log",
+			fontSize: 13,
+			pattern: null,
+			jump: null,
+			position: positionStore()
+		}
+		const view = render(
+			<LargeTextRows
+				{...props}
+				linesVersion={0}
+			/>
+		)
+		const scroller = screen.getByRole("document", { name: "big.log" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const before = [...scroller.querySelectorAll("[data-row]")].map(each => each.textContent)
+
+		view.rerender(
+			<LargeTextRows
+				{...props}
+				linesVersion={1}
+			/>
+		)
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const after = [...scroller.querySelectorAll("[data-row]")].map(each => each.textContent)
+
+		// The same rows, now each led by its line number (row 5 of the held rows is the first shown: line 6).
+		expect(after).toHaveLength(before.length)
+		expect(after[0]).toBe(`6${before[0] ?? ""}`)
 	})
 })
