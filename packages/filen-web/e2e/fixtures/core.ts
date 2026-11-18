@@ -168,7 +168,7 @@ export const CORE_SCENARIOS = scenarioModule(
 		"e2e-arc-gate-stop.tar.gz": { generate: gateStopTarGz },
 		"e2e-arc-nested.zip": { buffer: nestedZip(), mimeType: "application/zip" },
 		"e2e-arc-nested-deep.zip": { buffer: nestedDeepZip(), mimeType: "application/zip" },
-		// 257 MiB of zeros built off disk, a few hundred KiB once deflated.
+		// About 260 KiB declaring a 257 MiB inner zip, streamed together (archiveFixtures.ts).
 		"e2e-arc-nested-huge.zip": { generate: nestedHugeZip },
 		"e2e-arc-nested-locked.zip": { buffer: nestedLockedZip(), mimeType: "application/zip" },
 		"e2e-arc-nested.tar.gz": { generate: nestedTarGz },

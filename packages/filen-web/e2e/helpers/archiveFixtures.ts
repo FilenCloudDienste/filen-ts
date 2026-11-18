@@ -1,4 +1,4 @@
-import { crc32, deflateRawSync, gzipSync, zstdCompressSync } from "node:zlib"
+import { constants as zlibConstants, crc32, deflateRawSync, gzipSync, zstdCompressSync } from "node:zlib"
 
 // Deterministic archive builders for the archive e2e specs: the shared fixture tree's archives
 // (setup/fixtures.setup.ts uploads them) and the small ones the write specs upload into their own
@@ -457,14 +457,89 @@ export function nestedDeepZip(): Buffer {
 	return buildZip([{ name: "l2.zip", data: l2, method: "stored" }])
 }
 
-// An inner zip of more than 256 MiB (its zeros stored), deflated in the outer one to a few hundred KiB: opening it
-// inflates all of it, which is confirmed first.
+// An inner zip of more than 256 MiB (zeros stored in it), deflated in the outer one, whose entry declares the inner zip's
+// full size uncompressed: opening it would inflate all of it, which is confirmed first. Built without ever holding the
+// inner zip: its zeros are one 1 MiB chunk deflated once and repeated (each piece a non-final deflate block ending in a
+// sync flush, which a decoder reads as one stream), its CRC-32 carried through the same chunk. Uploaded, it is about
+// 260 KiB; building it holds about 1 MiB.
 export const NESTED_HUGE_ZEROS_BYTES = 257 * 1024 * 1024
 
+const ZERO_CHUNK_BYTES = 1024 * 1024
+
 export function nestedHugeZip(): Buffer {
-	return buildZip([
-		{ name: "huge.zip", data: buildZip([{ name: "zeros.bin", data: Buffer.alloc(NESTED_HUGE_ZEROS_BYTES), method: "stored" }]) }
+	const zeros = Buffer.alloc(ZERO_CHUNK_BYTES)
+	const chunks = NESTED_HUGE_ZEROS_BYTES / ZERO_CHUNK_BYTES
+	const piece = (bytes: Buffer): Buffer => deflateRawSync(bytes, { finishFlush: zlibConstants.Z_SYNC_FLUSH })
+	let zerosCrc = 0
+
+	for (let i = 0; i < chunks; i++) {
+		zerosCrc = crc32(zeros, zerosCrc)
+	}
+
+	// The inner zip around its one stored file, the file's bytes left out.
+	const { head, tail } = storedZipShell("zeros.bin", NESTED_HUGE_ZEROS_BYTES, zerosCrc)
+	const innerSize = head.length + NESTED_HUGE_ZEROS_BYTES + tail.length
+	let innerCrc = crc32(head)
+
+	for (let i = 0; i < chunks; i++) {
+		innerCrc = crc32(zeros, innerCrc)
+	}
+
+	innerCrc = crc32(tail, innerCrc)
+
+	const zeroPiece = piece(zeros)
+	const deflated = Buffer.concat([
+		piece(head),
+		...new Array<Buffer>(chunks).fill(zeroPiece),
+		piece(tail),
+		// The final block, empty.
+		deflateRawSync(Buffer.alloc(0))
 	])
+	const outer = storedZipShell("huge.zip", innerSize, innerCrc, { method: 8, compressedSize: deflated.length })
+
+	return Buffer.concat([outer.head, deflated, outer.tail])
+}
+
+// A one-file zip's local header and its central directory plus end record, around `size` bytes of entry data the
+// caller writes between them (stored unless `method` 8, then `compressedSize` of deflate).
+function storedZipShell(
+	fileName: string,
+	size: number,
+	crc: number,
+	options: { method: 0 | 8; compressedSize: number } = { method: 0, compressedSize: size }
+): { head: Buffer; tail: Buffer } {
+	const name = Buffer.from(fileName, "utf8")
+	const header = Buffer.alloc(30)
+
+	header.writeUInt32LE(0x04034b50, 0)
+	header.writeUInt16LE(20, 4)
+	header.writeUInt16LE(UTF8_FLAG, 6)
+	header.writeUInt16LE(options.method, 8)
+	header.writeUInt16LE(DOS_TIME, 10)
+	header.writeUInt16LE(DOS_DATE, 12)
+	header.writeUInt32LE(crc >>> 0, 14)
+	header.writeUInt32LE(options.compressedSize, 18)
+	header.writeUInt32LE(size, 22)
+	header.writeUInt16LE(name.length, 26)
+
+	const record = Buffer.alloc(46)
+
+	record.writeUInt32LE(0x02014b50, 0)
+	record.writeUInt16LE(MADE_BY_UNIX, 4)
+	header.copy(record, 6, 4, 26)
+	record.writeUInt16LE(name.length, 28)
+	record.writeUInt32LE((MODE_FILE * 0x10000) >>> 0, 38)
+
+	const directory = Buffer.concat([record, name])
+	const end = Buffer.alloc(22)
+
+	end.writeUInt32LE(0x06054b50, 0)
+	end.writeUInt16LE(1, 8)
+	end.writeUInt16LE(1, 10)
+	end.writeUInt32LE(directory.length, 12)
+	end.writeUInt32LE(header.length + name.length + options.compressedSize, 16)
+
+	return { head: Buffer.concat([header, name]), tail: Buffer.concat([directory, end]) }
 }
 
 // A zip stored under ZipCrypto (ZIPCRYPTO_PASSWORD) in a zip that lists without a password.
