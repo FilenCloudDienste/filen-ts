@@ -100,14 +100,14 @@ async function unlease(id: string): Promise<void> {
 	await api.closeArchiveReader(`${id}-reader`)
 }
 
-function entryOrigin(reader: string, access: "whole" | "mapped" = "whole"): ByteOrigin {
+function entryOrigin(reader: string, access: "whole" | "mapped" = "whole", anon = false): ByteOrigin {
 	return {
 		kind: "entry",
 		reader,
 		entry: { archive: "d0000000-0000-0000-0000-000000000000", index: 2 },
 		size: 10,
 		access,
-		anon: false,
+		anon,
 		cacheKey: "x#2"
 	}
 }
@@ -185,6 +185,20 @@ describe("sdk worker origin range ports", () => {
 
 	it("refuses an entry whose reader is closed", async () => {
 		await expect(openPort(entryOrigin("closed"), "o4")).rejects.toThrow("closed")
+	})
+
+	it("cancels the reads of a lease taken on a reader closed already, on a public link's surface too", async () => {
+		await api.leaseArchiveEntry("late", "never-opened", PLAN, NO_EVENTS)
+
+		for (const anon of [false, true]) {
+			await expect(
+				api.downloadOriginBytes(entryOrigin("late", "whole", anon), anon ? "anon" : "authed", 10, "o6")
+			).rejects.toMatchObject({
+				kind: "Cancelled"
+			})
+		}
+
+		await api.releaseArchiveEntry("late")
 	})
 })
 

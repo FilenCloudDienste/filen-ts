@@ -34,6 +34,8 @@ export interface EntryReaderEvents {
 // An entry lease (an origin's `reader`): one entry of an archive reader, read whole through it.
 export interface EntryReaderRecord {
 	readonly anon: boolean
+	// Its reader was closed before the lease (sign-out, the archive left): every read is a cancel.
+	readonly closed?: boolean
 	// The entry's whole decoded bytes, checked against its checksum where the archive has one, under `signal`.
 	read(entry: ArchiveEntryId, size: number, signal: AbortSignal): Promise<Uint8Array>
 	// Bytes `start..end` of a `mapped` or `seekable` entry, unchecked (its checksum covers it whole), read through the
@@ -165,6 +167,10 @@ export function originSource(o: ByteOrigin, deps: OriginSourceDeps): OriginSourc
 
 			if (record === undefined) {
 				throw new Error("archive reader is closed")
+			}
+
+			if (record.closed === true) {
+				throw released()
 			}
 
 			// A reader opened on one client is never read through the other.

@@ -219,6 +219,83 @@ describe("archive readers: read-ahead", () => {
 		expect(model.reader.readEntries).toHaveBeenCalledTimes(2)
 	})
 
+	it("shares one read of an entry asked twice at once, each caller with its own buffer", async () => {
+		const model = modelReader("solidRar")
+		const { readers } = readersOver(model)
+		const [first, second] = await Promise.all([readPage(readers, 4), readPage(readers, 4)])
+
+		expect(model.cost.passes).toBe(1)
+		expect(first.length).toBe(size(4))
+		expect(second.length).toBe(size(4))
+		expect(second.buffer === first.buffer).toBe(false)
+	})
+
+	it("after a failed pass lets the earliest waiter lead, whose pass the later ones join; no two passes run at once", async () => {
+		const model = modelReader("solidRar")
+		const firstIndexes: number[] = []
+		let running = 0
+		let most = 0
+		const pass = model.reader.readEntries.getMockImplementation()
+
+		model.reader.readEntries.mockImplementation(async params => {
+			running += 1
+			most = Math.max(most, running)
+			firstIndexes.push(Math.min(...params.entries.map(entry => entry.index)))
+
+			try {
+				if (firstIndexes.length === 1) {
+					await Promise.resolve()
+
+					throw new Error("network")
+				}
+
+				return await (pass?.(params) ?? Promise.resolve(EMPTY_PASS))
+			} finally {
+				running -= 1
+			}
+		})
+
+		const { readers } = readersOver(model)
+		// The leader at page 0; then waiters on pages 3 and 1, the later page asking first.
+		const results = await Promise.allSettled([readPage(readers, 0), readPage(readers, 3), readPage(readers, 1)])
+
+		expect(results.map(result => result.status)).toEqual(["rejected", "fulfilled", "fulfilled"])
+		expect(firstIndexes).toEqual([0, 1])
+		expect(most).toBe(1)
+	})
+
+	it("keeps what is held ahead and what a pass brings within the budget together, during the pass", async () => {
+		const model = modelReader("solidRar")
+		const small = 12 * MiB
+		const readers = createArchiveReaders({
+			open: () => Promise.resolve({ reader: model.asReader, release: vi.fn() }),
+			aheadBudget: () => small
+		})
+		const store = solidListing()
+		const signal = new AbortController().signal
+		const pass = model.reader.readEntries.getMockImplementation()
+		const peaks: number[] = []
+
+		model.reader.readEntries.mockImplementation(params => {
+			const asked = params.entries[0]?.index ?? 0
+			const coming = params.entries.filter(entry => entry.index !== asked).reduce((sum, entry) => sum + size(entry.index), 0)
+
+			peaks.push(readers.heldBytes("a") + readers.heldBytes("b") + coming)
+
+			return pass?.(params) ?? Promise.resolve(EMPTY_PASS)
+		})
+		readers.register("a", ARCHIVE, false, undefined)
+		readers.register("b", ARCHIVE, false, "pw")
+		await readers.readWhole("a", idOf(0), size(0), entryReadPlan(store, 0, true, small), EVENTS, signal)
+		await readers.readWhole("b", idOf(20), size(20), entryReadPlan(store, 20, true, small), EVENTS, signal)
+		await readers.readWhole("a", idOf(30), size(30), entryReadPlan(store, 30, true, small), EVENTS, signal)
+
+		expect(peaks).toHaveLength(3)
+		for (const peak of peaks) {
+			expect(peak).toBeLessThanOrEqual(small)
+		}
+	})
+
 	it("lets a waiter leave by its own cancel", async () => {
 		const model = modelReader("solidRar")
 		const hold = Promise.withResolvers<undefined>()
@@ -367,6 +444,50 @@ describe("archive readers: lifetime", () => {
 		await expect(read).rejects.toThrow()
 		expect(release).toHaveBeenCalledTimes(1)
 		await expect(readPage(readers, 3)).rejects.toMatchObject({ name: "Cancelled" })
+	})
+
+	it("shuts an opening every waiter left that resolves after a newer one: the newer reader is the one kept", async () => {
+		const stale = modelReader("solidRar")
+		const fresh = modelReader("solidRar")
+		const openings = [
+			Promise.withResolvers<{ reader: ReaderLike; release: () => void }>(),
+			Promise.withResolvers<{ reader: ReaderLike; release: () => void }>()
+		]
+		const releases = [vi.fn(), vi.fn()]
+		let opened = 0
+		const readers = createArchiveReaders({
+			open: () => (openings[opened++] ?? openings[1])?.promise ?? Promise.reject(new Error("no opening")),
+			aheadBudget: () => BUDGET
+		})
+
+		readers.register("r", ARCHIVE, false, undefined)
+
+		const leaving = new AbortController()
+		const first = readers.list("r", null, () => undefined, { abortSignal: leaving.signal })
+
+		await vi.waitFor(() => {
+			expect(opened).toBe(1)
+		})
+		leaving.abort(new Error("left"))
+		await expect(first).rejects.toThrow("left")
+
+		const second = readers.list("r", null, () => undefined, { abortSignal: new AbortController().signal })
+
+		await vi.waitFor(() => {
+			expect(opened).toBe(2)
+		})
+		fresh.reader.list.mockResolvedValue({})
+		openings[1]?.resolve({ reader: fresh.asReader, release: releases[1] ?? vi.fn() })
+		await expect(second).resolves.toBeDefined()
+		// The SDK finished the first before it saw the cancel.
+		openings[0]?.resolve({ reader: stale.asReader, release: releases[0] ?? vi.fn() })
+		await vi.waitFor(() => {
+			expect(releases[0]).toHaveBeenCalledTimes(1)
+		})
+		expect(stale.reader.close).toHaveBeenCalledTimes(1)
+		expect(fresh.reader.close).not.toHaveBeenCalled()
+		await readers.list("r", null, () => undefined, { abortSignal: new AbortController().signal })
+		expect(fresh.reader.list).toHaveBeenCalledTimes(2)
 	})
 
 	it("shares one opening among its waiters: one leaving cancels nothing for the rest, and each hears its progress", async () => {

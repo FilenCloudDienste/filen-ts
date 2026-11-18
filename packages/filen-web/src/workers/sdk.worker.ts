@@ -3165,12 +3165,14 @@ const api = {
 	// One entry of the reader `readerId`, read whole as `plan` says, named by the origins `id` builds; `events` hears
 	// its reads (a Comlink proxy). On a closed reader its reads fail as cancelled.
 	leaseArchiveEntry(id: string, readerId: string, plan: EntryReadPlan, events: EntryReaderEvents): void {
-		const anon = archiveReaders.anon(readerId) ?? false
+		const anon = archiveReaders.anon(readerId)
 
 		entryLeaseReaders.set(id, readerId)
 		archiveReaders.lease(readerId)
 		registerEntryReader(id, {
-			anon,
+			// A reader closed already reads nothing, on either client: a cancel, not a client mismatch.
+			anon: anon ?? false,
+			closed: !archiveReaders.has(readerId),
 			range: (entry, start, end, signal) => archiveReaders.readRange(readerId, entry, start, end, signal),
 			read: (entry, size, signal) =>
 				archiveReaders.readWhole(
