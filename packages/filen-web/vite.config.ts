@@ -12,6 +12,12 @@ import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plug
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
 import { threeAssets } from "./vite/three-assets-plugin"
 import { ocrAssets } from "./vite/ocr-assets-plugin"
+import {
+	mermaidFrameAsset,
+	MERMAID_FRAME_ASSET_GLOB,
+	MERMAID_FRAME_ASSET_PATTERN,
+	MERMAID_FRAME_HEADERS
+} from "./vite/mermaid-frame-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
 import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
@@ -21,12 +27,17 @@ import { isAllowedModelOrigin } from "./src/features/assistant/runtime/manifest"
 // Vite's header options only reach the responses it serves with a body: the 304 Not Modified that
 // answers a revalidation goes out bare, from the preview's static handler and the dev server's module
 // transform alike, and WebKit then refuses a worker script revalidated on reload for want of COEP.
-// Every response carries them, as the deployment must (README § Deployment). Dev sends server.headers.
+// Every response carries them, as the deployment must (README § Deployment). Dev sends server.headers. The preview
+// also sends the diagram frame's script its own resource policy, as the deployment does (deployHeaders).
 function responseHeaders(preview: OutgoingHttpHeaders): Plugin {
 	const setAll =
 		(headers: OutgoingHttpHeaders): Connect.NextHandleFunction =>
-		(_request, response, next) => {
-			for (const [name, value] of Object.entries(headers)) {
+		(request, response, next) => {
+			const path = (request.url ?? "").split("?")[0] ?? ""
+
+			for (const [name, value] of Object.entries(
+				MERMAID_FRAME_ASSET_PATTERN.test(path) ? { ...headers, ...MERMAID_FRAME_HEADERS } : headers
+			)) {
 				if (value !== undefined) {
 					response.setHeader(name, value)
 				}
@@ -51,7 +62,8 @@ function responseHeaders(preview: OutgoingHttpHeaders): Plugin {
 // the unhashed SDK artifacts can drop the immutable caching /assets/* grants: their names never change,
 // so they must be revalidated on every load or a client pairs new code with an old SDK. The office fonts'
 // licence files are unhashed too (the fonts themselves are content-hashed under /assets/), as are the
-// spellcheck dictionaries' (the engine and dictionaries are hashed under /assets/spellcheck/).
+// spellcheck dictionaries' (the engine and dictionaries are hashed under /assets/spellcheck/). The diagram frame's script
+// alone may be embedded cross-origin (vite/mermaid-frame-plugin.ts).
 // FILEN_WEB_NOINDEX keeps the staging deployment out of search indexes.
 function deployHeaders(headers: Record<string, string>): Plugin {
 	const rule = (path: string, lines: string[]) => [path, ...lines.map(line => `  ${line}`)].join("\n")
@@ -77,7 +89,11 @@ function deployHeaders(headers: Record<string, string>): Plugin {
 						...SDK_ARTIFACTS.map(name => rule(`/assets/${name}`, revalidate)),
 						rule("/assets/snippets/*", revalidate),
 						rule(`${OFFICE_FONTS_BASE}*`, revalidate),
-						rule(`${SPELLCHECK_BASE}*`, revalidate)
+						rule(`${SPELLCHECK_BASE}*`, revalidate),
+						rule(
+							MERMAID_FRAME_ASSET_GLOB,
+							Object.entries(MERMAID_FRAME_HEADERS).flatMap(([name, value]) => [`! ${name}`, `${name}: ${value}`])
+						)
 					].join("\n") + "\n"
 			})
 		}
@@ -187,6 +203,17 @@ const previewHeaderSet = (mode: string): Record<string, string> => ({
 	"Permissions-Policy": "camera=(), microphone=(), geolocation=()"
 })
 
+const DEV_HEADERS: Record<string, string> = {
+	...COI_HEADERS,
+	// Dev has no built sw.js, so registerSW points the worker at its SOURCE module and lets this
+	// server transform it — which scopes it to /src/sw/ by default. The app needs root scope to
+	// see its own download route, and a worker may only claim a scope above its own script when
+	// the script's response says so.
+	"Service-Worker-Allowed": "/"
+}
+
+const PREVIEW_FILE_HEADERS = Object.fromEntries(Object.entries(DEV_HEADERS).filter(([name]) => name !== "Cross-Origin-Resource-Policy"))
+
 export default defineConfig(({ mode }) => ({
 	plugins: [
 		responseHeaders(previewHeaderSet(mode)),
@@ -217,6 +244,7 @@ export default defineConfig(({ mode }) => ({
 		pdfjsAssets(),
 		threeAssets(),
 		ocrAssets(),
+		mermaidFrameAsset(),
 		assistantModelDev()
 	],
 	// Workspace packages are compiled from source, so their bare imports resolve from their own directory,
@@ -270,21 +298,17 @@ export default defineConfig(({ mode }) => ({
 		rolldownOptions: { output: { codeSplitting: false } }
 	},
 	server: {
-		headers: {
-			...COI_HEADERS,
-			// Dev has no built sw.js, so registerSW points the worker at its SOURCE module and lets this
-			// server transform it — which scopes it to /src/sw/ by default. The app needs root scope to
-			// see its own download route, and a worker may only claim a scope above its own script when
-			// the script's response says so.
-			"Service-Worker-Allowed": "/"
-		},
+		headers: DEV_HEADERS,
 		// The desktop shell's dev mode (filen-desktop scripts/dev.ts) loads the page from its own filen:// origin,
 		// which the HMR client would otherwise take as this server's host.
 		...(process.env["FILEN_DESKTOP_HMR_PORT"] === undefined
 			? {}
 			: { hmr: { protocol: "ws", host: "localhost", clientPort: Number(process.env["FILEN_DESKTOP_HMR_PORT"]) } })
 	},
-	// The preview headers are set by responseHeaders() (plugins above), not preview.headers.
+	// The preview headers are set by responseHeaders() (plugins above), not preview.headers. The preview's static
+	// handler re-sends preview.headers (server.headers unless set) on every file it serves, after that middleware, so
+	// they leave out the resource policy that middleware sets per path.
+	preview: { headers: PREVIEW_FILE_HEADERS },
 	// Each worker is one file too, for the same reason as the page's bundle.
 	// Rolldown keeps `/* @__PURE__ */` annotations in minified output unless told otherwise, and Vite only says so
 	// for the page build: ~70 KB of comments across the workers.

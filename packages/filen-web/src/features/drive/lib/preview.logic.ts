@@ -57,6 +57,7 @@ export type PreviewCategory =
 	| "calendar"
 	| "contact"
 	| "binaryInfo"
+	| "mermaid"
 	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): a file previewed from a whole buffer
@@ -537,6 +538,21 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindBinaryInfo",
 		assistantKind: null
 	},
+	// A diagram drawn in a frame that loads nothing (mermaidFrame.ts), its source a toggle away.
+	mermaid: {
+		streamed: false,
+		ranged: false,
+		bufferCap: TEXT_MAX_BYTES,
+		aboveCap: "refuse",
+		entry: "whole",
+		anon: "buffer",
+		textFamily: true,
+		editsAsText: true,
+		photo: false,
+		pager: true,
+		labelKey: "drivePreviewKindMermaid",
+		assistantKind: "document"
+	},
 	// The download-only fallback: no viewer, ever.
 	other: {
 		streamed: false,
@@ -629,6 +645,7 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 	[["ics", "ical", "ifb"], "calendar"],
 	// A `.vcf` is a vCard until a read of its first line finds other text (a Variant Call Format file).
 	[["vcf", "vcard"], "contact"],
+	[["mmd", "mermaid"], "mermaid"],
 	// Executables and disk images, shown by their headers (an installer package, `.msi`, stays a download).
 	[["exe", "dll", "sys", "efi", "scr", "ocx", "cpl", "elf", "so", "ko", "axf", "dylib", "dmg", "iso"], "binaryInfo"],
 	[["txt", "log"], "text"],

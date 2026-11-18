@@ -106,3 +106,22 @@ describe("MarkdownView math (opt-in)", () => {
 		expect(html("$x$\nnext", undefined, MATH)).toBe('<p><code class="language-math math-inline">x</code>\nnext</p>')
 	})
 })
+
+describe("MarkdownView mermaid fences (opt-in)", () => {
+	const DIAGRAMS = "```mermaid\ngraph TD; A-->B\n```\n\n```js\nx\n```\n\n- ```Mermaid\n  pie\n  ```"
+
+	it("numbers each mermaid fence, nested ones included, and nothing else", () => {
+		expect(html(DIAGRAMS, undefined, { mermaid: true })).toBe(
+			'<pre><code class="language-mermaid" data-mermaid="0">graph TD; A--&gt;B\n</code></pre>\n' +
+				'<pre><code class="language-js">x\n</code></pre>\n' +
+				'<ul>\n<li>\n<pre><code class="language-Mermaid" data-mermaid="1">pie\n</code></pre>\n</li>\n</ul>'
+		)
+	})
+
+	it("leaves fences unmarked without the extension, and composes with math", () => {
+		expect(html(DIAGRAMS)).not.toContain("data-mermaid")
+		expect(html("$x$\n\n```mermaid\npie\n```", undefined, { math: true, mermaid: true })).toBe(
+			'<p><code class="language-math math-inline">x</code></p>\n<pre><code class="language-mermaid" data-mermaid="0">pie\n</code></pre>'
+		)
+	})
+})

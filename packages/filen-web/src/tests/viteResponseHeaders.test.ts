@@ -53,6 +53,8 @@ beforeAll(() => {
 	mkdirSync(join(root, "dist"))
 	writeFileSync(join(root, "worker.js"), "self.postMessage(1)\n")
 	writeFileSync(join(root, "dist", "worker.js"), "self.postMessage(1)\n")
+	mkdirSync(join(root, "dist", "assets"))
+	writeFileSync(join(root, "dist", "assets", "mermaid-frame-0123abcd.js"), "void 0\n")
 })
 
 afterAll(() => {
@@ -99,7 +101,8 @@ describe("response headers on 304 Not Modified", () => {
 			logLevel: "silent",
 			plugins: [await responseHeadersPlugin("build")],
 			build: { outDir: "dist" },
-			preview: { host: "127.0.0.1", port: 0, open: false }
+			// The config's own file headers, which the static handler sends after the plugin's.
+			preview: { headers: (await config("build")).preview?.headers ?? {}, host: "127.0.0.1", port: 0, open: false }
 		})
 
 		const { port } = previewServer.httpServer.address() as AddressInfo
@@ -110,5 +113,12 @@ describe("response headers on 304 Not Modified", () => {
 		for (const name of [...ISOLATION, "content-security-policy"]) {
 			expect(second.headers.get(name), name).not.toBeNull()
 		}
+
+		// The diagram frame's script alone may be embedded cross-origin (its frame's origin is opaque).
+		const frame = await revalidate(`http://127.0.0.1:${String(port)}`, "/assets/mermaid-frame-0123abcd.js")
+
+		expect(frame.first.headers.get("cross-origin-resource-policy")).toBe("cross-origin")
+		expect(frame.second.headers.get("cross-origin-resource-policy")).toBe("cross-origin")
+		expect(second.headers.get("cross-origin-resource-policy")).toBe("same-origin")
 	})
 })

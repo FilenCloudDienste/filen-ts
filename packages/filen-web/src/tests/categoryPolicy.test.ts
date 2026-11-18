@@ -92,6 +92,7 @@ const LEGACY_LABELS: Record<PreviewCategory, string | null> = {
 	calendar: "drivePreviewKindCalendar",
 	contact: "drivePreviewKindContact",
 	binaryInfo: "drivePreviewKindBinaryInfo",
+	mermaid: "drivePreviewKindMermaid",
 	other: null
 }
 const LEGACY_TRANSCODED = new Set(["mka", "ac3", "eac3", "ec3", "dts"])
@@ -290,7 +291,8 @@ const ADDED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set([
 	"subtitle",
 	"calendar",
 	"contact",
-	"binaryInfo"
+	"binaryInfo",
+	"mermaid"
 ])
 const CATEGORIES = (Object.keys(CATEGORY_POLICY) as PreviewCategory[]).filter(category => !ADDED_CATEGORIES.has(category))
 const DIRECT: EntryAccess = { type: "direct", packedBytes: 10n }
@@ -706,6 +708,23 @@ describe("the calendar and contact rows", () => {
 		expect(previewType(fileNamed("card", 1024n, "text/directory"))).toBe("contact")
 		expect(previewKindLabelKey("calendar")).toBe("drivePreviewKindCalendar")
 		expect(previewKindLabelKey("contact")).toBe("drivePreviewKindContact")
+	})
+})
+
+describe("the mermaid row", () => {
+	// A downloads-only type before: it opens wherever text opens, up to the text cap, and saves as text.
+	it("opens diagram sources as text does and saves them as text", () => {
+		for (const name of ["flow.mmd", "flow.mermaid"]) {
+			expect(previewType(fileNamed(name, 1024n)), name).toBe("mermaid")
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES)), name).toBe(true)
+			expect(canPreview(fileNamed(name, TEXT_MAX_BYTES + 1n)), name).toBe(false)
+			expect(anonPreviewability(fileNamed(name, TEXT_MAX_BYTES)), name).toBe("previewable")
+			expect(canOpenEntry(storeOf([{ path: name, access: DIRECT, size: Number(TEXT_MAX_BYTES) }]), 0), name).toBe(true)
+		}
+
+		expect(isTextCategory("mermaid")).toBe(true)
+		expect(CATEGORY_POLICY.mermaid).toMatchObject({ textFamily: true, editsAsText: true, assistantKind: "document", pager: true })
+		expect(previewKindLabelKey("mermaid")).toBe("drivePreviewKindMermaid")
 	})
 })
 

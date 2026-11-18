@@ -97,6 +97,7 @@ import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
 import { NotebookViewer } from "@/features/preview/components/notebookViewer"
 import { ContactViewer } from "@/features/preview/components/contactViewer"
+import { MermaidViewer } from "@/features/preview/components/mermaidViewer"
 import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { EbookViewer } from "@/features/preview/components/ebookViewer"
@@ -2749,7 +2750,7 @@ interface PreviewBodyProps {
 // pdf/docx each own their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
-// case's TextViewer, and the source-mode editors of the "markdown", "subtitle", "calendar" and "contact" cases —
+// case's TextViewer, and the source-mode editors of the "markdown", "subtitle", "calendar", "contact" and "mermaid" cases —
 // every other category ignores them.
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
@@ -2974,6 +2975,19 @@ function PreviewBody({
 		case "contact":
 			return (
 				<ContactViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					onTextState={onTextState}
+					readAs={readAs}
+					contentRef={contentRef}
+				/>
+			)
+		case "mermaid":
+			return (
+				<MermaidViewer
 					item={item}
 					alt={alt}
 					editable={editable}

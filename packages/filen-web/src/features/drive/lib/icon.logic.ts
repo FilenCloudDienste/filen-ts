@@ -33,6 +33,8 @@ export function fileIconKey(name: string, mime?: string | null, uuid?: string, v
 	const { extension, kind, source } = fileTypeKind(name, mime, uuid, verdict)
 	const key = sharedFileIconKey(extension, ICON_SETS, source === "sniff" && kind !== null)
 
-	// Code extensions only this app's table adds (`.mts`, `.cts`).
-	return key === "other" && previewCategoryForExtension(extension) === "code" ? "code" : key
+	// Code extensions only this app's table adds (`.mts`, `.cts`), and diagram sources the shared table lacks (`.mermaid`).
+	const category = previewCategoryForExtension(extension)
+
+	return key === "other" && (category === "code" || category === "mermaid") ? "code" : key
 }

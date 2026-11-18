@@ -38,6 +38,8 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("film.srt")).toBe("txt")
 		expect(fileIconKey("inbox.mbox")).toBe("txt")
 		expect(fileIconKey("tracks.gpx")).toBe("code")
+		expect(fileIconKey("flow.mmd")).toBe("code")
+		expect(fileIconKey("flow.mermaid")).toBe("code")
 		expect(fileIconKey("lib.aar")).toBe("archive")
 		expect(fileIconKey("book.epub")).toBe("doc")
 		expect(fileIconKey("part.stl")).toBe("cad")

@@ -7,11 +7,21 @@ import { spellcheckAssets } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
 import { threeAssets } from "./vite/three-assets-plugin"
 import { ocrAssets } from "./vite/ocr-assets-plugin"
+import { mermaidFrameAsset } from "./vite/mermaid-frame-plugin"
 import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
 export default defineConfig({
 	// virtual:office-fonts (the viewer's font URLs), virtual:office-hyphenation, virtual:spellcheck-assets,
-	// virtual:pdfjs-assets, virtual:three-assets and virtual:ocr-assets resolve in tests as in the app.
-	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets(), encodingDetectAsset(), pdfjsAssets(), threeAssets(), ocrAssets()],
+	// virtual:pdfjs-assets, virtual:three-assets, virtual:ocr-assets and virtual:mermaid-frame resolve in tests as in the app.
+	plugins: [
+		officeFonts(),
+		officeHyphenation(),
+		spellcheckAssets(),
+		encodingDetectAsset(),
+		pdfjsAssets(),
+		threeAssets(),
+		ocrAssets(),
+		mermaidFrameAsset()
+	],
 	// The same single copies the app build resolves (vite.config.ts): tests render @filen/office's components.
 	resolve: { alias: [{ find: "@", replacement: new URL("./src", import.meta.url).pathname }, MUPDF_WASM_ALIAS], dedupe: SINGLETONS },
 	test: {

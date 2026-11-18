@@ -270,6 +270,32 @@ const NOTEBOOK_TEXT = JSON.stringify({
 	]
 })
 
+// Mermaid diagrams a preview must draw without contacting anything: a directive that would style with a remote image and
+// turn on HTML labels (stripped, the diagram drawn), an image shape on a Filen host and a link (both refused), a
+// timeline and a formula label (drawn). A .mmd file holds one plain diagram.
+export const MERMAID_REMOTE = [
+	"https://cdn.filen.io/e2e-never-fetched-shape.png",
+	"https://cdn.filen.io/e2e-never-fetched-css.png"
+] as const
+export const MERMAID_DRAWN = 3
+export const MERMAID_REFUSED = 2
+
+const fence = (body: string): string => `\`\`\`mermaid\n${body}\n\`\`\``
+
+export const MERMAID_MARKDOWN_TEXT = [
+	"# Diagrams",
+	fence(
+		`%%{init: {"themeCSS": ".node rect { fill: url(${MERMAID_REMOTE[1]}) }", "htmlLabels": true, "securityLevel": "loose"}}%%\nflowchart TD\n  A[Start] --> B[Done]`
+	),
+	fence(`flowchart TD\n  A@{ img: "${MERMAID_REMOTE[0]}", label: "Shape", pos: "t", w: 60, h: 60 }\n  A --> B`),
+	fence('flowchart TD\n  A --> B\n  click A href "https://example.com/e2e-never-opened"'),
+	fence("timeline\n  title Releases\n  2025 : first\n  2026 : second : third"),
+	fence('flowchart LR\n  A["$$x^2 + 1$$"] --> B'),
+	""
+].join("\n\n")
+
+export const MERMAID_FILE_TEXT = "flowchart LR\n  Read --> Draw --> Show\n"
+
 export const TEXT_SCENARIOS = scenarioModule(
 	{
 		"preview-text-legacy": ["cyrillic-notes.txt"],
@@ -279,7 +305,8 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"preview-pim": ["e2e-team.ics", "e2e-people.vcf", "e2e-variants.vcf"],
 		"preview-binary-info": ["e2e-tool", "e2e-setup.exe", "e2e-disc.iso"],
 		"preview-email": ["e2e-message.eml"],
-		"preview-notebook": ["e2e-analysis.ipynb"]
+		"preview-notebook": ["e2e-analysis.ipynb"],
+		"preview-mermaid": ["e2e-diagrams.md", "e2e-flow.mmd"]
 	},
 	() => ({
 		"cyrillic-notes.txt": { buffer: encodeSingleByte(LEGACY_CYRILLIC_TEXT, "windows-1251"), mimeType: "text/plain" },
@@ -298,6 +325,8 @@ export const TEXT_SCENARIOS = scenarioModule(
 		"e2e-setup.exe": { buffer: peBytes(), mimeType: "application/x-msdownload" },
 		"e2e-disc.iso": { buffer: isoBytes(), mimeType: "application/x-iso9660-image" },
 		"e2e-message.eml": { buffer: Buffer.from(EMAIL_TEXT, "utf8"), mimeType: "message/rfc822" },
-		"e2e-analysis.ipynb": { buffer: Buffer.from(NOTEBOOK_TEXT, "utf8"), mimeType: "application/x-ipynb+json" }
+		"e2e-analysis.ipynb": { buffer: Buffer.from(NOTEBOOK_TEXT, "utf8"), mimeType: "application/x-ipynb+json" },
+		"e2e-diagrams.md": { buffer: Buffer.from(MERMAID_MARKDOWN_TEXT, "utf8"), mimeType: "text/markdown" },
+		"e2e-flow.mmd": { buffer: Buffer.from(MERMAID_FILE_TEXT, "utf8"), mimeType: "application/octet-stream" }
 	})
 )

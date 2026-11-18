@@ -17,7 +17,10 @@ import {
 	ISO_VOLUME,
 	TORRENT_INFOHASH,
 	TORRENT_TRACKER,
-	TORRENT_WEB_SEED
+	TORRENT_WEB_SEED,
+	MERMAID_DRAWN,
+	MERMAID_REFUSED,
+	MERMAID_REMOTE
 } from "./fixtures/text"
 
 // Reading text-family files, from the shared fixture tree only: a legacy codepage named by the encoding detector (its
@@ -34,6 +37,7 @@ const [CALENDAR, CONTACTS, VARIANTS] = FIXTURE_FILES["preview-pim"]
 const [TOOL, SETUP, DISC] = FIXTURE_FILES["preview-binary-info"]
 const [MESSAGE] = FIXTURE_FILES["preview-email"]
 const [NOTEBOOK] = FIXTURE_FILES["preview-notebook"]
+const [DIAGRAMS, FLOW] = FIXTURE_FILES["preview-mermaid"]
 const NEVER_RUN = "Never run. Read from the file's headers only."
 const NO_PREVIEW = "Preview isn't available for this file type yet."
 
@@ -303,6 +307,62 @@ test("a message shows its own picture and attachment, and nothing remote it name
 	await close(page)
 
 	expect(remote).toEqual([])
+	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
+	expect(cspViolations).toEqual([])
+})
+
+test("Mermaid diagrams draw in their frame and nothing they name is ever fetched; a .mmd file opens on its diagram", async ({
+	page,
+	context
+}) => {
+	const cspViolations = trackCspViolations(page)
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
+	const remoteRequests: string[] = []
+
+	context.on("request", request => {
+		if ((MERMAID_REMOTE as readonly string[]).includes(request.url())) {
+			remoteRequests.push(request.url())
+		}
+	})
+
+	await bootTo(page)
+
+	const listbox = await gotoFixture(page, "preview-mermaid")
+	const dialog = page.getByRole("dialog")
+
+	await itemRow(listbox, DIAGRAMS).dblclick()
+	await expect(dialog.getByRole("heading", { name: "Diagrams", level: 1 })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+
+	const surface = page.getByRole("document", { name: DIAGRAMS })
+
+	// The frame's first start parses mermaid: drawn within the viewer budget.
+	await expect(surface.getByRole("img", { name: "Mermaid diagram" })).toHaveCount(MERMAID_DRAWN, { timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(surface.getByText("This diagram uses images or links, which previews don't load.")).toHaveCount(MERMAID_REFUSED)
+	// Each drawing is a picture of the frame's SVG, never markup in the page.
+	expect(
+		await surface
+			.getByRole("img", { name: "Mermaid diagram" })
+			.evaluateAll(images => images.map(image => image.getAttribute("src")?.slice(0, 5)))
+	).toEqual(Array.from({ length: MERMAID_DRAWN }, () => "blob:"))
+	await expect(surface.locator("svg foreignObject")).toHaveCount(0)
+
+	await surface.getByRole("button", { name: "Show source" }).first().click()
+	await expect(surface.getByText(MERMAID_REMOTE[0], { exact: false })).toBeVisible()
+
+	// The frame: sandboxed with scripts only.
+	await expect(page.locator('iframe[sandbox="allow-scripts"]')).toHaveCount(1)
+	await close(page)
+	// Closing the viewer removes its frame.
+	await expect(page.locator('iframe[sandbox="allow-scripts"]')).toHaveCount(0)
+
+	await itemRow(listbox, FLOW).dblclick()
+	await expect(dialog.getByRole("img", { name: "Mermaid diagram" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: "Source", exact: true }).click()
+	await expect(dialog.locator(".cm-line").first()).toHaveText("flowchart LR")
+	await close(page)
+
+	expect(remoteRequests).toEqual([])
 	expect(foreign).toEqual([])
 	expect(cspBlocked).toEqual([])
 	expect(cspViolations).toEqual([])

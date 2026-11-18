@@ -40,6 +40,16 @@ describe("headersFor", () => {
 		expect(headersFor(joined, "/x")["vary"]).toBe("a, b")
 	})
 
+	it("replaces the resource policy on the one asset a wildcard rule names", () => {
+		const corp = parseHeaders(
+			"/*\n  Cross-Origin-Resource-Policy: same-origin\n/assets/mermaid-frame-*.js\n  ! Cross-Origin-Resource-Policy\n  Cross-Origin-Resource-Policy: cross-origin\n"
+		)
+
+		expect(headersFor(corp, "/assets/mermaid-frame-0123abcd.js")["cross-origin-resource-policy"]).toBe("cross-origin")
+		expect(headersFor(corp, "/assets/index-abc.js")["cross-origin-resource-policy"]).toBe("same-origin")
+		expect(headersFor(corp, "/assets/mermaid-frame-0123abcd.js.map")["cross-origin-resource-policy"]).toBe("same-origin")
+	})
+
 	it("does not match a path rule against a longer path", () => {
 		expect(headersFor(rules, "/assets/sdk-rs.js.map")["cache-control"]).toBe("public, max-age=31536000, immutable")
 	})

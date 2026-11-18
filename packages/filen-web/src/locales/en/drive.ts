@@ -690,6 +690,8 @@ export const drive = {
 	drivePreviewKindContact: "Contacts",
 	/** Info dialog "Kind" value — an executable or a disk image (exe, dll, so, dylib, dmg, iso) */
 	drivePreviewKindBinaryInfo: "Program or disk image",
+	/** Info dialog "Kind" value — a Mermaid diagram file (mmd, mermaid) */
+	drivePreviewKindMermaid: "Mermaid diagram",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

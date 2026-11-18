@@ -6,12 +6,15 @@ import { MathFormula } from "@/features/preview/components/mathFormula"
 import { HighlightedFence } from "@/features/preview/components/highlightedFence"
 import { FenceBudgetContext, type FenceBudget } from "@/features/preview/lib/fenceBudget"
 import { previewMarkdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
+import { MermaidFence } from "@/features/preview/components/mermaidDiagram"
+import { useMermaidScope } from "@/features/preview/hooks/useMermaidDiagram"
+import { MermaidScopeContext } from "@/features/preview/lib/mermaidScope"
 
-// A markdown file as the preview renders it: the shared surface plus math, fences highlighted, and images that are never
-// fetched (an image embedded as a data: URL shows; any other is named in its place). Notes and assistant replies keep the plain
-// surface.
+// A markdown file as the preview renders it: the shared surface plus math, fences highlighted, Mermaid diagrams (drawn in
+// a frame that loads nothing, mermaidFrame.ts), and images that are never fetched (an image embedded as a data: URL
+// shows; any other is named in its place). Notes and assistant replies keep the plain surface.
 
-const EXTENSIONS: MarkdownExtensions = { math: true }
+const EXTENSIONS: MarkdownExtensions = { math: true, mermaid: true }
 
 function classNames(value: unknown): readonly unknown[] {
 	return Array.isArray(value) ? value : []
@@ -46,12 +49,24 @@ function PreviewCode({ className, children }: { className?: string | undefined; 
 	return <MarkdownCode className={className}>{children}</MarkdownCode>
 }
 
-// Display math arrives as `pre > code.math-display`: the formula is its own block, not a code block.
+// Display math arrives as `pre > code.math-display`: the formula is its own block, not a code block. A ```mermaid
+// fence arrives as `pre > code[data-mermaid]`, its place among the document's diagrams.
 const PreviewPre: MarkdownComponents["pre"] = ({ node, children }) => {
 	const first = node?.children[0]
 
 	if (first?.type === "element" && first.tagName === "code" && classNames(first.properties.className).includes("math-display")) {
 		return <>{children}</>
+	}
+
+	const ordinal = first?.type === "element" && first.tagName === "code" ? first.properties["dataMermaid"] : undefined
+
+	if (first?.type === "element" && typeof ordinal === "string") {
+		return (
+			<MermaidFence
+				source={first.children.map(child => (child.type === "text" ? child.value : "")).join("")}
+				ordinal={Number(ordinal)}
+			/>
+		)
 	}
 
 	return <MarkdownPre>{children}</MarkdownPre>
@@ -78,17 +93,20 @@ const OVERRIDES: MarkdownComponents = { code: PreviewCode, pre: PreviewPre, img:
 export function PreviewMarkdown({ text, alt }: { text: string; alt: string }) {
 	// The document's fence highlighting budget, kept for its life.
 	const [budget] = useState<FenceBudget>(() => ({ lines: 0 }))
+	const scope = useMermaidScope()
 
 	return (
-		<FenceBudgetContext value={budget}>
-			<MarkdownRenderer
-				text={text}
-				alt={alt}
-				tabIndex={-1}
-				extensions={EXTENSIONS}
-				overrides={OVERRIDES}
-				urlTransform={previewMarkdownUrlTransform}
-			/>
-		</FenceBudgetContext>
+		<MermaidScopeContext value={scope}>
+			<FenceBudgetContext value={budget}>
+				<MarkdownRenderer
+					text={text}
+					alt={alt}
+					tabIndex={-1}
+					extensions={EXTENSIONS}
+					overrides={OVERRIDES}
+					urlTransform={previewMarkdownUrlTransform}
+				/>
+			</FenceBudgetContext>
+		</MermaidScopeContext>
 	)
 }

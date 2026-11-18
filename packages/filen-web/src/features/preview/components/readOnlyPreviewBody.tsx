@@ -15,6 +15,7 @@ import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
 import { CalendarViewer } from "@/features/preview/components/calendarViewer"
 import { NotebookViewer } from "@/features/preview/components/notebookViewer"
 import { ContactViewer } from "@/features/preview/components/contactViewer"
+import { MermaidViewer } from "@/features/preview/components/mermaidViewer"
 import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
 import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
 import { GeoViewer } from "@/features/preview/components/geoViewer"
@@ -120,6 +121,13 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 		case "contact":
 			return (
 				<ContactViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "mermaid":
+			return (
+				<MermaidViewer
 					item={item}
 					alt={alt}
 				/>

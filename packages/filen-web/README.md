@@ -48,6 +48,8 @@ Send these on **every** response, `304 Not Modified` included: Safari judges a r
 
 The three cross-origin headers are what make `self.crossOriginIsolated` true; without it the SDK's threaded wasm worker cannot start and the app redirects to `/no-coi`. The CSP is deliberately referenced rather than copied: `vite.config.ts` is the edit-first source and carries the rationale for each directive, and a second literal copy would drift.
 
+One file is the exception: the Mermaid diagram frame's script, `/assets/mermaid-frame-<hash>.js`, is sent with `Cross-Origin-Resource-Policy: cross-origin` instead. The frame that loads it is sandboxed without `allow-same-origin`, so its origin is opaque and the load is cross-origin; under `require-corp` it needs that header (`vite/mermaid-frame-plugin.ts`).
+
 Note that nginx's `add_header` does not inherit into a nested `location`, so every block that serves a response has to repeat the whole set.
 
 ### MIME types and compression
