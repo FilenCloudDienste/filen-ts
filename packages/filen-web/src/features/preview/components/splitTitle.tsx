@@ -9,10 +9,23 @@ export function SplitTitle({ text, tailLength }: { text: string; tailLength: num
 
 	if (splitAt === 0) return <span className="truncate">{text}</span>
 
+	// The halves are flex items, and an accessible name puts a space between blocks ("e 2e-notes.zip"): assistive
+	// technology reads the whole text instead.
 	return (
 		<>
-			<span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{text.slice(0, splitAt)}</span>
-			<span className="shrink-0 whitespace-pre">{text.slice(splitAt)}</span>
+			<span className="sr-only">{text}</span>
+			<span
+				aria-hidden="true"
+				className="min-w-0 overflow-hidden text-ellipsis whitespace-pre"
+			>
+				{text.slice(0, splitAt)}
+			</span>
+			<span
+				aria-hidden="true"
+				className="shrink-0 whitespace-pre"
+			>
+				{text.slice(splitAt)}
+			</span>
 		</>
 	)
 }

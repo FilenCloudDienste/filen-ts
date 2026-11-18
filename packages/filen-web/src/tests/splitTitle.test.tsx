@@ -11,7 +11,7 @@ afterEach(cleanup)
 function halves(text: string, tailLength: number): { text: string; className: string }[] {
 	const { container } = render(createElement(SplitTitle, { text, tailLength }))
 
-	return [...container.querySelectorAll("span")].map(span => ({ text: span.textContent, className: span.className }))
+	return [...container.querySelectorAll('span[aria-hidden="true"]')].map(span => ({ text: span.textContent, className: span.className }))
 }
 
 describe("SplitTitle", () => {
@@ -27,7 +27,16 @@ describe("SplitTitle", () => {
 		}
 	})
 
+	it("names a split title whole for assistive technology, the halves hidden from it", () => {
+		const { container } = render(createElement(SplitTitle, { text: "Untitled presentation.odp", tailLength: 16 }))
+		const read = [...container.querySelectorAll("span")].filter(span => span.getAttribute("aria-hidden") !== "true")
+
+		expect(read.map(span => span.textContent)).toEqual(["Untitled presentation.odp"])
+	})
+
 	it("leaves a short name whole", () => {
-		expect(halves("short.odp", 16).map(part => part.text)).toEqual(["short.odp"])
+		const { container } = render(createElement(SplitTitle, { text: "short.odp", tailLength: 16 }))
+
+		expect([...container.querySelectorAll("span")].map(span => span.textContent)).toEqual(["short.odp"])
 	})
 })

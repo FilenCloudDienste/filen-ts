@@ -30,6 +30,11 @@ export function visibleRows(bounds: Pick<WindowBounds, "rowHeight" | "height">):
 	return Math.max(1, Math.ceil(bounds.height / bounds.rowHeight) + 1)
 }
 
+// Rows the view shows whole.
+export function wholeRows(bounds: Pick<WindowBounds, "rowHeight" | "height">): number {
+	return Math.max(1, Math.floor(bounds.height / bounds.rowHeight))
+}
+
 // Rows held at most: the view and two screens either side.
 export function maxHeldRows(bounds: Pick<WindowBounds, "rowHeight" | "height">): number {
 	return visibleRows(bounds) * 5
@@ -60,9 +65,18 @@ export function placedWindow<Row extends WindowRow>(
 	bounds: WindowBounds
 ): PagerWindow<Row> {
 	const top = Math.max(0, focus - before)
-	const full = Math.floor(bounds.height / bounds.rowHeight)
 
-	return atEnd(rows, bounds) ? { rows, top: Math.min(top, Math.max(0, rows.length - full)), shift: 0 } : { rows, top, shift: 0 }
+	return atEnd(rows, bounds)
+		? { rows, top: Math.min(top, Math.max(0, rows.length - wholeRows(bounds))), shift: 0 }
+		: { rows, top, shift: 0 }
+}
+
+// Whether the file's last row shows whole: held, and its bottom at or above the view's.
+export function showsEnd(window: PagerWindow<WindowRow>, bounds: WindowBounds): boolean {
+	return (
+		atEnd(window.rows, bounds) &&
+		window.rows.length * bounds.rowHeight - (window.top * bounds.rowHeight + window.shift) <= bounds.height
+	)
 }
 
 // Whether the window wants rows above it, or below.

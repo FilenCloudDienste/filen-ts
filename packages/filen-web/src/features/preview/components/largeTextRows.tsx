@@ -19,9 +19,11 @@ import {
 	placedWindow,
 	prependRows,
 	scrollWindow,
+	showsEnd,
 	visibleRows,
 	wantsAfter,
 	wantsBefore,
+	wholeRows,
 	type PagerWindow,
 	type PositionStore,
 	type WindowBounds
@@ -288,10 +290,8 @@ export function LargeTextRows({
 
 	const publish = useEffectEvent((current: ViewState) => {
 		const first = current.rows[current.top]
-		const last = current.rows.at(-1)
-		const end = last !== undefined && last.end >= size && current.rows.length - current.top <= Math.floor(height / rowHeight)
 
-		if (first !== undefined) position.set(end ? size : first.start)
+		if (first !== undefined) position.set(showsEnd(current, bounds) ? size : first.start)
 	})
 
 	useEffect(() => {
@@ -389,7 +389,8 @@ export function LargeTextRows({
 				void locate(start, 0, 1, false)
 			},
 			End: () => {
-				void locate(size, shown, null, false)
+				// The last row at the view's bottom: as many above it as fill the view.
+				void locate(size, wholeRows(bounds) - 1, null, false)
 			}
 		}
 		const move = event.altKey || event.shiftKey ? undefined : moves[event.key]

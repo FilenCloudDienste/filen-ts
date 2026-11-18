@@ -8,9 +8,11 @@ import {
 	positionStore,
 	prependRows,
 	scrollWindow,
+	showsEnd,
 	visibleRows,
 	wantsAfter,
 	wantsBefore,
+	wholeRows,
 	type PagerWindow,
 	type WindowBounds,
 	type WindowRow
@@ -44,6 +46,25 @@ describe("textPager viewport", () => {
 	it("places a located row near the top, and the file's end at the bottom", () => {
 		expect(placedWindow(rows(1000, 40), 10, 3, BOUNDS)).toMatchObject({ top: 7 })
 		expect(placedWindow(rows(99_800, 20), 18, 3, BOUNDS)).toMatchObject({ top: 10 })
+	})
+
+	it("places the file's last row at the view's bottom when asked for it with a view's whole rows above", () => {
+		const held = rows(99_400, 60)
+		const placed = placedWindow(held, held.length - 1, wholeRows(BOUNDS) - 1, BOUNDS)
+
+		expect(placed).toMatchObject({ top: 50 })
+		expect(showsEnd(placed, BOUNDS)).toBe(true)
+		// A screen's worth of rows above it leaves the last row below the view.
+		expect(showsEnd(placedWindow(held, held.length - 1, visibleRows(BOUNDS), BOUNDS), BOUNDS)).toBe(false)
+	})
+
+	it("shows the end once the last row's bottom is in view, a part row at the top or not", () => {
+		const bounds = { ...BOUNDS, height: 210 }
+		const held = rows(99_500, 50)
+
+		expect(showsEnd(scrollWindow({ rows: held, top: 30, shift: 0 }, 10_000, bounds), bounds)).toBe(true)
+		expect(showsEnd({ rows: held, top: 39, shift: 0 }, bounds)).toBe(false)
+		expect(showsEnd({ rows: rows(1000, 50), top: 40, shift: 0 }, bounds)).toBe(false)
 	})
 
 	it("asks for rows near either end of what it holds, and only where the file goes on", () => {
