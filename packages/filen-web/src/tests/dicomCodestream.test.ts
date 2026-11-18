@@ -2,6 +2,7 @@ import { createRequire } from "node:module"
 import { describe, expect, it, vi } from "vitest"
 import {
 	declaredPixels,
+	endsCodestream,
 	jpeg2000Header,
 	jpegFrameHeader,
 	jpegLsHeader,
@@ -30,6 +31,22 @@ const paths = vi.hoisted(async () => {
 vi.mock("@cornerstonejs/codec-charls/decodewasm?url", async () => ({ default: (await paths).charls }))
 vi.mock("@cornerstonejs/codec-openjpeg/decodewasm?url", async () => ({ default: (await paths).openjpeg }))
 vi.mock("@cornerstonejs/codec-openjph/wasm?url", async () => ({ default: (await paths).openjph }))
+// The decode-only CharLS build, each module it loads kept: a module loaded afresh is one more.
+const charlsModules = vi.hoisted((): { JpegLSDecoder: { prototype: { decode: () => void } } }[] => [])
+
+vi.mock("@cornerstonejs/codec-charls/decodewasmjs", async importOriginal => {
+	const actual = await importOriginal<{ default: (options: object) => Promise<(typeof charlsModules)[number]> }>()
+
+	return {
+		default: async (options: object) => {
+			const loaded = await actual.default(options)
+
+			charlsModules.push(loaded)
+
+			return loaded
+		}
+	}
+})
 
 const { decodeCompressed } = await import("@/features/preview/lib/dicom/codecs")
 
@@ -224,5 +241,65 @@ describe("the codecs", () => {
 		await expect(decodeCompressed(stream, grayModule(48, 64, 16), "gray", decoder, 10_000)).rejects.toMatchObject({
 			reason: "mismatch"
 		})
+	})
+	it.each([
+		["jpeg2000", "@cornerstonejs/codec-openjpeg/wasmjs", "J2KEncoder"],
+		["htj2k", "@cornerstonejs/codec-openjph/wasmjs", "HTJ2KEncoder"]
+	] as const)("calls a %s frame cut short or corrupt damaged, never a mismatch", async (decoder, name, entry) => {
+		const info = { width: 64, height: 48, bitsPerSample: 12, componentCount: 1, isSigned: false, isUsingColorTransform: false }
+		const stream = await encoder(name, entry, info, ramp, 3)
+		const tags = grayModule(48, 64, 12)
+
+		expect(endsCodestream(stream)).toBe(true)
+		expect(endsCodestream(Uint8Array.from([...stream, 0]))).toBe(true)
+
+		for (const kept of [0.5, 0.2]) {
+			await expect(
+				decodeCompressed(stream.slice(0, Math.floor(stream.length * kept)), tags, "gray", decoder, 10_000)
+			).rejects.toMatchObject({
+				reason: "damaged"
+			})
+		}
+
+		// Its packets overwritten, its end marker kept: the decoder's own failure where it reports one, never a mismatch.
+		const corrupt = stream.slice()
+
+		corrupt.fill(0xff, Math.floor(stream.length / 2), stream.length - 2)
+
+		const outcome = await decodeCompressed(corrupt, tags, "gray", decoder, 10_000).then(
+			() => "decoded",
+			(error: unknown) => (error as { reason?: string }).reason
+		)
+
+		expect(outcome).not.toBe("mismatch")
+	})
+
+	it("keeps CharLS loaded through a stream it throws on, and loads it afresh only after an abort", async () => {
+		const info = { width: 64, height: 48, bitsPerSample: 12, componentCount: 1 }
+		const jls = await encoder("@cornerstonejs/codec-charls/wasmjs", "JpegLSEncoder", info, ramp)
+		const tags = grayModule(48, 64, 12)
+
+		await decodeCompressed(jls, tags, "gray", "jpegLs", 10_000)
+
+		const loads = charlsModules.length
+
+		await expect(decodeCompressed(jls.slice(0, jls.length / 2), tags, "gray", "jpegLs", 10_000)).rejects.toMatchObject({
+			reason: "damaged"
+		})
+		await decodeCompressed(jls, tags, "gray", "jpegLs", 10_000)
+		expect(charlsModules).toHaveLength(loads)
+
+		const loaded = charlsModules.at(-1)
+
+		if (loaded === undefined) throw new Error("CharLS never loaded")
+
+		const abort = vi.spyOn(loaded.JpegLSDecoder.prototype, "decode").mockImplementationOnce(() => {
+			throw new WebAssembly.RuntimeError("unreachable")
+		})
+
+		await expect(decodeCompressed(jls, tags, "gray", "jpegLs", 10_000)).rejects.toMatchObject({ reason: "damaged" })
+		abort.mockRestore()
+		await decodeCompressed(jls, tags, "gray", "jpegLs", 10_000)
+		expect(charlsModules).toHaveLength(loads + 1)
 	})
 })

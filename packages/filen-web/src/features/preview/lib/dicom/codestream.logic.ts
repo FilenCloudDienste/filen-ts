@@ -246,6 +246,14 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 	return { rows: ysiz - yosiz, columns: xsiz - xosiz, components, bits, levels }
 }
 
+// Whether a JPEG 2000 codestream ends with its EOC marker (FFD9), allowing the one byte a fragment is padded with.
+export function endsCodestream(bytes: Uint8Array): boolean {
+	const end = bytes.length
+	const at = (from: number): boolean => bytes[from - 2] === 0xff && bytes[from - 1] === 0xd9
+
+	return at(end) || (end > 2 && (bytes[end - 1] === 0x00 || bytes[end - 1] === 0xff) && at(end - 1))
+}
+
 export interface FrameTags {
 	readonly rows: number
 	readonly columns: number

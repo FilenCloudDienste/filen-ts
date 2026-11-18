@@ -8,6 +8,7 @@ import openjpegWasmUrl from "@cornerstonejs/codec-openjpeg/decodewasm?url"
 import openjphWasmUrl from "@cornerstonejs/codec-openjph/wasm?url"
 import {
 	declaredPixels,
+	endsCodestream,
 	jpeg2000Header,
 	jpegFrameHeader,
 	jpegLsHeader,
@@ -27,7 +28,8 @@ import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
 // CharLS (JPEG-LS), OpenJPEG (JPEG 2000) and OpenJPH (HTJ2K). Each frame's codestream header is read first and must
 // match the tags; the larger declaration is checked against the pixel budget before the decoder is called. A JPEG 2000
 // frame over the budget is decoded at the fewest reductions that fit. Each wasm module loads on first use, from 'self';
-// a decode that failed may have left it unusable, so it starts afresh next time. Nothing is printed.
+// one that aborted may have left its heap unusable, so it starts afresh next time. A stream the decoder could not
+// decode, or one cut short, is a damaged frame. Nothing is printed.
 
 const quiet = (): void => undefined
 
@@ -86,8 +88,29 @@ function mismatch(): never {
 	throw new DicomFrameFailure("mismatch", "the codestream header does not match the tags")
 }
 
+// No codestream header where the frame begins, or one cut short.
+function unreadableHeader(): never {
+	throw new DicomFrameFailure("damaged", "the codestream header could not be read")
+}
+
+// The header matched the tags, but the decoder did not deliver the frame it declares: the stream is cut short or
+// corrupt.
+function damaged(): never {
+	throw new DicomFrameFailure("damaged", "the codestream could not be decoded")
+}
+
+// A decoder's own failure as the frame's: a C++ exception or a JS decoder's error leaves the module as it was; only a
+// wasm abort (a trap) may have left its heap unusable, so the module is let go and loaded afresh for the next frame.
+function decodeFailure(error: unknown, codec: Loader<unknown> | null): never {
+	if (error instanceof DicomFrameFailure) throw error
+	if (error instanceof WebAssembly.RuntimeError) codec?.drop()
+
+	damaged()
+}
+
 function checked(header: CodestreamHeader | null, module: PixelModule, pixels: number): CodestreamHeader {
-	if (header === null || !matchesTags(header, module)) mismatch()
+	if (header === null) unreadableHeader()
+	if (!matchesTags(header, module)) mismatch()
 
 	if (declaredPixels(header, module) > pixels) {
 		throw new DicomFrameFailure("tooLarge", "the frame is larger than the decode budget")
@@ -117,11 +140,11 @@ function samples(
 	}
 }
 
-// Copies the decoder's output out of the wasm heap once its size is the one expected; frees the decoder either way.
+// Copies the decoder's output out of the wasm heap once its size is the one expected.
 function decodedCopy(decoder: { getDecodedBuffer: () => Uint8Array }, expected: number): Uint8Array {
 	const out = decoder.getDecodedBuffer()
 
-	if (out.length !== expected) mismatch()
+	if (out.length !== expected) damaged()
 
 	return out.slice()
 }
@@ -131,10 +154,10 @@ async function jpegBaseline(encoded: Uint8Array, module: PixelModule, color: Sam
 	const bitmap = await createImageBitmap(new Blob([plain(encoded)], { type: "image/jpeg" }), {
 		colorSpaceConversion: "none",
 		premultiplyAlpha: "none"
-	})
+	}).catch((error: unknown) => decodeFailure(error, null))
 
 	try {
-		if (bitmap.width !== columns || bitmap.height !== rows) mismatch()
+		if (bitmap.width !== columns || bitmap.height !== rows) damaged()
 
 		const canvas = new OffscreenCanvas(columns, rows)
 		const context = canvas.getContext("2d")
@@ -169,9 +192,15 @@ function jpegLossless(encoded: Uint8Array, module: PixelModule, color: SampleCol
 		throw new DicomFrameFailure("unsupported", "16-bit colour lossless JPEG")
 	}
 
-	const decoded = new LosslessDecoder().decode(plain(encoded).buffer, encoded.byteOffset, encoded.length, bytes)
+	let decoded: Uint8Array | Uint16Array
 
-	if (decoded.length !== rows * columns * components) mismatch()
+	try {
+		decoded = new LosslessDecoder().decode(plain(encoded).buffer, encoded.byteOffset, encoded.length, bytes)
+	} catch (error) {
+		decodeFailure(error, null)
+	}
+
+	if (decoded.length !== rows * columns * components) damaged()
 
 	return samples(new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength), rows, columns, module, color, false, bytes > 1)
 }
@@ -188,15 +217,13 @@ async function jpegLs(encoded: Uint8Array, module: PixelModule, color: SampleCol
 
 		const info = decoder.getFrameInfo()
 
-		if (info.width !== columns || info.height !== rows || info.componentCount !== components) mismatch()
+		if (info.width !== columns || info.height !== rows || info.componentCount !== components) damaged()
 
 		const data = decodedCopy(decoder, rows * columns * components * (wide ? 2 : 1))
 
 		return samples(data, rows, columns, module, color, components > 1 && decoder.getInterleaveMode() === 0, wide)
 	} catch (error) {
-		if (!(error instanceof DicomFrameFailure)) charls.drop()
-
-		throw error
+		decodeFailure(error, charls)
 	} finally {
 		decoder.delete()
 	}
@@ -211,7 +238,10 @@ async function jpeg2000(
 ): Promise<FrameSamples> {
 	const header = jpeg2000Header(encoded)
 
-	if (header === null || !matchesTags(header, module)) mismatch()
+	if (header === null) unreadableHeader()
+	if (!matchesTags(header, module)) mismatch()
+	// A codestream cut short still decodes, to a frame with its last tiles or code blocks missing: refused unread.
+	if (!endsCodestream(encoded)) damaged()
 
 	const level = reductionWithin(header, pixels)
 
@@ -230,16 +260,15 @@ async function jpeg2000(
 
 		const info = decoder.getFrameInfo()
 
-		if (info.width !== header.columns || info.height !== header.rows || info.componentCount !== header.components) mismatch()
+		// OpenJPEG reports a decode it gave up on as a frame of 0 × 0.
+		if (info.width !== header.columns || info.height !== header.rows || info.componentCount !== header.components) damaged()
 
 		const wide = header.bits > 8
 		const data = decodedCopy(decoder, size.rows * size.columns * header.components * (wide ? 2 : 1))
 
 		return samples(data, size.rows, size.columns, module, color, false, wide)
 	} catch (error) {
-		if (!(error instanceof DicomFrameFailure)) loaded.drop()
-
-		throw error
+		decodeFailure(error, loaded)
 	} finally {
 		decoder.delete()
 	}

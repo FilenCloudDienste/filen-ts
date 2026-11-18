@@ -132,9 +132,8 @@ function checkReducible(context: FrameContext, spans: readonly Span[], pixels: n
 
 	const header = jpeg2000Header(context.source.read(first.offset, Math.min(first.length, DICOM_J2K_HEAD_BYTES)))
 
-	if (header === null || !matchesTags(header, context.module)) {
-		throw new DicomFrameFailure("mismatch", "the codestream header does not match the tags")
-	}
+	if (header === null) throw new DicomFrameFailure("damaged", "the codestream header could not be read")
+	if (!matchesTags(header, context.module)) throw new DicomFrameFailure("mismatch", "the codestream header does not match the tags")
 
 	if (reductionWithin(header, pixels) === null) tooLarge()
 }
