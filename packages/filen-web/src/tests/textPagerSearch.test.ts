@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { LineIndex, SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
 import { pagerEncoding } from "@/features/preview/lib/textPager/rows.logic"
 import { MATCH_CAP, MatchList, searchText, type PagerScanSource, type SearchEnd } from "@/features/preview/lib/textPager/search.logic"
@@ -196,5 +196,38 @@ describe("textPager search", () => {
 		})
 		expect(index.complete).toBe(true)
 		expect(matches.at(0)).toEqual({ offset: size - 6, line: index.lines })
+	})
+
+	// HKSCS pointers decode to two code points (0x88 0x62) or past the Basic Multilingual Plane; GB18030's four-byte
+	// sequences from 0x90 too. Units are counted by decoding, so offsets stay exact whatever the decoder gives.
+	it("keeps Big5 offsets exact past a pointer that decodes to two code points", async () => {
+		// Node's decoder gives 0x88 0x62 a private-use character; WHATWG's (Firefox, Chromium) gives U+00CA U+0304.
+		const Native = globalThis.TextDecoder
+
+		vi.stubGlobal(
+			"TextDecoder",
+			class extends Native {
+				public override decode(input?: AllowSharedBufferSource, options?: TextDecodeOptions): string {
+					return super.decode(input, options).replaceAll("\uf325", "\u00ca\u0304")
+				}
+			}
+		)
+
+		const head = new Uint8Array(6000).map((_, index) => (index % 2 === 0 ? 0x88 : 0x62))
+		const bytes = new Uint8Array([...head, ...utf8(" key")])
+		const { matches } = await search(bytes, "key", { label: "big5" })
+
+		expect(all(matches).map(match => match.offset)).toEqual([head.length + 1])
+	})
+
+	it.each([
+		["big5", [0xa4, 0xa4]],
+		["gb18030", [0x94, 0x39, 0xfc, 0x36]]
+	] as const)("keeps %s offsets exact past %j", async (label, char) => {
+		const head = new Uint8Array(char.length * 3000).map((_, index) => char[index % char.length] ?? 0)
+		const bytes = new Uint8Array([...head, ...utf8(" key "), ...head, ...utf8("key")])
+		const { matches } = await search(bytes, "key", { label })
+
+		expect(all(matches).map(match => match.offset)).toEqual([head.length + 1, bytes.length - 3])
 	})
 })

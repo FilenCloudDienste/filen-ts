@@ -65,7 +65,10 @@ export class MatchList {
 
 // Where each decoded unit came from: walks bytes as the decoder did, so a match's unit index becomes its byte offset.
 // Exact for UTF-8 (WHATWG's maximal-subpart error handling), UTF-16, UTF-32 and single-byte encodings; a malformed
-// multi-byte legacy sequence may shift offsets until the stretch ends.
+// multi-byte legacy sequence may shift offsets until the stretch ends (legacy characters are counted by decoding them).
+// A legacy run decoded at once while walking to a match.
+const LEGACY_RUN_BYTES = 4096
+
 class UnitWalker {
 	private unit = 0
 	private byte = 0
@@ -89,11 +92,46 @@ class UnitWalker {
 			return target * 2
 		}
 
+		if (encoding.kind === "multi") {
+			return this.legacyTo(target)
+		}
+
 		while (this.unit < target && this.byte < this.bytes.length) {
 			const [length, units] = this.step()
 
 			this.byte += length
 			this.unit += units
+		}
+
+		return this.byte
+	}
+
+	// A legacy character may decode to two units (GB18030 and Big5 HKSCS past the Basic Multilingual Plane, Big5's
+	// pointers that give two code points), so units are counted by decoding: a run of characters at a time, then one
+	// character at a time inside the run that holds the target.
+	private legacyTo(target: number): number {
+		const { bytes, encoding } = this
+
+		while (this.unit < target && this.byte < bytes.length) {
+			let end = this.byte
+
+			while (end < bytes.length && end - this.byte < LEGACY_RUN_BYTES) end += legacyCharLength(bytes, end, encoding.label)
+
+			const units = decodeSpan(bytes.subarray(this.byte, Math.min(end, bytes.length)), encoding).length
+
+			if (this.unit + units <= target) {
+				this.byte = Math.min(end, bytes.length)
+				this.unit += units
+
+				continue
+			}
+
+			while (this.unit < target && this.byte < end) {
+				const length = legacyCharLength(bytes, this.byte, encoding.label)
+
+				this.unit += decodeSpan(bytes.subarray(this.byte, this.byte + length), encoding).length
+				this.byte += length
+			}
 		}
 
 		return this.byte
@@ -108,13 +146,6 @@ class UnitWalker {
 				byte + 4 > bytes.length ? 0 : new DataView(bytes.buffer, bytes.byteOffset + byte, 4).getUint32(0, encoding.littleEndian)
 
 			return [4, point > 0xffff && point <= 0x10ffff ? 2 : 1]
-		}
-
-		if (encoding.kind === "multi") {
-			const length = legacyCharLength(bytes, byte, encoding.label)
-
-			// GB18030's four-byte sequences from 0x90 on are past the Basic Multilingual Plane.
-			return [length, length === 4 && (bytes[byte] ?? 0) >= 0x90 ? 2 : 1]
 		}
 
 		return utf8Step(bytes, byte)
