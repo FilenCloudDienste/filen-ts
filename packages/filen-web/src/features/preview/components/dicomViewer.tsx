@@ -104,6 +104,13 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 			if (originRanged(from)) {
 				const bridge = await openOriginSyncSource(from, token, { access })
 
+				// The viewer went while the bridge opened: nothing will close it but this.
+				if (!live) {
+					bridge.close()
+
+					throw new Error("the viewer closed before its file opened")
+				}
+
 				close = () => {
 					bridge.close()
 				}

@@ -50,13 +50,16 @@ vi.mock("@/lib/workers/ownedWorker", async importOriginal => ({
 }))
 vi.mock("@/features/preview/workers/dicom.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelPreviewDownload: () => Promise.resolve() } }))
-vi.mock("@/features/preview/lib/origin/syncSource", () => ({
-	openOriginSyncSource: () =>
-		Promise.resolve({
-			channel: { buffer: new SharedArrayBuffer(8), port: new MessageChannel().port1, length: 10 },
-			close: () => undefined
-		})
-}))
+const bridge = vi.hoisted(() => {
+	const open = () => ({
+		channel: { buffer: new SharedArrayBuffer(8), port: new MessageChannel().port1, length: 10 },
+		close: vi.fn()
+	})
+
+	return { open, openSource: vi.fn(() => Promise.resolve(open())) }
+})
+
+vi.mock("@/features/preview/lib/origin/syncSource", () => ({ openOriginSyncSource: bridge.openSource }))
 vi.mock("@/features/preview/components/canvasViewerShell", () => ({
 	CanvasViewerShell: ({
 		toolbar,
@@ -200,6 +203,29 @@ describe("DicomViewer", () => {
 		await vi.waitFor(() => {
 			expect(remote.open).toHaveBeenCalledTimes(2)
 		})
+	})
+
+	it("closes a bridge that opens only once the viewer is gone", async () => {
+		const opened = bridge.open()
+		let resolve: (value: typeof opened) => void = () => undefined
+
+		bridge.openSource.mockImplementationOnce(
+			() =>
+				new Promise(done => {
+					resolve = done
+				})
+		)
+		remote.open.mockClear()
+		render(<DicomViewer item={linkedFileItem("IM0001.dcm")} />)
+		await vi.waitFor(() => {
+			expect(bridge.openSource).toHaveBeenCalled()
+		})
+		cleanup()
+		resolve(opened)
+		await vi.waitFor(() => {
+			expect(opened.close).toHaveBeenCalledTimes(1)
+		})
+		expect(remote.open).not.toHaveBeenCalled()
 	})
 
 	it("keeps the tags a button away when the image cannot be drawn", async () => {
