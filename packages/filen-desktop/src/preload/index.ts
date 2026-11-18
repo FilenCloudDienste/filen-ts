@@ -11,6 +11,7 @@ import type {
 	DesktopPlatform,
 	DesktopSyncActivity,
 	DesktopSyncOverview,
+	DesktopThirdPartyNotices,
 	DesktopTransferEvent,
 	DesktopTransferResult,
 	DesktopTransfers,
@@ -357,7 +358,15 @@ const bridge: DesktopBridge = {
 			ipcRenderer.send(CHANNELS.quit)
 		},
 		browserCacheSize: () => ipcRenderer.invoke(CHANNELS.browserCacheSize) as Promise<number>,
-		clearBrowserCache: () => ipcRenderer.invoke(CHANNELS.clearBrowserCache) as Promise<void>
+		clearBrowserCache: () => ipcRenderer.invoke(CHANNELS.clearBrowserCache) as Promise<void>,
+		// Main sends the file's text; only the notices cross to the page, not what they were generated from.
+		thirdPartyNotices: async () => {
+			const { texts, notices } = JSON.parse(
+				(await ipcRenderer.invoke(CHANNELS.thirdPartyNotices)) as string
+			) as DesktopThirdPartyNotices
+
+			return { texts, notices }
+		}
 	},
 	lock: {
 		status: () => ipcRenderer.invoke(CHANNELS.lockStatus) as Promise<DesktopLockStatus>,

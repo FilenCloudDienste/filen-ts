@@ -94,6 +94,23 @@ export type DesktopMediaTransport = "none" | "paused" | "playing"
 // What the window's zoom keys do: one step in or out, or back to 100%.
 export type DesktopZoomStep = "in" | "out" | "reset"
 
+// One third-party notice of what the shell ships beyond the web build (filen-desktop's scripts/generateThirdPartyNotices.ts):
+// `texts` index into the DesktopThirdPartyNotices it came with; empty when the component shipped no license file.
+export interface DesktopThirdPartyNotice {
+	name: string
+	version: string
+	license: string
+	ecosystem: "npm" | "rust" | "go" | "vendored"
+	copyright: string[]
+	repository: string | null
+	texts: number[]
+}
+
+export interface DesktopThirdPartyNotices {
+	texts: string[]
+	notices: DesktopThirdPartyNotice[]
+}
+
 export interface DesktopApp {
 	readonly version: string
 	// Unread chat messages, shown on the dock / taskbar.
@@ -127,6 +144,9 @@ export interface DesktopApp {
 	// The window's HTTP cache on disk, in bytes, and clearing it (with the compiled-code cache). Never site storage.
 	browserCacheSize(): Promise<number>
 	clearBrowserCache(): Promise<void>
+	// The third-party notices of what the shell adds to the web build (Electron, Chromium, the native addons, rclone,
+	// WinFsp, its bundled npm packages), read from disk on each call. The page lists them together with its own.
+	thirdPartyNotices(): Promise<DesktopThirdPartyNotices>
 }
 
 // The window's own keys, which a desktop app has and a browser tab leaves to the browser: zoom, full screen, close.

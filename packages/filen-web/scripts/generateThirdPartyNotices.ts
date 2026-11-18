@@ -1,19 +1,21 @@
 import { isUtf8 } from "node:buffer"
-import { execFileSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+	crateSourceDir,
+	crateSourceRoots,
 	describeCargoCrate,
-	describedNotice,
 	finalizeNotices,
+	filenRsReleaseLock,
 	listInstalledNpm,
+	lockedCrates,
+	npmPackageNotice,
 	readJson,
-	repositoryOf,
+	resolveFilenRsCheckout,
 	sortNoticeTexts,
-	spdxOf,
 	splitCopyright,
 	vendoredNotice,
+	workspacePatches,
 	type CollectedNotice,
 	type InstalledNpmPackage
 } from "@filen/shared/tooling"
@@ -22,7 +24,7 @@ import { QWEN35_4B } from "../src/features/assistant/runtime/models"
 import { CLDR_WINDOWS_ZONES_COMMIT } from "./windowsZonesSource"
 
 /**
- * Emits the third-party attribution payload the Open source licenses dialog renders.
+ * Emits the third-party attribution payload the Third party notices dialog renders.
  *
  * MIT, BSD and Apache-2.0 all require the license text AND the copyright notice to accompany the
  * distribution, so listing package names and SPDX ids would not discharge the obligation — the text has
@@ -82,31 +84,6 @@ function requireJson(path: string): Record<string, unknown> {
 }
 
 /**
- * The patch pnpm applies to a package, by `name@version` (or a bare name, for every version), from
- * pnpm-workspace.yaml's patchedDependencies. What ships is the patched source, so its notice names the patch.
- */
-function patchedDependencies(): Map<string, string> {
-	const patches = new Map<string, string>()
-	let inSection = false
-
-	for (const line of readFileSync(WORKSPACE_FILE, "utf8").split("\n")) {
-		if (!/^\s/.test(line)) {
-			inSection = line.trimEnd() === "patchedDependencies:"
-
-			continue
-		}
-
-		const match = inSection ? /^\s+'?(.+?)'?:\s+(\S+)\s*$/.exec(line) : null
-
-		if (match?.[1] !== undefined && match[2] !== undefined) {
-			patches.set(match[1], match[2])
-		}
-	}
-
-	return patches
-}
-
-/**
  * The npm packages that reach a browser.
  *
  * Identity is `name@version`, not the bare name: several packages ship at two versions in this tree and
@@ -115,7 +92,7 @@ function patchedDependencies(): Map<string, string> {
 function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 	const seen = new Set<string>()
 	const entries: Collected[] = []
-	const patches = patchedDependencies()
+	const patches = workspacePatches(WORKSPACE_FILE)
 
 	for (const { name, version, dir } of installed) {
 		const id = `${name}@${version}`
@@ -124,168 +101,39 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 			continue
 		}
 
-		const manifest = readJson(join(dir, "package.json"))
+		const entry = npmPackageNotice({ name, version, dir }, patches, FILEN_TS_REPOSITORY)
 
 		// Marked seen only once actually described: an id pnpm reports but no directory can supply stays
 		// undescribed and fails the payload's drift guard loudly rather than silently.
-		if (!manifest) {
+		if (entry === null) {
 			continue
 		}
 
-		const manifestVersion = manifest["version"]
-
-		if (typeof manifestVersion === "string" && manifestVersion !== version) {
-			throw new Error(`${id}: pnpm says ${version}, ${dir}/package.json says ${manifestVersion} — run pnpm install`)
-		}
-
 		seen.add(id)
-
-		const entry = describedNotice({
-			name,
-			version,
-			license: spdxOf(manifest["license"] ?? manifest["licenses"]),
-			ecosystem: "npm",
-			dir,
-			repository: repositoryOf(manifest["repository"])
-		})
-		const patch = patches.get(id) ?? patches.get(name)
-
-		// The source of what ships (MPL-2.0 and the LGPL ask for it): the release as published, with the patch.
-		entries.push(
-			patch === undefined
-				? entry
-				: {
-						...entry,
-						terms: [
-							`Modified: ${name} ${version} as published, with the patch ${patch} from the filen-ts repository (${FILEN_TS_REPOSITORY}) applied. That patch is the whole of the change to its source.`,
-							...entry.terms
-						]
-					}
-		)
+		entries.push(entry)
 	}
 
 	return entries
 }
 
-function argValue(flag: string): string | undefined {
-	return process.argv
-		.slice(2)
-		.find(arg => arg.startsWith(`${flag}=`))
-		?.slice(flag.length + 1)
-}
-
-function git(checkout: string, args: string[]): string {
-	return execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
-}
-
-/**
- * Which filen-rs checkout the crate list comes from, and which of the three candidates supplied it.
- *
- * The monorepo's `packages/filen-mobile/filen-rs` submodule is deliberately NOT a candidate: it is
- * pinned by mobile's native build on mobile's schedule and routinely sits at a different SDK release,
- * so falling through to it would attribute one release's crates to another's wasm.
- */
-function resolveCheckout(): { path: string; source: string } {
-	const candidates: { path: string; source: string }[] = [
-		{ path: argValue("--filen-rs") ?? "", source: "--filen-rs" },
-		{ path: process.env["FILEN_RS_PATH"] ?? "", source: "FILEN_RS_PATH" },
-		{ path: "../../../filen-rs", source: "sibling" }
-	]
-
-	for (const candidate of candidates) {
-		if (candidate.path.length > 0 && existsSync(join(candidate.path, "Cargo.lock"))) {
-			return candidate
-		}
-	}
-
-	throw new Error(
-		`no filen-rs checkout with a Cargo.lock — tried ${candidates.map(c => `${c.source}=${c.path.length > 0 ? c.path : "(unset)"}`).join(", ")}`
-	)
-}
-
-/** The crate sources cargo keeps on this machine: registry crates plus git-dependency checkouts. */
-function crateSourceRoots(): string[] {
-	const roots: string[] = []
-
-	for (const base of [join(homedir(), ".cargo", "registry", "src"), join(homedir(), ".cargo", "git", "checkouts")]) {
-		if (!existsSync(base)) {
-			continue
-		}
-
-		for (const entry of readdirSync(base)) {
-			roots.push(join(base, entry))
-		}
-	}
-
-	return roots
-}
-
 /**
  * The Rust crates the shipped wasm is compiled from, read at the RELEASE TAG matching the installed
- * @filen/sdk-rs version.
- *
- * Reading the checkout's working tree instead would attribute whatever the branch happens to be at —
- * measurably a different crate set — and a version equality check alone cannot catch that, because the
- * working tree still declares the same version.
+ * @filen/sdk-rs version (filenRsReleaseLock).
  */
 function collectRust(expected: string): { entries: Collected[]; ref: string; source: string; crates: number } {
-	const checkout = resolveCheckout()
-	const tag = `filen-js@${expected}`
-	const allowUntagged = process.argv.includes("--allow-untagged")
-	let ref = tag
-
-	try {
-		git(checkout.path, ["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
-	} catch {
-		if (!allowUntagged) {
-			throw new Error(`${checkout.path} has no tag ${tag} — fetch it (git -C ${checkout.path} fetch --tags) or pass --allow-untagged`)
-		}
-
-		ref = `worktree@${git(checkout.path, ["rev-parse", "--short", "HEAD"]).trim()}`
-	}
-
-	const atTag = ref === tag
-	const cargoToml = atTag
-		? git(checkout.path, ["show", `${tag}:filen-sdk-rs/Cargo.toml`])
-		: readFileSync(join(checkout.path, "filen-sdk-rs", "Cargo.toml"), "utf8")
-	const cargoLock = atTag ? git(checkout.path, ["show", `${tag}:Cargo.lock`]) : readFileSync(join(checkout.path, "Cargo.lock"), "utf8")
-	const declared = /^\s*version\s*=\s*"([^"]+)"/m.exec(cargoToml.split("[dependencies]")[0] ?? cargoToml)?.[1]
-
-	if (declared !== expected) {
-		throw new Error(`${checkout.path} at ${ref} declares filen-sdk-rs ${declared ?? "(none)"}, expected ${expected}`)
-	}
-
+	const checkout = resolveFilenRsCheckout("../../../filen-rs")
+	const { lock: cargoLock, ref } = filenRsReleaseLock(checkout.path, expected, process.argv.includes("--allow-untagged"))
 	const roots = crateSourceRoots()
 	const entries: Collected[] = []
 	const byId = new Map<string, Collected>()
 	let crates = 0
 
-	for (const match of cargoLock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "([^"]+)")?/g)) {
-		const [, name, version, source] = match
-
-		// No `source` means a workspace member — Filen's own code, not a third party.
-		if (!source || !name || !version) {
-			continue
-		}
+	for (const crate of lockedCrates(cargoLock)) {
+		const { name, version } = crate
 
 		crates++
 
-		// A registry crate unpacks to <root>/<name>-<version>; a git dependency to a checkout directory
-		// named after the abbreviated revision from the source URL's fragment.
-		const rev = /#([0-9a-f]+)$/.exec(source)?.[1]
-		const dir =
-			roots.map(root => join(root, `${name}-${version}`)).find(existsSync) ??
-			(rev === undefined
-				? undefined
-				: roots
-						.flatMap(root => {
-							try {
-								return readdirSync(root).map(entry => ({ entry, path: join(root, entry) }))
-							} catch {
-								return []
-							}
-						})
-						.find(({ entry }) => rev.startsWith(entry))?.path)
+		const dir = crateSourceDir(roots, crate)
 
 		if (dir === undefined) {
 			throw new Error(`no local source for crate ${name}-${version} — run cargo fetch in ${checkout.path}`)
@@ -1447,16 +1295,14 @@ function wasmCrateNotices(listed: readonly Collected[], lock: string, repoDir: s
 	const roots = crateSourceRoots()
 	const entries: Collected[] = []
 
-	for (const match of readFileSync(lock, "utf8").matchAll(
-		/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "([^"]+)")?/g
-	)) {
-		const [, name, version, source] = match
+	for (const crate of lockedCrates(readFileSync(lock, "utf8"))) {
+		const { name, version } = crate
 
-		if (!source || !name || !version || known.has(`${name}@${version}`)) {
+		if (known.has(`${name}@${version}`)) {
 			continue
 		}
 
-		const dir = roots.map(root => join(root, `${name}-${version}`)).find(existsSync)
+		const dir = crateSourceDir(roots, crate)
 
 		if (dir === undefined) {
 			throw new Error(`no local source for crate ${name}-${version} — run cargo fetch in ${repoDir}/crate`)

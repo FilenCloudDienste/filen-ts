@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 
 /**
@@ -636,4 +637,208 @@ export function poolLicenseTexts<T extends PoolableNotice>(collected: T[], verba
 	}
 
 	return texts
+}
+
+/**
+ * The patch pnpm applies to a package, by `name@version` (or a bare name, for every version), from the workspace
+ * file's patchedDependencies. What ships is the patched source, so its notice names the patch.
+ */
+export function workspacePatches(workspaceFile: string): Map<string, string> {
+	const patches = new Map<string, string>()
+	let inSection = false
+
+	for (const line of readFileSync(workspaceFile, "utf8").split("\n")) {
+		if (!/^\s/.test(line)) {
+			inSection = line.trimEnd() === "patchedDependencies:"
+
+			continue
+		}
+
+		const match = inSection ? /^\s+'?(.+?)'?:\s+(\S+)\s*$/.exec(line) : null
+
+		if (match?.[1] !== undefined && match[2] !== undefined) {
+			patches.set(match[1], match[2])
+		}
+	}
+
+	return patches
+}
+
+/**
+ * The notice for an npm package installed at `dir`, or null when its manifest cannot be read. A package pnpm patches
+ * leads with the patch it ships with (MPL-2.0 and the LGPL ask that recipients learn where the modified source is).
+ */
+export function npmPackageNotice(
+	pkg: { name: string; version: string; dir: string },
+	patches: ReadonlyMap<string, string>,
+	repository: string
+): CollectedNotice<"npm"> | null {
+	const { name, version, dir } = pkg
+	const id = `${name}@${version}`
+	const manifest = readJson(join(dir, "package.json"))
+
+	if (!manifest) {
+		return null
+	}
+
+	const manifestVersion = manifest["version"]
+
+	if (typeof manifestVersion === "string" && manifestVersion !== version) {
+		throw new Error(`${id}: pnpm says ${version}, ${dir}/package.json says ${manifestVersion} — run pnpm install`)
+	}
+
+	const entry = describedNotice({
+		name,
+		version,
+		license: spdxOf(manifest["license"] ?? manifest["licenses"]),
+		ecosystem: "npm",
+		dir,
+		repository: repositoryOf(manifest["repository"])
+	})
+	const patch = patches.get(id) ?? patches.get(name)
+
+	return patch === undefined
+		? entry
+		: {
+				...entry,
+				terms: [
+					`Modified: ${name} ${version} as published, with the patch ${patch} from the filen-ts repository (${repository}) applied. That patch is the whole of the change to its source.`,
+					...entry.terms
+				]
+			}
+}
+
+/** A third-party crate locked in a Cargo.lock. */
+export type LockedCrate = { name: string; version: string; source: string }
+
+/** The third-party crates a Cargo.lock locks, in its order. Entries with no `source` are workspace members: first-party. */
+export function lockedCrates(lock: string): LockedCrate[] {
+	const crates: LockedCrate[] = []
+
+	for (const [, name, version, source] of lock.matchAll(
+		/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "([^"]+)")?/g
+	)) {
+		if (name && version && source) {
+			crates.push({ name, version, source })
+		}
+	}
+
+	return crates
+}
+
+/** The crate sources cargo keeps on this machine: registry crates plus git-dependency checkouts. */
+export function crateSourceRoots(): string[] {
+	const roots: string[] = []
+
+	for (const base of [join(homedir(), ".cargo", "registry", "src"), join(homedir(), ".cargo", "git", "checkouts")]) {
+		if (!existsSync(base)) {
+			continue
+		}
+
+		for (const entry of readdirSync(base)) {
+			roots.push(join(base, entry))
+		}
+	}
+
+	return roots
+}
+
+/**
+ * Where cargo unpacked a locked crate on this machine, or undefined. A registry crate unpacks to <root>/<name>-<version>;
+ * a git dependency to a checkout directory named after the abbreviated revision from the source URL's fragment.
+ */
+export function crateSourceDir(roots: readonly string[], crate: LockedCrate): string | undefined {
+	const registry = roots.map(root => join(root, `${crate.name}-${crate.version}`)).find(existsSync)
+
+	if (registry !== undefined) {
+		return registry
+	}
+
+	const rev = /#([0-9a-f]+)$/.exec(crate.source)?.[1]
+
+	if (rev === undefined) {
+		return undefined
+	}
+
+	return roots
+		.flatMap(root => {
+			try {
+				return readdirSync(root).map(entry => ({ entry, path: join(root, entry) }))
+			} catch {
+				return []
+			}
+		})
+		.find(({ entry }) => rev.startsWith(entry))?.path
+}
+
+export function gitIn(checkout: string, args: string[]): string {
+	return execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+}
+
+/** The value of a `--flag=value` command-line argument. */
+export function argValue(flag: string, argv: readonly string[] = process.argv.slice(2)): string | undefined {
+	return argv.find(arg => arg.startsWith(`${flag}=`))?.slice(flag.length + 1)
+}
+
+/**
+ * Which filen-rs checkout the crate lists come from, and which candidate supplied it: `--filen-rs`, then
+ * `FILEN_RS_PATH`, then `sibling` (a filen-rs checkout beside filen-ts).
+ *
+ * The apps' filen-rs submodules are deliberately NOT candidates: each is pinned by its own native build on its own
+ * schedule and routinely sits at a different SDK release, so falling through to one would attribute one release's
+ * crates to another's build.
+ */
+export function resolveFilenRsCheckout(sibling: string): { path: string; source: string } {
+	const candidates: { path: string; source: string }[] = [
+		{ path: argValue("--filen-rs") ?? "", source: "--filen-rs" },
+		{ path: process.env["FILEN_RS_PATH"] ?? "", source: "FILEN_RS_PATH" },
+		{ path: sibling, source: "sibling" }
+	]
+
+	for (const candidate of candidates) {
+		if (candidate.path.length > 0 && existsSync(join(candidate.path, "Cargo.lock"))) {
+			return candidate
+		}
+	}
+
+	throw new Error(
+		`no filen-rs checkout with a Cargo.lock — tried ${candidates.map(c => `${c.source}=${c.path.length > 0 ? c.path : "(unset)"}`).join(", ")}`
+	)
+}
+
+/**
+ * The workspace Cargo.lock of a filen-rs checkout at the RELEASE TAG `filen-js@<sdkVersion>`, after checking that the
+ * tag's filen-sdk-rs declares that version.
+ *
+ * Reading the checkout's working tree instead would attribute whatever the branch happens to be at — measurably a
+ * different crate set — and a version equality check alone cannot catch that, because the working tree still declares
+ * the same version. `allowUntagged` reads the working tree when the tag is missing (a local experiment only): the ref is
+ * then `worktree@<sha>`, which every payload test rejects.
+ */
+export function filenRsReleaseLock(checkout: string, sdkVersion: string, allowUntagged: boolean): { lock: string; ref: string } {
+	const tag = `filen-js@${sdkVersion}`
+	let ref = tag
+
+	try {
+		gitIn(checkout, ["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
+	} catch {
+		if (!allowUntagged) {
+			throw new Error(`${checkout} has no tag ${tag} — fetch it (git -C ${checkout} fetch --tags) or pass --allow-untagged`)
+		}
+
+		ref = `worktree@${gitIn(checkout, ["rev-parse", "--short", "HEAD"]).trim()}`
+	}
+
+	const atTag = ref === tag
+	const cargoToml = atTag
+		? gitIn(checkout, ["show", `${tag}:filen-sdk-rs/Cargo.toml`])
+		: readFileSync(join(checkout, "filen-sdk-rs", "Cargo.toml"), "utf8")
+	const lock = atTag ? gitIn(checkout, ["show", `${tag}:Cargo.lock`]) : readFileSync(join(checkout, "Cargo.lock"), "utf8")
+	const declared = /^\s*version\s*=\s*"([^"]+)"/m.exec(cargoToml.split("[dependencies]")[0] ?? cargoToml)?.[1]
+
+	if (declared !== sdkVersion) {
+		throw new Error(`${checkout} at ${ref} declares filen-sdk-rs ${declared ?? "(none)"}, expected ${sdkVersion}`)
+	}
+
+	return { lock, ref }
 }

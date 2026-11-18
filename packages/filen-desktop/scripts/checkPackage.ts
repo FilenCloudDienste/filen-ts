@@ -9,7 +9,7 @@ import { LEGACY_EXECUTABLE, LINUX_INSTALL_DIR, listsLegacyExecutableLink } from 
 import { nativeArchOf } from "./nativeArch.ts"
 import { MAC_TEAM } from "./signRclone.ts"
 
-// Checks the unpacked apps electron-builder leaves in release/: the web build, tray assets, the sync addon and rclone
+// Checks the unpacked apps electron-builder leaves in release/: the web build, Electron's and Chromium's license files, tray assets, the sync addon and rclone
 // (both built for the app's arch) and, on Windows, WinFsp's installer made it in, and the app-update.yml baked into
 // each app polls the frozen feed with no channel. On Linux, rclone must be the binary whose sha256 the main bundle
 // carries, and the deb and rpm, where built, must install 3.x's executable name as a link to it. With --signed, the Windows one must also pin the publisher, which is what makes the updater verify an
@@ -161,6 +161,12 @@ for (const arch of archs) {
 		path.join(resources, "web", "index.html"),
 		path.join(resources, "web", "_headers")
 	]
+
+	// Electron's and Chromium's licenses, which electron-builder keeps in Contents/Resources on macOS and beside the
+	// executable elsewhere; the third-party notices point there for Chromium's and Node.js's components.
+	const licenses = platform === "mac" ? resources : app
+
+	required.push(path.join(licenses, "LICENSE.electron.txt"), path.join(licenses, "LICENSES.chromium.html"))
 
 	if (platform === "win") {
 		// packElevateHelper: the per-machine installer elevates through it during silent updates.

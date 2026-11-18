@@ -6,6 +6,7 @@ import { createElement } from "react"
 import "@/lib/i18n"
 import { FILEN_PRIVACY_URL, FILEN_TERMS_URL } from "@/lib/externalUrls"
 import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
 afterEach(() => {
 	cleanup()
@@ -32,7 +33,8 @@ describe("AuthLegalLinks", () => {
 
 	// Signed-out visitors run the same bundled third-party code, so its notices are reachable without a session.
 	it("opens the open source licenses without a session", () => {
-		render(createElement(AuthLegalLinks))
+		// The app root provides the query client; the dialog asks it for the desktop shell's notices.
+		render(createElement(AuthLegalLinks), { wrapper: queryClientWrapper(createTestQueryClient()) })
 
 		fireEvent.click(screen.getByRole("button", { name: "Open source licenses" }))
 

@@ -5,7 +5,9 @@ import { listInstalledNpm, type InstalledNpmPackage } from "@filen/shared/toolin
 import {
 	filterThirdPartyNotices,
 	findThirdPartyNotice,
+	licenseTextsIn,
 	thirdPartyLicenseTexts,
+	withDesktopNotices,
 	thirdPartyNoticesPayload,
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
 	THIRD_PARTY_NOTICES_SDK_VERSION
@@ -548,5 +550,62 @@ describe("noticeRepositoryHref", () => {
 		const linked = THIRD_PARTY_NOTICES.map(notice => noticeRepositoryHref(notice.repository)).filter(href => href !== null)
 
 		expect(linked.every(href => href.startsWith("https://") || href.startsWith("http://"))).toBe(true)
+	})
+})
+
+describe("withDesktopNotices", () => {
+	const desktop = {
+		texts: ["Shell terms A", "Shell terms B"],
+		notices: [
+			{
+				name: "zzz-shell",
+				version: "1.0.0",
+				license: "MIT",
+				ecosystem: "go" as const,
+				copyright: ["Copyright Z"],
+				repository: null,
+				texts: [1]
+			},
+			{
+				name: "Aaa-shell",
+				version: "2.0.0",
+				license: "MIT",
+				ecosystem: "vendored" as const,
+				copyright: ["Copyright A"],
+				repository: null,
+				texts: [0, 1]
+			}
+		]
+	}
+	const merged = withDesktopNotices({ texts: LICENSE_TEXTS, notices: THIRD_PARTY_NOTICES }, desktop)
+
+	it("keeps the web build's notices and texts as they are, and appends the shell's texts after them", () => {
+		expect(merged.texts.slice(0, LICENSE_TEXTS.length)).toEqual(LICENSE_TEXTS)
+		expect(merged.texts.slice(LICENSE_TEXTS.length)).toEqual(desktop.texts)
+
+		for (const notice of THIRD_PARTY_NOTICES.slice(0, 50)) {
+			const found = merged.notices.find(
+				entry => entry.ecosystem === notice.ecosystem && entry.name === notice.name && entry.version === notice.version
+			)
+
+			expect(found === undefined ? [] : licenseTextsIn(merged, found)).toEqual(thirdPartyLicenseTexts(notice))
+		}
+	})
+
+	it("resolves the shell's notices to their own texts", () => {
+		const shell = merged.notices.filter(notice => notice.name.endsWith("-shell"))
+
+		expect(shell.map(notice => [notice.name, licenseTextsIn(merged, notice)])).toEqual([
+			["Aaa-shell", ["Shell terms A", "Shell terms B"]],
+			["zzz-shell", ["Shell terms B"]]
+		])
+	})
+
+	it("orders the merged list by name then version, as the web list is", () => {
+		const order = (list: readonly { name: string; version: string }[]) =>
+			[...list].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+
+		expect(merged.notices.length).toBe(THIRD_PARTY_NOTICES.length + desktop.notices.length)
+		expect(merged.notices).toEqual(order(merged.notices))
 	})
 })

@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
 	describeCargoCrate,
 	describedNotice,
 	describeLicensing,
+	crateSourceDir,
 	finalizeNotices,
+	lockedCrates,
+	npmPackageNotice,
 	poolLicenseTexts,
 	repositoryOf,
 	sortNoticeTexts,
 	spdxOf,
 	vendoredNotice,
+	workspacePatches,
 	type PoolableNotice
 } from "@filen/shared/tooling"
 
@@ -237,5 +241,77 @@ describe("vendoredNotice", () => {
 		expect(() => vendoredNotice({ ...component, terms: [" "] }, "vendored")).toThrow("license text")
 		expect(() => vendoredNotice({ ...component, copyright: [] }, "vendored")).toThrow("copyright")
 		expect(() => vendoredNotice({ ...component, version: "" }, "vendored")).toThrow("version")
+	})
+})
+
+describe("lockedCrates", () => {
+	it("lists third-party crates and skips workspace members", () => {
+		const lock = [
+			"version = 4",
+			"",
+			"[[package]]",
+			"name = \"filen-sdk-rs\"",
+			"version = \"0.5.32\"",
+			"",
+			"[[package]]",
+			"name = \"libc\"",
+			"version = \"0.2.191\"",
+			"source = \"registry+https://github.com/rust-lang/crates.io-index\"",
+			"",
+			"[[package]]",
+			"name = \"forked\"",
+			"version = \"1.0.0\"",
+			"source = \"git+https://github.com/example/forked?rev=abc#abcdef1234\"",
+			""
+		].join("\n")
+
+		expect(lockedCrates(lock)).toEqual([
+			{ name: "libc", version: "0.2.191", source: "registry+https://github.com/rust-lang/crates.io-index" },
+			{ name: "forked", version: "1.0.0", source: "git+https://github.com/example/forked?rev=abc#abcdef1234" }
+		])
+	})
+})
+
+describe("crateSourceDir", () => {
+	it("finds a registry crate by name-version and a git crate by its abbreviated revision", () => {
+		const root = packageDir({})
+
+		mkdirSync(join(root, "libc-0.2.191"))
+		mkdirSync(join(root, "abcdef1"))
+
+		expect(crateSourceDir([root], { name: "libc", version: "0.2.191", source: "registry+x" })).toBe(join(root, "libc-0.2.191"))
+		expect(crateSourceDir([root], { name: "forked", version: "1.0.0", source: "git+x#abcdef1234" })).toBe(join(root, "abcdef1"))
+		expect(crateSourceDir([root], { name: "absent", version: "1.0.0", source: "registry+x" })).toBeUndefined()
+	})
+})
+
+describe("workspacePatches and npmPackageNotice", () => {
+	it("reads patchedDependencies and names the patch in the notice of a patched package", () => {
+		const workspace = packageDir({
+			"pnpm-workspace.yaml": "packages:\n  - packages/*\npatchedDependencies:\n  # why\n  'pkg@1.0.0': patches/pkg@1.0.0.patch\n  other: patches/other.patch\nallowBuilds:\n  x: true\n"
+		})
+		const patches = workspacePatches(join(workspace, "pnpm-workspace.yaml"))
+		const dir = packageDir({
+			"package.json": JSON.stringify({ name: "pkg", version: "1.0.0", license: "MIT", repository: { type: "git", url: "git+https://github.com/o/pkg.git" } }),
+			LICENSE: "Copyright (c) Someone\n\nPermission is hereby granted."
+		})
+
+		expect([...patches]).toEqual([
+			["pkg@1.0.0", "patches/pkg@1.0.0.patch"],
+			["other", "patches/other.patch"]
+		])
+		expect(npmPackageNotice({ name: "pkg", version: "1.0.0", dir }, patches, "https://repo")).toMatchObject({
+			name: "pkg",
+			license: "MIT",
+			ecosystem: "npm",
+			copyright: ["Copyright (c) Someone"],
+			repository: "https://github.com/o/pkg",
+			terms: [
+				"Modified: pkg 1.0.0 as published, with the patch patches/pkg@1.0.0.patch from the filen-ts repository (https://repo) applied. That patch is the whole of the change to its source.",
+				"Permission is hereby granted."
+			]
+		})
+		expect(() => npmPackageNotice({ name: "pkg", version: "2.0.0", dir }, patches, "https://repo")).toThrow(/run pnpm install/)
+		expect(npmPackageNotice({ name: "pkg", version: "1.0.0", dir: join(dir, "missing") }, patches, "https://repo")).toBeNull()
 	})
 })

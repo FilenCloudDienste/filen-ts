@@ -304,7 +304,8 @@ describe("desktop vault", () => {
 				installUpdate: () => undefined,
 				quit: () => undefined,
 				browserCacheSize: () => Promise.reject(new Error("unused")),
-				clearBrowserCache: () => Promise.reject(new Error("unused"))
+				clearBrowserCache: () => Promise.reject(new Error("unused")),
+				thirdPartyNotices: () => Promise.reject(new Error("unused"))
 			},
 			lock: {
 				status: () => Promise.reject(new Error("unused")),

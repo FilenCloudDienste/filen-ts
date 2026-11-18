@@ -1,13 +1,20 @@
 import { useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { useQuery } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import type { DesktopApp } from "@filen/shared/desktop"
 import { ArrowLeftIcon, PackageSearchIcon } from "lucide-react"
 import {
 	filterThirdPartyNotices,
-	thirdPartyLicenseTexts,
+	licenseTextsIn,
 	thirdPartyNoticesPayload,
-	type ThirdPartyNotice
+	withDesktopNotices,
+	type ThirdPartyNotice,
+	type ThirdPartyNoticesPayload
 } from "@/features/settings/lib/thirdPartyNotices"
+import { desktopBridge } from "@/lib/desktop"
+import { log } from "@/lib/log"
+import { noDiskPersister } from "@/queries/persist"
 import { noticeLacksCopyright, noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -23,8 +30,35 @@ export interface ThirdPartyNoticesDialogProps {
 const ROW_HEIGHT = 52
 const OVERSCAN = 10
 
-// Both panes live in ONE dialog, swapped by local state — a nested dialog would fight the shared
-// dismissal gate.
+// In the desktop app, the notices of what its shell adds to this build, merged in once the dialog first opens. Never
+// persisted: the shell reads them from disk, which is cheaper than the query cache would be.
+async function desktopNotices(app: DesktopApp): Promise<ThirdPartyNoticesPayload> {
+	try {
+		return withDesktopNotices(thirdPartyNoticesPayload(), await app.thirdPartyNotices())
+	} catch (e) {
+		log.error("settings.notices", "reading the desktop shell's notices failed", e)
+
+		throw e
+	}
+}
+
+// The web build's notices until the shell's arrive, and still them if reading those failed; in a browser, only them.
+function useThirdPartyNotices(open: boolean): ThirdPartyNoticesPayload {
+	const app = desktopBridge()?.app
+	const { data } = useQuery({
+		queryKey: ["settings", "thirdPartyNotices", "desktop"],
+		queryFn: () => (app === undefined ? thirdPartyNoticesPayload() : desktopNotices(app)),
+		persister: noDiskPersister,
+		enabled: open && app !== undefined,
+		staleTime: Infinity,
+		retry: false,
+		refetchOnWindowFocus: false,
+		refetchOnReconnect: false
+	})
+
+	return data ?? thirdPartyNoticesPayload()
+}
+
 export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialogProps) {
 	const { t } = useTranslation("settings")
 	const [query, setQuery] = useState("")
@@ -32,8 +66,9 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
 	// re-lays every row when its key function changes, so the filtered list and its key function must
-	// change with the query and nothing else, not on every scroll render.
-	const notices = useMemo(() => filterThirdPartyNotices(thirdPartyNoticesPayload().notices, query), [query])
+	// change with the query (and the desktop shell's notices arriving) and nothing else, not on every scroll render.
+	const payload = useThirdPartyNotices(open)
+	const notices = useMemo(() => filterThirdPartyNotices(payload.notices, query), [payload, query])
 	const repositoryHref = noticeRepositoryHref(selected?.repository ?? null)
 	const getItemKey = useCallback(
 		(index: number) => {
@@ -160,7 +195,7 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 							{noticeLacksCopyright(selected) ? (
 								<p className="text-muted-foreground">{t("settingsNoticesNoCopyrightLine")}</p>
 							) : null}
-							{thirdPartyLicenseTexts(selected).map(text => (
+							{licenseTextsIn(payload, selected).map(text => (
 								<pre
 									key={text}
 									className="font-mono whitespace-pre-wrap"

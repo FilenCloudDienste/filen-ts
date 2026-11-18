@@ -22,9 +22,9 @@ import { nativeArch, type NativeArch } from "./nativeArch.ts"
 
 const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const cacheDir = path.join(packageDir, "node_modules", ".cache", "filen-rclone")
-const ARCHS: NativeArch[] = ["x64", "arm64"]
+export const ARCHS: NativeArch[] = ["x64", "arm64"]
 // electron-builder's ${os} and rclone's name for the same OS.
-const OS: Partial<Record<NodeJS.Platform, { builder: "mac" | "win" | "linux"; rclone: string }>> = {
+export const OS: Partial<Record<NodeJS.Platform, { builder: "mac" | "win" | "linux"; rclone: string }>> = {
 	darwin: { builder: "mac", rclone: "osx" },
 	win32: { builder: "win", rclone: "windows" },
 	linux: { builder: "linux", rclone: "linux" }
@@ -127,21 +127,32 @@ async function download(url: string, sha256: string): Promise<Uint8Array> {
 	return data
 }
 
-// The pinned rclone of this OS for `arch`, verified against versions.json.
-export async function pinnedRclone(arch: NativeArch, versions = readVersions()): Promise<Uint8Array> {
-	const os = OS[process.platform]
+// The official release zip of rclone for `platform` and `arch`, as versions.json pins it.
+export function rcloneRelease(
+	arch: NativeArch,
+	versions: RcloneVersions,
+	platform: NodeJS.Platform
+): { url: string; sha256: string; entry: string } {
+	const os = OS[platform]
 
 	if (os === undefined) {
-		throw new Error(`No rclone for ${process.platform}`)
+		throw new Error(`No rclone for ${platform}`)
 	}
 
 	const name = `rclone-v${versions.rclone}-${os.rclone}-${RCLONE_ARCH[arch]}`
-	const zip = await download(
-		`https://downloads.rclone.org/v${versions.rclone}/${name}.zip`,
-		versions.rcloneSha256[`${os.builder}-${arch}`]
-	)
 
-	return rcloneFromZip(zip, `${name}/${os.builder === "win" ? "rclone.exe" : "rclone"}`, arch)
+	return {
+		url: `https://downloads.rclone.org/v${versions.rclone}/${name}.zip`,
+		sha256: versions.rcloneSha256[`${os.builder}-${arch}`],
+		entry: `${name}/${os.builder === "win" ? "rclone.exe" : "rclone"}`
+	}
+}
+
+// The pinned rclone of `platform` (this OS by default) for `arch`, verified against versions.json.
+export async function pinnedRclone(arch: NativeArch, versions = readVersions(), platform = process.platform): Promise<Uint8Array> {
+	const release = rcloneRelease(arch, versions, platform)
+
+	return rcloneFromZip(await download(release.url, release.sha256), release.entry, arch)
 }
 
 export async function stageRclone(): Promise<void> {

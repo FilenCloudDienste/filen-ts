@@ -39,6 +39,7 @@ export const CHANNELS = {
 	installUpdate: "app:install-update",
 	browserCacheSize: "app:browser-cache-size",
 	clearBrowserCache: "app:clear-browser-cache",
+	thirdPartyNotices: "app:third-party-notices",
 	lockStatus: "lock:status",
 	lockChanged: "lock:changed",
 	lockUnlock: "lock:unlock",

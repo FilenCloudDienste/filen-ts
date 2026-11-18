@@ -107,6 +107,7 @@ import { createSessionEnd, shouldConfirmQuit, unloadGuardAsks } from "./quitConf
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
 import { registerBrowserCacheIpc, sessionBrowserCache } from "./browserCache.ts"
+import { fileThirdPartyNotices, registerThirdPartyNoticesIpc } from "./thirdPartyNotices.ts"
 import { createSignOut, deleteProfileStorage, type ProfileOutcome, removeTree, wipeProfileBeforeReady } from "./signOut.ts"
 import { parseSessionBlob } from "@filen/shared/session"
 import {
@@ -2176,6 +2177,7 @@ if (!instanceLock.held) {
 		sessionBrowserCache(() => session.defaultSession),
 		url => isTrustedSender(url, APP_ORIGIN)
 	)
+	registerThirdPartyNoticesIpc(ipcMain, fileThirdPartyNotices(import.meta.dirname), url => isTrustedSender(url, APP_ORIGIN))
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)

@@ -1,13 +1,19 @@
+import type { DesktopThirdPartyNotice, DesktopThirdPartyNotices } from "@filen/shared/desktop"
 import {
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
 	THIRD_PARTY_NOTICES_PAYLOAD,
 	THIRD_PARTY_NOTICES_SDK_VERSION,
-	type ThirdPartyNotice
+	type ThirdPartyNotice as WebThirdPartyNotice
 } from "@/features/settings/thirdPartyNotices.gen"
 
-export { THIRD_PARTY_NOTICES_SDK_VERSION, THIRD_PARTY_NOTICES_FILEN_RS_REF, type ThirdPartyNotice }
+export { THIRD_PARTY_NOTICES_SDK_VERSION, THIRD_PARTY_NOTICES_FILEN_RS_REF }
 
-interface ThirdPartyNoticesPayload {
+// A notice of the web build, or (in the desktop app) of what its shell adds.
+export type ThirdPartyNotice = Omit<WebThirdPartyNotice, "ecosystem"> & {
+	ecosystem: WebThirdPartyNotice["ecosystem"] | DesktopThirdPartyNotice["ecosystem"]
+}
+
+export interface ThirdPartyNoticesPayload {
 	texts: readonly string[]
 	notices: readonly ThirdPartyNotice[]
 }
@@ -35,6 +41,21 @@ export function findThirdPartyNotice(name: string, version: string): ThirdPartyN
 }
 
 /**
+ * The web build's notices with the desktop shell's appended: the shell's text indices are moved past the web table,
+ * and the list is ordered by name then version again, as each side is.
+ */
+export function withDesktopNotices(web: ThirdPartyNoticesPayload, desktop: DesktopThirdPartyNotices): ThirdPartyNoticesPayload {
+	const offset = web.texts.length
+
+	return {
+		texts: [...web.texts, ...desktop.texts],
+		notices: [...web.notices, ...desktop.notices.map(notice => ({ ...notice, texts: notice.texts.map(index => index + offset) }))].sort(
+			(a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version)
+		)
+	}
+}
+
+/**
  * The license terms that ship with a package — empty when it shipped no license file.
  *
  * Empty is deliberately not filled in from another package's text of the same license: an MIT file is
@@ -42,7 +63,12 @@ export function findThirdPartyNotice(name: string, version: string): ThirdPartyN
  * than one text means the declared license is a conjunction and every text applies.
  */
 export function thirdPartyLicenseTexts(notice: ThirdPartyNotice): string[] {
-	const { texts } = thirdPartyNoticesPayload()
+	return licenseTextsIn(thirdPartyNoticesPayload(), notice)
+}
+
+/** The same, for a notice of `payload` (one withDesktopNotices built). */
+export function licenseTextsIn(payload: ThirdPartyNoticesPayload, notice: ThirdPartyNotice): string[] {
+	const { texts } = payload
 
 	return notice.texts.map(index => texts[index]).filter((text): text is string => text !== undefined)
 }
