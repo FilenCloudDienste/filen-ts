@@ -38,7 +38,8 @@ vi.mock("@filen/sdk-rs", () => ({
 		Chat: "Chat",
 		Note: "Note",
 		Contact: "Contact",
-		General: "General"
+		General: "General",
+		Lock: "Lock"
 	},
 	GeneralEvent_Tags: {
 		PasswordChanged: "PasswordChanged",

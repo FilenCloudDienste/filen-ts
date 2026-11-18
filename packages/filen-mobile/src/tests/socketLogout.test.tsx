@@ -50,7 +50,8 @@ vi.mock("@filen/sdk-rs", () => ({
 		Chat: "Chat",
 		Note: "Note",
 		Contact: "Contact",
-		General: "General"
+		General: "General",
+		Lock: "Lock"
 	},
 	GeneralEvent_Tags: { PasswordChanged: "PasswordChanged", NewEvent: "NewEvent" },
 	ChatEvent_Tags: { Typing: "Typing" },
@@ -71,6 +72,7 @@ vi.mock("@/queries/socketSession", () => ({ noteSocketDataEvent: vi.fn() }))
 import Socket from "@/components/shell/socket"
 import events from "@/lib/events"
 import useSocketStore from "@/stores/useSocket.store"
+import alerts from "@/lib/alerts"
 import type { SocketEvent } from "@filen/sdk-rs"
 
 type Listener = { onEvent: (event: SocketEvent) => void }
@@ -152,5 +154,18 @@ describe("the shell socket at logout", () => {
 		completeRegistration()
 
 		await waitFor(() => expect(h.handle.uniffiDestroy).toHaveBeenCalledOnce())
+	})
+})
+
+describe("the shell socket's lock announcements", () => {
+	it("are no data change and raise no error", async () => {
+		const listener = await mountRegistered()
+		const errorCalls = vi.mocked(alerts.error).mock.calls.length
+
+		listener.onEvent({ tag: "Lock", inner: [{ inner: { tag: "Acquired", inner: [{}] } }] } as unknown as SocketEvent)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(vi.mocked(alerts.error).mock.calls.length).toBe(errorCalls)
+		expect(h.handleDriveEvent).not.toHaveBeenCalled()
 	})
 })

@@ -117,7 +117,8 @@ export enum SocketEvent_Tags {
 	Chat = "Chat",
 	Note = "Note",
 	Contact = "Contact",
-	General = "General"
+	General = "General",
+	Lock = "Lock"
 }
 
 export enum DriveEvent_Tags {

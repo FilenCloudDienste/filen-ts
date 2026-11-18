@@ -109,6 +109,8 @@ export function buildJsClientConfig(resolved: ResolvedTransferConfig): JsClientC
 		// The app runs no archive jobs: the platform defaults (one job at a time on mobile) stay.
 		archiveCodecMemBudget: undefined,
 		archiveJobConcurrency: undefined,
+		// The app opens no archive readers: the platform default (64 MiB on iOS and Android) stays.
+		archiveRetainedBudget: undefined,
 		// The SDK's 5 ms default: concurrent calls to a route with a bulk twin go out as one request
 		// (fewer API requests for bulk actions); the first call of a burst is never delayed.
 		batchWindowMs: undefined

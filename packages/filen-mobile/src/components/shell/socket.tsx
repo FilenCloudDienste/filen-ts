@@ -157,6 +157,13 @@ async function onEvent(event: SocketEvent) {
 				break
 			}
 
+			// Lock announcements: the SDK applies them to the client's own lock leases, and the app keeps no
+			// lock state of its own. Every client of the account receives them, so they must not reach the
+			// default's throw + error toast.
+			case SocketEvent_Tags.Lock: {
+				break
+			}
+
 			default: {
 				logger.error("socket", "Unhandled socket event", { tag: (event as { tag?: string }).tag })
 
