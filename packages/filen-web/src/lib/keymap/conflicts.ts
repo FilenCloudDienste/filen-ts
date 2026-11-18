@@ -305,6 +305,9 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["preview.dicomPreviousFrame", "presentation.show.previous"],
 	["preview.dicomNextFrame", "media.chapterNext"],
 	["preview.dicomPreviousFrame", "media.chapterPrevious"],
+	// One body at a time: a comic's pages and a DICOM image's frames are never shown together.
+	["preview.comicNextPage", "preview.dicomNextFrame"],
+	["preview.comicPreviousPage", "preview.dicomPreviousFrame"],
 	["preview.pdfNextPage", "notes.newNote"],
 	["editor.undo", "preview.imageUndo"],
 	["editor.undo", "presentation.undo"],
