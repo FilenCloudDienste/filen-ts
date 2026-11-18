@@ -258,16 +258,20 @@ export interface FrameTags {
 	readonly rows: number
 	readonly columns: number
 	readonly samplesPerPixel: number
+	readonly bitsAllocated: number
 	readonly bitsStored: number
 }
 
-// Whether the codestream declares the frame the tags do.
+// Whether the codestream declares the frame the tags do. Its precision may exceed Bits Stored, as PS3.5 8.2 allows
+// (the samples still hold Bits Stored's values, which is what the pipeline masks to), up to the Bits Allocated the
+// decoded samples are held in; the size and the components must be the tags' own.
 export function matchesTags(header: CodestreamHeader, tags: FrameTags): boolean {
 	return (
 		header.rows === tags.rows &&
 		header.columns === tags.columns &&
 		header.components === tags.samplesPerPixel &&
-		header.bits === tags.bitsStored
+		header.bits >= tags.bitsStored &&
+		header.bits <= tags.bitsAllocated
 	)
 }
 

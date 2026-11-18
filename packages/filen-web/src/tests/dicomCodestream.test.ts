@@ -77,7 +77,7 @@ function jpeg(sof: number, precision: number, rows: number, columns: number, com
 	])
 }
 
-const TAGS = { rows: 48, columns: 64, samplesPerPixel: 1, bitsStored: 16 }
+const TAGS = { rows: 48, columns: 64, samplesPerPixel: 1, bitsAllocated: 16, bitsStored: 16 }
 
 describe("codestream headers", () => {
 	it("reads a JPEG's SOFn past APPn, a lossless one as the decoder walks it, and JPEG-LS's SOF55", () => {
@@ -141,6 +141,10 @@ describe("codestream headers", () => {
 		expect(matchesTags({ ...header, rows: 47 }, TAGS)).toBe(false)
 		expect(matchesTags({ ...header, components: 3 }, TAGS)).toBe(false)
 		expect(matchesTags({ ...header, bits: 12 }, TAGS)).toBe(false)
+		// A precision past Bits Stored, within Bits Allocated, is the standard's own allowance.
+		expect(matchesTags(header, { ...TAGS, bitsStored: 12 })).toBe(true)
+		expect(matchesTags({ ...header, bits: 8 }, { ...TAGS, bitsAllocated: 8, bitsStored: 8 })).toBe(true)
+		expect(matchesTags({ ...header, bits: 12 }, { ...TAGS, bitsAllocated: 8, bitsStored: 8 })).toBe(false)
 		expect(declaredPixels({ ...header, rows: 4800 }, TAGS)).toBe(4800 * 64)
 	})
 
@@ -241,6 +245,9 @@ describe("the codecs", () => {
 		await expect(decodeCompressed(stream, grayModule(48, 64, 16), "gray", decoder, 10_000)).rejects.toMatchObject({
 			reason: "mismatch"
 		})
+
+		// A 12-bit codestream for 10 bits stored.
+		expect((await decodeCompressed(stream, grayModule(48, 64, 10), "gray", decoder, 10_000)).rows).toBe(48)
 	})
 	it.each([
 		["jpeg2000", "@cornerstonejs/codec-openjpeg/wasmjs", "J2KEncoder"],
