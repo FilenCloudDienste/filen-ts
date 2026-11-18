@@ -146,9 +146,11 @@ function assistantModelSources(mode: string): string[] {
 const contentSecurityPolicy = (connectExtra: readonly string[]) =>
 	[
 		"default-src 'none'",
-		// challenges.cloudflare.com: the Turnstile challenge on the public link pages' abuse report.
+		// challenges.cloudflare.com: the Turnstile challenge on the public link pages' abuse report. Its script is
+		// /turnstile/v0/api.js; its frame lives under the challenge path alone, so no frame of ours (a sandboxed
+		// preview frame navigating itself) can reach anything else on that host.
 		"script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
-		"frame-src https://challenges.cloudflare.com",
+		"frame-src https://challenges.cloudflare.com/cdn-cgi/challenge-platform/",
 		"worker-src 'self' blob:",
 		"style-src 'self' 'unsafe-inline'",
 		"font-src 'self'",
