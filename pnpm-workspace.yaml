@@ -44,6 +44,10 @@ overrides:
   # spessasynth_core depends on stb-vorbis at "latest"; pinned so a new release reaches the MIDI synthesizer only
   # through a deliberate bump.
   'spessasynth_core>stb-vorbis': 0.0.7
+  # dxf-viewer asks for three ^0.186; it shares the app's (patched) three so one copy loads, which the DXF e2e
+  # guards. Re-check on every bump of either.
+  'dxf-viewer>three': 0.187.0
+  'dxf-viewer>@types/three': 0.187.0
 
 # pnpm's default one-day minimumReleaseAge stays on for third-party packages. First-party ones are released
 # and adopted the same day, so they are exempt by name, never per version; pruning drops one-off exemptions
@@ -121,6 +125,11 @@ patchedDependencies:
   # Passes cache_ram_mib and the context-checkpoint params to the self-built wasm (filen-web
   # scripts/wllama), capping a prompt cache that outgrew the heap. Drop once a wllama release exposes them.
   '@wllama/wllama@3.8.1': patches/@wllama__wllama@3.8.1.patch
+  # The DXF viewer builds untrusted drawings: the scene counts its work (entity visits, so blocks nested in blocks
+  # count once per path; generated vertices; arc segments; hatch lines and dash steps) against the `maxWork` option
+  # and fails past it, and one entity's geometry against `maxEntityWork`. Unpatched, a few KB of nested INSERTs or one
+  # hatch build without limit. Re-author on every bump; propose upstream.
+  dxf-viewer@1.0.51: patches/dxf-viewer@1.0.51.patch
   # Desktop updates: the AppImage is replaced only after the new one is moved into place (a failed mv deleted the
   # running app), and the Windows app quits only once elevate.exe started the installer (a declined UAC prompt
   # quit it with nothing installed). Drop each once upstream fixes it.

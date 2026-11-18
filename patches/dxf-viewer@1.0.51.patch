@@ -1,0 +1,184 @@
+diff --git a/src/DxfScene.js b/src/DxfScene.js
+index 816d2513719b61cb4d24576067eb69145b52df5c..ef0131b3e5ddf30ca26a4b353206113f9e535f93 100644
+--- a/src/DxfScene.js
++++ b/src/DxfScene.js
+@@ -119,6 +119,14 @@ function SplitQuad(corners) {
+  * is decoupled in such a way so that it should be possible to build it in a web-worker, effectively
+  * transfer it to the main thread, and easily apply it to a Three.js scene there.
+  */
++/** Thrown once a build has done more work than `maxWork` allows (see DxfScene.DefaultOptions). */
++export class SceneTooComplexError extends Error {
++    constructor() {
++        super("The drawing needs more work to build than the scene allows")
++        this.name = "DxfSceneTooComplex"
++    }
++}
++
+ export class DxfScene {
+ 
+     constructor(options) {
+@@ -150,6 +158,21 @@ export class DxfScene {
+         this.numEntitiesFiltered = 0
+         /* Entities dropped because they are malformed, see _ProcessDxfEntity(). */
+         this.numEntitiesSkipped = 0
++        /* Work done so far, see _Spend(). */
++        this.work = 0
++    }
++
++    /** Count work about to be done, and throw once the build is over `maxWork`. Every later call
++     * throws as well, so the per-entity error handling cannot carry an over-budget build on. A
++     * count that is not positive (a loop that will not run) costs nothing.
++     */
++    _Spend(amount) {
++        if (amount > 0) {
++            this.work += amount
++        }
++        if (this.work > this.options.maxWork) {
++            throw new SceneTooComplexError()
++        }
+     }
+ 
+     /** Build the scene from the provided parsed DXF.
+@@ -249,6 +272,8 @@ export class DxfScene {
+         if (this.numEntitiesSkipped > 0) {
+             console.warn(`${this.numEntitiesSkipped} malformed entities skipped`)
+         }
++        /* The last entity may have gone over, its throw taken for a malformed entity. */
++        this._Spend(0)
+ 
+         this.scene = this._BuildScene()
+ 
+@@ -359,6 +384,8 @@ export class DxfScene {
+      * @param {?BlockContext} blockCtx
+      */
+     _ProcessDxfEntity(entity, blockCtx = null) {
++        /* One per entity visit: a block nested in a block is visited once per path to it. */
++        this._Spend(1)
+         let renderEntities
+         try {
+             renderEntities = this._DecomposeDxfEntity(entity, blockCtx)
+@@ -434,8 +461,21 @@ export class DxfScene {
+             console.log("Unhandled entity type: " + entity.type)
+             return []
+         }
+-        /* Materialized so that a throw part way through leaves nothing written. */
+-        renderEntities = Array.from(renderEntities)
++        /* Materialized so that a throw part way through leaves nothing written. Counted as it is
++         * built: a hatch yields its segments one by one.
++         */
++        const materialized = []
++        let entityWork = 0
++        for (const renderEntity of renderEntities) {
++            const work = 1 + renderEntity.vertices.length + (renderEntity.indices?.length ?? 0)
++            entityWork += work
++            if (entityWork > this.options.maxEntityWork) {
++                throw new Error("Entity produces more geometry than one entity may")
++            }
++            this._Spend(work)
++            materialized.push(renderEntity)
++        }
++        renderEntities = materialized
+         /* Decomposers work in the entity's OCS; this is the one place it is mapped to WCS. Fresh
+          * vertices are made rather than transforming in place, because render entities may hold
+          * the parsed vertex objects themselves, and a block definition is decomposed again for
+@@ -618,6 +658,10 @@ export class DxfScene {
+             endAngle = -tmp
+         }
+ 
++        if (endAngle <= startAngle) {
++            /* Turns the loop below takes; it never ends once a turn no longer changes the angle. */
++            this._Spend(Math.ceil((startAngle - endAngle) / (Math.PI * 2)) + 1)
++        }
+         while (endAngle <= startAngle) {
+             endAngle += Math.PI * 2
+         }
+@@ -628,6 +672,7 @@ export class DxfScene {
+         if (numSegments === 0) {
+             numSegments = 1
+         }
++        this._Spend(numSegments)
+         const step = arcAngle / numSegments
+ 
+         let rotationTransform = null
+@@ -1319,7 +1364,14 @@ export class DxfScene {
+ 
+         const calc = new HatchCalculator(filteredBoundaryLoops, style)
+ 
++        let boundaryVertices = 0
++        for (const loop of filteredBoundaryLoops) {
++            boundaryVertices += loop.length
++        }
++
+         if (entity.isSolid) {
++            /* Nesting compares each loop with every other one. */
++            this._Spend(filteredBoundaryLoops.length * boundaryVertices)
+             /* Each region is triangulated on its own: the loops of one hatch may well be disjoint
+              * areas rather than a single contour with its islands.
+              */
+@@ -1389,7 +1441,7 @@ export class DxfScene {
+             for (const line of pattern.lines) {
+                 yield* this._DecomposeHatchPatternLine(line, calc, patTransform,
+                                                        pattern.offsetInLineSpace,
+-                                                       {layer, color})
++                                                       {layer, color}, boundaryVertices)
+             }
+         }
+     }
+@@ -1405,7 +1457,8 @@ export class DxfScene {
+      * @param {Boolean} offsetInLineSpace Pattern offsets are already rotated by the line angle.
+      * @param {Object} renderParams `layer` and `color` for produced entities.
+      */
+-    *_DecomposeHatchPatternLine(line, calc, patTransform, offsetInLineSpace, renderParams) {
++    *_DecomposeHatchPatternLine(line, calc, patTransform, offsetInLineSpace, renderParams,
++                                boundaryVertices) {
+         let offsetX
+         let offsetY
+         if (offsetInLineSpace) {
+@@ -1453,6 +1506,8 @@ export class DxfScene {
+             console.warn("Too many lines produced by hatching pattern")
+             return
+         }
++        /* Each line is clipped against every boundary edge. */
++        this._Spend((maxLineIdx - minLineIdx + 1) * (boundaryVertices + 1))
+ 
+         let dashPatLength
+         if (line.dashes && line.dashes.length > 1) {
+@@ -1552,6 +1607,7 @@ export class DxfScene {
+             console.warn("Too many segments produced by hatching pattern line")
+             return
+         }
++        this._Spend((maxSegIdx - minSegIdx + 1) * dashes.length)
+ 
+         for (let segIdx = minSegIdx; segIdx <= maxSegIdx; segIdx++) {
+             let segStartParam = GetParam(xBase + segIdx * dashPatLength)
+@@ -3379,5 +3435,16 @@ DxfScene.DefaultOptions = {
+      * TextRendererOptions.js.
+      */
+     /** Text rendering options. See {@link TextRendererOptions}. */
+-    textOptions: DefaultTextOptions
++    textOptions: DefaultTextOptions,
++    /** Upper bound of the work one build may do: entity visits (a block nested in blocks is
++     * visited once per path to it), generated vertices and indices, arc segments, and hatch
++     * lines and dash steps. Over it the build fails with a `SceneTooComplexError`.
++     * @default
++     */
++    maxWork: Infinity,
++    /** Upper bound of the vertices and indices one entity may generate. An entity over it is
++     * skipped as malformed.
++     * @default
++     */
++    maxEntityWork: Infinity
+ }
+diff --git a/src/index.d.ts b/src/index.d.ts
+index baefc9e5b2532b096b926990b313fd94d78c3ea2..2953123f80785e4d51363b1b87a207b4e3763a1d 100644
+--- a/src/index.d.ts
++++ b/src/index.d.ts
+@@ -18,6 +18,8 @@ export type DxfSceneOptions = {
+     wireframeMesh?: boolean,
+     suppressPaperSpace?: boolean,
+     textOptions?: TextRendererOptions,
++    maxWork?: number,
++    maxEntityWork?: number,
+ }
+ 
+ /** See DxfViewer.DefaultOptions for default values and documentation. */
