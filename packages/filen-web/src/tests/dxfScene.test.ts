@@ -8,7 +8,10 @@ import { dxfCanvas, dxfContainer, installDxfGlobals } from "@/features/preview/l
 import {
 	DXF_DRAWING_PATH,
 	DXF_FONT_PATH_PREFIX,
+	DXF_MAX_LAYER_LABEL,
+	DXF_MAX_LISTED_LAYERS,
 	createDxfViewer,
+	dxfLayerList,
 	dxfLoadFailure,
 	loadDxf,
 	watchDxfMessages
@@ -598,5 +601,22 @@ describe("one entity's work", () => {
 
 		expect(result.notices.skipped).toBe(1)
 		expect(ms).toBeLessThan(2000)
+	})
+})
+
+describe("dxfLayerList", () => {
+	it("lists the first layers with their names cut, and counts the rest", () => {
+		const layers = Array.from({ length: DXF_MAX_LISTED_LAYERS + 5 }, (_, index) => ({
+			name: `L${String(index)}`,
+			displayName: index === 0 ? "x".repeat(10_000) : `L${String(index)}`,
+			color: index === 0 ? 0x1ff0000 : 0x00ff00,
+			visible: index !== 1
+		}))
+		const { layers: listed, more } = dxfLayerList(layers)
+
+		expect(listed).toHaveLength(DXF_MAX_LISTED_LAYERS)
+		expect(more).toBe(5)
+		expect(listed[0]).toEqual({ name: "L0", label: "x".repeat(DXF_MAX_LAYER_LABEL), color: "#ff0000", visible: true })
+		expect(listed[1]).toEqual({ name: "L1", label: "L1", color: "#00ff00", visible: false })
 	})
 })

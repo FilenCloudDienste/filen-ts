@@ -24,6 +24,12 @@ type Owned = OwnedWorker<DxfWorkerApi>
 const loads = new WeakMap<object, Promise<DxfLoad>>()
 
 const FAILED: DxfLoad = { status: "malformed", layers: [], moreLayers: 0, missingGlyphs: false, skipped: 0 }
+// A load still running after this long is ended: whatever the scene's budget lets through, no drawing takes this long.
+export const DXF_LOAD_TIMEOUT_MS = 30_000
+const TIMED_OUT: DxfLoad = { ...FAILED, status: "tooComplex" }
+// Fresh workers started by themselves for a display that did not come back, per file; then the card (a drawing that
+// resets the GPU would otherwise reset it again and again, and the browser then blocks WebGL for the whole app).
+export const DXF_MAX_RESTARTS = 1
 
 const STATE_MESSAGES = {
 	empty: "previewCadEmpty",
@@ -92,9 +98,22 @@ function DxfDrawing({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Ar
 	const [panel, setPanel] = useState<boolean | null>(null)
 	const [hidden, setHidden] = useState<{ owner: object | null; names: ReadonlySet<string> }>({ owner: null, names: new Set() })
 	const hiddenNames = hidden.owner === owned ? hidden.names : new Set<string>()
-	// A new worker over the bytes still held: a display that did not come back, or Reload viewer.
+	const [restarts, setRestarts] = useState(0)
+	const [displayLost, setDisplayLost] = useState(false)
+	// A new worker over the bytes still held: Reload viewer.
 	const restart = (): void => {
 		setAttempt(previous => previous + 1)
+	}
+	// The worker's display did not come back: a fresh one, a limited number of times.
+	const restartLost = (): void => {
+		if (restarts >= DXF_MAX_RESTARTS) {
+			setDisplayLost(true)
+
+			return
+		}
+
+		setRestarts(restarts + 1)
+		restart()
 	}
 	const start = useEffectEvent((target: Owned): Promise<DxfLoad> => {
 		// The page keeps its bytes (View source reads them); the worker reads a Blob of them, which it lets go once parsed.
@@ -107,20 +126,30 @@ function DxfDrawing({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Ar
 		if (owned === null) return
 
 		let live = true
+		let timedOut = false
 		const pending = loads.get(owned) ?? start(owned)
+		const timer = setTimeout(() => {
+			timedOut = true
+			owned.terminate()
+		}, DXF_LOAD_TIMEOUT_MS)
 
 		loads.set(owned, pending)
 		pending.then(
 			loaded => {
+				clearTimeout(timer)
+
 				if (live) setState({ owner: owned, load: loaded })
 			},
 			() => {
-				if (live) setState({ owner: owned, load: FAILED })
+				clearTimeout(timer)
+
+				if (live) setState({ owner: owned, load: timedOut ? TIMED_OUT : FAILED })
 			}
 		)
 
 		return () => {
 			live = false
+			clearTimeout(timer)
 		}
 	}, [owned])
 
@@ -132,6 +161,16 @@ function DxfDrawing({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Ar
 			{t("previewCadShowSource")}
 		</Button>
 	)
+
+	if (displayLost) {
+		return (
+			<PreviewUnsupportedState
+				item={item}
+				message={t("previewRichShellContextFailed")}
+				secondary={source}
+			/>
+		)
+	}
 
 	if (worker.status === "failed") {
 		return (
@@ -172,10 +211,10 @@ function DxfDrawing({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Ar
 				session={generation}
 				label={t("previewCadCanvasLabel")}
 				connect={port => {
-					void owned.run(remote => remote.attach(Comlink.transfer(port, [port])))
+					owned.run(remote => remote.attach(Comlink.transfer(port, [port]))).catch(() => undefined)
 				}}
 				// The only status: a display that did not come back.
-				onStatus={restart}
+				onStatus={restartLost}
 				onReload={restart}
 				notice={
 					notices.length > 0 ? (
@@ -207,7 +246,7 @@ function DxfDrawing({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Ar
 								variant="ghost"
 								size="sm"
 								onClick={() => {
-									void owned.run(remote => remote.fit())
+									owned.run(remote => remote.fit()).catch(() => undefined)
 								}}
 							>
 								<MaximizeIcon data-icon="inline-start" />

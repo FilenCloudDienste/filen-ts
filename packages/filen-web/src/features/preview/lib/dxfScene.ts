@@ -1,4 +1,4 @@
-import { DxfViewer } from "dxf-viewer"
+import { DxfViewer, type LayerInfo } from "dxf-viewer"
 import type { Color, WebGLRenderer } from "three"
 import { dxfContainer } from "@/features/preview/lib/dxfStubs"
 
@@ -85,4 +85,44 @@ export async function loadDxf(viewer: DxfViewer, fonts: readonly string[]): Prom
 		fonts: fonts.map(file => `filen-ref:///${DXF_FONT_PATH_PREFIX}${file}`),
 		workerFactory: null
 	})
+}
+
+// Restored contexts a worker draws into; past it the display is reported failed (a drawing whose draw resets the GPU
+// would reset it again and again, and the browser then blocks WebGL for the whole app).
+export const DXF_MAX_RESTORES = 2
+// Layers listed in the panel at most; the rest are counted.
+export const DXF_MAX_LISTED_LAYERS = 1000
+// Characters of a layer's name sent to the page at most.
+export const DXF_MAX_LAYER_LABEL = 256
+
+export interface DxfLayer {
+	// What ShowLayer takes.
+	readonly name: string
+	readonly label: string
+	// CSS colour, as drawn against the background at load.
+	readonly color: string
+	readonly visible: boolean
+}
+
+// The layers the page lists: the first DXF_MAX_LISTED_LAYERS, their names cut to DXF_MAX_LAYER_LABEL, and how many more.
+export function dxfLayerList(layers: Iterable<LayerInfo>): { layers: DxfLayer[]; more: number } {
+	const listed: DxfLayer[] = []
+	let more = 0
+
+	for (const layer of layers) {
+		if (listed.length === DXF_MAX_LISTED_LAYERS) {
+			more++
+
+			continue
+		}
+
+		listed.push({
+			name: layer.name,
+			label: layer.displayName.slice(0, DXF_MAX_LAYER_LABEL),
+			color: `#${(layer.color & 0xffffff).toString(16).padStart(6, "0")}`,
+			visible: layer.visible
+		})
+	}
+
+	return { layers: listed, more }
 }

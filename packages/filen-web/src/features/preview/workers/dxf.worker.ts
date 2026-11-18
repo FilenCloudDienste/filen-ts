@@ -16,10 +16,13 @@ import {
 	DXF_DRAWING_PATH,
 	DXF_FONT_PATH_PREFIX,
 	DXF_FONT_BYTES_PER_WORK,
+	DXF_MAX_RESTORES,
 	createDxfViewer,
+	dxfLayerList,
 	dxfLoadFailure,
 	loadDxf,
-	watchDxfMessages
+	watchDxfMessages,
+	type DxfLayer
 } from "@/features/preview/lib/dxfScene"
 import { IMAGE_WHEEL_SENSITIVITY } from "@/features/preview/components/imageViewer.logic"
 import type { CanvasInput, ShellToWorker, WorkerToShell } from "@/features/preview/components/canvasViewerShell.logic"
@@ -30,21 +33,11 @@ import type { CanvasInput, ShellToWorker, WorkerToShell } from "@/features/previ
 // canvas no DOM event reaches. A lost context is restored by three over the retained scene; one that is not gets a
 // fresh worker (the viewer cannot move its scene to a new renderer).
 
-// Layers listed in the panel at most; the rest are counted.
-const DXF_MAX_LISTED_LAYERS = 1000
-
 const KEY_PAN = 64
 const KEY_ZOOM = 1.25
 const BACKGROUNDS = { dark: new Color(0x000000), light: new Color(0xffffff) }
 
-export interface DxfLayer {
-	// What ShowLayer takes.
-	readonly name: string
-	readonly label: string
-	// CSS colour, as drawn against the background at load.
-	readonly color: string
-	readonly visible: boolean
-}
+export type { DxfLayer }
 
 export type DxfStatus = "ready" | "empty" | "tooComplex" | "malformed" | "noWebgl"
 
@@ -114,6 +107,7 @@ installDxfGlobals()
 let shell: MessagePort | null = null
 let canvas: OffscreenCanvas | null = null
 let viewer: DxfViewer | null = null
+let restores = 0
 let size = { width: 1, height: 1 }
 let pixelRatio = 1
 let dark = false
@@ -133,8 +127,18 @@ function buildRenderer(next: OffscreenCanvas): WebGLRenderer | null {
 		next.addEventListener("webglcontextlost", () => {
 			send({ type: "contextLost" })
 		})
-		// After three's own handler, which rebuilt its state with the default clear colour.
+		// After three's own handler, which rebuilt its state with the default clear colour. A drawing whose draw loses
+		// the context again is not drawn again past DXF_MAX_RESTORES: the display is reported failed and let go.
 		next.addEventListener("webglcontextrestored", () => {
+			restores++
+
+			if (restores > DXF_MAX_RESTORES) {
+				viewer = null
+				send({ type: "contextFailed" })
+
+				return
+			}
+
 			viewer?.SetClearColor(dark ? BACKGROUNDS.dark : BACKGROUNDS.light)
 			send({ type: "contextRestored" })
 		})
@@ -288,24 +292,10 @@ async function readText(source: Blob): Promise<DxfTextRead> {
 	return scan.finish()
 }
 
-function layerColor(color: number): string {
-	return `#${(color & 0xffffff).toString(16).padStart(6, "0")}`
-}
-
 function outcome(status: DxfStatus, notices: { missingGlyphs: boolean; skipped: number } = { missingGlyphs: false, skipped: 0 }): DxfLoad {
-	const layers = viewer === null || status !== "ready" ? [] : [...viewer.GetLayers(true)]
+	const { layers, more } = dxfLayerList(viewer === null || status !== "ready" ? [] : viewer.GetLayers(true))
 
-	return {
-		status,
-		layers: layers.slice(0, DXF_MAX_LISTED_LAYERS).map(layer => ({
-			name: layer.name,
-			label: layer.displayName,
-			color: layerColor(layer.color),
-			visible: layer.visible
-		})),
-		moreLayers: Math.max(0, layers.length - DXF_MAX_LISTED_LAYERS),
-		...notices
-	}
+	return { status, layers, moreLayers: more, ...notices }
 }
 
 const api = {
