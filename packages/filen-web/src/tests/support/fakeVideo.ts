@@ -7,6 +7,7 @@ export class FakeVideo extends EventTarget {
 	public readonly HAVE_FUTURE_DATA = 3
 	public readonly HAVE_ENOUGH_DATA = 4
 	public paused = true
+	public loop = false
 	public seeking = false
 	public readyState = 0
 	public currentTime = 0

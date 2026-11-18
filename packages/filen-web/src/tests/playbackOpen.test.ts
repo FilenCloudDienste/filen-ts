@@ -120,6 +120,7 @@ function setUp(setUpOptions: SetUpOptions = {}) {
 			play: () => Promise.resolve(),
 			seek: () => undefined,
 			selectAudio: fake.selectAudio,
+			firstTime: () => 0,
 			diagnostics: () => Promise.reject(new Error("unused")),
 			dispose: () => {
 				fake.disposed = true

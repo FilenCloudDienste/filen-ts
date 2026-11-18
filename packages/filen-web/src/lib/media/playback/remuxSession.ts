@@ -234,6 +234,10 @@ class RemuxPlaybackSession implements PlaybackSession {
 		})
 	}
 
+	public firstTime(): number {
+		return this.session?.firstTime() ?? 0
+	}
+
 	public async selectAudio(audio: SessionAudio): Promise<boolean> {
 		const session = this.session
 

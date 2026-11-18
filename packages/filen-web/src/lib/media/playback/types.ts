@@ -59,6 +59,8 @@ export interface PlaybackSession {
 	attach(video: HTMLVideoElement): Promise<void>
 	// Switches audio in place; false when this session cannot, and a new session has to.
 	selectAudio(audio: SessionAudio): Promise<boolean>
+	// Where the stream's first picture is, which a loop goes back to: 0 for most, later for a stream that starts so.
+	firstTime(): number
 	// Empties the element and releases everything held for the stream.
 	dispose(): void
 }

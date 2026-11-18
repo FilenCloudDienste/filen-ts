@@ -22,6 +22,7 @@ import {
 	rangesOutside,
 	seekPlan,
 	stallAction,
+	startTarget,
 	supportedCopyCodec
 } from "@/lib/media/mseController.logic"
 
@@ -142,6 +143,31 @@ describe("quotaAction", () => {
 		expect(quotaAction({ attempt: 0, currentTime: 0, ranges: [], scale: 1 })).toEqual({ type: "fatal" })
 		// Behind the playhead was already given back and nothing is buffered ahead of it.
 		expect(quotaAction({ attempt: 1, currentTime: 5, ranges: [[3, 5]], scale: 1 })).toEqual({ type: "fatal" })
+	})
+})
+
+describe("startTarget", () => {
+	it("keeps the time asked for, once a key picture at or before it starts playback", () => {
+		expect(startTarget(12, { video: { keyTime: 10, clamped: false }, audio: { startTime: 10 } })).toBe(12)
+	})
+
+	it("moves a time before the first picture onto it", () => {
+		// A transport stream whose first picture is at 1.41 s, looped back to 0.
+		expect(startTarget(0, { video: { keyTime: 1.41, clamped: false }, audio: { startTime: 1.4 } })).toBe(1.41)
+	})
+
+	it("moves to where a file without an index could be seeked", () => {
+		expect(startTarget(50, { video: { keyTime: 20, clamped: true }, audio: null })).toBe(20)
+	})
+
+	it("starts audio alone where its first sound is", () => {
+		expect(startTarget(0, { video: null, audio: { startTime: 1.5 } })).toBe(1.5)
+		expect(startTarget(5, { video: null, audio: { startTime: 4.9 } })).toBe(5)
+	})
+
+	it("finds even a lead of a few milliseconds", () => {
+		// An MPEG-PS whose first picture is at 5.3 ms.
+		expect(startTarget(0, { video: { keyTime: 0.0053, clamped: false }, audio: { startTime: 0 } })).toBe(0.0053)
 	})
 })
 

@@ -56,6 +56,8 @@ export interface Playback {
 	subscribe(listener: () => void): () => void
 	// Index into the probe's audio list, -1 for none.
 	selectAudio(audioIndex: number): Promise<void>
+	// Where the current session's stream begins (PlaybackSession.firstTime), which a loop goes back to.
+	firstTime(): number
 	dispose(): void
 }
 
@@ -218,6 +220,10 @@ class LadderPlayback implements Playback {
 
 	public selectAudio(audioIndex: number): Promise<void> {
 		return this.enqueue(() => this.switchAudio(audioIndex))
+	}
+
+	public firstTime(): number {
+		return this.session?.firstTime() ?? 0
 	}
 
 	// A method rather than a field read: it changes across awaits.

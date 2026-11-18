@@ -26,6 +26,7 @@ import {
 	sessionAhead,
 	shouldEndStream,
 	STALL_DETECTION_MS,
+	startTarget,
 	stallAction,
 	supportedCopyCodec,
 	TimelineOps,
@@ -105,6 +106,8 @@ export interface RemuxSession {
 	seek(time: number): void
 	// `mode` overrides the choice between copying and re-encoding the track.
 	selectAudio(trackId: number, mode?: AudioMode): Promise<void>
+	// Where the stream's first picture is: a loop goes back there. 0 until a start before it found it later.
+	firstTime(): number
 	diagnostics(): Promise<RemuxSessionDiagnostics>
 	dispose(): void
 }
@@ -673,6 +676,10 @@ class MseRemuxSession implements RemuxSession {
 	// When refetches after browser eviction happened, recent ones only.
 	private evictions: number[] = []
 	private internalSeekTo: number | null = null
+	// Where the stream's first picture is, once a start before it found it (startTarget). A seek more than a buffer
+	// hole before it lands on it: there is nothing to play earlier, and WebKit's GStreamer build seeking into that gap
+	// waits forever. A smaller lead is left to the engine, as moving a seek it is still making can crash that build.
+	private streamStart: number | null = null
 	// A start position waiting for the element's metadata; until then the playhead is not where it will be.
 	private pendingStart: number | null = null
 	private stallTimer: ReturnType<typeof setInterval> | undefined
@@ -792,6 +799,10 @@ class MseRemuxSession implements RemuxSession {
 		if (this.element !== null) {
 			this.element.currentTime = time
 		}
+	}
+
+	public firstTime(): number {
+		return this.streamStart ?? 0
 	}
 
 	public async selectAudio(trackId: number, forcedMode?: AudioMode): Promise<void> {
@@ -1035,8 +1046,14 @@ class MseRemuxSession implements RemuxSession {
 			this.audio.attachBuffer(result.audio === null ? null : this.addSourceBuffer(this.audio, mediaSource, result.audio.mime))
 			this.audioMime = result.audio?.mime ?? null
 
-			// Exactly where asked (a resume position), or the key packet a cues-less file was clamped to.
+			// Exactly where asked (a resume position), or the key packet a cues-less file was clamped to. A start before
+			// the first picture is left to the stall watch, which skips the gap once playback waits in it.
 			const target = result.video?.clamped === true ? result.video.keyTime : time
+			const first = startTarget(time, result)
+
+			if (first > time) {
+				this.streamStart = first
+			}
 
 			if (target > 0) {
 				this.seekOnceLoaded(target, mediaSource)
@@ -1235,10 +1252,16 @@ class MseRemuxSession implements RemuxSession {
 				return
 			}
 
-			// Decoding starts at the key packet; the element still shows exactly `time` unless a file without
-			// an index could not be seeked that far.
-			if (result.video?.clamped === true) {
-				this.internalSeek(result.video.keyTime)
+			const target = startTarget(time, result)
+
+			if (target > time) {
+				this.streamStart = target
+			}
+
+			// Back to where a file without an index was clamped, or on past a gap at the start no engine skips; a
+			// lead within a buffer hole is left to the engine (see streamStart).
+			if (target < time || target - time > MAX_BUFFER_HOLE) {
+				this.internalSeek(target)
 			}
 		} finally {
 			this.audio.release("switch")
@@ -1313,12 +1336,17 @@ class MseRemuxSession implements RemuxSession {
 			return
 		}
 
-		const time = element.currentTime
-
-		if (this.internalSeekTo !== null && Math.abs(this.internalSeekTo - time) < INTERNAL_SEEK_TOLERANCE) {
+		if (this.internalSeekTo !== null && Math.abs(this.internalSeekTo - element.currentTime) < INTERNAL_SEEK_TOLERANCE) {
 			this.internalSeekTo = null
 
 			return
+		}
+
+		const lead = this.streamStart === null ? 0 : this.streamStart - element.currentTime
+		const time = lead > MAX_BUFFER_HOLE && this.streamStart !== null ? this.streamStart : element.currentTime
+
+		if (time !== element.currentTime) {
+			this.internalSeek(time)
 		}
 
 		this.nudges = 0

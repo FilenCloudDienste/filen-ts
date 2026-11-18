@@ -120,8 +120,14 @@ function setUp(options: {
 	poster?: Promise<string | null>
 	// Playback opens only when this settles.
 	openGate?: Promise<void>
+	// The element's `loop` attribute.
+	loop?: boolean
+	// Where the playback's stream begins.
+	firstTime?: number
 }): Harness {
 	const video = new DecodingVideo()
+
+	video.loop = options.loop ?? false
 
 	if (options.audioTracks !== undefined) {
 		Object.assign(video, { audioTracks: options.audioTracks })
@@ -145,6 +151,7 @@ function setUp(options: {
 			return () => listeners.delete(listener)
 		},
 		selectAudio: playback.selectAudio,
+		firstTime: () => options.firstTime ?? 0,
 		dispose: playback.dispose
 	}
 	const release = vi.fn<(url: string) => void>()
@@ -494,6 +501,53 @@ describe("PreviewVideo — the ladder", () => {
 
 		expect(harness.open).toHaveBeenCalledOnce()
 		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 0, subtitle: "embedded-text" })
+	})
+
+	it("loops the element itself, back to 0, and hands its loop back on dispose", async () => {
+		const harness = setUp({ route: "ladder", loop: true })
+
+		await flush()
+
+		// The element's own loop never finishes its seek in WebKit's GStreamer build.
+		expect(harness.video.loop).toBe(false)
+
+		const plays = harness.video.plays
+
+		harness.video.currentTime = 2.5
+		harness.video.pause()
+		harness.video.emit("ended")
+
+		expect(harness.video.currentTime).toBe(0)
+		expect(harness.video.plays).toBe(plays + 1)
+
+		harness.controller.dispose()
+
+		expect(harness.video.loop).toBe(true)
+	})
+
+	it("loops back to where the stream's first picture is", async () => {
+		// A transport stream whose first picture is at 1.41 s: nothing plays before it.
+		const harness = setUp({ route: "ladder", loop: true, firstTime: 1.41 })
+
+		await flush()
+		harness.video.currentTime = 4.4
+		harness.video.emit("ended")
+
+		expect(harness.video.currentTime).toBe(1.41)
+	})
+
+	it("leaves an element that does not loop ended", async () => {
+		const harness = setUp({ route: "ladder" })
+
+		await flush()
+
+		const plays = harness.video.plays
+
+		harness.video.currentTime = 2.5
+		harness.video.emit("ended")
+
+		expect(harness.video.currentTime).toBe(2.5)
+		expect(harness.video.plays).toBe(plays)
 	})
 
 	it("disposes the playback and empties the element", async () => {

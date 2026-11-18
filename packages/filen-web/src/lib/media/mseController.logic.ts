@@ -201,6 +201,20 @@ export function quotaAction(params: { attempt: number; currentTime: number; rang
 	return { type: "shrink", scale: scale * QUOTA_SHRINK }
 }
 
+// Where the element is put for a start at `time`: there, unless the start's first picture comes later, which only
+// happens before a file's first key picture (a stream starting at 1.4 s, a loop back to 0), or where a file without an
+// index could not be seeked that far (`clamped`). Audio alone starts where its first sound does.
+export function startTarget(
+	time: number,
+	start: { video: { keyTime: number; clamped: boolean } | null; audio: { startTime: number } | null }
+): number {
+	if (start.video !== null) {
+		return start.video.clamped || start.video.keyTime > time ? start.video.keyTime : time
+	}
+
+	return start.audio !== null && start.audio.startTime > time ? start.audio.startTime : time
+}
+
 // Buffered seconds both tracks need past a seek target for it to play from what is already there.
 export const SEEK_IN_BUFFER_SECONDS = 0.5
 

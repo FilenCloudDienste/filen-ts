@@ -183,6 +183,10 @@ class DirectSession implements PlaybackSession {
 		video.src = url
 	}
 
+	public firstTime(): number {
+		return 0
+	}
+
 	public selectAudio(audio: SessionAudio): Promise<boolean> {
 		const tracks = audioTracksOf(this.video)
 

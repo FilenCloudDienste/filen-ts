@@ -105,6 +105,7 @@ const PLAYBACK: Playback = {
 	}),
 	subscribe: () => () => undefined,
 	selectAudio: () => Promise.resolve(),
+	firstTime: () => 0,
 	dispose: vi.fn()
 }
 
