@@ -72,11 +72,11 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(cta).toBeVisible()
 		await expect(cta).toHaveAttribute("href", "https://filen.io")
 
-		// A one-line footer: the e2e tagline plus the report-abuse dialog's trigger, and the open source licenses
+		// A one-line footer: the e2e tagline plus the report-abuse dialog's trigger, and the third party notices
 		// the page's bundle ships, quieter at its far end.
 		await expect(page.getByText("Shared securely with end-to-end encryption")).toBeVisible()
 		await expect(page.getByRole("button", { name: "Report abuse" })).toBeVisible()
-		await expect(page.getByRole("button", { name: "Open source licenses" })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Third party notices" })).toBeVisible()
 	})
 
 	test("pins the header and the footer to one viewport, the page itself never scrolling", async ({ page }) => {

@@ -227,7 +227,7 @@ test.describe("settings", () => {
 		await expect(privacy).toHaveAttribute("rel", "noopener noreferrer")
 	})
 
-	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page }) => {
+	test("the Advanced section opens the lazily-loaded third party notices dialog", async ({ page }) => {
 		await gotoSettings(page)
 
 		await openSettingsSection(page, "Advanced")
@@ -235,7 +235,7 @@ test.describe("settings", () => {
 		// The only real proof that the lazily-imported payload chunk loads under the hardened preview CSP.
 		await page.getByRole("button", { name: "View licenses", exact: true }).click()
 
-		await expect(page.getByRole("heading", { name: "Open source licenses" })).toBeVisible()
+		await expect(page.getByRole("heading", { name: "Third party notices" })).toBeVisible()
 
 		// The list is virtualized over ~1300 rows, so any given package is outside the initial window —
 		// filter for it first rather than expecting it on screen.

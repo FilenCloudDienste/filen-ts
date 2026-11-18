@@ -95,7 +95,7 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 		>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle>{selected === null ? t("settingsNoticesTitle") : selected.name}</DialogTitle>
+					<DialogTitle>{selected === null ? t("settingsThirdPartyNoticesTitle") : selected.name}</DialogTitle>
 					<DialogDescription>
 						{selected === null
 							? t("settingsNoticesCount", { count: notices.length })

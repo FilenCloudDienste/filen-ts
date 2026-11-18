@@ -15,7 +15,7 @@ const FILEN_HOME_URL = "https://filen.io"
 // the link resolves to (invalid / password / file / directory). This page deliberately drops
 // old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA (for a
 // signed-in visitor, a single way back to Cloud Drive instead), and a one-line footer with the e2e
-// tagline, a report-abuse dialog and, quieter at its far end, the open source licenses. Exactly
+// tagline, a report-abuse dialog and, quieter at its far end, the third party notices. Exactly
 // one viewport tall with both bars pinned: only `main` scrolls, and a surface that fills it (a preview, a
 // directory's list) sizes to it through its own min-h-0 chain. Theme-aware via the app's existing tokens (the
 // ambient ThemeProvider resolves system default for an anonymous visitor, so nothing theme-specific is

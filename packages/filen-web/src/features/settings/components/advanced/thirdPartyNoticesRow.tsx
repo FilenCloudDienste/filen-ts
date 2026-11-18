@@ -10,8 +10,8 @@ function ThirdPartyNoticesRow() {
 
 	return (
 		<SettingsRow
-			label={t("settingsNoticesTitle")}
-			description={t("settingsNoticesDescription")}
+			label={t("settingsThirdPartyNoticesTitle")}
+			description={t("settingsThirdPartyNoticesDescription")}
 		>
 			{/* No offline gate: the data is compiled into the bundle, nothing is fetched. */}
 			<Button

@@ -117,14 +117,14 @@ describe("PublicLinkShell header", () => {
 
 describe("PublicLinkShell footer", () => {
 	// An anonymous visitor's preview runs the bundled third-party decoders, so their notices are one click away.
-	it("opens the open source licenses for a signed-out visitor", async () => {
+	it("opens the third party notices for a signed-out visitor", async () => {
 		hasClient.mockResolvedValue(false)
 		renderShell()
 
-		fireEvent.click(screen.getByRole("button", { name: "Open source licenses" }))
+		fireEvent.click(screen.getByRole("button", { name: "Third party notices" }))
 
 		await waitFor(() => {
-			expect(screen.getByRole("dialog", { name: "Open source licenses" })).toBeDefined()
+			expect(screen.getByRole("dialog", { name: "Third party notices" })).toBeDefined()
 		})
 	})
 })

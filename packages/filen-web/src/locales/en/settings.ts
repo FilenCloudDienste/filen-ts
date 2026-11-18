@@ -306,11 +306,11 @@ export const settings = {
 	// ── Advanced: about / legal ────────────────────────────────────────────────
 	settingsAboutTitle: "About",
 
-	// ── Advanced: open source licenses ────────────────────────────────────────
+	// ── Advanced: third party notices ─────────────────────────────────────────
 	/** Advanced settings — row title for the third-party attribution surface */
-	settingsNoticesTitle: "Open source licenses",
+	settingsThirdPartyNoticesTitle: "Third party notices",
 	/** Advanced settings — row description explaining what the list contains */
-	settingsNoticesDescription: "Filen is built on open source software. These are the packages it includes, with their licenses.",
+	settingsThirdPartyNoticesDescription: "The third-party packages Filen includes, with their licenses.",
 	/** Advanced settings — button opening the licenses dialog */
 	settingsNoticesOpen: "View licenses",
 	/** Licenses dialog — filter box placeholder and aria-label */

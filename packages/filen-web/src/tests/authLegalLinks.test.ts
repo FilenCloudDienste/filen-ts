@@ -32,12 +32,12 @@ describe("AuthLegalLinks", () => {
 	})
 
 	// Signed-out visitors run the same bundled third-party code, so its notices are reachable without a session.
-	it("opens the open source licenses without a session", () => {
+	it("opens the third party notices without a session", () => {
 		// The app root provides the query client; the dialog asks it for the desktop shell's notices.
 		render(createElement(AuthLegalLinks), { wrapper: queryClientWrapper(createTestQueryClient()) })
 
-		fireEvent.click(screen.getByRole("button", { name: "Open source licenses" }))
+		fireEvent.click(screen.getByRole("button", { name: "Third party notices" }))
 
-		expect(screen.getByRole("dialog", { name: "Open source licenses" })).toBeDefined()
+		expect(screen.getByRole("dialog", { name: "Third party notices" })).toBeDefined()
 	})
 })
