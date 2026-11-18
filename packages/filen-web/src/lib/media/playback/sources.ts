@@ -1,6 +1,7 @@
 import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
+import { openOriginPorts } from "@/features/preview/lib/origin/rangeSource"
 import { sdkApi } from "@/lib/sdk/client"
 import {
 	holdPreviewStreamAlive,
@@ -65,9 +66,17 @@ function createRemuxSource(file: AnyFile, options: { warmKey?: string; access?: 
 	)
 }
 
-// Any origin the SDK worker reads (an archive's entry), asked for by `access`'s surface; never prewarmed.
+// Any origin (an archive's entry through the SDK worker, an attachment's Blob served on the page), asked for by
+// `access`'s surface; never prewarmed.
 export function originRemuxSource(origin: ByteOrigin, access: OriginAccess): RemuxSource {
-	return portSource((port, token) => sdkApi.openOriginRangePort(port, origin, access, token))
+	const ports = openOriginPorts(origin, crypto.randomUUID(), { access })
+
+	return {
+		openPort: () => ports.port(),
+		close: () => {
+			ports.close()
+		}
+	}
 }
 
 export function remuxSource(file: AnyFile): RemuxSource {

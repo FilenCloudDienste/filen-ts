@@ -147,6 +147,17 @@ describe("entry media", () => {
 		expect(downloadOriginBytes).not.toHaveBeenCalled()
 	})
 
+	it("serves an attachment's synthesizer source from its Blob on the page, never through the SDK worker", async () => {
+		const { originRemuxSource } = await import("@/lib/media/playback/sources")
+		const source = originRemuxSource(bytesOrigin(new Blob([new Uint8Array([1, 2, 3])]), "mail/2"), "authed")
+		const port = await source.openPort()
+
+		expect(port).toBeInstanceOf(MessagePort)
+		expect(cancelPreviewDownload).not.toHaveBeenCalled()
+		source.close()
+		port.close()
+	})
+
 	it("decodes a tracker module through the synthesizer from its origin", async () => {
 		const origin = entryLeaseOrigin("lease", ARCHIVE.uuid, false, 3, 1000, "whole")
 
