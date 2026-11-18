@@ -596,7 +596,7 @@ describe("one entity's work", () => {
 	})
 
 	it("skips text whose layout would pass one entity's work before laying it out", async () => {
-		const text = drawing([0, "MTEXT", 8, "0", 10, 0, 20, 0, 30, 0, 40, 2, 1, "x".repeat(30_000)])
+		const text = drawing([0, "MTEXT", 8, "0", 10, 0, 20, 0, 30, 0, 40, 2, 1, "x".repeat(50_000)])
 
 		serve(text)
 

@@ -7,11 +7,10 @@ import { dxfContainer } from "@/features/preview/lib/dxfStubs"
 
 // The scene's work budget (patched into dxf-viewer, see pnpm-workspace.yaml): entity visits, generated vertices and
 // indices, spline sampling, hatch lines and dash steps, each block instance's vertices, render batches and the fonts
-// loaded. Measured at about 0.3 µs, 40-90 bytes of heap and 11 bytes of scene buffer a unit at worst: 2^23 holds a
-// 32 MiB drawing of plain geometry at 40 % and bounds the build at about 0.7 GB over the parse.
-export const DXF_MAX_WORK = 8_388_608
-// One entity's work, checked before it generates its geometry.
-export const DXF_MAX_ENTITY_WORK = 1_048_576
+// loaded. 2^24 holds about 225k circles; measured on the worst 16 MiB drawings at up to 0.9 GB and 2.7 s of CPU.
+export const DXF_MAX_WORK = 16_777_216
+// One entity's work, checked before it generates its geometry: a polyline of a million vertices fits.
+export const DXF_MAX_ENTITY_WORK = 2_097_152
 // Bytes of TrueType counted as one unit of work: opentype.js and dxf-viewer hold a parsed face at about 7 times its
 // size (Noto Sans SC: 10.6 MB, 77 MB of heap), about 64 bytes a unit.
 export const DXF_FONT_BYTES_PER_WORK = 8
