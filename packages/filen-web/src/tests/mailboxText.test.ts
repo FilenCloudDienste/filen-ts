@@ -35,3 +35,11 @@ describe("mailboxText", () => {
 		expect(text.length).toBeLessThanOrEqual(4001)
 	})
 })
+
+describe("mailboxText's first message", () => {
+	it("says the first message was cut when it runs past what was read", async () => {
+		const text = await mailboxText(encode(message(0, "x".repeat(500))), false, 4000)
+
+		expect(text).toContain("First message (cut short: only its start was read):")
+	})
+})

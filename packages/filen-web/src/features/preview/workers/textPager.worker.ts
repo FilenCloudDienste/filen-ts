@@ -17,16 +17,8 @@ import {
 	type PagerSource
 } from "@/features/preview/lib/textPager/rows.logic"
 import { MatchList, searchText, type PagerScanSource, type SearchEnd } from "@/features/preview/lib/textPager/search.logic"
-import {
-	MboxIndex,
-	headerBlock,
-	messageBytes,
-	readHeaderHead,
-	readMessage,
-	searchHeaders,
-	type MboxCount,
-	type MboxSearchResult
-} from "@/features/preview/lib/textPager/mbox.logic"
+import type { MboxCount, MboxSearchResult } from "@/features/preview/lib/textPager/mbox.logic"
+import { MailboxSession, type MboxMessage } from "@/features/preview/lib/textPager/mailboxSession"
 import { readHeaderSummary, type EmailHeaderSummary } from "@/features/preview/lib/emailReading"
 
 // One large text file's rows, line numbers and find, owned by its viewer (one worker per viewer, terminated with it):
@@ -35,10 +27,6 @@ import { readHeaderSummary, type EmailHeaderSummary } from "@/features/preview/l
 // Only one scan (find, Count lines, a go to line past the counted lines) runs at a time; a new one stops it.
 
 const CACHE_BLOCKS = 8
-// A mailbox's list rows kept read (≈ 300 B each), the least recently shown dropped first.
-const MBOX_ROWS_KEPT = 20_000
-// Rows a list asks for at once.
-const MBOX_ROWS_AT_ONCE = 500
 const READ_AHEAD_BLOCKS = 2
 
 // A Comlink proxy from the page, released once its scan ends.
@@ -96,39 +84,17 @@ let encoding: PagerEncoding | null = null
 let index: LineIndex | null = null
 let matches: MatchList | null = null
 let scan: AbortController | null = null
-// A mailbox's message index and list rows, made on first use.
-let mbox: MboxIndex | null = null
-const mboxRows = new Map<number, EmailHeaderSummary>()
-// The mailbox scan running (one at a time), and the stop of a "Count all".
-let mboxScan: Promise<MboxCount> | null = null
-let mboxCount: AbortController | null = null
+// A mailbox's session (its index, rows, count, search and message reads), made on first use.
+let mailboxSession: MailboxSession | null = null
 
-export type MboxMessage =
-	| { readonly status: "ok"; readonly bytes: Uint8Array<ArrayBuffer> }
-	// Past the message size cap.
-	| { readonly status: "tooLarge" }
-	// No such message (past the end of the file).
-	| { readonly status: "missing" }
+export type { MboxMessage } from "@/features/preview/lib/textPager/mailboxSession"
 
-function mailbox(): MboxIndex {
-	mbox ??= new MboxIndex(file().source.size)
+function mailbox(): MailboxSession {
+	const { source } = file()
 
-	return mbox
-}
+	mailboxSession ??= new MailboxSession({ cached: source, scan: source, parse: readHeaderSummary })
 
-// Scans the mailbox on until `want` messages, one scan at a time: asked while one runs, the state so far.
-async function scanMailbox(want: number, signal: AbortSignal, onProgress: (count: MboxCount) => void): Promise<MboxCount> {
-	const index = mailbox()
-
-	if (mboxScan !== null) return index.state()
-
-	mboxScan = index.scanUntil(file().source, want, signal, onProgress)
-
-	try {
-		return await mboxScan
-	} finally {
-		mboxScan = null
-	}
+	return mailboxSession
 }
 
 function file(): Opened {
@@ -164,10 +130,8 @@ function close(): void {
 	opened?.cache.dispose()
 	opened?.reader.close()
 	opened?.onLost[Comlink.releaseProxy]?.()
-	mboxCount?.abort()
-	mboxCount = null
-	mbox = null
-	mboxRows.clear()
+	mailboxSession?.close()
+	mailboxSession = null
 	opened = null
 	encoding = null
 	index = null
@@ -225,48 +189,6 @@ function isAbort(error: unknown): boolean {
 		(error instanceof DOMException && error.name === "AbortError") ||
 		(error instanceof Error && error.name === "BlockAbortError")
 	)
-}
-
-// Rows `first` to `first + count` (at most MBOX_ROWS_AT_ONCE) of the list, among the messages found: sender, subject
-// and date, from each message's header block, kept in an LRU.
-async function mboxRowsAt(first: number, count: number): Promise<(EmailHeaderSummary | null)[]> {
-	const index = mailbox()
-	const { source } = file()
-	const rows: (EmailHeaderSummary | null)[] = []
-
-	for (let at = Math.max(0, first); at < Math.min(first + Math.min(count, MBOX_ROWS_AT_ONCE), index.count); at++) {
-		const kept = mboxRows.get(at)
-
-		if (kept !== undefined) {
-			// Most recently shown last.
-			mboxRows.delete(at)
-			mboxRows.set(at, kept)
-			rows.push(kept)
-			continue
-		}
-
-		const span = index.span(at)
-
-		if (span === null) {
-			rows.push(null)
-			continue
-		}
-
-		const block = headerBlock(await readHeaderHead(source, { start: span.start, end: span.end ?? source.size }))
-		const row = block === null ? { from: null, subject: null, date: null } : await readHeaderSummary(block)
-
-		mboxRows.set(at, row)
-
-		if (mboxRows.size > MBOX_ROWS_KEPT) {
-			const oldest = mboxRows.keys().next()
-
-			if (oldest.done !== true) mboxRows.delete(oldest.value)
-		}
-
-		rows.push(row)
-	}
-
-	return rows
 }
 
 const api = {
@@ -400,106 +322,49 @@ const api = {
 	},
 	match: (at: number): { offset: number; line: number } | null => matches?.at(at) ?? null,
 	// The mailbox's messages found so far, scanning on until `want` (the list's rows and an overscan) or the end.
-	mboxEnsure: async (want: number): Promise<MboxCount> => {
-		return await scanMailbox(want, new AbortController().signal, () => undefined)
-	},
-	// Scans the whole mailbox; stopped by mboxStop(). Progress hears the count so far.
+	mboxEnsure: (want: number): Promise<MboxCount> => mailbox().ensure(want),
+	// Scans the whole mailbox; stopped by mboxStop(). Progress hears the count after each stretch.
 	mboxCountAll: async (onProgress: ((count: MboxCount) => unknown) & Partial<Comlink.ProxyMethods>): Promise<MboxCount> => {
-		mboxCount?.abort()
-		mboxCount = new AbortController()
-
-		const counted = await scanMailbox(Number.POSITIVE_INFINITY, mboxCount.signal, count => {
-			void onProgress(count)
-		}).catch((error: unknown) => {
-			if (!isAbort(error) && !(error instanceof DOMException && error.name === "AbortError")) throw error
-
-			return mailbox().state()
-		})
-
-		onProgress[Comlink.releaseProxy]?.()
-		mboxCount = null
-
-		return counted
+		try {
+			return await mailbox().countAll(count => {
+				void onProgress(count)
+			})
+		} finally {
+			onProgress[Comlink.releaseProxy]?.()
+		}
 	},
 	mboxStop: (): void => {
-		mboxCount?.abort()
+		mailbox().stopCount()
 	},
-	// Every message whose sender or subject holds `query` (at most MBOX_MATCH_CAP), finding messages as it goes; stopped
-	// by mboxStop() or another search. Progress hears the messages searched and the matches found since its last report.
+	// Every message whose sender or subject holds `query` (at most 10,000), streaming through the file; stopped by
+	// mboxStopSearch() or another search, keeping what it found. Progress hears the messages searched and the matches
+	// found since its last report.
 	mboxSearch: async (
 		query: string,
 		onProgress: ((searched: number, found: readonly number[]) => unknown) & Partial<Comlink.ProxyMethods>
 	): Promise<MboxSearchResult> => {
-		mboxCount?.abort()
-		mboxCount = new AbortController()
-
-		const signal = mboxCount.signal
-		let sent = 0
-		const result = await searchHeaders(query, {
-			ensure: async want => {
-				const index = mailbox()
-
-				// Another scan is running (the list's): wait for it, then go on.
-				while (mboxScan !== null) await mboxScan.catch(() => undefined)
-
-				return index.count >= want || index.complete ? index.state() : await scanMailbox(want, signal, () => undefined)
-			},
-			row: async at => (await mboxRowsAt(at, 1))[0] ?? { from: null, subject: null },
-			signal,
-			// Only the matches found since the last report cross over.
-			onProgress: (searched, matches) => {
-				void onProgress(searched, matches.slice(sent))
-				sent = matches.length
-			}
-		}).catch((error: unknown): MboxSearchResult => {
-			if (!(error instanceof DOMException && error.name === "AbortError") && !isAbort(error)) throw error
-
-			return { matches: [], end: "stopped", searched: 0 }
-		})
-
-		onProgress[Comlink.releaseProxy]?.()
-
-		return result
-	},
-	// Rows `first` to `first + count` (at most MBOX_ROWS_AT_ONCE) of the list, among the messages found: sender, subject
-	// and date, from each message's header block.
-	mboxRows: (first: number, count: number): Promise<(EmailHeaderSummary | null)[]> => mboxRowsAt(first, count),
-	// The rows of the messages `indexes` names (a search's matches; at most MBOX_ROWS_AT_ONCE), in that order.
-	mboxRowsOf: async (indexes: readonly number[]): Promise<(EmailHeaderSummary | null)[]> => {
-		const rows: (EmailHeaderSummary | null)[] = []
-
-		for (const index of indexes.slice(0, MBOX_ROWS_AT_ONCE)) rows.push((await mboxRowsAt(index, 1))[0] ?? null)
-
-		return rows
-	},
-	// Message `index`'s own bytes (unescaped), for the message viewer; its end found first when not yet.
-	mboxMessage: async (index: number): Promise<MboxMessage> => {
-		const messages = mailbox()
-		let span = messages.span(index)
-
-		while (span !== null && span.end === null && !messages.complete) {
-			await scanMailbox(index + 2, new AbortController().signal, () => undefined)
-
-			span = messages.span(index)
-
-			// Another scan was running: wait for it to move on.
-			if (span?.end === null && mboxScan !== null) await mboxScan.catch(() => undefined)
+		try {
+			return await mailbox().find(query, (searched, found) => {
+				void onProgress(searched, found)
+			})
+		} finally {
+			onProgress[Comlink.releaseProxy]?.()
 		}
-
-		if (span === null) return { status: "missing" }
-
-		const bytes = await readMessage(
-			file().source,
-			{ start: span.start, end: span.end ?? file().source.size },
-			new AbortController().signal
-		)
-
-		if (bytes === null) return { status: "tooLarge" }
-
-		const message = messageBytes(bytes)
-
-		return Comlink.transfer({ status: "ok", bytes: message }, [message.buffer])
 	},
+	mboxStopSearch: (): void => {
+		mailbox().stopFind()
+	},
+	// Rows `first` to `first + count` of the list (at most 500): sender, subject and date.
+	mboxRows: (first: number, count: number): Promise<(EmailHeaderSummary | null)[]> => mailbox().rowsFrom(first, count),
+	// The rows of the messages `indexes` names (a search's matches; at most 500), in that order.
+	mboxRowsOf: (indexes: readonly number[]): Promise<(EmailHeaderSummary | null)[]> => mailbox().rowsOf(indexes),
+	// Message `index`'s own bytes (unquoted), for the message viewer; a later open stops this one.
+	mboxMessage: async (index: number): Promise<MboxMessage> => {
+		const message = await mailbox().message(index)
+
+		return message.status === "ok" ? Comlink.transfer(message, [message.bytes.buffer]) : message
+	},
+
 	stop: (): void => {
 		stopScan()
 	}
