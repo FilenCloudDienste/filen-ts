@@ -81,14 +81,36 @@ vi.mock("@/features/preview/lib/previewCache", async importOriginal => {
 
 	return { ...actual, loadPreviewBytes: vi.fn(actual.loadPreviewBytes) }
 })
+// A mailbox's start, read through a range source over the bytes the test's SDK serves.
+const { mailboxBytes } = vi.hoisted(() => ({ mailboxBytes: { current: new Uint8Array(0) } }))
+
+vi.mock("@/features/preview/lib/origin/rangeSource", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/preview/lib/origin/rangeSource")>()),
+	openOriginPorts: (_origin: unknown, _token: string, options: { limit?: number }) => ({
+		size: Math.min(options.limit ?? Number.POSITIVE_INFINITY, mailboxBytes.current.length),
+		port: () => Promise.resolve(new MessageChannel().port1),
+		close: () => undefined
+	})
+}))
+vi.mock("@/lib/media/rangePort", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/media/rangePort")>()),
+	rangePortReader: () => ({
+		readRange: (start: number, end: number) => Promise.resolve(mailboxBytes.current.slice(start, end)),
+		close: () => undefined
+	})
+}))
+
 // The text-family worker's message extract, run here: the same reader and extract the worker runs.
 vi.mock("@/features/preview/lib/textFamilyClient", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/preview/lib/textFamilyClient")>()
 	const { readEmailNames } = await import("@/features/preview/lib/emailReading")
 	const { emailText } = await import("@/features/preview/lib/emailText")
 
+	const { mailboxText } = await import("@/features/preview/lib/mailboxText")
+
 	return {
 		...actual,
+		readMailboxText: (prefix: Uint8Array, complete: boolean, limit: number) => mailboxText(new Uint8Array(prefix), complete, limit),
 		readEmailText: async (bytes: Uint8Array, limit: number) => {
 			const reading = await readEmailNames(new Uint8Array(bytes))
 
@@ -946,6 +968,28 @@ describe("read_text_file", () => {
 		expect(content).toBe(
 			"From: Anna <anna@example.com>\nTo: me@example.com\nSubject: Numbers\nAttachments: report.pdf\n\nRevenue & costs\nare up."
 		)
+	})
+
+	it("reads a mailbox's start in ranges: its first messages listed, the first one's extract", async () => {
+		const box = rawFile(testUuid("mbox"), "inbox.mbox", ROOT, "application/mbox")
+
+		mailboxBytes.current = new Uint8Array(
+			new TextEncoder().encode(
+				"From a@x Mon Nov 16 09:00:00 2026\nFrom: Anna <a@x.io>\nSubject: Hello\n\nFirst body\n\nFrom b@x Mon Nov 16 10:00:00 2026\nFrom: Bob <b@x.io>\nSubject: Later\n\nSecond\n\n"
+			)
+		)
+		sdk.listDirectory.mockResolvedValue({ dirs: [], files: [box] })
+		queryClient.removeQueries({ queryKey: driveListingQueryKey({ variant: "drive", uuid: null }) })
+		await call("list_directory", {})
+
+		const content = String(json(await call("read_text_file", { handle: "f1" }))["content"])
+
+		expect(content).toContain("Mailbox: ")
+		expect(content).toContain("Anna <a@x.io> | Hello")
+		expect(content).toContain("Bob <b@x.io> | Later")
+		expect(content).toContain("First message:\nFrom: Anna <a@x.io>")
+		expect(content).toContain("First body")
+		expect(sdk.downloadFileBytes).not.toHaveBeenCalledWith(expect.objectContaining({ uuid: box.uuid }), expect.anything())
 	})
 
 	it("refuses anything but text, code and markdown without downloading it", async () => {

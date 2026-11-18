@@ -29,7 +29,9 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { spreadsheetFileKind } from "@/features/spreadsheet/lib/fileKind"
 import { loadDriveFileBytes } from "@/features/preview/lib/fileBytes"
 import { EMAIL_MAX_BYTES } from "@/features/preview/lib/previewCaps"
-import { readEmailText } from "@/features/preview/lib/textFamilyClient"
+import { readEmailText, readMailboxText } from "@/features/preview/lib/textFamilyClient"
+import { openOriginPorts } from "@/features/preview/lib/origin/rangeSource"
+import { rangePortReader } from "@/lib/media/rangePort"
 import { readTextFileDetected } from "@/features/preview/lib/encodingGuess"
 import { assistantRouter, navigateChecked } from "@/features/assistant/tools/navigation"
 import { navigateToRoute } from "@/features/assistant/tools/routes"
@@ -642,6 +644,11 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 		return await readEmailTool(scope, entity, item, name)
 	}
 
+	// A mailbox reads as its start's parsed text: the first messages listed, the first one's extract.
+	if (previewType(item) === "mailbox") {
+		return await readMailboxTool(scope, entity, item, name)
+	}
+
 	const csv = spreadsheetFileKind(extensionOf(name).toLowerCase())
 
 	// CSV and TSV preview as spreadsheets but are text.
@@ -695,6 +702,57 @@ async function readEmailTool(
 			name,
 			content: text,
 			...(truncated ? { truncated: true } : {})
+		}
+	}
+}
+
+// What of a mailbox the assistant reads: its start, in ranges (a mailbox can be any size).
+const MAILBOX_PREFIX_BYTES = 1_048_576
+
+async function readMailboxTool(
+	scope: ToolScope,
+	entity: { item: DriveItem; path?: string },
+	item: DriveItem,
+	name: string
+): ReturnType<ToolAdapter> {
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file") {
+		throw new AssistantToolError(`"${name}" is a directory, not a file`, { invalid: true })
+	}
+
+	const token = crypto.randomUUID()
+	const signal = abortSignalOf(scope.signal) ?? new AbortController().signal
+	// One port, read once.
+	const range = openOriginPorts({ kind: "file", file: base.data }, token, { access: "authed", limit: MAILBOX_PREFIX_BYTES })
+	let prefix: Uint8Array
+
+	try {
+		const reader = rangePortReader(await range.port())
+
+		try {
+			prefix = await reader.readRange(0, range.size, signal)
+		} finally {
+			reader.close()
+		}
+	} finally {
+		range.close()
+	}
+
+	const text = await readMailboxText(prefix, Number(item.data.size) <= MAILBOX_PREFIX_BYTES, TEXT_FILE_MAX_CHARS)
+
+	if (text === null) {
+		throw new AssistantToolError(`"${name}" could not be read in time`)
+	}
+
+	const clipped = clipText(text, TEXT_FILE_MAX_CHARS)
+
+	return {
+		value: {
+			handle: showDrive(scope, item, livePath(entity, item)),
+			name,
+			content: clipped.text,
+			...(clipped.truncated ? { truncated: true } : {})
 		}
 	}
 }

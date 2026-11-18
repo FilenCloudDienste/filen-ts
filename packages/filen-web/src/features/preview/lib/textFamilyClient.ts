@@ -54,6 +54,23 @@ export async function readEmailText(bytes: Uint8Array, limit: number): Promise<E
 	})
 }
 
+// The start of a mailbox as plain text for the assistant (mailboxText.ts); null past the job's budget.
+export async function readMailboxText(prefix: Uint8Array, complete: boolean, limit: number): Promise<string | null> {
+	try {
+		return await job<string>(async remote => {
+			const copy = prefix.slice()
+
+			return await remote.mailboxText(Comlink.transfer(copy, [copy.buffer]), complete, limit)
+		})
+	} catch (e) {
+		if (e instanceof WorkerJobTimeoutError) {
+			return null
+		}
+
+		throw e
+	}
+}
+
 // A message's parse past the job's budget is a message too large to read here (a slow device on a hostile one), not a
 // failure.
 async function emailJob<R>(run: (remote: WorkerHandle<TextFamilyWorkerApi>["remote"]) => Promise<R>): Promise<R | { status: "tooLarge" }> {

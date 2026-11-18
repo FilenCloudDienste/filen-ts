@@ -7,6 +7,7 @@ import { cmsSigner } from "@filen/office/core/pdfsign"
 import { readBinaryReading, type BinaryReading } from "@/features/preview/lib/binaryInfo/reading"
 import { readEmail, readEmailNames, type EmailReading } from "@/features/preview/lib/emailReading"
 import { emailText } from "@/features/preview/lib/emailText"
+import { mailboxText } from "@/features/preview/lib/mailboxText"
 import { readSubtitleText, type SubtitleReading } from "@/features/preview/lib/subtitleCues.logic"
 import { readNotebook, type NotebookReading } from "@/features/preview/lib/notebookReading"
 
@@ -39,6 +40,10 @@ const api = {
 	},
 	// A message: a copy of its bytes, parsed and dropped; attachments come back as Blobs (no copy on the way).
 	email: (bytes: Uint8Array<ArrayBuffer>): Promise<EmailReading> => readEmail(bytes),
+	// The start of a mailbox (`complete`: the whole file) as plain text: its first messages listed, the first one's
+	// extract; at most `limit` characters and one more.
+	mailboxText: async (prefix: Uint8Array<ArrayBuffer>, complete: boolean, limit: number): Promise<string> =>
+		await mailboxText(prefix, complete, limit),
 	// A message as plain text (headers, body, attachment names), at most `limit` characters and one more.
 	emailText: async (bytes: Uint8Array<ArrayBuffer>, limit: number): Promise<EmailTextReading> => {
 		const reading = await readEmailNames(bytes)
