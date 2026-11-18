@@ -169,7 +169,11 @@ export function readHeader(source: DicomSource, options: HeaderOptions): DicomHe
 	}
 
 	for (let length = prefix.length; ;) {
-		const dataSet = tryParse(prefix, { untilTag: PIXEL_DATA, ...parseOptions })
+		const parsed = tryParse(prefix, size, { untilTag: PIXEL_DATA, ...parseOptions })
+
+		if (parsed === "damaged") throw parseFailure()
+
+		const dataSet = parsed === "more" ? null : parsed.dataSet
 
 		if (dataSet !== null && (dataSet.elements[PIXEL_DATA] !== undefined || length === size)) {
 			return {
@@ -203,11 +207,32 @@ export function readHeader(source: DicomSource, options: HeaderOptions): DicomHe
 	}
 }
 
-function tryParse(bytes: Uint8Array, options: Parameters<typeof parseDicom>[1]): DataSet | null {
+// A parse of a prefix: its data set, or why there is none. "more" when the prefix ends inside the data set (a read past
+// its end, which a longer prefix may satisfy); "damaged" for anything a longer prefix cannot mend: a value or item
+// running past the end of the file itself, nesting deeper than the stack, or bytes that are not a data set.
+type Parsed = { readonly dataSet: DataSet } | "more" | "damaged"
+
+// dicom-parser's own wording for a read past the bytes it was given.
+const PAST_END = /past end|buffer overrun|maxP ?osition/
+
+function tryParse(bytes: Uint8Array, fileSize: number, options: Parameters<typeof parseDicom>[1]): Parsed {
 	try {
-		return parseDicom(bytes, options)
-	} catch {
-		return null
+		return { dataSet: parseDicom(bytes, options) }
+	} catch (thrown) {
+		// It throws strings, Errors, and `{ exception, dataSet }` records holding what it had read.
+		const record = typeof thrown === "object" && thrown !== null && "exception" in thrown ? thrown : null
+		const error: unknown = record === null ? thrown : record.exception
+		const partial = record !== null && "dataSet" in record ? (record.dataSet as DataSet | undefined) : undefined
+		const message = typeof error === "string" ? error : error instanceof Error && !(error instanceof RangeError) ? error.message : ""
+
+		if (!PAST_END.test(message)) return "damaged"
+
+		// An element whose value would end past the file is no truncation a longer read mends.
+		const elements = partial === undefined ? [] : Object.values(partial.elements)
+
+		return elements.some(element => element.length !== 0xffffffff && element.dataOffset + element.length > fileSize)
+			? "damaged"
+			: "more"
 	}
 }
 
@@ -247,7 +272,11 @@ function readDeflated(
 		length = Math.min(inflated.length, length * 2, position + cap)
 	) {
 		const limit = length
-		const dataSet = tryParse(meta, { untilTag: PIXEL_DATA, inflater: () => inflated.subarray(0, limit) })
+		const parsed = tryParse(meta, inflated.length, { untilTag: PIXEL_DATA, inflater: () => inflated.subarray(0, limit) })
+
+		if (parsed === "damaged") throw parseFailure()
+
+		const dataSet = parsed === "more" ? null : parsed.dataSet
 
 		if (dataSet !== null && (dataSet.elements[PIXEL_DATA] !== undefined || limit === inflated.length)) {
 			return {

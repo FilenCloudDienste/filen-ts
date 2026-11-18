@@ -218,6 +218,40 @@ describe("the header", () => {
 		)
 	})
 
+	it("calls a header damaged at once when no longer prefix could mend it, rather than reading up to the cap", () => {
+		// A ranged file of 64 MiB whose first prefix holds the meta group, then `body`.
+		const ranged = (body: number[]) => {
+			const head = dicomFile({ transferSyntax: EXPLICIT_LE, elements: [text(0x00080060, "CS", "CT")] })
+			const big = new Uint8Array(64 * MIB)
+
+			big.set(head)
+			big.set(body, head.length)
+
+			return counting(big)
+		}
+		const le16 = (value: number) => [value & 0xff, value >> 8]
+		const le32 = (value: number) => [...le16(value & 0xffff), ...le16(value >>> 16)]
+
+		// An OB value of 4 GiB, past the end of the file.
+		const huge = ranged([...le16(0x0009), ...le16(0x1010), 0x4f, 0x42, 0, 0, ...le32(0xfffffff0)])
+
+		expect(() => readHeader(huge, { decodeBytes: DECODE })).toThrow(expect.objectContaining({ reason: "damaged" }))
+		expect(huge.reach()).toBe(MIB)
+
+		// Sequences nested deeper than the parser's stack.
+		const nested: number[] = []
+
+		for (let depth = 0; depth < 40_000; depth++) {
+			nested.push(...le16(0x0040), ...le16(0xa730), 0x53, 0x51, 0, 0, ...le32(0xffffffff))
+			nested.push(...le16(0xfffe), ...le16(0xe000), ...le32(0xffffffff))
+		}
+
+		const deep = ranged(nested)
+
+		expect(() => readHeader(deep, { decodeBytes: DECODE })).toThrow(expect.objectContaining({ reason: "damaged" }))
+		expect(deep.reach()).toBe(MIB)
+	})
+
 	it("refuses a deflated data set over 256 MiB on a ranged origin before reading it", () => {
 		const head = ctFile(DEFLATED).subarray(0, 512)
 		const read = vi.fn((offset: number, length: number) => {
