@@ -64,6 +64,7 @@ const SOURCE: ArchiveSource = {
 	name: "photos.zip",
 	size: 100 * 1024 * 1024,
 	anon: false,
+	nested: null,
 	ownParent: null
 }
 

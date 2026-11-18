@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyFile, ArchiveFormat, ListUpdate, UuidStr } from "@filen/sdk-rs"
+import type { AnyFile, ArchiveFormat, ListUpdate } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import { log } from "@/lib/log"
@@ -26,7 +26,7 @@ interface Call {
 const MiB = 1024 * 1024
 
 function source(name: string, size: number, uuid = TEST_ARCHIVE): ArchiveSource {
-	return { file: { uuid } as unknown as AnyFile, uuid: uuid as UuidStr, name, size, anon: false, ownParent: null }
+	return { file: { uuid } as unknown as AnyFile, uuid, name, size, anon: false, nested: null, ownParent: null }
 }
 
 function nameInfo(format: ArchiveFormat | null): ArchiveNameInfo {
@@ -38,7 +38,7 @@ function harness(info: ArchiveNameInfo | Promise<ArchiveNameInfo> = nameInfo({ t
 	const passwords = new Map<string, string | undefined>()
 	let ids = 0
 	const deps: ListingDeps = {
-		acquireReader: vi.fn((_file: AnyFile, anon: boolean, password: string | undefined) => {
+		acquireReader: vi.fn(({ anon }: ArchiveSource, password: string | undefined) => {
 			const id = `reader:${password ?? ""}`
 
 			passwords.set(id, password)

@@ -83,7 +83,7 @@ function ShownComicPage({
 	const [leaseBase] = useState(() => crypto.randomUUID())
 	const [waiting, setWaiting] = useState(false)
 	const leaseId = `${leaseBase}:${String(slot)}:${password ?? ""}`
-	const origin = entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot))
+	const origin = entryLeaseOrigin(leaseId, source.uuid, source.anon, store.index(slot), store.size(slot))
 	const item = archiveEntryItem(source.uuid, store.index(slot), store.name(slot), store.size(slot), store.modified(slot))
 	const leaseRequest = useEffectEvent(() => ({ plan: entryReadPlan(store, slot, readAhead, undefined, aheadEntries), password }))
 	const phase = useEffectEvent((waitingForWorker: boolean) => {
@@ -102,8 +102,7 @@ function ShownComicPage({
 
 		return leaseEntry({
 			leaseId,
-			file: source.file,
-			anon: source.anon,
+			target: source,
 			password: request.password,
 			plan: request.plan,
 			events: {

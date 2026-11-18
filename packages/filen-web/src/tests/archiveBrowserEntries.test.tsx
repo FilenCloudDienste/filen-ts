@@ -146,6 +146,7 @@ const SOURCE: ArchiveSource = {
 	name: "bundle.7z",
 	size: 10 * 1024 * 1024,
 	anon: false,
+	nested: null,
 	ownParent: null
 }
 

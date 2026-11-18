@@ -51,18 +51,18 @@ async function readEntry(
 	signal: AbortSignal
 ) {
 	const leaseId = crypto.randomUUID()
-	const file = request.params.archive
 	const { index } = request.params.entry
 	const release = leaseEntry({
 		leaseId,
-		file,
-		anon: request.anon,
+		target: request.target,
 		password,
 		plan: entryPlanOf(store, index, request.size, request.params.maxSolidSkip, false),
 		events: NO_EVENTS
 	})
 
-	return await readOrigin(entryLeaseOrigin(leaseId, file, request.anon, index, request.size), access, cap, signal).finally(release)
+	return await readOrigin(entryLeaseOrigin(leaseId, request.target.uuid, request.anon, index, request.size), access, cap, signal).finally(
+		release
+	)
 }
 
 // `index`: the viewed entry's index in the archive. `costAccepted`: the listing session accepted reading a solid block's

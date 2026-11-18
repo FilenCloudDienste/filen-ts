@@ -100,6 +100,9 @@ function harness() {
 		open: vi.fn((id: string, _file: AnyFile, anon: boolean, password: string | undefined) => {
 			opened.set(id, { anon, password })
 		}),
+		openNested: vi.fn((id: string, _parentId: string, _entry: unknown, password: string | undefined) => {
+			opened.set(id, { anon: false, password })
+		}),
 		close: vi.fn((id: string) => {
 			opened.delete(id)
 		}),
@@ -114,7 +117,7 @@ function harness() {
 		}
 	}
 	const deps: Deps = {
-		acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password, pageDeps),
+		acquireReader: (target, password) => acquireArchiveReader(target, password, pageDeps),
 		listArchive: vi.fn((_readerId: string, jobId: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => {
 			return new Promise<ListReportDTO>(resolve => {
 				lists.push({ jobId, params, emit: onEvent, resolve })

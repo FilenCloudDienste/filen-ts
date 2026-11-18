@@ -77,7 +77,7 @@ function EntryExtractCard({ archiveUuid, entry, onBack, listing, reason }: Archi
 	return (
 		<NestedFileViewer
 			item={item}
-			origin={entryLeaseOrigin("", request.params.archive, request.anon, request.params.entry.index, request.size)}
+			origin={entryLeaseOrigin("", request.target.uuid, request.anon, request.params.entry.index, request.size)}
 			category={entry.category}
 			references={null}
 			backLabel={t("previewArchiveEntryBack")}
@@ -131,14 +131,7 @@ function ReadEntryViewer({
 	const [byteAccess, setByteAccess] = useState<{ key: string; kind: EntryAccessKind } | null>(null)
 	const accessKey = `${leaseId}:${password ?? ""}`
 	const kind = ranged ? (byteAccess?.key === accessKey ? byteAccess.kind : null) : "whole"
-	const origin = entryLeaseOrigin(
-		leaseId,
-		request.params.archive,
-		request.anon,
-		request.params.entry.index,
-		request.size,
-		kind ?? "whole"
-	)
+	const origin = entryLeaseOrigin(leaseId, request.target.uuid, request.anon, request.params.entry.index, request.size, kind ?? "whole")
 	const onPhase = useEffectEvent((waitingForWorker: boolean) => {
 		setWaiting(waitingForWorker)
 	})
@@ -171,7 +164,7 @@ function ReadEntryViewer({
 		const asked = accessRequest()
 
 		// A reader that cannot tell (a refused password): read whole, which asks the password as before.
-		void entryAccessOf(asked.request.params.archive, asked.request.anon, asked.password, asked.request.params.entry.index)
+		void entryAccessOf(asked.request.target, asked.password, asked.request.params.entry.index)
 			.catch((): EntryAccessKind => "whole")
 			.then(next => {
 				if (live) {
@@ -190,8 +183,7 @@ function ReadEntryViewer({
 
 		return leaseEntry({
 			leaseId,
-			file: opened.request.params.archive,
-			anon: opened.request.anon,
+			target: opened.request.target,
 			password: opened.password,
 			plan: opened.plan,
 			events: {

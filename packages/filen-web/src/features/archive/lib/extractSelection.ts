@@ -380,7 +380,8 @@ export function selectionExtractRequest(
 	resolved: Extract<ResolvedSelection, { kind: "entries" }>,
 	baseDir: number
 ): ExtractRequest {
-	const archive = input.source.uuid
+	// A drive file's own: nothing is extracted from a nested archive.
+	const archive = input.source.file.uuid
 
 	return {
 		...baseRequest(input),

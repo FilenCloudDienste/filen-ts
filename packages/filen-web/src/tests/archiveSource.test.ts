@@ -126,6 +126,7 @@ describe("linkedArchiveSource", () => {
 			name: "photos.zip",
 			size: 4096,
 			anon: true,
+			nested: null,
 			ownParent: undefined
 		})
 	})

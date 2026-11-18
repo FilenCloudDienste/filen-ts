@@ -1,4 +1,4 @@
-import type { AnyFile } from "@filen/sdk-rs"
+import type { AnyFile, ArchiveEntryId } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { registerPreviewDisposer } from "@/lib/workers/previewDisposers"
 import { log } from "@/lib/log"
@@ -15,6 +15,46 @@ export const READER_LINGER_MS = 30_000
 // retained budget bounds across readers).
 export const READER_CLOSE_AT_ONCE_BYTES = 4 * 1024 * 1024
 
+// An archive inside another's entry (W6 §3.4, §6.1 A): read through its parent's reader, at most three deep.
+export interface NestedSource {
+	readonly parent: ReaderTarget
+	// The parent's password, which its reader was opened with.
+	readonly parentPassword: string | undefined
+	// The entry holding it, in the parent's listing.
+	readonly index: number
+	// 2 for an archive inside a drive file's, 3 at most (owner decision E6).
+	readonly depth: number
+}
+
+export const MAX_NESTED_DEPTH = 3
+
+// What a reader is opened on: a drive or public link file, or an archive nested in one. `uuid` names it in the page's
+// caches and in the entry ids the page passes (the file's uuid; `${parent uuid}/${index}` for a nested one, which the
+// worker maps to the SDK's own id).
+export interface ReaderTarget {
+	readonly file: AnyFile
+	readonly uuid: string
+	// Read through the public-link client, never the session's.
+	readonly anon: boolean
+	readonly nested: NestedSource | null
+}
+
+// A drive or public link file's archive.
+export function fileTarget(file: AnyFile, anon: boolean): ReaderTarget {
+	return { file, uuid: file.uuid, anon, nested: null }
+}
+
+// The archive in the entry `index` of `parent`'s listing; null past MAX_NESTED_DEPTH.
+export function nestedTarget(parent: ReaderTarget, parentPassword: string | undefined, index: number): NestedSource | null {
+	const depth = (parent.nested?.depth ?? 1) + 1
+
+	return depth > MAX_NESTED_DEPTH ? null : { parent, parentPassword, index, depth }
+}
+
+export function nestedUuid(parent: ReaderTarget, index: number): string {
+	return `${parent.uuid}/${String(index)}`
+}
+
 export interface ArchiveReaderRef {
 	// The worker's reader id.
 	readonly id: string
@@ -28,6 +68,7 @@ export interface ArchiveReaderRef {
 
 export interface ArchiveReaderPageDeps {
 	open: (id: string, file: AnyFile, anon: boolean, password: string | undefined) => void
+	openNested: (id: string, parentId: string, entry: ArchiveEntryId, password: string | undefined) => void
 	close: (id: string) => void
 	heldBytes: (id: string) => Promise<number>
 	newId: () => string
@@ -39,6 +80,11 @@ export const defaultArchiveReaderPageDeps: ArchiveReaderPageDeps = {
 	open: (id, file, anon, password) => {
 		sdkApi.openArchiveReader(id, file, anon, password).catch((e: unknown) => {
 			log.warn("archiveReaders", "opening a reader failed", e)
+		})
+	},
+	openNested: (id, parentId, entry, password) => {
+		sdkApi.openNestedArchiveReader(id, parentId, entry, password).catch((e: unknown) => {
+			log.warn("archiveReaders", "opening a nested reader failed", e)
 		})
 	},
 	close: id => {
@@ -65,6 +111,8 @@ interface OpenReader {
 	closed: boolean
 	cancelLinger: (() => void) | null
 	unregister: () => void
+	// A nested reader's hold on its parent's, let go when it closes.
+	parent: ArchiveReaderRef | null
 }
 
 // By archive and client; within one, by password (in memory only, never logged).
@@ -88,17 +136,25 @@ function closeReader(open: OpenReader, deps: ArchiveReaderPageDeps): void {
 	open.cancelLinger = null
 	open.unregister()
 	deps.close(open.id)
+	open.parent?.release()
 }
 
-// The reader of `file` under `password`, opened (Comlink delivers calls in order, so its id is usable at once) or
-// joined. `anon`: a public link's file, read through the public-link client.
+// The registry key: by archive and client; a nested one under its parent's key and password (in memory only).
+function readerKey(target: ReaderTarget): string {
+	return target.nested === null
+		? `${target.anon ? "anon" : "authed"}:${target.file.uuid}`
+		: `${readerKey(target.nested.parent)}\u0000${target.nested.parentPassword ?? ""}\u0000${String(target.nested.index)}`
+}
+
+// The reader of `target` under `password`, opened (Comlink delivers calls in order, so its id is usable at once) or
+// joined. A nested archive's holds its parent's reader open while it is.
 export function acquireArchiveReader(
-	file: AnyFile,
-	anon: boolean,
+	target: ReaderTarget,
 	password: string | undefined,
 	deps: ArchiveReaderPageDeps = defaultArchiveReaderPageDeps
 ): ArchiveReaderRef {
-	const key = `${anon ? "anon" : "authed"}:${file.uuid}`
+	const { anon } = target
+	const key = readerKey(target)
 	let byPassword = readers.get(key)
 
 	if (byPassword === undefined) {
@@ -116,7 +172,8 @@ export function acquireArchiveReader(
 			refs: 0,
 			closed: false,
 			cancelLinger: null,
-			unregister: () => undefined
+			unregister: () => undefined,
+			parent: null
 		}
 
 		created.unregister = registerPreviewDisposer("archiveReader", () => {
@@ -124,7 +181,20 @@ export function acquireArchiveReader(
 			closeReader(created, deps)
 		})
 		byPassword.set(password, created)
-		deps.open(created.id, file, anon, password)
+
+		const nested = target.nested
+
+		if (nested === null) {
+			deps.open(created.id, target.file, anon, password)
+		} else {
+			created.parent = acquireArchiveReader(nested.parent, nested.parentPassword, deps)
+			deps.openNested(
+				created.id,
+				created.parent.id,
+				{ archive: nested.parent.uuid as ArchiveEntryId["archive"], index: nested.index },
+				password
+			)
+		}
 		open = created
 	}
 

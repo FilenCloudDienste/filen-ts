@@ -244,8 +244,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 				token,
 				release: leaseEntry({
 					leaseId,
-					file: source.file,
-					anon: source.anon,
+					target: source,
 					password: readWith,
 					plan: entryReadPlan(store, slot, costAccepted, undefined, entries),
 					events: { phase: () => undefined, verified: () => undefined, failed: () => undefined }
@@ -253,7 +252,7 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 			}
 
 			running.set(slot, read)
-			loadOriginBytes(entryLeaseOrigin(leaseId, source.file, source.anon, store.index(slot), store.size(slot)), token, {
+			loadOriginBytes(entryLeaseOrigin(leaseId, source.uuid, source.anon, store.index(slot), store.size(slot)), token, {
 				access,
 				cap: store.size(slot),
 				scope: cacheScope,

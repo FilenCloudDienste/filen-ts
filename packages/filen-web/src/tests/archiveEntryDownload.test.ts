@@ -86,6 +86,7 @@ const ARCHIVE_UUID = "0a0a0a0a-0000-4000-8000-000000000000" as UuidStr
 const REQUEST: EntryRequest = {
 	params: { archive: { uuid: ARCHIVE_UUID } as unknown as AnyFile, entry: { archive: ARCHIVE_UUID, index: 2 }, maxSolidSkip: 0 },
 	anon: false,
+	target: { file: { uuid: ARCHIVE_UUID } as unknown as AnyFile, uuid: ARCHIVE_UUID, anon: false, nested: null },
 	name: "notes.txt",
 	size: 3
 }

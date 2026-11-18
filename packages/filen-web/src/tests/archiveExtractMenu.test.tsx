@@ -76,7 +76,7 @@ const SUMMARY: ListSummary = {
 const FILE = { uuid: TEST_ARCHIVE } as unknown as AnyFile
 
 function source(ownParent: string | null | undefined): ArchiveSource {
-	return { file: FILE, uuid: TEST_ARCHIVE, name: "photos.tar", size: 1024, anon: false, ownParent }
+	return { file: FILE, uuid: TEST_ARCHIVE, name: "photos.tar", size: 1024, anon: false, nested: null, ownParent }
 }
 
 // The session's commands, each a spy.

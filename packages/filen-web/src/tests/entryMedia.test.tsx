@@ -24,7 +24,7 @@ const { entryLeaseOrigin } = await import("@/features/archive/lib/archiveHandle"
 const ARCHIVE = { uuid: "a0000000-0000-0000-0000-000000000000" } as unknown as AnyFile
 
 function show(access: EntryAccessKind): ByteOrigin {
-	const origin = entryLeaseOrigin("lease", ARCHIVE, false, 3, 1000, access)
+	const origin = entryLeaseOrigin("lease", ARCHIVE.uuid, false, 3, 1000, access)
 
 	render(
 		<PreviewByteOriginProvider origin={origin}>

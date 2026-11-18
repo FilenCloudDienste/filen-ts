@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { AnyFile } from "@filen/sdk-rs"
+import type { ArchiveEntryId } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
@@ -7,7 +7,7 @@ import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { EntryReadPlan, PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import type { ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
-import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/lib/archiveReaders"
+import { acquireArchiveReader, fileTarget, type ArchiveReaderRef, type ReaderTarget } from "@/features/archive/lib/archiveReaders"
 import type { EntryReaderEvents } from "@/workers/originSource"
 import { listSummaryOf, type ListSummary } from "@/features/archive/lib/listingSession"
 import { canReadEntry, entryKey, lonePlan, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
@@ -56,7 +56,7 @@ export function archiveHandleRefusal(origin: ByteOrigin): ArchiveRefusal | null 
 }
 
 export interface ArchiveHandleDeps {
-	acquireReader: (file: AnyFile, anon: boolean, password: string | undefined) => ArchiveReaderRef
+	acquireReader: (target: ReaderTarget, password: string | undefined) => ArchiveReaderRef
 	listArchive: (readerId: string, jobId: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => Promise<ListReportDTO>
 	cancelJob: (jobId: string) => void
 	releaseJob: (jobId: string) => void
@@ -72,7 +72,7 @@ const NO_EVENTS: EntryReaderEvents = {
 }
 
 export const defaultArchiveHandleDeps: ArchiveHandleDeps = {
-	acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password),
+	acquireReader: (target, password) => acquireArchiveReader(target, password),
 	listArchive: (readerId, jobId, params, onEvent) => sdkApi.listArchiveReader(readerId, jobId, params, Comlink.proxy(onEvent)),
 	cancelJob: jobId => {
 		void sdkApi.cancelTransfer(jobId)
@@ -93,11 +93,12 @@ export const defaultArchiveHandleDeps: ArchiveHandleDeps = {
 	newId: () => crypto.randomUUID()
 }
 
-// The origin the lease `leaseId` (leaseEntry) names the archive's entry `index` by.
-// `access`: how its bytes are read (entryAccessOf); a whole read, checked, unless the reader said it maps or seeks.
+// The origin the lease `leaseId` (leaseEntry) names the entry `index` of the archive `archiveUuid` (its ReaderTarget's
+// uuid) by. `access`: how its bytes are read (entryAccessOf); a whole read, checked, unless the reader said it maps or
+// seeks.
 export function entryLeaseOrigin(
 	leaseId: string,
-	file: AnyFile,
+	archiveUuid: string,
 	anon: boolean,
 	index: number,
 	size: number,
@@ -106,21 +107,21 @@ export function entryLeaseOrigin(
 	return {
 		kind: "entry",
 		reader: leaseId,
-		entry: { archive: file.uuid, index },
+		entry: { archive: archiveUuid as ArchiveEntryId["archive"], index },
 		size,
 		access,
 		anon,
-		cacheKey: entryKey(file.uuid, index)
+		cacheKey: entryKey(archiveUuid, index)
 	}
 }
 
 // How the archive's entry `index` can be read, asked of its reader for `password` (held for the call): mapped or
 // seekable entries are read by range (media, a database), others whole.
-export async function entryAccessOf(file: AnyFile, anon: boolean, password: string | undefined, index: number): Promise<EntryAccessKind> {
-	const reader = acquireArchiveReader(file, anon, password)
+export async function entryAccessOf(target: ReaderTarget, password: string | undefined, index: number): Promise<EntryAccessKind> {
+	const reader = acquireArchiveReader(target, password)
 
 	try {
-		return await sdkApi.archiveEntryAccess(reader.id, { archive: file.uuid, index })
+		return await sdkApi.archiveEntryAccess(reader.id, { archive: target.uuid as ArchiveEntryId["archive"], index })
 	} finally {
 		reader.release()
 	}
@@ -128,8 +129,8 @@ export async function entryAccessOf(file: AnyFile, anon: boolean, password: stri
 
 export interface EntryLeaseRequest {
 	readonly leaseId: string
-	readonly file: AnyFile
-	readonly anon: boolean
+	// The archive (a file's, or one nested in it).
+	readonly target: ReaderTarget
 	readonly password: string | undefined
 	// How its whole read goes (entryReadPlan, lonePlan).
 	readonly plan: EntryReadPlan
@@ -140,7 +141,7 @@ export interface EntryLeaseRequest {
 // reference on that reader until released. Comlink delivers calls in order, so the origin reads at once. Returns the
 // release.
 export function leaseEntry(request: EntryLeaseRequest, deps: ArchiveHandleDeps = defaultArchiveHandleDeps): () => void {
-	const reader = deps.acquireReader(request.file, request.anon, request.password)
+	const reader = deps.acquireReader(request.target, request.password)
 	let leased = true
 
 	deps.leaseEntry(request.leaseId, reader.id, request.plan, request.events)
@@ -224,7 +225,8 @@ export function acquireArchiveHandle(
 	}
 
 	const file = origin.file
-	const reader = deps.acquireReader(file, origin.kind === "linkedFile", password)
+	const target = fileTarget(file, origin.kind === "linkedFile")
+	const reader = deps.acquireReader(target, password)
 	let released = false
 
 	const handle: ArchiveHandle = {
@@ -275,8 +277,7 @@ export function acquireArchiveHandle(
 			const release = leaseEntry(
 				{
 					leaseId,
-					file,
-					anon: reader.anon,
+					target,
 					password: reader.password,
 					plan: lonePlan(index, size, maxSolidSkipFor(store, slot)),
 					events: events ?? NO_EVENTS
@@ -284,7 +285,7 @@ export function acquireArchiveHandle(
 				deps
 			)
 
-			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file, reader.anon, index, size), release })
+			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file.uuid, reader.anon, index, size), release })
 		},
 		release: () => {
 			if (released) {

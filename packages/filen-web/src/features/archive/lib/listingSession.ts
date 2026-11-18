@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { AnyFile, ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
+import type { ArchiveFormat, ListUpdate, PasswordCheck } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
@@ -69,7 +69,7 @@ export interface ListingSnapshot {
 }
 
 export interface ListingDeps {
-	acquireReader: (file: AnyFile, anon: boolean, password: string | undefined) => ArchiveReaderRef
+	acquireReader: (target: ArchiveSource, password: string | undefined) => ArchiveReaderRef
 	listArchive: (readerId: string, id: string, params: ListJobParams, onEvent: (event: ListJobEvent) => void) => Promise<ListReportDTO>
 	cancel: (id: string) => void
 	release: (id: string) => void
@@ -149,7 +149,7 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export const defaultListingDeps: ListingDeps = {
-	acquireReader: (file, anon, password) => acquireArchiveReader(file, anon, password),
+	acquireReader: (target, password) => acquireArchiveReader(target, password),
 	listArchive: (readerId, id, params, onEvent) => sdkApi.listArchiveReader(readerId, id, params, Comlink.proxy(onEvent)),
 	cancel: id => {
 		void sdkApi.cancelTransfer(id)
@@ -256,7 +256,7 @@ export function openListingSession(
 	let disposed = false
 	let costAccepted = false
 	// The reader of the accepted password, which the browser's entries read through. Nothing is read until used.
-	let held: ArchiveReaderRef = deps.acquireReader(source.file, source.anon, accepted)
+	let held: ArchiveReaderRef = deps.acquireReader(source, accepted)
 
 	// The session reads through the accepted password's reader from now on.
 	const holdAccepted = (): void => {
@@ -266,7 +266,7 @@ export function openListingSession(
 
 		const previous = held
 
-		held = deps.acquireReader(source.file, source.anon, accepted)
+		held = deps.acquireReader(source, accepted)
 		previous.release()
 	}
 
@@ -433,7 +433,7 @@ export function openListingSession(
 
 		const current: Run = {
 			id: deps.newId(),
-			reader: deps.acquireReader(source.file, source.anon, password),
+			reader: deps.acquireReader(source, password),
 			token,
 			kind,
 			store: kind === "full" ? createEntryStore() : snapshot.store

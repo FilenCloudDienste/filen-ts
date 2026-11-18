@@ -101,6 +101,7 @@ const SOURCE = {
 	name: "issue.cbr",
 	size: 1000,
 	anon: false,
+	nested: null,
 	ownParent: null
 }
 

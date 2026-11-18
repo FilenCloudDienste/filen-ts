@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import type { ArchiveEntryId } from "@filen/sdk-rs"
 import type { EntryJobParams, EntryProgress } from "@/workers/sdk.worker"
 import {
 	isPickerCancelled,
@@ -18,7 +19,7 @@ import { toastTransferStarted } from "@/features/transfers/lib/transferStartToas
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { canReadEntry, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
-import { acquireArchiveReader } from "@/features/archive/lib/archiveReaders"
+import { acquireArchiveReader, type ReaderTarget } from "@/features/archive/lib/archiveReaders"
 
 // One archive entry saved on its own, through the archive's reader (archiveReaders.ts): with the index the browser's
 // listing left it, only the entry is read. Never for a selection, which extracts.
@@ -27,6 +28,8 @@ export interface EntryRequest {
 	params: EntryJobParams
 	// A public link's archive, read through the public-link client.
 	anon: boolean
+	// The archive its reader is opened on (a file's, or one nested in it).
+	target: ReaderTarget
 	name: string
 	// As listed.
 	size: number
@@ -42,10 +45,11 @@ export function entryRequest(source: ArchiveSource, store: EntryStore, slot: num
 	return {
 		params: {
 			archive: source.file,
-			entry: { archive: source.uuid, index: store.index(slot) },
+			entry: { archive: source.uuid as ArchiveEntryId["archive"], index: store.index(slot) },
 			maxSolidSkip: maxSolidSkipFor(store, slot)
 		},
 		anon: source.anon,
+		target: source,
 		name: store.name(slot),
 		size: store.size(slot)
 	}
@@ -165,7 +169,7 @@ async function downloadThroughReader(
 	writable: WritableStream<Uint8Array>,
 	report: EntryDownloadReporters
 ): Promise<boolean> {
-	const reader = acquireArchiveReader(request.params.archive, request.anon, password)
+	const reader = acquireArchiveReader(request.target, password)
 
 	try {
 		return await sdkApi.downloadReaderEntry(reader.id, transferId, request.params, writable, progressProxy(report))
