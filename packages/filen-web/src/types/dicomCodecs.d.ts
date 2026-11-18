@@ -54,7 +54,8 @@ declare module "@cornerstonejs/codec-openjpeg/decodewasmjs" {
 
 declare module "@cornerstonejs/codec-openjph/wasmjs" {
 	interface HTJ2KDecoder extends DicomEmbindDecoder {
-		decodeSubResolution(decodeLevel: number, decodeLayer: number): void
+		// HTJ2KDecoder::decodeSubResolution(size_t decompositionLevel) at 2.4.11: one argument, unlike OpenJPEG's.
+		decodeSubResolution(decompositionLevel: number): void
 	}
 
 	const factory: (options: DicomEmscriptenOptions) => Promise<DicomEmscriptenModule & { HTJ2KDecoder: new () => HTJ2KDecoder }>

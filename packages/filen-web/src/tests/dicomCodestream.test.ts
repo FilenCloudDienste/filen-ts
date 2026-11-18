@@ -33,6 +33,23 @@ const paths = vi.hoisted(async () => {
 vi.mock("@cornerstonejs/codec-charls/decodewasm?url", async () => ({ default: (await paths).charls }))
 vi.mock("@cornerstonejs/codec-openjpeg/decodewasm?url", async () => ({ default: (await paths).openjpeg }))
 vi.mock("@cornerstonejs/codec-openjph/wasm?url", async () => ({ default: (await paths).openjph }))
+// OpenJPH, each module it loads kept, for a look at how its decoder is called.
+const openjphModules = vi.hoisted((): { HTJ2KDecoder: { prototype: { decodeSubResolution: (...levels: number[]) => void } } }[] => [])
+
+vi.mock("@cornerstonejs/codec-openjph/wasmjs", async importOriginal => {
+	const actual = await importOriginal<{ default: (options: object) => Promise<(typeof openjphModules)[number]> }>()
+
+	return {
+		default: async (options: object) => {
+			const loaded = await actual.default(options)
+
+			openjphModules.push(loaded)
+
+			return loaded
+		}
+	}
+})
+
 // The decode-only CharLS build, each module it loads kept: a module loaded afresh is one more.
 const charlsModules = vi.hoisted((): { JpegLSDecoder: { prototype: { decode: () => void } } }[] => [])
 
@@ -296,6 +313,22 @@ describe("the codecs", () => {
 		// A 12-bit codestream for 10 bits stored.
 		expect((await decodeCompressed(stream, grayModule(48, 64, 10), "gray", decoder, 10_000)).rows).toBe(48)
 	})
+	it("asks OpenJPH for a reduced resolution by its decomposition levels alone, as its binding takes them", async () => {
+		const info = { width: 64, height: 48, bitsPerSample: 12, componentCount: 1, isSigned: false, isUsingColorTransform: false }
+		const stream = await encoder("@cornerstonejs/codec-openjph/wasmjs", "HTJ2KEncoder", info, ramp, 3)
+
+		await decodeCompressed(stream, grayModule(48, 64, 12), "gray", "htj2k", 10_000)
+
+		const loaded = openjphModules.at(-1)
+
+		if (loaded === undefined) throw new Error("OpenJPH never loaded")
+
+		const reduce = vi.spyOn(loaded.HTJ2KDecoder.prototype, "decodeSubResolution")
+
+		await decodeCompressed(stream, grayModule(48, 64, 12), "gray", "htj2k", 32 * 24)
+		expect(reduce.mock.calls).toEqual([[1]])
+	})
+
 	it.each([
 		["jpeg2000", "@cornerstonejs/codec-openjpeg/wasmjs", "J2KEncoder"],
 		["htj2k", "@cornerstonejs/codec-openjph/wasmjs", "HTJ2KEncoder"]

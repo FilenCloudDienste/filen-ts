@@ -230,6 +230,33 @@ async function jpegLs(encoded: Uint8Array, module: PixelModule, color: SampleCol
 	}
 }
 
+type OpenJpegCodec = Awaited<ReturnType<typeof OpenJPEG>>
+type OpenJphCodec = Awaited<ReturnType<typeof OpenJPH>>
+
+// A JPEG 2000 decoder of either codec, and its decode at `levels` reductions: OpenJPH takes the decomposition levels
+// alone, OpenJPEG a quality layer too (0: every layer).
+function j2kDecoder(codec: OpenJpegCodec | OpenJphCodec): { decoder: DicomEmbindDecoder; reduce: (levels: number) => void } {
+	if ("HTJ2KDecoder" in codec) {
+		const decoder = new codec.HTJ2KDecoder()
+
+		return {
+			decoder,
+			reduce: levels => {
+				decoder.decodeSubResolution(levels)
+			}
+		}
+	}
+
+	const decoder = new codec.J2KDecoder()
+
+	return {
+		decoder,
+		reduce: levels => {
+			decoder.decodeSubResolution(levels, 0)
+		}
+	}
+}
+
 async function jpeg2000(
 	encoded: Uint8Array,
 	module: PixelModule,
@@ -250,14 +277,14 @@ async function jpeg2000(
 
 	const loaded = high ? openjph : openjpeg
 	const codec = await loaded.get()
-	const decoder = "HTJ2KDecoder" in codec ? new codec.HTJ2KDecoder() : new codec.J2KDecoder()
+	const { decoder, reduce } = j2kDecoder(codec)
 	const size = reducedSize(header, level)
 
 	try {
 		decoder.getEncodedBuffer(encoded.length).set(encoded)
 
 		if (level === 0) decoder.decode()
-		else decoder.decodeSubResolution(level, 0)
+		else reduce(level)
 
 		const info = decoder.getFrameInfo()
 
