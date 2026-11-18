@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { openFixtureRows } from "./helpers/fixtures"
@@ -9,20 +9,49 @@ import { trackCspViolations } from "./helpers/csp"
 // MediaSource), every other browser moves it to the ladder. WebKit's Linux build (GStreamer) can stall on the in-place
 // switch; the preview then moves it to the ladder too, which is what a user there gets.
 
+// Seconds the element has played since `reset`, summed from its timeupdates: a loop back or a seek adds nothing. The
+// clips loop every two or three seconds, so a sampled currentTime can keep landing early in the clip (a poll period
+// close to half a loop) however long it plays.
+function playedSeconds(video: Locator, reset = false): Promise<number> {
+	return video
+		.evaluate((el, fresh) => {
+			const element = el as HTMLVideoElement & { e2ePlayed?: { total: number; last: number } }
+
+			if (element.e2ePlayed === undefined) {
+				element.addEventListener("timeupdate", () => {
+					const state = element.e2ePlayed
+
+					if (state !== undefined) {
+						const delta = element.currentTime - state.last
+
+						state.last = element.currentTime
+						state.total += !element.seeking && delta > 0 && delta < 1 ? delta : 0
+					}
+				})
+			}
+
+			if (fresh || element.e2ePlayed === undefined) {
+				element.e2ePlayed = { total: 0, last: element.currentTime }
+			}
+
+			return element.e2ePlayed.total
+		}, reset)
+		.catch(() => 0)
+}
+
 // Plays the dialog's video until `seconds` of it have played.
 async function playing(page: Page, seconds = 0.3): Promise<void> {
 	const video = page.getByRole("dialog").locator("video")
 
 	await expect(video).toHaveCount(1, { timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await playedSeconds(video, true)
 	await video.evaluate(el => {
 		const element = el as HTMLVideoElement
 
 		element.muted = true
 		void element.play().catch(() => undefined)
 	})
-	await expect
-		.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime).catch(() => 0), { timeout: LAZY_VIEWER_TIMEOUT_MS })
-		.toBeGreaterThan(seconds)
+	await expect.poll(() => playedSeconds(video), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(seconds)
 }
 
 test("AVI, ASF and MPEG-PS files play, and a transport stream's MP2 plays with sound", async ({ page }) => {
@@ -89,23 +118,9 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 			.toBe(true)
 	}
 
-	// Played on a second after the pick, which a move to the ladder would have made by then. The three-second clip
-	// loops, so the second is counted across a loop back to the start.
-	const at = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
-
-	await expect
-		.poll(
-			() =>
-				video
-					.evaluate((el, from) => {
-						const element = el as HTMLVideoElement
-
-						return (element.currentTime - from + element.duration) % element.duration
-					}, at)
-					.catch(() => 0),
-			{ timeout: LAZY_VIEWER_TIMEOUT_MS }
-		)
-		.toBeGreaterThan(1)
+	// Played on a second after the pick, which a move to the ladder would have made by then.
+	await playedSeconds(video, true)
+	await expect.poll(() => playedSeconds(video), { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThan(1)
 
 	if (browserName === "webkit") {
 		// Still the direct stream, unless the switch stalled and the preview moved it to the ladder (MediaSource).
