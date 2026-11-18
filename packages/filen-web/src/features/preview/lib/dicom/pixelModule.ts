@@ -1,6 +1,6 @@
 import type { DataSet } from "dicom-parser"
 import { DICOM_MAX_SIDE, type DicomDecoder, type TransferSyntax } from "@/features/preview/lib/dicom/transferSyntax"
-import { nativeFrameBytes } from "@/features/preview/lib/dicom/frames.logic"
+import { MAX_FRAGMENTS, nativeFrameBytes } from "@/features/preview/lib/dicom/frames.logic"
 import {
 	paletteChannel,
 	paletteFirst,
@@ -250,7 +250,8 @@ export function imageVerdict(module: PixelModule, syntax: TransferSyntax | null,
 	if (rows < 1 || columns < 1 || bitsStored < 1 || bitsStored > bitsAllocated || highBit < bitsStored - 1 || highBit >= bitsAllocated) {
 		return { status: "damaged" }
 	}
-	if (rows > DICOM_MAX_SIDE || columns > DICOM_MAX_SIDE) return { status: "tooLarge" }
+	// A frame count past what the fragment index holds would size offset tables of that many entries.
+	if (rows > DICOM_MAX_SIDE || columns > DICOM_MAX_SIDE || module.frames > MAX_FRAGMENTS) return { status: "tooLarge" }
 
 	const color = sampleColor(module, syntax.decoder)
 

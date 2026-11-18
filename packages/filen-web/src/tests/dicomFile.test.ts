@@ -269,6 +269,9 @@ describe("the image verdict", () => {
 		expect(verdict(grayModule({ rows: 16_385, columns: 1, bitsAllocated: 8, bitsStored: 8, highBit: 7, signed: false }))).toBe(
 			"tooLarge"
 		)
+		expect(
+			verdict(grayModule({ rows: 1, columns: 2, bitsAllocated: 16, bitsStored: 12, highBit: 11, signed: false, frames: 2_000_000 }))
+		).toBe("tooLarge")
 		expect(verdict([...small.filter(element => element.tag !== 0x00280004), text(0x00280004, "CS", "YBR_PARTIAL_420")])).toBe(
 			"unsupported"
 		)

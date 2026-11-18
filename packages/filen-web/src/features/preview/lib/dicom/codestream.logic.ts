@@ -187,7 +187,7 @@ export function jpegLsHeader(bytes: Uint8Array): CodestreamHeader | null {
 }
 
 // JPEG 2000 Part 1 / HTJ2K (Part 15): a raw codestream, SOC then SIZ, every component at full resolution and of one
-// depth; COD's decomposition levels from the main header (up to the first tile part).
+// depth, at most 65,535 tiles; COD's decomposition levels from the main header (up to the first tile part).
 export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 	if (u16(bytes, 0) !== 0xff4f || u16(bytes, 2) !== 0xff51) return null
 
@@ -196,10 +196,17 @@ export function jpeg2000Header(bytes: Uint8Array): CodestreamHeader | null {
 	const ysiz = u32(bytes, 12)
 	const xosiz = u32(bytes, 16)
 	const yosiz = u32(bytes, 20)
+	const xtsiz = u32(bytes, 24)
+	const ytsiz = u32(bytes, 28)
+	const xtosiz = u32(bytes, 32)
+	const ytosiz = u32(bytes, 36)
 	const components = u16(bytes, 40)
 
 	if (sizLength === null || xsiz === null || ysiz === null || xosiz === null || yosiz === null || components === null) return null
+	if (xtsiz === null || ytsiz === null || xtosiz === null || ytosiz === null) return null
 	if (components < 1 || sizLength !== 38 + components * 3 || xosiz >= xsiz || yosiz >= ysiz) return null
+	// A tile part's index is 16 bits: the decoders refuse more tiles (OpenJPEG before allocating its tile array).
+	if (xtsiz < 1 || ytsiz < 1 || Math.ceil((xsiz - xtosiz) / xtsiz) * Math.ceil((ysiz - ytosiz) / ytsiz) > 65_535) return null
 
 	let bits = 0
 

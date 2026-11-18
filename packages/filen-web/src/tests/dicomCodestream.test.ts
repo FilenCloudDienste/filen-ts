@@ -144,6 +144,12 @@ describe("codestream headers", () => {
 	it("reads JPEG 2000's SIZ and COD, refusing subsampled components", () => {
 		expect(jpeg2000Header(siz(64, 48, 3, 12, 5))).toEqual({ rows: 48, columns: 64, components: 3, bits: 12, levels: 5 })
 		expect(jpeg2000Header(siz(64, 48, 3, 8, 5, true))).toBeNull()
+
+		// One-pixel tiles over a large image: more tiles than a codestream can index.
+		const tiny = siz(4096, 4096, 1, 8, 5)
+
+		tiny.set([0, 0, 0, 1, 0, 0, 0, 1], 24)
+		expect(jpeg2000Header(tiny)).toBeNull()
 		expect(jpeg2000Header(siz(64, 48, 1, 8, 5).subarray(0, 50))).toBeNull()
 		expect(jpeg2000Header(Uint8Array.from([0xff, 0xd8]))).toBeNull()
 	})
