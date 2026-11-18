@@ -321,7 +321,8 @@ function codingLevels(bytes: Uint8Array, start: number, components: number): { c
 	return { cod, coc, end: at }
 }
 
-// Whether a JPEG 2000 codestream ends with its EOC marker (FFD9), allowing the one byte a fragment is padded with.
+// Whether a codestream ends with its end marker (JPEG's EOI, JPEG 2000's EOC: FFD9), allowing the one byte a fragment is
+// padded with.
 export function endsCodestream(bytes: Uint8Array): boolean {
 	const end = bytes.length
 	const at = (from: number): boolean => bytes[from - 2] === 0xff && bytes[from - 1] === 0xd9

@@ -13,7 +13,7 @@ import {
 	withoutExif
 } from "@/features/preview/lib/dicom/codestream.logic"
 import type { PixelModule } from "@/features/preview/lib/dicom/pixelModule"
-import { siz } from "@/tests/support/dicomBytes"
+import { losslessJpeg, siz } from "@/tests/support/dicomBytes"
 
 // The codestream header checks made before a compressed DICOM frame reaches its decoder, and the decoders themselves
 // (CharLS, OpenJPEG, OpenJPH) on codestreams their own encoders wrote.
@@ -313,6 +313,22 @@ describe("the codecs", () => {
 		// A 12-bit codestream for 10 bits stored.
 		expect((await decodeCompressed(stream, grayModule(48, 64, 10), "gray", decoder, 10_000)).rows).toBe(48)
 	})
+	it("decodes a lossless JPEG through jpeg-lossless-decoder-js, as written by the tests' own encoder", async () => {
+		const samples = Uint16Array.from({ length: 48 * 64 }, (_, i) => (i * 37) % 4096)
+		const stream = losslessJpeg(samples, 64, 12)
+
+		expect(losslessJpegHeader(stream)).toMatchObject({ rows: 48, columns: 64, components: 1, bits: 12 })
+
+		const decoded = await decodeCompressed(stream, grayModule(48, 64, 12), "gray", "jpegLossless", 10_000)
+
+		expect([...decoded.data]).toEqual([...samples])
+		await expect(
+			decodeCompressed(stream.slice(0, stream.length / 3), grayModule(48, 64, 12), "gray", "jpegLossless", 10_000)
+		).rejects.toMatchObject({
+			reason: "damaged"
+		})
+	})
+
 	it("asks OpenJPH for a reduced resolution by its decomposition levels alone, as its binding takes them", async () => {
 		const info = { width: 64, height: 48, bitsPerSample: 12, componentCount: 1, isSigned: false, isUsingColorTransform: false }
 		const stream = await encoder("@cornerstonejs/codec-openjph/wasmjs", "HTJ2KEncoder", info, ramp, 3)

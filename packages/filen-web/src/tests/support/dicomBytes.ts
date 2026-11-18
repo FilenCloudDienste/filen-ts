@@ -372,3 +372,53 @@ export function siz(
 		0x90
 	])
 }
+
+// A lossless JPEG (ITU-T T.81 Annex H, SOF3, one component) of `samples`, `columns` wide, at `precision` bits: predictor 1
+// (the sample to the left; above it for a row's first), one Huffman table coding each difference's magnitude category
+// (0–15) with five bits, then the difference's own bits. Byte-stuffed, its last byte padded with ones.
+export function losslessJpeg(samples: ArrayLike<number>, columns: number, precision: number): Uint8Array {
+	const rows = samples.length / columns
+	const out: number[] = [0xff, 0xd8]
+	const categories = Array.from({ length: 16 }, (_, i) => i)
+
+	out.push(0xff, 0xc3, ...be16(11), precision, ...be16(rows), ...be16(columns), 1, 1, 0x11, 0)
+	out.push(0xff, 0xc4, ...be16(2 + 17 + categories.length), 0x00, 0, 0, 0, 0, categories.length, ...new Array<number>(11).fill(0))
+	out.push(...categories)
+	out.push(0xff, 0xda, ...be16(8), 1, 1, 0x00, 1, 0, 0)
+
+	let bits = 0
+	let count = 0
+	const write = (value: number, length: number): void => {
+		for (let i = length - 1; i >= 0; i--) {
+			bits = (bits << 1) | ((value >> i) & 1)
+			count++
+
+			if (count === 8) {
+				out.push(bits)
+
+				if (bits === 0xff) out.push(0)
+
+				bits = 0
+				count = 0
+			}
+		}
+	}
+
+	for (let at = 0; at < samples.length; at++) {
+		const x = at % columns
+		const value = samples[at] ?? 0
+		const predicted = at === 0 ? 2 ** (precision - 1) : x === 0 ? (samples[at - columns] ?? 0) : (samples[at - 1] ?? 0)
+		const difference = value - predicted
+		const category = difference === 0 ? 0 : Math.floor(Math.log2(Math.abs(difference))) + 1
+
+		write(category, 5)
+
+		if (category > 0) write(difference > 0 ? difference : difference + 2 ** category - 1, category)
+	}
+
+	if (count > 0) write(0xff, 8 - count)
+
+	out.push(0xff, 0xd9)
+
+	return Uint8Array.from(out)
+}

@@ -186,6 +186,9 @@ async function jpegBaseline(encoded: Uint8Array, module: PixelModule, color: Sam
 
 function jpegLossless(encoded: Uint8Array, module: PixelModule, color: SampleColor, pixels: number): FrameSamples {
 	const { rows, columns, components } = checked(losslessJpegHeader(encoded), module, pixels)
+
+	// jpeg-lossless-decoder-js decodes a stream cut short to a full frame of whatever it read past the end.
+	if (!endsCodestream(encoded)) damaged()
 	const bytes = module.bitsAllocated > 8 ? 2 : 1
 
 	// The decoder writes wider samples for one component only.
