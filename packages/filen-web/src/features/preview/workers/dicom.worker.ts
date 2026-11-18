@@ -9,10 +9,10 @@ import {
 	encapsulatedFrame,
 	fragmentIndex,
 	nativeFrame,
-	type CompressedDecoder,
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
 import { FrameCache } from "@/features/preview/lib/dicom/frameCache.logic"
+import { decodeCompressed } from "@/features/preview/lib/dicom/codecs"
 import { DICOM_FRAME_CACHE_BYTES, type DicomDecoder } from "@/features/preview/lib/dicom/transferSyntax"
 import {
 	drawnSize,
@@ -52,9 +52,7 @@ import {
 // drawn into the shell's OffscreenCanvas (2D) through the window, only when something changed. Nothing about the
 // file's values is logged.
 
-// The decoders this build carries.
-const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle"])
-const COMPRESSED: CompressedDecoder | null = null
+const DECODERS: ReadonlySet<DicomDecoder> = new Set(["native", "rle", "jpegBaseline", "jpegLossless", "jpegLs", "jpeg2000", "htj2k"])
 // Playback when the file names no frame time.
 const DEFAULT_FRAME_MS = 100
 const KEY_ZOOM = 1.25
@@ -105,7 +103,14 @@ function send(message: WorkerToShell<DicomStatus>): void {
 }
 
 function postStatus(): void {
-	const status: DicomStatus = { frame: current, window: voiWindow, atDefault: voiWindow === baseWindow, playing, failure }
+	const status: DicomStatus = {
+		frame: current,
+		window: voiWindow,
+		atDefault: voiWindow === baseWindow,
+		playing,
+		failure,
+		reduced: samples !== null && opened !== null && samples.rows < opened.module.rows
+	}
 	const key = JSON.stringify(status)
 
 	if (key !== posted) {
@@ -493,7 +498,7 @@ const api = {
 								decodeBytes: budget.decodeBytes,
 								heldWith: frameBytes => (held > 0 ? held : frameBytes + ringBytes)
 							},
-							compressed: COMPRESSED
+							compressed: decodeCompressed
 						}
 					: null
 			const color = verdict.status === "ok" ? verdict.color : null

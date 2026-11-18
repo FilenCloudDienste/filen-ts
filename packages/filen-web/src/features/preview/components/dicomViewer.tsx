@@ -317,7 +317,14 @@ function DicomImage({
 	onReload: () => void
 }) {
 	const { t } = useTranslation("preview")
-	const [status, setStatus] = useState<DicomStatus>({ frame: 0, window: null, atDefault: true, playing: false, failure: null })
+	const [status, setStatus] = useState<DicomStatus>({
+		frame: 0,
+		window: null,
+		atDefault: true,
+		playing: false,
+		failure: null,
+		reduced: false
+	})
 	const [invert, setInvert] = useState(false)
 	const [tags, setTags] = useState(false)
 	const hostRef = useRef<HTMLDivElement>(null)
@@ -396,9 +403,9 @@ function DicomImage({
 					onStatus={setStatus}
 					onReload={onReload}
 					notice={
-						status.failure !== null ? (
+						status.failure !== null || status.reduced ? (
 							<span className="rounded-md bg-background/80 px-2 py-1 text-muted-foreground">
-								{t(FRAME_MESSAGES[status.failure])}
+								{t(status.failure === null ? "previewDicomReduced" : FRAME_MESSAGES[status.failure])}
 							</span>
 						) : undefined
 					}

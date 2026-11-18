@@ -53,6 +53,8 @@ export interface DicomStatus {
 	readonly playing: boolean
 	// The frame on screen could not be shown.
 	readonly failure: FrameFailure | null
+	// The frame on screen is decoded at a lower resolution than it has (a JPEG 2000 frame over the budget).
+	readonly reduced: boolean
 }
 
 export interface DicomBudget {

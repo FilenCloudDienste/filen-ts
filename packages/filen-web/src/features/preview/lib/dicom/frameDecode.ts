@@ -1,4 +1,4 @@
-import { DICOM_FRAME_BPP, type TransferSyntax } from "@/features/preview/lib/dicom/transferSyntax"
+import { DICOM_FRAME_BPP, type DicomDecoder, type TransferSyntax } from "@/features/preview/lib/dicom/transferSyntax"
 import {
 	FragmentIndex,
 	joinSpans,
@@ -36,8 +36,14 @@ export interface DecodeBudget {
 }
 
 // A decoder of compressed frames (the codecs): the frame's codestream into samples. `pixels` is the budget left for
-// this frame, already checked against the tags; the decoder checks its codestream header against it again.
-export type CompressedDecoder = (encoded: Uint8Array, module: PixelModule, color: SampleColor, pixels: number) => Promise<FrameSamples>
+// this frame; the decoder checks its codestream header against the tags and against it before decoding.
+export type CompressedDecoder = (
+	encoded: Uint8Array,
+	module: PixelModule,
+	color: SampleColor,
+	decoder: DicomDecoder,
+	pixels: number
+) => Promise<FrameSamples>
 
 export interface FrameContext {
 	readonly module: PixelModule
@@ -65,12 +71,16 @@ function samplesView(bytes: Uint8Array, bitsAllocated: number, littleEndian: boo
 		: new Uint32Array(aligned.buffer, aligned.byteOffset, count)
 }
 
-// Throws when a frame of the module's size does not fit what is left of the budget with `frameBytes` held.
+// JPEG 2000 frames decode at a reduced resolution when the full one is over the budget.
+const REDUCIBLE: ReadonlySet<DicomDecoder> = new Set(["jpeg2000", "htj2k"])
+
+// The pixels left for a frame with `frameBytes` held; throws when the tags' frame does not fit them and the decoder
+// cannot reduce it.
 function checkBudget(context: FrameContext, frameBytes: number): number {
 	const { rows, columns } = context.module
 	const pixels = pixelsWithin(context.budget.decodeBytes, context.budget.heldWith(frameBytes), DICOM_FRAME_BPP)
 
-	if (rows * columns > pixels) {
+	if (rows * columns > pixels && !REDUCIBLE.has(context.syntax.decoder)) {
 		throw new DicomFrameFailure("tooLarge", "the frame is larger than the decode budget")
 	}
 
@@ -152,7 +162,7 @@ export async function encapsulatedFrame(context: FrameContext, fragments: Fragme
 
 		if (context.compressed === null) throw new DicomFrameFailure("unsupported", "no decoder for this transfer syntax")
 
-		return await context.compressed(encoded, module, color, pixels)
+		return await context.compressed(encoded, module, color, syntax.decoder, pixels)
 	} catch (error) {
 		return rethrow(error)
 	}

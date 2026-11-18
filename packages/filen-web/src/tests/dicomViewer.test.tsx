@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 import type { DicomInfo, DicomOpenResult, DicomStatus, DicomTagLevel } from "@/features/preview/lib/dicom/protocol"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
+import { DicomViewer } from "@/features/preview/components/dicomViewer"
 
 // The DICOM viewer's states: the image with its summary, window presets, Invert, Reset, Tags and (multi-frame) the
 // scrubber and Page Down; the cards for a file that does not open and for an image it cannot draw, whose tags still
@@ -119,16 +120,14 @@ afterEach(() => {
 	cleanup()
 })
 
-async function renderViewer(result: DicomOpenResult): Promise<void> {
-	const { DicomViewer } = await import("@/features/preview/components/dicomViewer")
-
+function renderViewer(result: DicomOpenResult): void {
 	remote.open.mockResolvedValue(result)
 	render(<DicomViewer item={linkedFileItem("IM0001.dcm")} />)
 }
 
 describe("DicomViewer", () => {
 	it("draws the image with its summary, presets, Invert, Reset and Tags", async () => {
-		await renderViewer({ info: INFO, failure: null })
+		renderViewer({ info: INFO, failure: null })
 
 		expect(await screen.findByText("CT · 3×2")).toBeTruthy()
 		expect(remote.show).toHaveBeenCalledWith(0)
@@ -140,7 +139,14 @@ describe("DicomViewer", () => {
 		expect(screen.queryByRole("slider")).toBeNull()
 
 		act(() => {
-			shellStatus.push({ frame: 0, window: { center: 40, width: 400 }, atDefault: false, playing: false, failure: null })
+			shellStatus.push({
+				frame: 0,
+				window: { center: 40, width: 400 },
+				atDefault: false,
+				playing: false,
+				failure: null,
+				reduced: false
+			})
 		})
 		expect(screen.getByText("W 400 L 40")).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Window: Soft tissue" })).toBeTruthy()
@@ -151,7 +157,7 @@ describe("DicomViewer", () => {
 	})
 
 	it("steps a multi-frame image with Page Down and the scrubber", async () => {
-		await renderViewer({ info: { ...INFO, frames: 3 }, failure: null })
+		renderViewer({ info: { ...INFO, frames: 3 }, failure: null })
 
 		expect(await screen.findByText("CT · 3×2 · 3 frames")).toBeTruthy()
 		expect(screen.getByText("1 / 3")).toBeTruthy()
@@ -166,11 +172,11 @@ describe("DicomViewer", () => {
 	})
 
 	it("shows a frame that failed as a notice on a multi-frame image, as a card on a single frame", async () => {
-		await renderViewer({ info: INFO, failure: null })
+		renderViewer({ info: INFO, failure: null })
 		await screen.findByText("CT · 3×2")
 
 		act(() => {
-			shellStatus.push({ frame: 0, window: null, atDefault: true, playing: false, failure: "mismatch" })
+			shellStatus.push({ frame: 0, window: null, atDefault: true, playing: false, failure: "mismatch", reduced: false })
 		})
 		expect(screen.getByText("Pixel data doesn't match its header.")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Tags" })).toBeNull()
@@ -181,14 +187,14 @@ describe("DicomViewer", () => {
 		["damaged", "This DICOM file is damaged."],
 		["tooLarge", "This file is too large to preview."]
 	] as const)("shows the %s card", async (failure, message) => {
-		await renderViewer({ info: null, failure })
+		renderViewer({ info: null, failure })
 
 		expect(await screen.findByText(message)).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
 	})
 
 	it("offers Try again when the file could not be read", async () => {
-		await renderViewer({ info: null, failure: "unreadable" })
+		renderViewer({ info: null, failure: "unreadable" })
 
 		fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
 		await vi.waitFor(() => {
@@ -197,7 +203,7 @@ describe("DicomViewer", () => {
 	})
 
 	it("keeps the tags a button away when the image cannot be drawn", async () => {
-		await renderViewer({ info: { ...INFO, image: "unsupported" }, failure: null })
+		renderViewer({ info: { ...INFO, image: "unsupported" }, failure: null })
 
 		fireEvent.click(await screen.findByRole("button", { name: "Tags" }))
 		expect(await screen.findByText("Patient's Name")).toBeTruthy()

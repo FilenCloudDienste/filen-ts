@@ -67,6 +67,8 @@ export const previewRichDicom = {
 	previewDicomFrameFailed: "This frame couldn't be shown.",
 	/** DICOM viewer — one frame is larger than the viewer decodes on this device */
 	previewDicomFrameTooLarge: "This frame is too large to show on this device.",
+	/** DICOM viewer — a JPEG 2000 frame too large for this device is shown at a lower resolution */
+	previewDicomReduced: "Shown at reduced resolution.",
 	/** DICOM tags panel — the element's name when it is a private one (odd group) */
 	previewDicomTagPrivate: "Private",
 	/** DICOM tags panel — the element's name when the dictionary does not list it */

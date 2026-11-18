@@ -13,7 +13,8 @@ export interface Window {
 
 // How the samples in hand read: their colour model as decoded (a decoder may have converted a YBR codestream), and
 // where Bits Stored sits in each sample's container.
-export type SampleColor = "gray" | "rgb" | "ybrFull" | "ybrFull422" | "palette"
+// "rgba": a browser decode's RGBA, as it came (alpha ignored).
+export type SampleColor = "gray" | "rgb" | "rgba" | "ybrFull" | "ybrFull422" | "palette"
 
 export interface FrameSamples {
 	readonly data: Uint8Array | Uint16Array | Uint32Array
@@ -201,7 +202,7 @@ function ybrToRgb(y: number, cb: number, cr: number, out: Uint8ClampedArray, at:
 	out[at + 2] = clampByte(y + 1.772 * (cb - 128))
 }
 
-// Colour samples (RGB, YBR_FULL or YBR_FULL_422) into `out`; `invert` flips every channel.
+// Colour samples (RGB, a decoder's RGBA, YBR_FULL or YBR_FULL_422) into `out`; `invert` flips every channel.
 export function renderColor(samples: FrameSamples, bitsStored: number, invert: boolean, drawn: Drawn, out: Uint8ClampedArray): void {
 	const { data, rows, columns, color, planar, shift } = samples
 	const { width, height, step } = drawn
@@ -217,6 +218,10 @@ export function renderColor(samples: FrameSamples, bitsStored: number, invert: b
 				const pair = Math.floor(pixel / 2) * 4
 
 				ybrToRgb(data[pair + (pixel % 2)] ?? 0, data[pair + 2] ?? 0, data[pair + 3] ?? 0, out, at)
+			} else if (color === "rgba") {
+				out[at] = data[pixel * 4] ?? 0
+				out[at + 1] = data[pixel * 4 + 1] ?? 0
+				out[at + 2] = data[pixel * 4 + 2] ?? 0
 			} else {
 				const a = channelLevel(data[planar ? pixel : pixel * 3] ?? 0, shift, bitsStored)
 				const b = channelLevel(data[planar ? plane + pixel : pixel * 3 + 1] ?? 0, shift, bitsStored)

@@ -2005,6 +2005,139 @@ function cldrNotices(): Collected[] {
 	]
 }
 
+/**
+ * The cornerstone codecs the DICOM viewer's worker decodes compressed frames with (MIT wrappers, described with the npm
+ * tree) link CharLS, OpenJPEG and OpenJPH, built to WebAssembly with Emscripten by the cornerstonejs/codecs release
+ * workflow. Each library is read at the commit the package's tag pins as a submodule; the license texts are kept beside
+ * this script.
+ */
+const DICOM_LICENSES = "scripts/licenses/dicom"
+const DICOM_CODECS_REPOSITORY = "https://github.com/cornerstonejs/codecs"
+const DICOM_CODECS_EMSCRIPTEN = "3.1.74"
+
+const DICOM_CODECS: readonly {
+	readonly pkg: string
+	readonly version: string
+	readonly module: string
+	readonly name: string
+	readonly release: string
+	readonly commit: string
+	readonly license: string
+	readonly copyright: readonly string[]
+	readonly repository: string
+	readonly file: string
+}[] = [
+	{
+		pkg: "@cornerstonejs/codec-charls",
+		version: "1.2.7",
+		module: "dist/charlswasm_decode.wasm",
+		name: "CharLS",
+		release: "2.4.4",
+		commit: "9930a2a2fa75f516c4a08708180c9907fa501a97",
+		license: "BSD-3-Clause",
+		copyright: ["Copyright (c) 2007, Jan de Vaan and Victor Derks"],
+		repository: "https://github.com/cornerstonejs/charls",
+		file: "charls-LICENSE.md"
+	},
+	{
+		pkg: "@cornerstonejs/codec-openjpeg",
+		version: "1.3.6",
+		module: "dist/openjpegwasm_decode.wasm",
+		name: "OpenJPEG",
+		release: "2.5.4",
+		commit: "6c4a29b00211eb0430fa0e5e890f1ce5c80f409f",
+		license: "BSD-2-Clause",
+		copyright: [
+			"Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium",
+			"Copyright (c) 2002-2014, Professor Benoit Macq",
+			"Copyright (c) 2003-2014, Antonin Descampe",
+			"Copyright (c) 2003-2009, Francois-Olivier Devaux",
+			"Copyright (c) 2005, Herve Drolon, FreeImage Team",
+			"Copyright (c) 2002-2003, Yannick Verschueren",
+			"Copyright (c) 2001-2003, David Janssens",
+			"Copyright (c) 2011-2012, Centre National d'Etudes Spatiales (CNES), France",
+			"Copyright (c) 2012, CS Systemes d'Information, France"
+		],
+		repository: "https://github.com/cornerstonejs/openjpeg",
+		file: "openjpeg-LICENSE"
+	},
+	{
+		pkg: "@cornerstonejs/codec-openjph",
+		version: "2.4.11",
+		module: "dist/openjphjs.wasm",
+		name: "OpenJPH",
+		release: "0.31.0",
+		commit: "4a68609b55034a14fac23f95afc60e239a9e809e",
+		license: "BSD-2-Clause",
+		copyright: [
+			"Copyright (c) 2019, Aous Naman",
+			"Copyright (c) 2019, Kakadu Software Pty Ltd, Australia",
+			"Copyright (c) 2019, The University of New South Wales, Sydney, Australia"
+		],
+		repository: "https://github.com/cornerstonejs/OpenJPH",
+		file: "openjph-LICENSE"
+	}
+]
+
+function dicomCodecNotices(): Collected[] {
+	const modules = DICOM_CODECS.map(codec => `${codec.pkg} ${codec.version}`).join(", ")
+
+	return [
+		vendoredNotice(
+			{
+				name: "Emscripten",
+				version: DICOM_CODECS_EMSCRIPTEN,
+				license: "MIT OR NCSA",
+				copyright: ["Copyright (c) 2010-2014 Emscripten authors"],
+				repository: "https://github.com/emscripten-core/emscripten",
+				terms: [
+					`The Emscripten runtime, linked into the cornerstone codec WebAssembly modules (${modules}; built with Emscripten ${DICOM_CODECS_EMSCRIPTEN} by ${DICOM_CODECS_REPOSITORY}'s release workflow).`,
+					readFileSync(`${FFMPEG_DIR}/licenses/emscripten-LICENSE`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "musl",
+				version: `Emscripten ${DICOM_CODECS_EMSCRIPTEN}`,
+				license: "MIT",
+				copyright: ["Copyright © 2005-2020 Rich Felker, et al."],
+				repository: "https://git.musl-libc.org/cgit/musl",
+				terms: [
+					`The musl C library, as bundled with Emscripten ${DICOM_CODECS_EMSCRIPTEN}, linked into the cornerstone codec WebAssembly modules.`,
+					readFileSync(`${FFMPEG_DIR}/licenses/musl-COPYRIGHT`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		...DICOM_CODECS.map(codec => {
+			const installedVersion = requireJson(`node_modules/${codec.pkg}/package.json`)["version"]
+
+			if (installedVersion !== codec.version) {
+				throw new Error(
+					`${codec.pkg} is installed at ${String(installedVersion)}, its library pin is read for ${codec.version}: read it again`
+				)
+			}
+
+			return vendoredNotice(
+				{
+					name: codec.name,
+					version: codec.release,
+					license: codec.license,
+					copyright: [...codec.copyright],
+					repository: codec.repository,
+					terms: [
+						`${codec.name} ${codec.release}, compiled into ${codec.pkg} ${codec.version}'s ${codec.module}, the DICOM viewer's decoder. Source: ${codec.repository} at ${codec.commit}, the submodule ${DICOM_CODECS_REPOSITORY} pins at the tag ${codec.pkg}@${codec.version}.`,
+						readFileSync(`${DICOM_LICENSES}/${codec.file}`, "utf8")
+					]
+				},
+				"vendored"
+			)
+		})
+	]
+}
+
 /** DICOM PS3.6's data dictionary (scripts/generateDicomTags.ts), shipped as the DICOM viewer's tag names. */
 function dicomDictionaryNotices(): Collected[] {
 	return [
@@ -2017,7 +2150,7 @@ function dicomDictionaryNotices(): Collected[] {
 				repository: "https://www.dicomstandard.org/current",
 				terms: [
 					`The data element tags, VRs and names of DICOM PS3.6 ${DICOM_DICTIONARY_EDITION} (tables 6-1, 7-1 and 8-1), as src/features/preview/lib/dicom/dicomTags.generated.ts. The publication's notice follows.`,
-					readFileSync("scripts/licenses/dicom/NOTICE.txt", "utf8")
+					readFileSync(`${DICOM_LICENSES}/NOTICE.txt`, "utf8")
 				]
 			},
 			"vendored"
@@ -2061,6 +2194,7 @@ const tesseract = tesseractNotices()
 const jsquash = jsquashNotices()
 const cldr = cldrNotices()
 const dicomDictionary = dicomDictionaryNotices()
+const dicomCodecs = dicomCodecNotices()
 const vendored = [
 	...ffmpeg,
 	...libopenmpt,
@@ -2077,7 +2211,8 @@ const vendored = [
 	...tesseract,
 	...jsquash,
 	...cldr,
-	...dicomDictionary
+	...dicomDictionary,
+	...dicomCodecs
 ]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...encodingDetectCrates, ...vendored]
 
@@ -2113,6 +2248,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 //   @filen/encoding-detect: ${encodingDetectCrates.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${ENCODING_DETECT_REPO_DIR}/crate/Cargo.lock)
 //   time zone data: ${cldr.map(entry => `${entry.name} ${entry.version}`).join(", ")} (scripts/windowsZones.ts)
 //   DICOM dictionary: ${dicomDictionary.map(entry => `${entry.name} ${entry.version}`).join(", ")} (scripts/generateDicomTags.ts)
+//   DICOM codec wasm: ${dicomCodecs.map(entry => `${entry.name} ${entry.version}`).join(", ")} (cornerstonejs/codecs tag submodules, ${DICOM_LICENSES})
 //
 // Cannot run in CI: needs a filen-rs checkout and the local cargo caches. Re-run after any SDK bump.
 
