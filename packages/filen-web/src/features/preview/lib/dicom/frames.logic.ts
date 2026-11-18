@@ -107,6 +107,11 @@ export class FragmentIndex {
 		this.options = options
 	}
 
+	// What the index holds: its fragments' offsets and lengths, where each frame starts, the offset table.
+	get bytes(): number {
+		return this.items.byteLength + (this.frameStarts.length + (this.offsets?.length ?? 0)) * 8
+	}
+
 	// The fragments of frame `index`, as spans of their bodies.
 	frame(index: number): readonly Span[] {
 		const { frames } = this.options

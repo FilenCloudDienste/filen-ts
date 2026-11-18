@@ -14,6 +14,9 @@ export const DICOM_CODEC_INITIAL_HEAP = 50 * MIB
 // frame starts from a fresh module rather than holding the high water mark of the largest.
 export const DICOM_CODEC_HEAP_KEEP = 256 * MIB
 
+// How far past a requested size an Emscripten heap may grow: by up to 20% of itself a step (at most 96 MiB).
+export const DICOM_CODEC_GROWTH = 1.2
+
 // The RGBA drawn from a frame: the ImageData and the canvas it is put into, at most the backing side squared.
 const DRAWN_BYTES_PER_PIXEL = 8
 
@@ -67,8 +70,9 @@ export function decoderCost(input: CostInput): DecoderCost {
 			// OpenJPEG: an int32 a sample in its image and again in the tile component, plus the decoded samples.
 			return { js: samples, wasm: samplesPerPixel * (8 + sampleBytes), encodedJs: read, encodedWasm: 1, heap: true }
 		case "htj2k":
-			// OpenJPH: the decoded samples, and code-block state of about twice the encoded frame.
-			return { js: samples, wasm: samples, encodedJs: read, encodedWasm: 3, heap: true }
+			// OpenJPH: the decoded samples and half a byte more a sample (measured: 2.33 B a 16-bit grey pixel, 4.0 a
+			// 3 × 8-bit one), and code-block state of about twice the encoded frame.
+			return { js: samples, wasm: samplesPerPixel * (sampleBytes + 0.5), encodedJs: read, encodedWasm: 3, heap: true }
 	}
 }
 
@@ -85,14 +89,16 @@ export interface BudgetInput {
 
 // What a frame of `pixels` decoded pixels costs on top of what is held.
 export function frameCost(cost: DecoderCost, input: BudgetInput, pixels: number): number {
-	const wasm = cost.wasm * pixels + cost.encodedWasm * input.encodedBytes
+	const need = cost.wasm * pixels + cost.encodedWasm * input.encodedBytes
+	// A heap that has to grow for it grows past what is asked: Emscripten adds up to a fifth of the heap at a time.
+	const wasm = need > input.heap ? need * DICOM_CODEC_GROWTH : input.heap
 
 	return (
 		input.held +
 		cost.js * pixels +
 		DRAWN_BYTES_PER_PIXEL * Math.min(pixels, input.drawnPixels) +
 		cost.encodedJs * input.encodedBytes +
-		Math.max(input.heap, cost.heap ? wasm : 0)
+		(cost.heap ? wasm : input.heap)
 	)
 }
 

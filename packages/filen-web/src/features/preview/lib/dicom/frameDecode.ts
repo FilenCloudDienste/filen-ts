@@ -97,7 +97,10 @@ interface Budgeted {
 
 // The decoded pixels left for a frame of `encodedBytes`, checked before any of them is read: none left refuses the
 // frame whatever its decoder, and so does a tags' frame that does not fit them when the decoder cannot reduce it.
-function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace: boolean): Budgeted {
+// Bytes a fragment's span takes while its frame is read (the object and its two numbers).
+const SPAN_BYTES = 48
+
+function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace: boolean, indexBytes = 0): Budgeted {
 	const { module, syntax, source, budget } = context
 	const { rows, columns, samplesPerPixel, bitsAllocated } = module
 	const { decoder } = syntax
@@ -112,7 +115,7 @@ function checkBudget(context: FrameContext, encodedBytes: number, encodedInPlace
 	})
 	const pixels = framePixels(cost, {
 		decodeBytes: budget.decodeBytes,
-		held: budget.held(),
+		held: budget.held() + indexBytes,
 		heap: budget.heap(decoder),
 		encodedBytes,
 		drawnPixels: MAX_BACKING_SIDE * MAX_BACKING_SIDE
@@ -195,7 +198,13 @@ export async function encapsulatedFrame(context: FrameContext, fragments: Fragme
 	try {
 		const spans = fragments.frame(index)
 		const encodedBytes = spansLength(spans)
-		const { cost, pixels } = checkBudget(context, encodedBytes, source.inMemory && spans.length === 1)
+		// The fragment index and this frame's spans are held while it decodes too.
+		const { cost, pixels } = checkBudget(
+			context,
+			encodedBytes,
+			source.inMemory && spans.length === 1,
+			fragments.bytes + spans.length * SPAN_BYTES
+		)
 
 		if (REDUCIBLE.has(syntax.decoder)) checkReducible(context, spans, pixels)
 
