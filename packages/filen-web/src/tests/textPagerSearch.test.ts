@@ -168,4 +168,33 @@ describe("textPager search", () => {
 
 		expect([0, 10, 11, 30, 31].map(offset => matches.firstFrom(offset))).toEqual([0, 0, 1, 2, -1])
 	})
+
+	it("keeps counting lines past the first stretch for a UTF-8-BOM file read as UTF-16", async () => {
+		const size = 2 * SCAN_BYTES + 6
+		const bytes = new Uint8Array(size)
+
+		bytes.set([0xef, 0xbb, 0xbf])
+
+		for (let at = 4; at < size; at += 2) bytes.set(at % 400 === 0 ? [0x0a, 0] : [0x41, 0], at)
+
+		bytes.set([0x7a, 0, 0x7a, 0], size - 6)
+
+		const encoding = pagerEncoding("utf-16le", bytes.subarray(0, 4096))
+		const index = new LineIndex(encoding, size)
+		const matches = new MatchList()
+
+		await searchText({
+			source: scanned(bytes).source,
+			encoding,
+			query: "zz",
+			caseSensitive: true,
+			matches,
+			signal: new AbortController().signal,
+			onBytes: (piece, base) => {
+				index.feed(piece, base)
+			}
+		})
+		expect(index.complete).toBe(true)
+		expect(matches.at(0)).toEqual({ offset: size - 6, line: index.lines })
+	})
 })

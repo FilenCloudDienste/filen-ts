@@ -29,6 +29,7 @@ export function countBreaks(bytes: Uint8Array, base: number, from: number, to: n
 // Reads [from, to) a block at a time (views into the cache, never one large copy) and calls `visit` on each piece.
 async function eachPiece(
 	source: PagerSource,
+	encoding: PagerEncoding,
 	from: number,
 	to: number,
 	visit: (bytes: Uint8Array, base: number) => boolean
@@ -36,8 +37,10 @@ async function eachPiece(
 	let at = from
 
 	while (at < to) {
-		const end = Math.min(to, (Math.floor(at / BLOCK_BYTES) + 1) * BLOCK_BYTES)
-		// Blocks are a multiple of every unit, so no unit straddles two pieces.
+		const blockEnd = Math.min(to, (Math.floor(at / BLOCK_BYTES) + 1) * BLOCK_BYTES)
+		// Each piece but the last ends on a unit boundary, so no break straddles two pieces.
+		const cut = blockEnd < to ? blockEnd - ((blockEnd - encoding.start) % encoding.unit) : blockEnd
+		const end = cut > at ? cut : Math.min(to, at + encoding.unit)
 		const bytes = await source.read(at, end)
 
 		if (!visit(bytes, at)) {
@@ -45,6 +48,42 @@ async function eachPiece(
 		}
 
 		at = end
+	}
+}
+
+export interface PagerScanSource {
+	readonly size: number
+	// Bytes [start, end) read straight from the file, past the cache (a pass over the file must not evict the rows'
+	// blocks). Rejects once `signal` aborts.
+	scan(start: number, end: number, signal: AbortSignal): Promise<Uint8Array>
+}
+
+// The end of the block-aligned stretch a scan reads from `at`.
+export function stretchEnd(at: number, size: number): number {
+	return Math.min(size, (Math.floor(at / SCAN_BYTES) + 1) * SCAN_BYTES)
+}
+
+// Counts lines from the frontier until `done` or the file's end, a block-aligned stretch at a time; `onProgress` hears
+// how far it has read.
+export async function countLines(
+	index: LineIndex,
+	source: PagerScanSource,
+	done: (index: LineIndex) => boolean,
+	signal: AbortSignal,
+	onProgress: (scanned: number) => void
+): Promise<void> {
+	while (!index.complete && !done(index) && !signal.aborted) {
+		const at = index.frontier
+		const end = stretchEnd(at, source.size)
+
+		index.feed(await source.scan(at, end, signal), at)
+
+		// The frontier reaches every stretch's end; a scan that made none would never end.
+		if (index.frontier <= at) {
+			throw new Error(`line count stuck at ${String(at)}`)
+		}
+
+		onProgress(end)
 	}
 }
 
@@ -63,9 +102,11 @@ export class LineIndex {
 	private lineStep: number
 	private byteStep: number
 	private readonly max: number
-	// How far breaks have been counted, and how many there were before that.
+	// How far bytes have been counted, and how many breaks there were before that.
 	private counted: number
 	private breaks = 0
+	// The start of a unit cut by the last feed's end, counted with the next feed's first bytes.
+	private partial: Uint8Array = new Uint8Array(0)
 	private readonly encoding: PagerEncoding
 	private readonly size: number
 
@@ -88,7 +129,7 @@ export class LineIndex {
 
 	// Every byte is counted: `lines` is the file's.
 	public get complete(): boolean {
-		return this.size - this.counted < this.encoding.unit
+		return this.counted >= this.size
 	}
 
 	// Lines in the counted prefix (a last line without a break included once the count is complete).
@@ -101,32 +142,62 @@ export class LineIndex {
 	}
 
 	// Counts what `bytes` (the file's from `base`) hold past the frontier; bytes that leave a gap before it count nothing.
-	// They end on a unit boundary (a scan's stretches are block-aligned) unless they end the file.
+	// A unit cut at their end is kept and counted with the next bytes, so the frontier always reaches their end.
 	public feed(bytes: Uint8Array, base: number): void {
 		const { encoding } = this
 		const from = this.counted
-		const length = base + bytes.length - from
 
-		if (base > from || length <= 0) {
+		if (base > from || base + bytes.length <= from) {
 			return
 		}
 
-		const end = from + length - (length % encoding.unit)
-		let at = nextBreak(bytes, base, from, end, encoding)
+		let view = bytes.subarray(from - base)
+		let at = from
 
-		while (at !== -1) {
-			this.checkpointUpTo(at)
-			this.breaks++
+		if (this.partial.length > 0) {
+			const unitStart = from - this.partial.length
+			const unit = new Uint8Array(encoding.unit)
+			const taken = Math.min(view.length, encoding.unit - this.partial.length)
 
-			if (this.breaks - this.lastBreaks() >= this.lineStep) {
-				this.push(at + encoding.unit, this.breaks)
+			unit.set(this.partial)
+			unit.set(view.subarray(0, taken), this.partial.length)
+
+			if (this.partial.length + taken < encoding.unit) {
+				this.partial = unit.slice(0, this.partial.length + taken)
+				this.counted = from + taken
+
+				return
 			}
 
-			at = nextBreak(bytes, base, at + encoding.unit, end, encoding)
+			if (nextBreak(unit, unitStart, unitStart, unitStart + 1, encoding) !== -1) {
+				this.seeBreak(unitStart)
+			}
+
+			this.partial = new Uint8Array(0)
+			view = view.subarray(taken)
+			at = from + taken
+		}
+
+		const end = at + view.length - (view.length % encoding.unit)
+		let found = nextBreak(view, at, at, end, encoding)
+
+		while (found !== -1) {
+			this.seeBreak(found)
+			found = nextBreak(view, at, found + encoding.unit, end, encoding)
 		}
 
 		this.checkpointUpTo(end)
-		this.counted = end
+		this.partial = view.slice(end - at)
+		this.counted = at + view.length
+	}
+
+	private seeBreak(at: number): void {
+		this.checkpointUpTo(at)
+		this.breaks++
+
+		if (this.breaks - this.lastBreaks() >= this.lineStep) {
+			this.push(at + this.encoding.unit, this.breaks)
+		}
 	}
 
 	// 1-based line number of the line holding `offset` (counted already: offset ≤ frontier); reads at most a checkpoint's
@@ -136,7 +207,7 @@ export class LineIndex {
 		const from = this.points[point * 2] ?? this.encoding.start
 		let breaks = this.points[point * 2 + 1] ?? 0
 
-		await eachPiece(source, from, offset, (bytes, base) => {
+		await eachPiece(source, this.encoding, from, offset, (bytes, base) => {
 			breaks += countBreaks(bytes, base, base, base + bytes.length, this.encoding)
 
 			return true
@@ -172,7 +243,7 @@ export class LineIndex {
 		let breaks = this.points[low * 2 + 1] ?? 0
 		let found: number | null = null
 
-		await eachPiece(source, this.points[low * 2] ?? this.encoding.start, this.counted, (bytes, base) => {
+		await eachPiece(source, this.encoding, this.points[low * 2] ?? this.encoding.start, this.counted, (bytes, base) => {
 			let at = nextBreak(bytes, base, base, base + bytes.length, this.encoding)
 
 			while (at !== -1) {

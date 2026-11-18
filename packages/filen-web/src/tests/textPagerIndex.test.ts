@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { BLOCK_BYTES } from "@filen/shared/videos"
-import { CHECKPOINT_LINES, LineIndex, MAX_CHECKPOINTS } from "@/features/preview/lib/textPager/index.logic"
-import { pagerEncoding, type PagerSource } from "@/features/preview/lib/textPager/rows.logic"
+import { CHECKPOINT_LINES, countLines, LineIndex, MAX_CHECKPOINTS, SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
+import { pagerEncoding, type PagerEncoding, type PagerSource } from "@/features/preview/lib/textPager/rows.logic"
 
 // Lines "0\n", "1\n", … : line n (1-based) holds the number n - 1.
 function numberedLines(count: number): Uint8Array {
@@ -103,8 +103,63 @@ describe("textPager line index", () => {
 
 		const index = new LineIndex(pagerEncoding("utf-16le", bytes), bytes.length)
 
-		// Fed in pieces that end on unit boundaries, as a scan's block-aligned stretches do.
-		feedAll(index, bytes, 4)
+		// Fed in odd pieces: a unit cut at a piece's end is counted with the next piece.
+		feedAll(index, bytes, 3)
+		expect(index.frontier).toBe(bytes.length)
 		expect(index.lines).toBe(3)
+	})
+
+	// A UTF-8 file with its mark, reopened as UTF-16: its mark is text, so units stay aligned with the stretches.
+	it.each(["utf-16le", "utf-16be"])("counts a UTF-8-BOM file read as %s to its end, stretch by stretch", async label => {
+		const size = 2 * SCAN_BYTES + 7
+		const bytes = new Uint8Array(size).fill(0x41)
+
+		bytes.set([0xef, 0xbb, 0xbf])
+
+		for (let at = 1000; at < size - 2; at += 1000) bytes.set(label === "utf-16le" ? [0x0a, 0] : [0, 0x0a], at)
+
+		const encoding = pagerEncoding(label, bytes.subarray(0, 4096))
+		const index = new LineIndex(encoding, size)
+		const reads: [number, number][] = []
+
+		expect(encoding.start).toBe(0)
+		await countLines(
+			index,
+			{
+				size,
+				scan: (start, end) => {
+					reads.push([start, end])
+
+					return Promise.resolve(bytes.slice(start, end))
+				}
+			},
+			() => false,
+			new AbortController().signal,
+			() => undefined
+		)
+		expect(reads).toEqual([
+			[0, SCAN_BYTES],
+			[SCAN_BYTES, 2 * SCAN_BYTES],
+			[2 * SCAN_BYTES, size]
+		])
+		expect(index.complete).toBe(true)
+		expect(index.lines).toBe(Math.floor((size - 3 - 1000) / 1000) + 2)
+	})
+
+	it("finds breaks that straddle a block in an encoding whose units do not line up with blocks", async () => {
+		// An odd text start: a UTF-16 unit then spans every block boundary.
+		const encoding: PagerEncoding = { label: "utf-16le", kind: "utf16", unit: 2, littleEndian: true, start: 1, newline: 0x0a }
+		const bytes = new Uint8Array(2 * BLOCK_BYTES + 1).fill(0x41)
+
+		bytes.set([0x0a, 0], BLOCK_BYTES - 1)
+
+		const index = new LineIndex(encoding, bytes.length)
+		const { source } = counted(bytes)
+
+		index.feed(bytes.subarray(0, BLOCK_BYTES), 0)
+		index.feed(bytes.subarray(BLOCK_BYTES), BLOCK_BYTES)
+		expect(index.lines).toBe(2)
+		expect(await index.lineAt(source, 2 * BLOCK_BYTES - 1)).toBe(2)
+		expect(await index.lineStart(source, 2)).toBe(BLOCK_BYTES + 1)
 	})
 })

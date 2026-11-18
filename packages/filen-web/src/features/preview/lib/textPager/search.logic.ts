@@ -1,4 +1,4 @@
-import { SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
+import { SCAN_BYTES, type PagerScanSource } from "@/features/preview/lib/textPager/index.logic"
 import {
 	boundaryBefore,
 	decodeSpan,
@@ -15,12 +15,7 @@ import {
 
 export const MATCH_CAP = 10_000
 
-export interface PagerScanSource {
-	readonly size: number
-	// Bytes [start, end) read straight from the file, past the cache (a pass over the file must not evict the rows'
-	// blocks).
-	scan(start: number, end: number, signal: AbortSignal): Promise<Uint8Array>
-}
+export type { PagerScanSource } from "@/features/preview/lib/textPager/index.logic"
 
 export class MatchList {
 	private readonly offsets = new Float64Array(MATCH_CAP)

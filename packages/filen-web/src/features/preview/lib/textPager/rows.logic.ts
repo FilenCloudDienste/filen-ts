@@ -33,8 +33,9 @@ export interface PagerEncoding {
 	readonly newline: typeof LF | typeof CR
 }
 
-// The bytes the file starts with: its byte order mark (skipped whatever it is read as, as a forced reading skips a mark
-// of another encoding) and its line break, by the first break the head holds.
+// The bytes the file starts with: its byte order mark and its line break, by the first break the head holds. A one-byte
+// reading skips any mark (as a forced reading skips a mark of another encoding); a UTF-16 or UTF-32 one only its own, so
+// its text starts on a unit boundary and every unit stays aligned with the blocks and stretches it is read in.
 export function pagerEncoding(label: string, head: Uint8Array): PagerEncoding {
 	const lowered = label.toLowerCase()
 	const kind: PagerEncodingKind =
@@ -47,12 +48,14 @@ export function pagerEncoding(label: string, head: Uint8Array): PagerEncoding {
 					: isMultiByteLegacy(lowered)
 						? "multi"
 						: "single"
+	const unit = kind === "utf16" ? 2 : kind === "utf32" ? 4 : 1
+	const bom = readBom(head)
 	const base = {
 		label: lowered,
 		kind,
-		unit: kind === "utf16" ? 2 : kind === "utf32" ? 4 : 1,
+		unit,
 		littleEndian: !lowered.endsWith("be"),
-		start: readBom(head)?.length ?? 0,
+		start: bom === null || (unit !== 1 && bom.label !== lowered) ? 0 : bom.length,
 		newline: LF
 	} as const satisfies PagerEncoding
 

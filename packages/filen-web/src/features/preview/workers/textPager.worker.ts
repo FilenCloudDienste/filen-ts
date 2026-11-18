@@ -5,7 +5,7 @@ import { decodeUnicodeText, looksLikeText } from "@filen/shared/textEncoding"
 import { BlockCache } from "@/lib/media/blockCache"
 import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
 import { isExecutableHead } from "@/features/preview/lib/binaryInfo/read"
-import { LineIndex, SCAN_BYTES } from "@/features/preview/lib/textPager/index.logic"
+import { countLines, LineIndex } from "@/features/preview/lib/textPager/index.logic"
 import {
 	decodeSpan,
 	locateRow,
@@ -161,13 +161,9 @@ function lines(index: LineIndex): PagerLines {
 async function countUntil(done: (index: LineIndex) => boolean, signal: AbortSignal, onProgress: Progress): Promise<void> {
 	const { source, index } = reading()
 
-	while (!index.complete && !done(index) && !signal.aborted) {
-		const at = index.frontier
-		const end = Math.min(source.size, (Math.floor(at / SCAN_BYTES) + 1) * SCAN_BYTES)
-
-		index.feed(await source.scan(at, end, signal), at)
-		void onProgress(end, 0, -1)
-	}
+	await countLines(index, source, done, signal, scanned => {
+		void onProgress(scanned, 0, -1)
+	})
 }
 
 function isAbort(error: unknown): boolean {

@@ -81,6 +81,10 @@ describe("textPager rows", () => {
 		expect(pagerEncoding("utf-32le", utf32le("a"))).toMatchObject({ kind: "utf32", unit: 4, start: 4 })
 		expect(pagerEncoding("shift_jis", utf8("a\r\nb"))).toMatchObject({ kind: "multi", newline: 0x0a })
 		expect(pagerEncoding("windows-1252", utf8("a\rb\rc"))).toMatchObject({ kind: "single", newline: 0x0d })
+		// A mark of another encoding: skipped by a one-byte reading, text to a UTF-16 one (whose units stay aligned).
+		expect(pagerEncoding("windows-1252", utf8("\ufeffa")).start).toBe(3)
+		expect(pagerEncoding("utf-16le", utf8("\ufeffa")).start).toBe(0)
+		expect(pagerEncoding("utf-16be", utf32le("a")).start).toBe(0)
 	})
 
 	it("lays out lines without their breaks, CRLF's CR dropped", async () => {
