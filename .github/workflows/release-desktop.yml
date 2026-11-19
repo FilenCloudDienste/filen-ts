@@ -118,7 +118,7 @@ jobs:
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
             packages/filen-encoding-detect/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       - name: Cache spellcheck dictionaries
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

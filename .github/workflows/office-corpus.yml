@@ -422,8 +422,8 @@ jobs:
           retention-days: 14
 
   # Nightly and on demand: the fuzzers of the other formats with seeds of this run instead of their fixed ones (the
-  # RTF, compound file and xlsx readers, the ODT writer, the presentation session). Each takes its own range, derived
-  # from FILEN_OFFICE_FUZZ_SEED; the job summary lists every seed for a local replay.
+  # RTF, compound file, Word binary and xlsx readers, the .doc converter, the ODT writer, the presentation session).
+  # Each takes its own range, derived from FILEN_OFFICE_FUZZ_SEED; the job summary lists every seed for a local replay.
   fuzz-office-formats:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: test-office-corpus
@@ -469,12 +469,17 @@ jobs:
             echo "FILEN_OFFICE_RTF_FUZZ_SEED=$(( 1000000 + FILEN_OFFICE_FUZZ_SEED ))"
             echo "FILEN_OFFICE_CFB_FUZZ_SEED=$(( 2000000 + FILEN_OFFICE_FUZZ_SEED ))"
             echo "FILEN_OFFICE_XLSX_FUZZ_SEED=$(( 3000000 + FILEN_OFFICE_FUZZ_SEED ))"
+            echo "FILEN_OFFICE_DOC_FUZZ_SEED=$(( 4000000 + FILEN_OFFICE_FUZZ_SEED ))"
             echo "FILEN_OFFICE_ODT_FUZZ_FROM=$(( FILEN_OFFICE_FUZZ_SEED * FILEN_OFFICE_ODT_FUZZ_RUNS ))"
             echo "FUZZ_FROM=$(( FILEN_OFFICE_FUZZ_SEED * FUZZ_SEEDS + 1 ))"
           } | tee -a "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
       - name: Reader fuzz
         working-directory: packages/filen-office
-        run: pnpm exec vitest run --reporter=verbose src/tests/rtfFuzz.test.ts src/tests/cfbFuzz.test.ts src/tests/xlsxReadFuzz.test.ts
+        run: pnpm exec vitest run --reporter=verbose src/tests/rtfFuzz.test.ts src/tests/cfbFuzz.test.ts src/tests/xlsxReadFuzz.test.ts src/tests/docFuzz.test.ts
+      - name: Word binary converter fuzz
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/docToDocxCorpus.test.ts -t "mutated Word binary documents"
       - name: ODT writer fuzz
         if: ${{ !cancelled() }}
         working-directory: packages/filen-office
@@ -485,8 +490,8 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/presentationSessionFuzz.test.ts
 
   # Nightly and on demand, for the spreadsheet engine over the cached corpus: the full recalculation against the
-  # results Excel stored (sheetOracleCached.test.ts, its 0.995 gate), and the long sheet fuzz run, one new sequence
-  # per workbook and run, in one mode a night (src/tests/fuzz/sheet).
+  # results Excel stored (sheetOracleCached.test.ts, its 0.995 gate), the long sheet fuzz run, one new sequence
+  # per workbook and run, in one mode a night (src/tests/fuzz/sheet), and the xlsx save budget at 1M cells.
   sheet-office-corpus:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: test-office-corpus
@@ -559,6 +564,14 @@ jobs:
           path: ${{ github.workspace }}/office-sheet-fuzz.jsonl
           if-no-files-found: ignore
           retention-days: 14
+      # The 1M-cell save budget (thread CPU, the parts deflated, the live peak). This file alone: the reader's
+      # budgets read the same switch and their peak-RSS bound is not scaled for shared runners.
+      - name: xlsx save budget at 1M cells
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_XLSX_PERF: '1'
+        run: pnpm exec vitest run --reporter=verbose src/tests/xlsxWritePerf.test.ts
 
   # Nightly and on demand: every ODF save and conversion against the ODF Toolkit's odfvalidator (ODF 1.3) and,
   # where a suite also writes OOXML, the Open XML SDK validator. Each oracle adds no error its source lacks.

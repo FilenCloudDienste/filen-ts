@@ -24,6 +24,7 @@ on:
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'packages/filen-encoding-detect/**'
+      - 'scripts/build-rust-wasm.mjs'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'packages/filen-assistant-eval/**'
@@ -40,6 +41,7 @@ on:
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'packages/filen-encoding-detect/**'
+      - 'scripts/build-rust-wasm.mjs'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'packages/filen-assistant-eval/**'
@@ -92,6 +94,7 @@ jobs:
             filen-spellcheck:
               - '.github/workflows/tests.yml'
               - 'packages/filen-spellcheck/**'
+              - 'scripts/build-rust-wasm.mjs'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -99,6 +102,7 @@ jobs:
             filen-encoding-detect:
               - '.github/workflows/tests.yml'
               - 'packages/filen-encoding-detect/**'
+              - 'scripts/build-rust-wasm.mjs'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -126,6 +130,7 @@ jobs:
               - 'packages/filen-shared/**'
               - 'packages/filen-spellcheck/**'
               - 'packages/filen-encoding-detect/**'
+              - 'scripts/build-rust-wasm.mjs'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -240,7 +245,7 @@ jobs:
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
             packages/filen-encoding-detect/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
@@ -499,7 +504,7 @@ jobs:
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
             packages/filen-encoding-detect/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
@@ -661,7 +666,7 @@ jobs:
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
             packages/filen-encoding-detect/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
@@ -760,11 +765,13 @@ jobs:
       - name: E2E tests
         working-directory: packages/filen-web
         # A dispatch can narrow the run to a spec and a project; both arrive through env, never inlined into
-        # the script, and are refused unless they are plain paths and names. A per-browser job never falls
-        # back to the shared account: its own secrets missing fails the job.
+        # the script, and are refused unless they are plain paths and names. Missing account secrets fail the job,
+        # the shared account's too (the authed specs would otherwise all skip and pass); a per-browser job never
+        # falls back to the shared account.
         run: |
-          if [ -n "$E2E_ACCOUNT" ] && { [ -z "$FILEN_WEB_E2E_TEST_EMAIL" ] || [ -z "$FILEN_WEB_E2E_TEST_PASSWORD" ]; }; then
-            echo "FILEN_WEB_E2E_TEST_EMAIL_$E2E_ACCOUNT / FILEN_WEB_E2E_TEST_PASSWORD_$E2E_ACCOUNT are not set"
+          if [ -z "$FILEN_WEB_E2E_TEST_EMAIL" ] || [ -z "$FILEN_WEB_E2E_TEST_PASSWORD" ]; then
+            suffix=${E2E_ACCOUNT:+_$E2E_ACCOUNT}
+            echo "FILEN_WEB_E2E_TEST_EMAIL$suffix / FILEN_WEB_E2E_TEST_PASSWORD$suffix are not set"
             exit 1
           fi
           args=()

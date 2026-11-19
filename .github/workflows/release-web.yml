@@ -56,7 +56,7 @@ jobs:
             ~/.cargo/git/db
             packages/filen-spellcheck/crate/target
             packages/filen-encoding-detect/crate/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-encoding-detect/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock', 'packages/filen-encoding-detect/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       # The dictionaries are built from pinned upstream sources (never committed) and verified against the
       # manifest; a cache hit skips the download.
