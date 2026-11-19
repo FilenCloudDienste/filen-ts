@@ -17,12 +17,18 @@ import { SyncReadError } from "@/features/sync/components/syncEntryRows"
 // One box metric for the textarea and the backdrop behind it, so the highlighted line sits exactly under its text.
 const EDITOR_TEXT_CLASS = "px-3 py-2 font-mono text-sm leading-5 whitespace-pre"
 
+// The unsaved edit, held above the editor: a tab or pair switch unmounts it, and the rules are device-wide, so one
+// draft serves every pair. Module memory only, so sign-out's reload drops it.
+let draft: string | null = null
+
 // The editor over the rules as read. Its text is frozen at mount: a later read never overwrites what the user is
-// typing (the parent remounts it after a save).
-function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: () => void }) {
+// typing. A save moves the baseline to the saved text in place (the shell stores it verbatim), keeping the editor
+// mounted with its focus, caret and scroll.
+function RulesEditor({ initialText }: { initialText: string }) {
 	const { t } = useTranslation("sync")
 	const id = useId()
-	const [text, setText] = useState(initialText)
+	const [baseline, setBaseline] = useState(initialText)
+	const [text, setText] = useState(() => draft ?? initialText)
 	const [invalidLine, setInvalidLine] = useState<number | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [saving, setSaving] = useState(false)
@@ -33,12 +39,16 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 		setSaving(true)
 		setError(null)
 
+		// The text box is read-only while saving, so what was sent is what it still shows.
+		const saved = text
+
 		try {
-			const result = await syncApi().setUserIgnore(text)
+			const result = await syncApi().setUserIgnore(saved)
 
 			if (result.ok) {
+				draft = null
+				setBaseline(saved)
 				toast.success(t("userIgnoreSaved"))
-				onSaved()
 			} else if (result.error.code === "invalidIgnore" && result.error.line !== undefined) {
 				setInvalidLine(result.error.line)
 				setError(t("userIgnoreInvalidLine", { line: result.error.line }))
@@ -53,7 +63,7 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 		}
 	}
 
-	const unchanged = text === initialText
+	const unchanged = text === baseline
 
 	// Def in features/sync/lib/keymap.ts: Mod+S saves while focus is in this editor (its text box included, where the
 	// browser would otherwise save the page), under the Save button's own gate.
@@ -98,7 +108,9 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 					aria-label={t("userIgnoreTitle")}
 					aria-invalid={invalidLine !== null}
 					aria-describedby={error === null ? undefined : `${id}-error`}
-					disabled={saving}
+					// Read-only rather than disabled, which would drop the focus.
+					readOnly={saving}
+					aria-busy={saving}
 					className={cn("absolute inset-0 resize-none overflow-auto bg-transparent outline-none", EDITOR_TEXT_CLASS)}
 					onScroll={event => {
 						const backdrop = backdropRef.current
@@ -109,7 +121,10 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 						}
 					}}
 					onChange={event => {
-						setText(event.target.value)
+						const value = event.target.value
+
+						setText(value)
+						draft = value === baseline ? null : value
 						setInvalidLine(null)
 						setError(null)
 					}}
@@ -162,8 +177,8 @@ function Defaults({ defaults }: { defaults: readonly string[] }) {
 // pair: the shell applies it to each.
 export function UserIgnoreEditor() {
 	const { t } = useTranslation("sync")
-	const [generation, setGeneration] = useState(0)
-	const read = useSyncRead<DesktopSyncUserIgnore>(`userIgnore:${String(generation)}`, () => syncApi().userIgnore())
+	// Read once per mount: a save keeps the editor and its text instead of reading back what it just wrote.
+	const read = useSyncRead<DesktopSyncUserIgnore>("userIgnore", () => syncApi().userIgnore())
 
 	return (
 		<SettingsGroup
@@ -182,13 +197,7 @@ export function UserIgnoreEditor() {
 					/>
 				)
 			) : (
-				<RulesEditor
-					key={read.data.text}
-					initialText={read.data.text}
-					onSaved={() => {
-						setGeneration(previous => previous + 1)
-					}}
-				/>
+				<RulesEditor initialText={read.data.text} />
 			)}
 			{read.data === undefined ? null : <Defaults defaults={read.data.defaults} />}
 		</SettingsGroup>

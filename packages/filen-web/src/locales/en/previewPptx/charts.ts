@@ -53,6 +53,10 @@ export const previewPptxCharts = {
 	/** Presentation editor — Edit data dialog note: the chart's data was an old Excel 97–2003 workbook */
 	previewPptxChartDataConverted:
 		"This chart's data is an Excel 97–2003 workbook. When you apply, it is saved in the presentation as an Excel workbook (.xlsx).",
+	/** Presentation editor — Edit data dialog: title of the confirm shown on Escape or close after the cells were edited */
+	previewPptxChartDataDiscardTitle: "Discard your changes to the chart's data?",
+	/** Presentation editor — Edit data dialog: body of that confirm */
+	previewPptxChartDataDiscardBody: "The cells you edited haven't been applied to the chart, so your changes are lost.",
 	/** Presentation editor — toast: the edited data could not be applied to the chart */
 	previewPptxChartDataApplyFailed: "The chart could not be updated with this data."
 } as const

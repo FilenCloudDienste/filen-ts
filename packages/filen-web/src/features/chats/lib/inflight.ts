@@ -39,12 +39,19 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 
 // "Retry": puts a failed send back on the queue (the 3-strike drop removes doomed messages from it),
 // clears its error/strike state so the bubble returns to pending with a fresh retry budget, persists
-// the queue and kicks a sync pass. Safe to call while the message is still queued (no duplicate is
-// enqueued). Silent — callers own UX.
+// the queue and kicks a sync pass; a follower tab forwards it to the leader instead. Safe to call while
+// the message is still queued (no duplicate is enqueued). Silent — callers own UX.
 export async function retryInflightMessage({ chat, message }: { chat: Chat; message: ChatMessageWithInflightId }): Promise<void> {
 	// Prefer the error record's snapshot (authoritative for dropped messages); fall back to the passed
 	// message.
 	const snapshot = useChatsInflightStore.getState().inflightErrors[message.inflightId]?.message ?? message
+
+	// A follower owns no loop and no disk: the leader gets the send again and runs it.
+	if (sync.forwardRetry(chat, snapshot)) {
+		clearInflightError(message.inflightId)
+
+		return
+	}
 
 	useChatsInflightStore.getState().setInflightMessages(prev => {
 		const existing = prev[chat.uuid]
@@ -69,6 +76,10 @@ export async function retryInflightMessage({ chat, message }: { chat: Chat; mess
 	if (!retryFlushed) {
 		log.error("chats-inflight", "retryInflightMessage flush failed — message memory-only", message.inflightId, chat.uuid)
 	}
+
+	// Other tabs still show the send as failed: a state listing it again turns their bubble back to pending
+	// (no-op in a single tab).
+	sync.broadcastState()
 
 	sync.syncNow()
 }

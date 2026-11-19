@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { mockViewportHeight } from "@/tests/support/viewport"
+import "@/lib/i18n"
 
 // Picking one file from the drive: rows the caller does not accept are left out, undecryptable ones disabled,
 // directories descend, a pick gets a signal that aborts when the dialog closes first.
@@ -123,6 +124,42 @@ describe("DriveFilePickerDialog", () => {
 
 		expect(onClose).toHaveBeenCalled()
 		expect(signal?.aborted).toBe(true)
+	})
+
+	it("says no file matches, not that the directory is empty, when every file was filtered out by type", () => {
+		layOutPicker()
+		picker.items = [file("notes.txt"), file("report.txt")]
+
+		render(
+			<DriveFilePickerDialog
+				title="Pick"
+				description="Pick one"
+				accept={() => false}
+				onPick={vi.fn(() => Promise.resolve())}
+				onClose={vi.fn()}
+			/>
+		)
+
+		expect(screen.getByText("No matching files")).toBeTruthy()
+		expect(screen.queryByTestId("listing-empty")).toBeNull()
+	})
+
+	it("keeps the empty-directory state for a directory with nothing in it", () => {
+		layOutPicker()
+		picker.items = []
+
+		render(
+			<DriveFilePickerDialog
+				title="Pick"
+				description="Pick one"
+				accept={() => false}
+				onPick={vi.fn(() => Promise.resolve())}
+				onClose={vi.fn()}
+			/>
+		)
+
+		expect(screen.getByTestId("listing-empty")).toBeTruthy()
+		expect(screen.queryByText("No matching files")).toBeNull()
 	})
 
 	it("mounts only a window of a directory of 10 000 files, and a row in it still picks", () => {

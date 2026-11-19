@@ -4,7 +4,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useEffect } from "react"
 import { gridView, type SheetGridHandle, type SheetGridModel, type SheetGridState } from "@filen/office/react/sheet"
-import type { SheetDrawingObject } from "@filen/office/react/sheet/drawings"
+import { anchorBox, type SheetBox, type SheetDrawingObject } from "@filen/office/react/sheet/drawings"
+import type { SheetLayout } from "@filen/office/core/sheet"
 import type { SheetBodyExtension } from "@/features/spreadsheet/components/sheetExtension"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
 import { requestImage } from "@/features/spreadsheet/objects/insertRequests"
@@ -92,17 +93,19 @@ function gridHandle(focus: () => void, model?: SheetGridModel): SheetGridHandle 
 function Objects({
 	grid,
 	handle,
+	canEdit,
 	onExtension
 }: {
 	grid: SheetGridState
 	handle: SheetGridHandle
+	canEdit: boolean
 	onExtension: (extension: SheetBodyExtension) => void
 }) {
 	const extension = useSheetObjects({
 		grid,
 		gridRef: { current: handle },
 		handle: { session: grid.model.session } as unknown as SheetHandle,
-		canEdit: true,
+		canEdit,
 		text: false
 	})
 
@@ -132,7 +135,14 @@ function Objects({
 }
 
 async function mount(
-	options: { viewed?: boolean; pictures?: readonly { readonly row: number; readonly alt: string }[] } = {}
+	options: {
+		viewed?: boolean
+		// `width` and `height` in px (the picture's own 1 px without them).
+		pictures?: readonly { readonly row: number; readonly alt: string; readonly width?: number; readonly height?: number }[]
+		canEdit?: boolean
+		// The sheet's layout as the view sees it (a right-to-left sheet, a locked object).
+		layout?: (layout: SheetLayout) => SheetLayout
+	} = {}
 ): Promise<{ model: SheetGridModel; extension: () => SheetBodyExtension; focus: ReturnType<typeof vi.fn> }> {
 	const model = await openGrid(await workbook([{ name: "One", rows: [["a"]] }]), "xlsx")
 
@@ -140,13 +150,44 @@ async function mount(
 		const inserted = await model.command({
 			type: "drawing.insertImage",
 			sheet: 0,
-			placement: { from: { row: picture.row, col: 1, rowOff: 0, colOff: 0 } },
+			placement: {
+				from: { row: picture.row, col: 1, rowOff: 0, colOff: 0 },
+				...(picture.width !== undefined && { cx: picture.width * 9525 }),
+				...(picture.height !== undefined && { cy: picture.height * 9525 })
+			},
 			bytes: PNG,
 			name: "",
 			alt: picture.alt
 		})
 
 		expect(inserted.ok).toBe(true)
+	}
+
+	const seen = options.layout
+
+	if (seen !== undefined) {
+		const snapshot = model.getSnapshot.bind(model)
+		const layout = model.layout.bind(model)
+		const looks = new WeakMap<SheetLayout, SheetLayout>()
+		const seenAs = (real: SheetLayout | null): SheetLayout | null => {
+			if (real === null) return null
+
+			const known = looks.get(real) ?? seen(real)
+
+			looks.set(real, known)
+
+			return known
+		}
+		let last: { real: ReturnType<typeof snapshot>; seen: ReturnType<typeof snapshot> } | null = null
+
+		vi.spyOn(model, "layout").mockImplementation(sheet => seenAs(layout(sheet)))
+		vi.spyOn(model, "getSnapshot").mockImplementation(() => {
+			const real = snapshot()
+
+			if (last?.real !== real) last = { real, seen: { ...real, layout: seenAs(real.layout) } }
+
+			return last.seen
+		})
 	}
 
 	const focus = vi.fn()
@@ -159,6 +200,7 @@ async function mount(
 				<Objects
 					grid={grid}
 					handle={handle}
+					canEdit={options.canEdit ?? true}
 					onExtension={extension => {
 						latest = extension
 					}}
@@ -176,6 +218,50 @@ async function mount(
 			return latest
 		}
 	}
+}
+
+const SIZED = [{ row: 1, alt: "Company logo", width: 100, height: 50 }]
+
+// The picture's box on the sheet (px at 100 %).
+function startBox(model: SheetGridModel): SheetBox {
+	const axes = model.axes(0)
+	const object = model.layout(0)?.extensions?.drawings?.objects[0]
+
+	if (axes === null || object === undefined) throw new Error("no picture")
+
+	return anchorBox(object.anchor, axes)
+}
+
+// The boxes the moves sent for `keys` pressed on the selected picture, each refused so that each starts from where it is.
+async function keyedBoxes(
+	model: SheetGridModel,
+	keys: readonly { key: string; shiftKey?: boolean; altKey?: boolean }[]
+): Promise<SheetBox[]> {
+	const picture = await findObject("Company logo")
+	const axes = model.axes(0)
+	const command = vi.spyOn(model, "command").mockResolvedValue({
+		ok: false,
+		refusal: { reason: "protectedSheet", detail: "objects" },
+		state: model.getSnapshot().state
+	})
+
+	if (axes === null) throw new Error("no axes")
+
+	act(() => {
+		selectObject(model, { sheet: 0, key: 0 })
+	})
+
+	for (const key of keys) fireEvent.keyDown(picture, key)
+
+	await act(async () => {
+		await Promise.resolve()
+	})
+
+	const boxes = command.mock.calls.flatMap(([sent]) => (sent.type === "drawing.move" ? [anchorBox(sent.anchor, axes)] : []))
+
+	command.mockRestore()
+
+	return boxes
 }
 
 describe("sheet objects view", () => {
@@ -424,6 +510,69 @@ describe("sheet objects view", () => {
 		fireEvent.keyDown(picture, { key: "Tab", shiftKey: true })
 		expect(selectedObjectKey(model)).toBeNull()
 		expect(focus).toHaveBeenCalled()
+	})
+
+	it("resizes a selected object from its trailing or bottom edge with Shift and the arrows, by 1 px with Alt", async () => {
+		const { model } = await mount({ pictures: SIZED })
+		const sent = await keyedBoxes(model, [
+			{ key: "ArrowRight", shiftKey: true },
+			{ key: "ArrowDown", shiftKey: true },
+			{ key: "ArrowRight", shiftKey: true, altKey: true },
+			{ key: "ArrowLeft", shiftKey: true },
+			{ key: "ArrowRight" }
+		])
+		const start = startBox(model)
+
+		expect(sent).toEqual([
+			{ ...start, width: start.width + 10 },
+			{ ...start, height: start.height + 10 },
+			{ ...start, width: start.width + 1 },
+			{ ...start, width: start.width - 10 },
+			{ ...start, x: start.x + 10 }
+		])
+	})
+
+	it("mirrors Shift and the arrows on a right-to-left sheet", async () => {
+		const { model } = await mount({ pictures: SIZED, layout: layout => ({ ...layout, rightToLeft: true }) })
+		const start = startBox(model)
+
+		expect(
+			await keyedBoxes(model, [
+				{ key: "ArrowLeft", shiftKey: true },
+				{ key: "ArrowRight", shiftKey: true }
+			])
+		).toEqual([
+			{ ...start, width: start.width + 10 },
+			{ ...start, width: start.width - 10 }
+		])
+	})
+
+	it("resizes nothing from the keyboard on a read-only grid or for an object the file locks against resizing", async () => {
+		const locked = await mount({
+			pictures: SIZED,
+			layout: layout => {
+				const drawings = layout.extensions?.drawings
+
+				return drawings === undefined
+					? layout
+					: {
+							...layout,
+							extensions: {
+								...layout.extensions,
+								drawings: { ...drawings, objects: drawings.objects.map(object => ({ ...object, noResize: true })) }
+							}
+						}
+			}
+		})
+
+		expect(await keyedBoxes(locked.model, [{ key: "ArrowRight", shiftKey: true }])).toEqual([])
+		// Still moved by the arrows alone.
+		expect(await keyedBoxes(locked.model, [{ key: "ArrowRight" }])).toHaveLength(1)
+		cleanup()
+
+		const readOnly = await mount({ pictures: SIZED, canEdit: false })
+
+		expect(await keyedBoxes(readOnly.model, [{ key: "ArrowRight", shiftKey: true }])).toEqual([])
 	})
 
 	it("opens the drive's picker when the toolbar asks for a picture from the drive", async () => {

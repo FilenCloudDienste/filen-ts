@@ -1,4 +1,11 @@
-import type { DvErrorStyle, DvOperator, DvType, SheetRefusalReason, SheetValidationRule } from "@filen/office/core/sheet"
+import {
+	MAX_VALIDATION_LIST,
+	type DvErrorStyle,
+	type DvOperator,
+	type DvType,
+	type SheetRefusalReason,
+	type SheetValidationRule
+} from "@filen/office/core/sheet"
 import type { PreviewKey } from "@/lib/i18n"
 
 // What the Data validation dialog offers and shows, as Excel's dialog: the kinds of value, the comparisons, which
@@ -84,7 +91,7 @@ export function validationRefusalKey(reason: SheetRefusalReason, rule: SheetVali
 		case "formula":
 			return "previewSheetValidationInvalidValue"
 		case "tooLarge":
-			return rule.type === "list" && !rule.value1.trim().startsWith("=") && rule.value1.trim().length > 255
+			return rule.type === "list" && !rule.value1.trim().startsWith("=") && rule.value1.trim().length > MAX_VALIDATION_LIST
 				? "previewSheetValidationListTooLong"
 				: "previewSheetValidationTextTooLong"
 		default:

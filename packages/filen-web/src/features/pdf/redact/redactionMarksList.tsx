@@ -11,15 +11,13 @@ import { markLabel } from "@/features/pdf/redact/redaction.logic"
 
 export interface RedactionMarksListProps {
 	marks: readonly RedactionMark[]
-	// The marked text of text marks, by mark id, when the host has read it.
-	texts?: ReadonlyMap<number, string> | undefined
 	onSelect?: ((mark: RedactionMark) => void) | undefined
 	onRemove: (mark: RedactionMark) => void
 	onApply: () => void
 	disabled?: boolean | undefined
 }
 
-export function RedactionMarksList({ marks, texts, onSelect, onRemove, onApply, disabled }: RedactionMarksListProps) {
+export function RedactionMarksList({ marks, onSelect, onRemove, onApply, disabled }: RedactionMarksListProps) {
 	const { t } = useTranslation("preview")
 	const id = useId()
 	const sectionRef = useRef<HTMLElement | null>(null)
@@ -57,7 +55,7 @@ export function RedactionMarksList({ marks, texts, onSelect, onRemove, onApply, 
 			) : (
 				<ul className="min-h-0 flex-1 overflow-y-auto">
 					{marks.map((mark, index) => {
-						const label = markLabel(mark, texts?.get(mark.id))
+						const label = markLabel(mark)
 						const name = t(label.key, label.params)
 
 						return (

@@ -53,8 +53,12 @@ export function sheetPdfMessages(result: SheetPdfOutcome): {
 	if (result.ok) {
 		const warnings: SheetPdfMessage[] = []
 
-		if (result.missingGlyphs > 0 || result.missingImages > 0) {
-			log.warn("preview", "spreadsheet pdf simplified", { glyphs: result.missingGlyphs, images: result.missingImages })
+		if (result.missingGlyphs > 0 || result.missingImages > 0 || result.missingObjects > 0) {
+			log.warn("preview", "spreadsheet pdf simplified", {
+				glyphs: result.missingGlyphs,
+				images: result.missingImages,
+				objects: result.missingObjects
+			})
 			warnings.push({ key: "previewSheetPdfSimplified", values: {} })
 		}
 

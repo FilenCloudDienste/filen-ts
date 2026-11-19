@@ -6,6 +6,7 @@ import { ChevronRightIcon, FolderSearchIcon, RotateCcwIcon, TriangleAlertIcon } 
 import {
 	cn,
 	compressReportSections,
+	copyReportSections,
 	defaultCollapsedSections,
 	extractReportSections,
 	flattenReportSections,
@@ -15,6 +16,7 @@ import {
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { hideJobToast, showJobToast } from "@/features/transfers/lib/jobToast"
 import { compressJobTitle, extractJobSummary, extractJobTitle } from "@/features/transfers/components/archiveJobToast.logic"
+import { copyCardTitle, type JobCardTitle } from "@/features/transfers/components/driveJobCard.logic"
 import {
 	lineHeight,
 	lineKey,
@@ -24,7 +26,7 @@ import {
 	sectionTitleKey
 } from "@/features/transfers/components/jobReport.logic"
 import { jobHasReport, jobRevealItem, type DriveJob } from "@/features/drive/lib/driveJobs.logic"
-import { canRetryExtract, type CompressJob, type ExtractJob } from "@/features/drive/lib/archiveJobs.logic"
+import { canRetryExtract } from "@/features/drive/lib/archiveJobs.logic"
 import { retryFailedExtract } from "@/features/drive/lib/archiveJobs"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -33,22 +35,44 @@ import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
-type ArchiveJob = CompressJob | ExtractJob
 type Line = JobReportLine<ErrorDTO>
 
 const OVERSCAN = 10
 
-function reportJob(job: DriveJob | undefined): ArchiveJob | null {
-	return job !== undefined && job.kind !== "copy" && jobHasReport(job) ? job : null
+function reportJob(job: DriveJob | undefined): DriveJob | null {
+	return job !== undefined && jobHasReport(job) ? job : null
 }
 
-// The report of an archive job (what it skipped, renamed, could not do, and what became of the originals),
-// opened from its card or transfers row and mounted once at the root beside the toasts. Its body exists
-// only while the dialog shows: a report can run to thousands of lines.
+function reportSections(job: DriveJob): JobReportSection<ErrorDTO>[] {
+	switch (job.kind) {
+		case "copy":
+			return copyReportSections(job)
+		case "compress":
+			return compressReportSections(job, uuid => job.sourceNames[uuid])
+		case "extract":
+			return extractReportSections(job)
+	}
+}
+
+function reportTitle(job: DriveJob): JobCardTitle {
+	switch (job.kind) {
+		case "copy":
+			return copyCardTitle(job)
+		case "compress":
+			return compressJobTitle(job)
+		case "extract":
+			return extractJobTitle(job)
+	}
+}
+
+// The report of a drive job: an archive job's (what it skipped, renamed, could not do, and what became of
+// the originals), or every failure of a copy with more than its card lists. Opened from its card or
+// transfers row and mounted once at the root beside the toasts. Its body exists only while the dialog
+// shows: a report can run to thousands of lines.
 export function JobReportDialog() {
 	const job = useDriveJobsStore(state => reportJob(state.reportJobId === null ? undefined : state.jobs[state.reportJobId]))
 	// The last report shown keeps its lines through the exit animation; dropped once that ends.
-	const [shown, setShown] = useState<ArchiveJob | null>(job)
+	const [shown, setShown] = useState<DriveJob | null>(job)
 
 	if (job !== null && job !== shown) {
 		setShown(job)
@@ -92,17 +116,14 @@ export function JobReportDialog() {
 	)
 }
 
-function JobReportBody({ job, onClose }: { job: ArchiveJob; onClose: () => void }) {
+function JobReportBody({ job, onClose }: { job: DriveJob; onClose: () => void }) {
 	const { t } = useTranslation(["archive", "transfers", "common"])
 	const { t: tTransfers } = useTranslation("transfers")
 	const navigate = useNavigate()
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): sections are built
 	// once per job object, flattened once per toggle, and the virtualizer's callbacks change only with them.
-	const sections = useMemo(
-		() => (job.kind === "extract" ? extractReportSections(job) : compressReportSections(job, uuid => job.sourceNames[uuid])),
-		[job]
-	)
+	const sections = useMemo(() => reportSections(job), [job])
 	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => defaultCollapsedSections(sections))
 	const lines = useMemo(() => flattenReportSections(sections, collapsed), [sections, collapsed])
 	const getItemKey = useCallback(
@@ -131,7 +152,7 @@ function JobReportBody({ job, onClose }: { job: ArchiveJob; onClose: () => void 
 		getItemKey
 	})
 
-	const title = job.kind === "extract" ? extractJobTitle(job) : compressJobTitle(job)
+	const title = reportTitle(job)
 	const summary = job.kind === "extract" ? extractJobSummary(job) : null
 	const revealItem = jobRevealItem(job)
 	const retryable = job.kind === "extract" && canRetryExtract(job)

@@ -1,6 +1,58 @@
-import type { Chat, LinkedFile, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, Dir, File, LinkedFile, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { linkedFileIntoDriveItem, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
+
+export function mockDir(overrides: Partial<Dir> = {}): Dir {
+	return {
+		uuid: testUuid("dir"),
+		parent: testUuid("parent"),
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "Documents" } },
+		...overrides
+	}
+}
+
+export function mockFile(overrides: Partial<File> = {}): File {
+	return {
+		uuid: testUuid("file"),
+		stableUUID: undefined,
+		parent: testUuid("parent"),
+		size: 1_024n,
+		favorited: false,
+		region: "de-1",
+		bucket: "filen-1",
+		timestamp: 1_700_000_000_000n,
+		chunks: 1n,
+		canMakeThumbnail: true,
+		meta: {
+			type: "decoded",
+			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+		},
+		...overrides
+	}
+}
+
+export function mockDirItem(overrides: Partial<Dir> = {}): Extract<DriveItem, { type: "directory" }> {
+	const item = narrowItem(mockDir(overrides))
+
+	if (item.type !== "directory") {
+		throw new Error("expected a directory arm")
+	}
+
+	return item
+}
+
+export function mockFileItem(overrides: Partial<File> = {}): Extract<DriveItem, { type: "file" }> {
+	const item = narrowItem(mockFile(overrides))
+
+	if (item.type !== "file") {
+		throw new Error("expected a file arm")
+	}
+
+	return item
+}
 
 // The wasm runtime hands a SharingRole over internally tagged, `{ type, email, id }`; the generated
 // .d.ts types it externally tagged, a shape no runtime value has. Fixtures build the runtime one, so
@@ -93,6 +145,22 @@ export function mockChat(overrides: Partial<Chat> = {}): Chat {
 		muted: false,
 		created: 0n,
 		lastFocus: 0n,
+		...overrides
+	}
+}
+
+export function mockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+	return {
+		uuid: testUuid("msg"),
+		chat: testUuid("chat"),
+		senderId: 1,
+		senderEmail: "sender@filen.io",
+		senderNickName: undefined,
+		message: "hi",
+		embedDisabled: false,
+		edited: false,
+		editedTimestamp: 0n,
+		sentTimestamp: 0n,
 		...overrides
 	}
 }

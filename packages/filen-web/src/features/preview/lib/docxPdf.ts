@@ -14,6 +14,7 @@ import {
 import { pdfDownloadName, pdfErrorKey, pdfProgressText, pdfReportKey, pdfTitle } from "@/features/preview/lib/docxPdf.logic"
 import { DOCX_FONT_URLS, docxProtection } from "@/features/preview/lib/docxEngine"
 import { PDF_DETERMINISTIC } from "@/features/office/lib/pdfTestMode"
+import { officeChartText } from "@/features/office/lib/chartText"
 import DocxPdfWorker from "@/features/preview/workers/docxPdf.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { downloadBlob } from "@/lib/downloadBlob"
@@ -120,6 +121,7 @@ export async function makeDocxPdf(source: DocxPdfSource, fileName: string, make:
 			options: {
 				title: pdfTitle(fileName),
 				lang: i18n.language,
+				chartText: officeChartText(),
 				...(source.kind === "file" && source.format !== undefined ? { format: source.format } : {}),
 				...(source.kind !== "unlocked" && source.untranslated !== undefined && source.untranslated > 0
 					? { untranslated: source.untranslated }

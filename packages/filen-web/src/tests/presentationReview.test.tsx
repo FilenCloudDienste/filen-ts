@@ -437,6 +437,8 @@ describe("presentation review", () => {
 			<PresentationNotesPane
 				text=""
 				phone={false}
+				collapsed={false}
+				onCollapsedChange={vi.fn()}
 				editor={editor}
 			/>
 		)
@@ -463,6 +465,8 @@ describe("presentation review", () => {
 			<PresentationNotesPane
 				text=""
 				phone={false}
+				collapsed={false}
+				onCollapsedChange={vi.fn()}
 				editor={editor}
 			/>
 		)
@@ -498,6 +502,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text="First"
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -751,6 +757,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={pending}
 				/>
 			)
@@ -799,6 +807,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -833,6 +843,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={{ ...editor, render }}
 				/>
 			)
@@ -880,6 +892,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -918,6 +932,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -968,6 +984,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -1014,6 +1032,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)
@@ -1060,6 +1080,8 @@ describe("presentation review", () => {
 				<PresentationNotesPane
 					text=""
 					phone={false}
+					collapsed={false}
+					onCollapsedChange={vi.fn()}
 					editor={editor}
 				/>
 			)

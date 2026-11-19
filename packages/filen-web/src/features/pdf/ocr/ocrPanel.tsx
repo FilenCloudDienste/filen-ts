@@ -17,10 +17,10 @@ import { isAppleMobile } from "@/lib/appleMobile"
 import { log } from "@/lib/log"
 import { Spinner } from "@/components/ui/spinner"
 
-// Tools › Recognise text, its panel: the editor finds the scanned pages (an image over most of the page, (near) no text), the
-// dialog picks pages and languages, then recognition runs page by page (ocr/ocrRun.ts): the editor renders a batch of
-// four, empties its store, the recogniser reads each page, and each page's invisible text is laid over it as its own
-// undo step. On iPhone and iPad the editor waits while a batch is recognised (one heavy worker at a time). Pages done
+// Tools › Recognise text, its panel: the editor finds the scanned pages (an image over most of the page, (near) no text) a
+// few pages per request, the dialog picks pages and languages, then recognition runs page by page (ocr/ocrRun.ts): the
+// editor renders a batch of four, empties its store, the recogniser reads each page, and each page's invisible text is
+// laid over it as its own undo step. On iPhone and iPad the editor waits while a batch is recognised (one heavy worker at a time). Pages done
 // stay when cancelled. The text is added untagged: a document with accessibility tags is told so.
 
 interface Scan {
@@ -41,6 +41,32 @@ function engineSteps(context: PdfToolContext): OcrEngineSteps {
 	}
 }
 
+// Pages the editor scans per request: renders and other requests run between runs, and a closed panel stops the scan.
+const SCAN_RUN = 8
+
+// The scanned pages, run by run; null once `scanning` stopped (the panel closed).
+async function scanPages(context: PdfToolContext, scanning: { readonly stopped: boolean }): Promise<Scan | null> {
+	const scanned: number[] = []
+	let pageCount = 1
+	let tagged = false
+
+	for (let from = 0; from < pageCount; from += SCAN_RUN) {
+		if (scanning.stopped) return null
+
+		const run = await withPdfSession(context, async session => {
+			const value = await session.engine.call("ocrScan", { from, count: SCAN_RUN })
+
+			return { ...value, tagged: session.getSnapshot().state.tagged }
+		})
+
+		pageCount = run.pageCount
+		tagged = run.tagged
+		scanned.push(...run.scanned)
+	}
+
+	return scanning.stopped ? null : { pageCount, scanned, tagged }
+}
+
 export function OcrPanel({ context }: PdfToolPanelProps) {
 	const { t, i18n } = useTranslation("preview")
 	const preference = useOcrLanguagePreference()
@@ -50,25 +76,27 @@ export function OcrPanel({ context }: PdfToolPanelProps) {
 	const [run, setRun] = useState<OcrDialogRun | null>(null)
 	const handle = useRef<OcrRunHandle | null>(null)
 
-	const start = useEffectEvent(() => {
-		withPdfSession(context, async session => {
-			const { scanned } = await session.engine.call("ocrScan", {})
-			const { state } = session.getSnapshot()
+	const start = useEffectEvent((scanning: { stopped: boolean }) => {
+		scanPages(context, scanning).then(
+			found => {
+				if (found !== null) setScan(found)
+			},
+			(error: unknown) => {
+				if (scanning.stopped) return
 
-			return { pageCount: state.pageCount, scanned, tagged: state.tagged }
-		}).then(setScan, (error: unknown) => {
-			log.warn("pdf", "finding scanned pages failed", { error })
-			context.notify(
-				<PdfNoticeLine
-					onDismiss={() => {
-						context.notify(null)
-					}}
-				>
-					{t("previewPdfOcrFindingFailed")}
-				</PdfNoticeLine>
-			)
-			context.finish()
-		})
+				log.warn("pdf", "finding scanned pages failed", { error })
+				context.notify(
+					<PdfNoticeLine
+						onDismiss={() => {
+							context.notify(null)
+						}}
+					>
+						{t("previewPdfOcrFindingFailed")}
+					</PdfNoticeLine>
+				)
+				context.finish()
+			}
+		)
 	})
 	const end = useEffectEvent(() => {
 		// Pages already laid over stay; the rest are not recognised.
@@ -77,9 +105,12 @@ export function OcrPanel({ context }: PdfToolPanelProps) {
 	})
 
 	useEffect(() => {
-		start()
+		const scanning = { stopped: false }
+
+		start(scanning)
 
 		return () => {
+			scanning.stopped = true
 			end()
 		}
 	}, [])

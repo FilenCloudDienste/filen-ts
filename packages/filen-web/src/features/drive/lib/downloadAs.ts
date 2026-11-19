@@ -535,7 +535,8 @@ async function printWorkbook(
 		const { info } = await withWorkbookDigit(opened, events)
 
 		// The locale the viewer's grid has its session show numbers and dates in (useSheetFormula.tsx).
-		session.configure({ locale: sheetLocaleOf(await loadedRegionalLanguage()) })
+		const regional = await loadedRegionalLanguage()
+		session.configure({ locale: sheetLocaleOf(regional) })
 		const sheet = info.sheets.find(entry => entry.id === info.activeSheet)
 		const active = sheet === undefined ? null : await sheetSettings({ session, layout: () => null }, kind, sheet)
 
@@ -544,12 +545,17 @@ async function printWorkbook(
 		}
 
 		const requests = printRequests(formOf(active.setup), active, [active], []) ?? []
-		const request = pdfRequest(requests, pdfFile(name, info, browserLanguage()), {
-			kind,
-			sheets: info.sheets,
-			date1904: info.date1904,
-			showFormulas: false
-		})
+		const request = pdfRequest(
+			requests,
+			pdfFile(name, info, browserLanguage()),
+			{
+				kind,
+				sheets: info.sheets,
+				date1904: info.date1904,
+				showFormulas: false
+			},
+			regional
+		)
 		const result = await makeSheetPdf(session, request, {
 			signal: run.signal,
 			password,

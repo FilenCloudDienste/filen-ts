@@ -198,7 +198,7 @@ describe("Local data and caches", () => {
 		})
 		fireEvent.click(clear)
 
-		expect(within(await screen.findByRole("alertdialog")).getByText(/analysed again for smooth transitions/)).toBeTruthy()
+		expect(within(await screen.findByRole("alertdialog")).getByText(/analyzed again for smooth transitions/)).toBeTruthy()
 	})
 
 	it("reports a clear that failed", async () => {

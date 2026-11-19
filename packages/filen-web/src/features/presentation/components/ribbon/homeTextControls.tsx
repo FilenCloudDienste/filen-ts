@@ -15,6 +15,7 @@ import {
 	IndentDecreaseIcon,
 	IndentIncreaseIcon,
 	ItalicIcon,
+	LetterSpacingIcon,
 	LinkIcon,
 	ListIcon,
 	ListOrderedIcon,
@@ -52,8 +53,7 @@ import {
 	type TextCommand,
 	type TextDefaults
 } from "@filen/office/core/presentation"
-import type { CommandResult } from "@filen/office/dom/presentation"
-import { formatShapes, selectedShapes, useShapeSelection, useTextEditing } from "@filen/office/react/presentation"
+import { formatShapesOp, selectedShapes, useShapeSelection, useTextEditing } from "@filen/office/react/presentation"
 import { cn } from "@filen/shared"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import {
@@ -109,9 +109,6 @@ import { i18n } from "@/lib/i18n"
 // as a formatting key on the canvas gives; a refusal is told). What a control shows comes from the open body's format
 // (the selection's properties as the inheritance chain shows them).
 
-// What formatShapes is told for each op it hands over: the op is only collected here, sent with the others after.
-const COLLECTED: CommandResult = { ok: true, revision: 0, dirty: false }
-
 // The ops as one command (a batch for several) through the shell's command path; nothing when there are none.
 async function sendAsOne(editor: TextRibbonEditor, ops: readonly DeckOp[]): Promise<void> {
 	const op = oneStep(ops)[0]
@@ -146,14 +143,9 @@ function useTextTarget(editor: TextRibbonEditor, editable: boolean): TextTarget 
 
 			// A shape whose body cannot be read is left out, as the canvas's formatting keys leave it.
 			void (async () => {
-				const ops: DeckOp[] = []
+				const op = await formatShapesOp(editor.session, shapes, make)
 
-				await formatShapes(editor.session, shapes, make, op => {
-					ops.push(op)
-
-					return Promise.resolve(COLLECTED)
-				})
-				await sendAsOne(editor, ops)
+				if (op !== undefined) await editor.command(op)
 			})()
 		},
 		setBodyPr: patch => {
@@ -632,7 +624,7 @@ const ALIGNS: readonly { readonly value: NonNullable<ParaProps["algn"]>; readonl
 	{ value: "ctr", label: "previewDocxAlignCenter", icon: <AlignCenterIcon /> },
 	{ value: "r", label: "previewDocxAlignEnd", icon: <AlignRightIcon /> },
 	{ value: "just", label: "previewDocxAlignJustify", icon: <AlignJustifyIcon /> },
-	{ value: "dist", label: "previewPptxTextAlignDistributed", icon: <AlignJustifyIcon /> }
+	{ value: "dist", label: "previewPptxTextAlignDistributed", icon: <LetterSpacingIcon /> }
 ]
 
 // A menu of one body property (direction, anchoring, columns).

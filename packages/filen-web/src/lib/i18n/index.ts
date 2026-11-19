@@ -76,4 +76,11 @@ i18n.on("languageChanged", language => {
 	}
 })
 
+// The key for `count` things: `single`, a sentence of its own without {{count}}, for exactly one, and the plural
+// `counted` for any other number. A plural `_one` is a CLDR category, not "one thing": Russian and Ukrainian put 21,
+// 31 and 101 in it, so every English `_one` carries {{count}} and the one-thing wording lives under its own key.
+export function singleOrCountKey<S extends string, C extends string>(count: number, single: S, counted: C): S | C {
+	return count === 1 ? single : counted
+}
+
 export { i18n }

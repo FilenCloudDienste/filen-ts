@@ -2,14 +2,14 @@ import { Fragment, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { UseQueryResult } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, FolderOpenIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn, driveItemName } from "@filen/shared"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
-import { NoResultsMessage } from "@/components/emptyMessage"
+import { EmptyMessage, NoResultsMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
 import { LIST_DIALOG_BODY_CLASS } from "@/components/dialogs/listDialog"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
@@ -86,6 +86,8 @@ export interface PickerListShellProps {
 	listingQuery: UseQueryResult<DriveItem[]>
 	// An active filter matched nothing: show the no-results state instead of the empty-directory one.
 	noResults?: boolean
+	// The directory has rows, but none of the kind this picker offers: this line instead of the empty-directory state.
+	filteredOutMessage?: string | undefined
 	count: number
 	// A stable key for the row at `index` (the item's uuid).
 	rowKey: (index: number) => string
@@ -93,7 +95,7 @@ export interface PickerListShellProps {
 	renderRow: (index: number) => ReactNode
 }
 
-export function PickerListShell({ listingQuery, noResults, count, rowKey, renderRow }: PickerListShellProps) {
+export function PickerListShell({ listingQuery, noResults, filteredOutMessage, count, rowKey, renderRow }: PickerListShellProps) {
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
 	return (
@@ -114,6 +116,11 @@ export function PickerListShell({ listingQuery, noResults, count, rowKey, render
 			) : count === 0 ? (
 				noResults === true ? (
 					<NoResultsMessage />
+				) : filteredOutMessage !== undefined ? (
+					<EmptyMessage
+						icon={FolderOpenIcon}
+						title={filteredOutMessage}
+					/>
 				) : (
 					<EmptyState
 						variant="empty"

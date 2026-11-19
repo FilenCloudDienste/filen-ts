@@ -11,6 +11,7 @@ import type { SpreadsheetSnapshot } from "@/features/spreadsheet/save/sheetSave.
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
 import { preview } from "@/locales/en/preview"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { file, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // Saving on the spreadsheet viewer, over real sessions on this thread (an in-thread host stands in for each
 // worker): idle autosave asks the overlay, Save as .xlsx carries a text file's edits into the copy it uploads and
@@ -34,10 +35,9 @@ const hooks = vi.hoisted(() => {
 	return state
 })
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: hooks.bytes, refetch: () => undefined })
 }))
@@ -90,24 +90,12 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: v
 const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
 
 beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+	stubSheetCanvas()
 	hooks.settings = { authorName: null, autosave: true, loaded: true }
 	hooks.uploads = []
 	hooks.downloads = []
 	hooks.autosaveChoices = []
 })
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
 
 async function budget(): Promise<Uint8Array> {
 	return await writeXlsx({

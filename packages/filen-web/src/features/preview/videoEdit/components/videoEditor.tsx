@@ -268,8 +268,13 @@ export function VideoEditor(props: VideoEditorProps) {
 	const fps = info.frameRate
 	const outputLength = outputDuration(recipe.keep, recipe.speed)
 	const snaps = !recipe.precise && shownPlan?.mode === "copy" ? snapMarks(shownPlan.snapped, fps) : []
-	// Splits only mean something inside what is kept.
-	const shownSplits = splits.filter(split => keepIndexAt(recipe.keep, split) !== -1)
+	// Splits only mean something inside what is kept (one on a kept part's start edge bounds nothing). They outlive
+	// the cuts and reverts that hide them, so an undo brings back the parts they marked.
+	const shownSplits = splits.filter(split => {
+		const range = recipe.keep[keepIndexAt(recipe.keep, split)]
+
+		return range !== undefined && split > range.start
+	})
 
 	const sync = (): void => {
 		setSnapshot({ recipe: history.current, canUndo: history.canUndo, canRedo: history.canRedo })
@@ -304,7 +309,6 @@ export function VideoEditor(props: VideoEditorProps) {
 
 	const revert = (): void => {
 		setSelection(null)
-		setSplits([])
 		setAspect("free")
 		setSelectedText(null)
 		commit(identityVideoRecipe(duration))
@@ -793,7 +797,6 @@ export function VideoEditor(props: VideoEditorProps) {
 
 		if (next !== null) {
 			commit({ ...history.current, keep: next })
-			setSplits(splits.filter(split => split < current.start || split > current.end))
 			setSelection(null)
 			setLoop(false)
 		}

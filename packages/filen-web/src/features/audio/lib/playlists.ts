@@ -52,8 +52,10 @@ const PLAYLISTS_DIR_NAME = DOT_FILEN_SUBDIRS.playlists
 const knownPlaylistFileUuids = new Set<string>()
 
 // Raw (pre-prune) parses from the last listing by drive file uuid. A file's uuid rotates on every
-// content change, so the bytes behind one never change and its parse can be reused.
-let parsedByFileUuid = new Map<string, Playlist>()
+// content change, so the bytes behind one never change and its parse can be reused. `null` is bytes that
+// do not parse as a playlist: as final as a parse, so that file is never downloaded again. A failed download
+// or an undecryptable file has no entry and is retried.
+let parsedByFileUuid = new Map<string, Playlist | null>()
 
 // `.filen/playlists` at the drive root, shared with the other `.filen` consumers (lib/dotFilen.ts).
 export function getPlaylistsDirectoryUuid(): Promise<string> {
@@ -273,7 +275,12 @@ function startPrunePasses(playlists: Playlist[]): void {
 	}, 0)
 }
 
-async function readOnePlaylistEntry(file: SdkFile, nextParsed: Map<string, Playlist>): Promise<PlaylistEntry> {
+// A row the next read would give again: a parsed playlist, or a file whose bytes do not parse.
+export function isSettledPlaylistEntry(entry: PlaylistEntry): boolean {
+	return entry.status === "ok" || parsedByFileUuid.get(entry.fileUuid) === null
+}
+
+async function readOnePlaylistEntry(file: SdkFile, nextParsed: Map<string, Playlist | null>): Promise<PlaylistEntry> {
 	const item = narrowItem(file)
 	const base = asDirectoryOrFile(item)
 	const fallbackName = driveItemName(base)
@@ -283,15 +290,17 @@ async function readOnePlaylistEntry(file: SdkFile, nextParsed: Map<string, Playl
 	}
 
 	try {
+		const known = parsedByFileUuid.get(base.data.uuid)
 		const parsed =
-			parsedByFileUuid.get(base.data.uuid) ??
-			parsePlaylist(safeJsonParse(await runOp(sdkApi.downloadFileBytes(base.data, crypto.randomUUID()))))
+			known !== undefined
+				? known
+				: parsePlaylist(safeJsonParse(await runOp(sdkApi.downloadFileBytes(base.data, crypto.randomUUID()))))
+
+		nextParsed.set(base.data.uuid, parsed)
 
 		if (parsed === null) {
 			return { status: "degraded", fileUuid: base.data.uuid, name: fallbackName }
 		}
-
-		nextParsed.set(base.data.uuid, parsed)
 
 		return { status: "ok", playlist: withoutKnownDead(parsed) }
 	} catch (error) {
@@ -327,11 +336,11 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 		noteDotFilenFile(file.uuid)
 	}
 
-	const nextParsed = new Map<string, Playlist>()
+	const nextParsed = new Map<string, Playlist | null>()
 	const entries = await Promise.all(files.map(file => readOnePlaylistEntry(file, nextParsed)))
 
 	parsedByFileUuid = nextParsed
-	startPrunePasses([...nextParsed.values()])
+	startPrunePasses([...nextParsed.values()].filter(parsed => parsed !== null))
 
 	return entries
 }

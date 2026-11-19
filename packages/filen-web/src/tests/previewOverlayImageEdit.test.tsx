@@ -18,11 +18,13 @@ const harness = vi.hoisted(() => ({
 	released: 0,
 	targets: null as null | { primary: unknown; copy: unknown },
 	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	loadFails: false,
 	splices: [] as unknown[]
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("sonner", () => ({ toast: { success: harness.toastSuccess, error: vi.fn(), warning: vi.fn(), info: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { success: harness.toastSuccess, error: harness.toastError, warning: vi.fn(), info: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({
 	useBlocker: () => ({ status: "idle" }),
 	useNavigate: () => vi.fn(),
@@ -91,13 +93,21 @@ vi.mock("@/features/preview/imageEdit/components/imageEditor", () => ({
 	ImageEditor: ({
 		saveRef,
 		commandsRef,
-		onDirtyChange
+		onDirtyChange,
+		onLoadFailed
 	}: {
 		saveRef: { current: unknown }
 		commandsRef: { current: unknown }
 		onDirtyChange: (dirty: boolean) => void
+		onLoadFailed: () => void
 	}) => {
 		useEffect(() => {
+			if (harness.loadFails) {
+				onLoadFailed()
+
+				return
+			}
+
 			saveRef.current = (target: SaveTarget) => {
 				harness.exports.push(target)
 
@@ -105,7 +115,7 @@ vi.mock("@/features/preview/imageEdit/components/imageEditor", () => ({
 			}
 			commandsRef.current = { undo: vi.fn(), redo: vi.fn(), revert: vi.fn() }
 			onDirtyChange(true)
-		}, [saveRef, commandsRef, onDirtyChange])
+		}, [saveRef, commandsRef, onDirtyChange, onLoadFailed])
 
 		return createElement("div", { "data-testid": "image-editor" })
 	}
@@ -168,6 +178,8 @@ beforeEach(() => {
 	harness.released = 0
 	harness.splices = []
 	harness.toastSuccess.mockClear()
+	harness.toastError.mockClear()
+	harness.loadFails = false
 	harness.targets = { primary: { kind: "inPlace", mime: "image/jpeg" }, copy: { kind: "copy", mime: "image/jpeg", extension: "jpg" } }
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
@@ -221,6 +233,31 @@ describe("PreviewOverlay — image editing", () => {
 		// Never shown in the slot: the title still names the original.
 		expect(screen.queryByTestId("image-editor")).toBeNull()
 		expect(screen.getAllByText(/photo/).some(element => element.textContent.includes("heic"))).toBe(true)
+	})
+
+	it("leaves edit mode with a toast when the editor cannot load the picture", async () => {
+		harness.loadFails = true
+
+		render(
+			createElement(PreviewOverlay, {
+				variant: "drive" as const,
+				items: [image("photo.jpg", "image/jpeg")],
+				index: 0,
+				onStep: vi.fn(),
+				onClose: vi.fn(),
+				onItemRemoved: vi.fn()
+			})
+		)
+
+		fireEvent.click(await screen.findByRole("button", { name: "Edit" }))
+
+		await waitFor(() => {
+			expect(harness.toastError).toHaveBeenCalledWith("The image couldn't be opened for editing.")
+		})
+		expect(screen.queryByTestId("image-editor")).toBeNull()
+		expect(harness.toastError).toHaveBeenCalledTimes(1)
+		expect(harness.released).toBe(1)
+		expect(screen.getByRole("button", { name: "Edit" })).toBeDefined()
 	})
 
 	it("asks before Cancel drops unsaved edits, and leaves edit mode on Discard without saving", async () => {

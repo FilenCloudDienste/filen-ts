@@ -7,72 +7,23 @@ import type { Chat } from "@filen/sdk-rs"
 // outbox runs under node vitest. This file exercises DURABILITY: persist-before-send, replay-on-launch
 // merge/prune, offline-keep, and the durable-schema drop. self-contained vi.mock per the project's
 // test convention.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
-	sendChatMessage: vi.fn(),
-	markChatRead: vi.fn(() => Promise.resolve()),
-	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
-	// The push loop resolves a LIVE chat per uuid; on a list-cache miss it falls back to getChat.
-	getChat: vi.fn((uuid: string) =>
-		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
-	)
-}))
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsSdkMocks()
+)
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
-const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
-	const store = new Map<string, unknown>()
-
-	return {
-		kvStore: store,
-		kvGetJson: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
-		kvSetJson: vi.fn((key: string, value: unknown) => {
-			store.set(key, value)
-
-			return Promise.resolve()
-		}),
-		kvDelete: vi.fn((key: string) => {
-			store.delete(key)
-
-			return Promise.resolve()
-		})
-	}
-})
+const { kvStore, kvGetJson, kvSetJson, kvDelete } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsKvMocks()
+)
 
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { Sync, enqueueChatMessage, sync } from "@/features/chats/lib/sync"
-import { inflightChatMessagesSchema, buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
-import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-
-const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
-
-function makeChat(uuid: string): Chat {
-	return {
-		uuid: uuid as Chat["uuid"],
-		ownerId: 7n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
-}
-
-function tick(): Promise<void> {
-	return new Promise(resolve => setTimeout(resolve, 0))
-}
-
-function optimistic(chatUuid: string, inflightId: string, sentTimestamp: bigint): ChatMessageWithInflightId {
-	return buildOptimisticMessage({
-		chatUuid: chatUuid as ChatMessageWithInflightId["chat"],
-		inflightId: inflightId as ChatMessageWithInflightId["uuid"],
-		content: "hi",
-		replyTo: undefined,
-		sentTimestamp,
-		sender: SENDER
-	})
-}
+import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
+import { useChatsInflightStore, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { SENDER, confirmedMessage, optimistic, outboxChat, tick } from "@/tests/support/chatsOutbox"
 
 function persistedQueue(): InflightChatMessages | undefined {
 	return kvStore.get("inflightChatMessages") as InflightChatMessages | undefined
@@ -83,7 +34,7 @@ beforeEach(async () => {
 	vi.clearAllMocks()
 	onlineManager.setOnline(true)
 	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {} })
-	sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid) }))
+	sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") }))
 	// Resolve the singleton's initPromise against an empty kv so flushToDisk/sync don't hang.
 	sync.start()
 	await tick()
@@ -93,21 +44,6 @@ afterEach(() => {
 	onlineManager.setOnline(true)
 })
 
-function makeConfirmed(chatUuid: string) {
-	return {
-		uuid: "srv-1-1-1" as ChatMessageWithInflightId["uuid"],
-		chat: chatUuid as ChatMessageWithInflightId["chat"],
-		senderId: 7,
-		senderEmail: "me@filen.io",
-		senderNickName: "Me",
-		message: "hi",
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1n
-	}
-}
-
 describe("enqueue — persist BEFORE send (the survives-window-close guarantee)", () => {
 	it("writes the whole outbox to disk before the send commits", async () => {
 		// A send that never resolves: the durable write must already be on disk regardless.
@@ -116,12 +52,12 @@ describe("enqueue — persist BEFORE send (the survives-window-close guarantee)"
 			(chat: Chat) =>
 				new Promise(resolve => {
 					releaseSend = () => {
-						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid) })
+						resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
 					}
 				})
 		)
 
-		const flushed = await enqueueChatMessage({ chat: makeChat("chat-a-a-a"), content: "hi", sender: SENDER })
+		const flushed = await enqueueChatMessage({ chat: outboxChat("chat-a-a-a"), content: "hi", sender: SENDER })
 
 		expect(flushed).toBe(true)
 		// The message is durable even though the send is still pending (releaseSend not called).
@@ -135,7 +71,7 @@ describe("enqueue — persist BEFORE send (the survives-window-close guarantee)"
 	it("surfaces a failed disk write as false without throwing", async () => {
 		kvSetJson.mockRejectedValueOnce(new Error("disk full"))
 
-		const flushed = await enqueueChatMessage({ chat: makeChat("chat-a-a-a"), content: "hi", sender: SENDER })
+		const flushed = await enqueueChatMessage({ chat: outboxChat("chat-a-a-a"), content: "hi", sender: SENDER })
 
 		expect(flushed).toBe(false)
 	})
@@ -144,9 +80,9 @@ describe("enqueue — persist BEFORE send (the survives-window-close guarantee)"
 describe("replay-on-launch — restore merges disk with in-memory by inflightId union", () => {
 	it("hydrates a persisted queue and re-sends it on start", async () => {
 		kvStore.set("inflightChatMessages", {
-			"chat-a-a-a": { chat: makeChat("chat-a-a-a"), messages: [optimistic("chat-a-a-a", "inf-1-1-1", 1n)] }
+			"chat-a-a-a": { chat: outboxChat("chat-a-a-a"), messages: [optimistic("chat-a-a-a", "inf-1-1-1", 1n)] }
 		})
-		listChats.mockResolvedValueOnce([makeChat("chat-a-a-a")])
+		listChats.mockResolvedValueOnce([outboxChat("chat-a-a-a")])
 
 		const fresh = new Sync()
 		fresh.start()
@@ -160,17 +96,17 @@ describe("replay-on-launch — restore merges disk with in-memory by inflightId 
 		// Seed a live message BEFORE restore runs (simulates a send during the seconds-long restore).
 		useChatsInflightStore.setState({
 			inflightMessages: {
-				"chat-a-a-a": { chat: makeChat("chat-a-a-a"), messages: [optimistic("chat-a-a-a", "inf-live-9-9", 900n)] }
+				"chat-a-a-a": { chat: outboxChat("chat-a-a-a"), messages: [optimistic("chat-a-a-a", "inf-live-9-9", 900n)] }
 			},
 			inflightErrors: {}
 		})
 		kvStore.set("inflightChatMessages", {
 			"chat-a-a-a": {
-				chat: makeChat("chat-a-a-a"),
+				chat: outboxChat("chat-a-a-a"),
 				messages: [optimistic("chat-a-a-a", "inf-live-9-9", 900n), optimistic("chat-a-a-a", "inf-disk-1-1", 100n)]
 			}
 		})
-		listChats.mockResolvedValue([makeChat("chat-a-a-a")])
+		listChats.mockResolvedValue([outboxChat("chat-a-a-a")])
 		// Keep the messages queued so the merge result is observable (send fails, keep-for-retry).
 		sendChatMessage.mockRejectedValue({ species: "sdk", kind: "Reqwest", label: "net", message: "net" })
 
@@ -187,11 +123,11 @@ describe("replay-on-launch — restore merges disk with in-memory by inflightId 
 describe("restore reconcile — prune queued sends for chats that no longer exist", () => {
 	it("drops a restored entry whose chat is absent from the fetched list, keeps one whose chat exists", async () => {
 		kvStore.set("inflightChatMessages", {
-			"chat-gone-x-x": { chat: makeChat("chat-gone-x-x"), messages: [optimistic("chat-gone-x-x", "inf-g-1-1", 1n)] },
-			"chat-live-y-y": { chat: makeChat("chat-live-y-y"), messages: [optimistic("chat-live-y-y", "inf-l-1-1", 1n)] }
+			"chat-gone-x-x": { chat: outboxChat("chat-gone-x-x"), messages: [optimistic("chat-gone-x-x", "inf-g-1-1", 1n)] },
+			"chat-live-y-y": { chat: outboxChat("chat-live-y-y"), messages: [optimistic("chat-live-y-y", "inf-l-1-1", 1n)] }
 		})
 		// Only the live chat comes back from the server; the gone chat is pruned.
-		listChats.mockResolvedValue([makeChat("chat-live-y-y")])
+		listChats.mockResolvedValue([outboxChat("chat-live-y-y")])
 		sendChatMessage.mockRejectedValue({ species: "sdk", kind: "Reqwest", label: "net", message: "net" })
 
 		const fresh = new Sync()
@@ -209,7 +145,7 @@ describe("offline — a queued send is kept forever, never dropped, until reconn
 	it("does not send while offline and preserves the durable queue", async () => {
 		onlineManager.setOnline(false)
 
-		await enqueueChatMessage({ chat: makeChat("chat-a-a-a"), content: "hi", sender: SENDER })
+		await enqueueChatMessage({ chat: outboxChat("chat-a-a-a"), content: "hi", sender: SENDER })
 		await tick()
 
 		expect(sendChatMessage).not.toHaveBeenCalled()

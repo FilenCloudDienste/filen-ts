@@ -1,99 +1,37 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
+import { goTo, nameBox, openViewer as openSheetViewer, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // The grid's shortcuts the viewer takes, over a real session on this thread: the insert and delete dialogs for cells,
 // Find Next from the grid, and a merge F4 repeats asking again about the values it would drop.
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-	return { bytes: held }
-})
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 // The find field is the document editor's, which binds Mod+F through the app's keymap.
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
-
-function nameBox(): string {
-	return screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox }).value
-}
+beforeEach(stubSheetCanvas)
 
 function contents(): string {
 	return screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSpreadsheetCellContents }).value
 }
 
-async function goTo(reference: string): Promise<void> {
-	const box = screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox })
-
-	fireEvent.focus(box)
-	fireEvent.change(box, { target: { value: reference } })
-	fireEvent.keyDown(box, { key: "Enter" })
-	// The box shows the active cell: a range's top left.
-	await waitFor(() => {
-		expect(nameBox()).toBe(reference.split(":")[0])
-	})
-}
-
 async function openViewer(name: string, source: Uint8Array): Promise<HTMLElement> {
-	bytes.current = source
-
-	render(
-		<SheetViewer
-			item={file(name)}
-			documentKey={name}
-			alt={name}
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	await screen.findByRole("textbox", { name: preview.previewSpreadsheetCellContents })
-
-	return await screen.findByRole("grid", {}, { timeout: 5000 })
+	return await openSheetViewer(source, { name })
 }
 
 describe("the spreadsheet viewer's grid shortcuts", () => {

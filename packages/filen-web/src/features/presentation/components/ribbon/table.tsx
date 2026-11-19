@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react"
+import { Selection, type EditorState } from "prosemirror-state"
 import { useTranslation } from "react-i18next"
 import {
 	BetweenHorizontalEndIcon,
@@ -48,7 +49,7 @@ import { usePresentationEditor } from "@/features/presentation/hooks/usePresenta
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Table tab (PowerPoint's Table Layout and Table Design in one): rows and columns beside the selected cells (a
-// range Shift+pressed or Shift+dragged over the table, else the cell the caret is in, else the whole table), delete,
+// range Shift+pressed, Shift+dragged or Shift+arrowed over the table, else the cell the caret is in, else the whole table), delete,
 // merge and split, distribute, the style gallery, the style options and the cells' shading. The table's structure comes from its render layer (SlideLayer.table); every
 // command is one op through the editor's session, several ops as one batch.
 
@@ -88,11 +89,12 @@ const NO_TEXT = createTextEditing()
 
 // ---- cell ranges -------------------------------------------------------------------------------------------------
 
-// The cells selected in one table frame: from `anchor` (the cell first pressed, or the one the caret was in) to the
-// cell the press reached, in whole merged cells.
+// The cells selected in one table frame: from `anchor` (the cell first pressed, or the one the caret was in) to
+// `head`, the cell the press or Shift+arrow reached, in whole merged cells.
 interface CellRangeSelection {
 	readonly table: ShapeRef
 	readonly anchor: CellRange
+	readonly head: CellRange
 	readonly range: CellRange
 }
 
@@ -152,6 +154,58 @@ export function rangeBetween(shape: TableShape, anchor: CellRange, to: CellRange
 	})
 }
 
+// The rows and columns one Shift+arrow moves a range's head by.
+const STEPS: Readonly<Record<string, readonly [number, number]>> = {
+	ArrowUp: [-1, 0],
+	ArrowDown: [1, 0],
+	ArrowLeft: [0, -1],
+	ArrowRight: [0, 1]
+}
+
+// The merged cell (its origin and span) that covers row, col; undefined past the table.
+function areaAt(shape: TableShape, row: number, col: number): CellRange | undefined {
+	const area = shape.areas.find(each => row >= each.r && row < each.r + each.rows && col >= each.c && col < each.c + each.cols)
+
+	return area === undefined ? undefined : { row: area.r, col: area.c, rows: area.rows, cols: area.cols }
+}
+
+// A range's head moved one cell by an arrow key (`key`, KeyboardEvent.key), past its whole merged cell, and the range
+// from `anchor` to it; undefined when the key is no arrow or the head is at the table's edge that way.
+export function extendRange(
+	shape: TableShape,
+	anchor: CellRange,
+	head: CellRange,
+	key: string
+): { readonly head: CellRange; readonly range: CellRange } | undefined {
+	const step = STEPS[key]
+
+	if (step === undefined) return undefined
+
+	const [down, right] = step
+	const row = down > 0 ? head.row + head.rows : down < 0 ? head.row - 1 : head.row
+	const col = right > 0 ? head.col + head.cols : right < 0 ? head.col - 1 : head.col
+	const next = areaAt(shape, row, col)
+
+	return next === undefined ? undefined : { head: next, range: rangeBetween(shape, anchor, next) }
+}
+
+// The other horizontal arrow: Left and Right swap where a right-to-left paragraph or table mirrors them.
+function mirrored(key: string): string {
+	return key === "ArrowLeft" ? "ArrowRight" : key === "ArrowRight" ? "ArrowLeft" : key
+}
+
+// Whether the caret is where a Shift+arrow leaves the cell's text (PowerPoint's rule): at its end for the forward keys
+// (Right, or Left in a right-to-left paragraph, and Down), at its start for the backward ones. Elsewhere the key
+// extends the text selection.
+function atTextEdge(state: EditorState, key: string, rtl: boolean): boolean {
+	const head = state.selection.head
+	const logical = rtl ? mirrored(key) : key
+
+	return logical === "ArrowRight" || logical === "ArrowDown"
+		? head === Selection.atEnd(state.doc).to
+		: head === Selection.atStart(state.doc).from
+}
+
 function withinTable(shape: TableShape, range: CellRange): boolean {
 	return range.row >= 0 && range.col >= 0 && range.row + range.rows <= shape.heights.length && range.col + range.cols <= shape.grid.length
 }
@@ -192,19 +246,21 @@ function layerPoint(layer: SlideLayer, at: { readonly x: number; readonly y: num
 // The cell range layer over the slide in view (SlideView's overlay slot, beside the selection layer): with a table
 // selected alone, Shift+press on a cell selects the cells from the caret's cell (or the range's first cell) to it,
 // and dragging on extends it; a plain press clears the range and does what it always does (select, move, enter a
-// cell). It draws the range and announces its size.
+// cell). From the keyboard, Shift+arrow with the caret at the edge of an open cell's text selects from that cell on,
+// and Shift+arrows move the range's far end; a plain arrow clears the range and moves the caret, Escape clears it.
+// It draws the range and announces its size.
 export function PresentationTableRange({ editor, scale }: { editor: PresentationRibbonEditor; scale: number }) {
 	const { t } = useTranslation("preview")
 	const table = useSelectedTable(editor)
-	const open = useTextEditing(editor.text ?? NO_TEXT)?.shape
+	const controller = useTextEditing(editor.text ?? NO_TEXT)
 	const store = rangeStoreOf(editor.selection)
 	const ranged = useSyncExternalStore(store.subscribe, store.get)
 	const rootRef = useRef<HTMLDivElement | null>(null)
-	// What the listeners read: the latest table, caret cell and scale.
-	const latest = useRef({ table, open, scale })
+	// What the listeners read: the latest table, open cell's editor and scale.
+	const latest = useRef({ table, controller, scale })
 
 	useEffect(() => {
-		latest.current = { table, open, scale }
+		latest.current = { table, controller, scale }
 
 		// A range belongs to the table it was made in: another selection drops it (a render in flight after a command,
 		// with the table still the one selected, keeps it).
@@ -237,7 +293,8 @@ export function PresentationTableRange({ editor, scale }: { editor: Presentation
 		const extend = (cell: CellRange, anchor: CellRange): void => {
 			const selected = latest.current.table
 
-			if (selected !== undefined) store.set({ table: selected.target, anchor, range: rangeBetween(selected.shape, anchor, cell) })
+			if (selected !== undefined)
+				store.set({ table: selected.target, anchor, head: cell, range: rangeBetween(selected.shape, anchor, cell) })
 		}
 
 		const down = (event: PointerEvent): void => {
@@ -254,7 +311,7 @@ export function PresentationTableRange({ editor, scale }: { editor: Presentation
 			}
 
 			const held = store.get()
-			const caret = openArea(latest.current.open, selected)
+			const caret = openArea(latest.current.controller?.shape, selected)
 			const anchor = held !== undefined && sameShape(held.table, selected.target) ? held.anchor : (caret ?? cell)
 
 			// Shift+press inside the open cell selects its text.
@@ -290,12 +347,72 @@ export function PresentationTableRange({ editor, scale }: { editor: Presentation
 			dragging = undefined
 		}
 
+		// Before the open cell's text editor (inside the host) sees the key.
+		const key = (event: KeyboardEvent): void => {
+			const { table: selected, controller: editing } = latest.current
+
+			if (selected === undefined || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+
+			const held = store.get()
+			const mine = held !== undefined && sameShape(held.table, selected.target) ? held : undefined
+
+			if (event.key === "Escape") {
+				if (mine === undefined) return
+
+				event.preventDefault()
+				event.stopPropagation()
+				store.set(undefined)
+
+				return
+			}
+
+			if (STEPS[event.key] === undefined) return
+
+			if (!event.shiftKey) {
+				if (mine !== undefined) store.set(undefined)
+
+				return
+			}
+
+			const caret = mine === undefined ? openArea(editing?.shape, selected) : undefined
+
+			if (mine === undefined && (caret === undefined || editing === undefined || !atTextEdge(editing.state, event.key, editing.rtl)))
+				return
+
+			const anchor = mine?.anchor ?? caret
+			const from = mine?.head ?? caret
+
+			if (anchor === undefined || from === undefined) return
+
+			event.preventDefault()
+			event.stopPropagation()
+
+			// An a:tblPr@rtl table draws its first column on the right: the arrow moves to the visually adjacent cell.
+			const next = extendRange(
+				selected.shape,
+				anchor,
+				from,
+				selected.layer.table.flags.rtl === true ? mirrored(event.key) : event.key
+			)
+
+			if (next === undefined) return
+
+			// Back on the cell it started from: the caret's cell again, no range.
+			store.set(
+				next.head.row === anchor.row && next.head.col === anchor.col
+					? undefined
+					: { table: selected.target, anchor, head: next.head, range: next.range }
+			)
+		}
+
 		host.addEventListener("pointerdown", down, true)
 		host.addEventListener("pointermove", move, true)
 		host.addEventListener("pointerup", up, true)
 		host.addEventListener("pointercancel", up, true)
+		host.addEventListener("keydown", key, true)
 
 		return () => {
+			host.removeEventListener("keydown", key, true)
 			host.removeEventListener("pointerdown", down, true)
 			host.removeEventListener("pointermove", move, true)
 			host.removeEventListener("pointerup", up, true)

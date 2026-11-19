@@ -18,6 +18,7 @@ import {
 	SW_MSG_BUILD,
 	SW_MSG_ACTIVE_STREAMS,
 	SW_MSG_CLAIM,
+	SW_MSG_DUMP_LOGS,
 	SW_DOWNLOAD_PREFIX,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_REGISTER_DOWNLOAD,
@@ -993,6 +994,11 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 
 	if (type === SW_MSG_ACTIVE_STREAMS) {
 		port?.postMessage({ active: downloads.activeStreams })
+		return
+	}
+
+	if (type === SW_MSG_DUMP_LOGS) {
+		port?.postMessage(log.dump())
 		return
 	}
 

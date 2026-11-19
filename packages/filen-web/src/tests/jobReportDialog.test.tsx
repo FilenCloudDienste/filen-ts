@@ -23,6 +23,8 @@ import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
 import type { ExtractSkipped } from "@filen/shared"
 import { compressJob, createdDirectory, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
+import { COPY_CARD_FAILURES_SHOWN } from "@/features/transfers/components/copyJobToast.logic"
 
 const ENTRY = { archive: "a", index: 0 }
 const ERROR = { species: "plain" as const, message: "m", label: "l" }
@@ -203,6 +205,36 @@ describe("JobReportDialog", () => {
 		expect(dialog.textContent).toContain("Holiday.jpg")
 		expect(dialog.textContent).toContain("unknown-uuid")
 		expect(dialog.textContent).toContain("It changed while the job ran")
+	})
+
+	it("lists a copy's failures once there are more than its card shows, and none before", async () => {
+		mockListViewport()
+
+		const failures = Array.from({ length: COPY_CARD_FAILURES_SHOWN + 1 }, (_, index) => ({
+			sourceUuid: `s${String(index)}`,
+			sourcePath: `dir/file-${String(index)}.txt`,
+			destName: `file-${String(index)}.txt`,
+			error: ERROR
+		}))
+		const copy = { ...createCopyJob("job", { uuid: null, name: "Photos" }, 1), outcome: { status: "doneWithFailures" as const } }
+
+		seed({ ...copy, failures: failures.slice(0, COPY_CARD_FAILURES_SHOWN) })
+		render(<JobReportDialog />)
+		open()
+
+		expect(screen.queryByRole("dialog")).toBeNull()
+
+		act(() => {
+			useDriveJobsStore.getState().setReportJobId(null)
+		})
+		seed({ ...copy, failures })
+		open()
+
+		const dialog = await screen.findByRole("dialog")
+
+		expect(within(dialog).getByRole("button", { name: /Failed/ }).textContent).toContain(String(COPY_CARD_FAILURES_SHOWN + 1))
+		expect(dialog.textContent).toContain("dir/file-0.txt")
+		expect(within(dialog).queryByRole("button", { name: "Retry failed" })).toBeNull()
 	})
 
 	it("closes when its job leaves the store, forgetting its id", async () => {

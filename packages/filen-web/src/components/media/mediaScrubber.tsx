@@ -5,7 +5,7 @@ import { SliderVisual } from "@/components/media/sliderVisual"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 import { chapterAt, type StageChapter } from "@/components/media/video/stage.logic"
 import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
-import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, timeAtRatio } from "@/lib/media/scrubber.logic"
+import { chapterName, parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, timeAtRatio } from "@/lib/media/scrubber.logic"
 import { seekMedia, useMediaBuffered, useMediaCurrentTime, useMediaDuration } from "@/lib/media/useMediaState"
 
 interface MediaScrubberProps {
@@ -52,13 +52,6 @@ export function MediaScrubber({
 	const tipTime = tooltip === false ? null : (dragTime ?? hoverTime)
 	const tipChapter = tipTime === null || markers === undefined ? null : chapterAt(markers, tipTime)
 	const shownChapter = markers === undefined ? null : chapterAt(markers, shown)
-	const chapterName = (chapter: StageChapter): string => {
-		const number = (markers?.indexOf(chapter) ?? 0) + 1
-
-		return chapter.title !== null && chapter.title.length > 0
-			? t("mediaChapterTitled", { number, title: chapter.title })
-			: t("mediaChapter", { number })
-	}
 	// Ticks inside the rail only: one at either end would only thicken its edge.
 	const ticks =
 		markers === undefined || disabled
@@ -167,7 +160,7 @@ export function MediaScrubber({
 						: t("mediaTimeOfInChapter", {
 								current: formatSecondsToMediaClock(shown),
 								total: formatSecondsToMediaClock(Math.max(duration, 0)),
-								chapter: chapterName(shownChapter)
+								chapter: chapterName(markers ?? [], shownChapter, t)
 							})
 				}
 				className="peer pointer-events-none absolute inset-0 size-full appearance-none opacity-0"
@@ -193,7 +186,7 @@ export function MediaScrubber({
 					{formatSecondsToMediaClock(tipTime)}
 					{tipChapter === null ? null : (
 						<span className="ml-1 inline-block max-w-48 truncate align-bottom text-muted-foreground">
-							· {chapterName(tipChapter)}
+							· {chapterName(markers ?? [], tipChapter, t)}
 						</span>
 					)}
 				</div>

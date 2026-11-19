@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { compressReportSections, defaultCollapsedSections, extractReportSections, flattenReportSections } from "@filen/shared"
+import {
+	compressReportSections,
+	copyReportSections,
+	defaultCollapsedSections,
+	extractReportSections,
+	flattenReportSections
+} from "@filen/shared"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { i18n } from "@/lib/i18n"
 import {
 	keptReasonKey,
@@ -104,6 +111,26 @@ describe("report sections", () => {
 		const sections = compressReportSections(job, uuid => job.sourceNames[uuid])
 
 		expect(sections.flatMap(section => section.rows.map(row => row.path))).toEqual(["Holiday.jpg", "unknown"])
+	})
+
+	it("lists every failure of a copy, past the card's cap too, with its error", () => {
+		const error = { species: "plain" as const, message: "m", label: "l" }
+		const failures = Array.from({ length: 300 }, (_, index) => ({
+			sourceUuid: `s${String(index)}`,
+			sourcePath: `dir/${String(index)}.txt`,
+			destName: `${String(index)}.txt`,
+			error
+		}))
+		const sections = copyReportSections({ ...createCopyJob("job", { uuid: null, name: "Photos" }, 1), failures })
+		const lines = flattenReportSections(sections, defaultCollapsedSections(sections))
+
+		const [failed] = sections
+
+		expect(sections.map(section => section.kind)).toEqual(["failed"])
+		expect(failed?.omitted).toBe(0)
+		expect(lines.flatMap(line => (line.type === "row" ? [line.row.path] : []))).toEqual(failures.map(failure => failure.sourcePath))
+		expect(failed?.rows[299]?.note).toEqual({ type: "error", error })
+		expect(copyReportSections(createCopyJob("job", { uuid: null, name: "Photos" }, 1))).toEqual([])
 	})
 
 	it("reads an unknown skip reason as an unsupported entry", () => {

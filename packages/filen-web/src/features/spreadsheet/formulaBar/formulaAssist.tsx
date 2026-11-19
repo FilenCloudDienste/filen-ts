@@ -105,7 +105,11 @@ export function FormulaAssist({
 								part.argument !== undefined && part.argument === current && "font-semibold text-foreground underline"
 							)}
 						>
-							{part.text}
+							{part.id === undefined
+								? part.text
+								: part.optional === true
+									? `[${t(`previewSheetArg_${part.id}`)}]`
+									: t(`previewSheetArg_${part.id}`)}
 						</span>
 					))}
 				</div>

@@ -2,60 +2,39 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushSync } from "react-dom"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
 import { highlightedReferences } from "@filen/office/core/sheet"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
 import type { GridCanvas, GridPaintScene } from "@filen/office/react/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { REFERENCE_COLORS, referenceColors } from "@/features/spreadsheet/formulaBar/referenceColors"
 import { referenceLayer } from "@/features/spreadsheet/formulaBar/referenceLayer"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { preview } from "@/locales/en/preview"
+import { openViewer as openSheetViewer, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // A formula typed in the cell shows its references in the colours the formula bar shows them in and the grid outlines
 // them in, drawn under the editor's clear text and following its scroll; other entries stay plain.
 
-const { bytes, theme } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+const { theme } = vi.hoisted(() => {
 	const scheme: { current: "light" | "dark" } = { current: "light" }
 
-	return { bytes: held, theme: scheme }
+	return { theme: scheme }
 })
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: theme.current })
-}))
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>(), () => theme.current)
+)
 
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 registerAllActions()
 
 beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+	stubSheetCanvas()
 	theme.current = "light"
 	vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
 		return [
@@ -64,24 +43,11 @@ beforeEach(() => {
 	})
 })
 
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
-
 async function openViewer(): Promise<HTMLElement> {
-	bytes.current = await writeXlsx({ sheets: [{ name: "Data", rows: [["Amount"], [1], [2]] }] })
-
-	render(
-		<SheetViewer
-			item={file("refs.xlsx")}
-			documentKey="refs"
-			alt="refs.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	return await screen.findByRole("grid")
+	return await openSheetViewer(await writeXlsx({ sheets: [{ name: "Data", rows: [["Amount"], [1], [2]] }] }), {
+		name: "refs.xlsx",
+		documentKey: "refs"
+	})
 }
 
 // Opens the in-cell editor on the active cell and types `text` into it.

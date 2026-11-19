@@ -69,14 +69,45 @@ export async function kvEntriesJson<T>(prefix: string, schema: Type<T>): Promise
 	return out
 }
 
-// How long kvEntriesJsonInSlices decodes before it lets the thread go, and how many rows cross from the storage
-// worker per message.
-const DECODE_SLICE_MS = 4
+// How long a sliced reader decodes before it lets the thread go, and how many rows cross from the storage worker
+// per message.
+export const DECODE_SLICE_MS = 4
 const ENTRIES_PAGE_ROWS = 2000
+
+// The raw rows under a prefix, one page per message in key order, for a reader of a prefix that may hold tens of
+// thousands of rows. The next page is read only once the caller asks for it, so rows it deletes in between are
+// never returned. A leader on an older build without paging answers in one read.
+export async function* kvEntryPages(api: StorageHandle["api"], prefix: string): AsyncGenerator<[string, string][], void> {
+	let after: string | null = null
+
+	for (;;) {
+		let rows: [string, string][]
+
+		try {
+			rows = await api.kvEntriesPage(prefix, after, ENTRIES_PAGE_ROWS)
+		} catch (e) {
+			if (after !== null || !isMissingStorageMethod(e)) {
+				throw e
+			}
+
+			yield await api.kvEntries(prefix)
+
+			return
+		}
+
+		yield rows
+
+		if (rows.length < ENTRIES_PAGE_ROWS) {
+			return
+		}
+
+		after = rows.at(-1)?.[0] ?? null
+	}
+}
 
 // kvEntriesJson for a prefix that may hold tens of thousands of rows: read a page at a time and decoded a few
 // milliseconds at a time, so the thread it runs on keeps answering in between. With `map`, each row is reduced as
-// it is decoded and only what that returns is kept. A leader on an older build without paging answers in one read.
+// it is decoded and only what that returns is kept.
 export function kvEntriesJsonInSlices<T>(prefix: string, schema: Type<T>): Promise<[string, T][]>
 export function kvEntriesJsonInSlices<T, R>(prefix: string, schema: Type<T>, map: (key: string, value: T) => R): Promise<R[]>
 export async function kvEntriesJsonInSlices<T, R>(
@@ -86,24 +117,9 @@ export async function kvEntriesJsonInSlices<T, R>(
 ): Promise<(R | [string, T])[]> {
 	const { api } = await storage()
 	const out: (R | [string, T])[] = []
-	let after: string | null = null
 	let sliceStart = performance.now()
 
-	for (;;) {
-		let rows: [string, string][]
-		let last = false
-
-		try {
-			rows = await api.kvEntriesPage(prefix, after, ENTRIES_PAGE_ROWS)
-		} catch (e) {
-			if (after !== null || !isMissingStorageMethod(e)) {
-				throw e
-			}
-
-			rows = await api.kvEntries(prefix)
-			last = true
-		}
-
+	for await (const rows of kvEntryPages(api, prefix)) {
 		for (const [key, raw] of rows) {
 			const value = decodeKvValue(key, raw, schema)
 
@@ -117,13 +133,9 @@ export async function kvEntriesJsonInSlices<T, R>(
 				sliceStart = performance.now()
 			}
 		}
-
-		if (last || rows.length < ENTRIES_PAGE_ROWS) {
-			return out
-		}
-
-		after = rows.at(-1)?.[0] ?? null
 	}
+
+	return out
 }
 
 export async function kvSetJson(key: string, value: unknown): Promise<void> {

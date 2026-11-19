@@ -217,6 +217,95 @@ describe("presentation viewer session", () => {
 		expect(screen.getByRole("button", { name: "Present" }).hasAttribute("disabled")).toBe(true)
 	})
 
+	it("shows and hides the notes by one flag: the pane's chevron and the ribbon's notes button", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit(opened)
+
+		const ribbon = (): HTMLElement => {
+			const element = document.querySelector<HTMLElement>("[data-office-ribbon]")
+
+			if (element === null) throw new Error("no ribbon")
+
+			return element
+		}
+		const pane = (): HTMLElement => {
+			const element = document.querySelector<HTMLElement>("section.fo-notes")
+
+			if (element === null) throw new Error("no notes pane")
+
+			return element
+		}
+
+		await waitFor(() => {
+			expect(within(ribbon()).getByRole("button", { name: "Hide notes" })).toBeTruthy()
+		})
+		expect(within(ribbon()).getByRole("button", { name: "Hide notes" }).className).toContain("bg-accent")
+
+		// The pane's chevron collapses the notes: the ribbon's button is no longer drawn pressed and offers to show them.
+		fireEvent.click(within(pane()).getByRole("button", { name: "Hide notes" }))
+
+		const show = within(ribbon()).getByRole("button", { name: "Show notes" })
+
+		expect(show.className).not.toContain("bg-accent")
+		expect(within(pane()).getByRole("button", { name: "Show notes" }).getAttribute("aria-expanded")).toBe("false")
+
+		// The ribbon's button shows them expanded, not an empty strip.
+		fireEvent.click(show)
+
+		expect(within(pane()).getByRole("button", { name: "Hide notes" }).getAttribute("aria-expanded")).toBe("true")
+		expect(within(pane()).getByRole("separator", { name: "Resize notes" })).toBeTruthy()
+		expect(within(ribbon()).getByRole("button", { name: "Hide notes" }).className).toContain("bg-accent")
+
+		// And hides them as a collapsed strip the chevron opens again.
+		fireEvent.click(within(ribbon()).getByRole("button", { name: "Hide notes" }))
+		expect(within(pane()).getByRole("button", { name: "Show notes" }).getAttribute("aria-expanded")).toBe("false")
+		expect(within(ribbon()).getByRole("button", { name: "Show notes" })).toBeTruthy()
+	})
+
+	it("starts with the notes collapsed at a phone's width", async () => {
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn((query: string) => ({
+				matches: query === "(max-width: 39.99rem)",
+				addEventListener: () => undefined,
+				removeEventListener: () => undefined
+			}))
+		)
+
+		try {
+			render(
+				<PresentationViewer
+					item={deckItem()}
+					alt="deck.pptx"
+				/>
+			)
+			await waitFor(() => {
+				expect(engine.opens).toHaveLength(1)
+			})
+			await emit(opened)
+
+			const chevron = await waitFor(() => {
+				const pane = document.querySelector<HTMLElement>("section.fo-notes")
+
+				if (pane === null) throw new Error("no notes pane")
+
+				return within(pane).getByRole("button", { name: "Show notes" })
+			})
+
+			expect(chevron.getAttribute("aria-expanded")).toBe("false")
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	it("leaves arrow keys to an open menu", async () => {
 		render(
 			<PresentationViewer

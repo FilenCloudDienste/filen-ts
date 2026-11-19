@@ -140,10 +140,12 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 		// last step, a redaction the steps it undoes when the save does not happen); the drafts stay for a later save.
 		if (request === null) await current.commitDrafts()
 
+		// A tool's request is never turned into a detached copy (it would race the tool's own ending of its steps): the
+		// refusal settles the request, and the tool decides what follows.
 		if (job === null && current.beforeSave !== undefined) {
 			const choice = await current.beforeSave("version")
 
-			if (choice === "copy") void saveCopy(true)
+			if (choice === "copy" && request === null) void saveCopy(true)
 			if (choice !== "version") throw quietly()
 		}
 
@@ -152,8 +154,9 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 		if (head.kind === "changed") {
 			const answer = await current.askRemote()
 
-			// A copy of a placed, unsigned signature is never written: signing only saves a version.
-			if (answer === "copy" && job === null) void saveCopy(true)
+			// Only a Save the user asked for becomes a copy: a tool's request settles (a copy of a placed, unsigned
+			// signature is never written, a redaction's steps are the tool's to undo or keep).
+			if (answer === "copy" && request === null) void saveCopy(true)
 			if (answer !== "version") throw quietly()
 		}
 

@@ -230,6 +230,19 @@ describe("CanvasViewerShell", () => {
 		expect(screen.getByText("2 missing")).toBeTruthy()
 		expect(screen.getByText("Info")).toBeTruthy()
 	})
+
+	it("stacks the side panel under the canvas below the sm breakpoint", () => {
+		const { view } = shell(1, { sidePanel: <p>Info</p> })
+		const aside = screen.getByText("Info").closest("aside")
+		const root = view.container.firstElementChild
+
+		expect(root?.classList.contains("max-sm:flex-col")).toBe(true)
+		expect(aside?.classList.contains("w-72")).toBe(true)
+		expect(aside?.classList.contains("max-sm:w-full")).toBe(true)
+		expect(aside?.classList.contains("max-sm:max-h-[45%]")).toBe(true)
+		expect(aside?.classList.contains("max-sm:border-t")).toBe(true)
+		expect(aside?.classList.contains("max-sm:border-s-0")).toBe(true)
+	})
 })
 
 describe("backingSize", () => {

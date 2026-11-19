@@ -52,7 +52,6 @@ const KINDS: Readonly<Record<ConversionLossKind, true>> = {
 	chartDetail: true,
 	field: true,
 	smartArt: true,
-	threeD: true,
 	ink: true,
 	shape: true,
 	background: true,

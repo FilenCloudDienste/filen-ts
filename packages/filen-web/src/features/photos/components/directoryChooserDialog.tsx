@@ -172,6 +172,7 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 				<PickerListShell
 					listingQuery={listingQuery}
 					noResults={filter.trim().length > 0}
+					filteredOutMessage={items.length > 0 ? t("drive:driveTreeMenuNoDirectories") : undefined}
 					count={filteredDirectories.length}
 					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 					renderRow={index => {

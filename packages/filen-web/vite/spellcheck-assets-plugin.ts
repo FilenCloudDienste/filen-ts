@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process"
-import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
@@ -7,7 +6,7 @@ import { promisify } from "node:util"
 import { gzip as gzipCallback } from "node:zlib"
 import type { Plugin } from "vite"
 import { WASM_PATH, buildWasm } from "@filen/spellcheck/build-wasm"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
+import { COI_HEADERS, type PinnedFile, record, sha256, verifyPinned } from "./shared"
 
 // @filen/spellcheck's wasm engine, its dictionaries and their licence files, served from 'self'. The engine
 // is built from source (cargo, incremental) and the dictionaries from their pinned upstream sources into
@@ -35,21 +34,13 @@ const WASM_NAME = "filen_spellcheck.wasm"
 const NOTICES = "dictionaries/"
 const gzip = promisify(gzipCallback)
 
-interface ManifestFile {
-	file: string
-	bytes: number
-	sha256: string
-}
+type ManifestFile = PinnedFile
 
 interface ManifestDictionary {
 	id: string
 	aff: ManifestFile
 	dic: ManifestFile
 	notices: ManifestFile[]
-}
-
-function record(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {}
 }
 
 function manifestFile(value: unknown, where: string): ManifestFile {
@@ -101,10 +92,6 @@ function buildDictionaries(): Promise<void> {
 			else reject(new Error(`build-dictionaries exited with ${String(code)}`))
 		})
 	})
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex")
 }
 
 // A dictionary file's URL in a build: its name, the hash, ".bin".
@@ -211,13 +198,8 @@ export function spellcheckAssets(): Plugin {
 			await Promise.all(
 				[...files.values()].map(async file => {
 					const source = readFileSync(join(BUILT_DIR, file.file))
-					const digest = sha256(source)
 
-					if (digest !== file.sha256 || source.byteLength !== file.bytes) {
-						this.error(
-							`${file.file} is ${String(source.byteLength)} bytes with SHA-256 ${digest}; manifest.json says ${String(file.bytes)} bytes, ${file.sha256}`
-						)
-					}
+					verifyPinned(this, source, file)
 
 					this.emitFile({ type: "asset", fileName: hashedPath(file), source: await gzip(source, { level: 9 }) })
 				})

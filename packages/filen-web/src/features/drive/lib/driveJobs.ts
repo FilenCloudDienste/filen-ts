@@ -1,4 +1,4 @@
-import type { QuotaCheckDeps, StorageCounters } from "@filen/shared"
+import { copyMaxBytes, type QuotaCheckDeps, type StorageCounters } from "@filen/shared"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { BulkOutcome } from "@/lib/actions/bulk"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
@@ -9,8 +9,8 @@ import { addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
 import { isDriveJobRunning } from "@/features/drive/lib/driveJobs.logic"
 import { forgetJobPassword } from "@/features/drive/lib/jobSecrets"
-import { transferById, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import { transferById, useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { useDriveJobsStore, type JobsAccess } from "@/features/transfers/store/useDriveJobsStore"
 
 // What every drive job (copy, compress, extract) shares, whatever its kind.
 
@@ -34,6 +34,54 @@ export async function readStartingAccount(account: QuotaCheckDeps): Promise<Stor
 // Settles a job the user stopped as cancelled; never shown.
 export const STOPPED: ErrorDTO = { species: "sdk", kind: "Cancelled", message: "", label: "" }
 
+export type QuotaSettlement<R> = { report: R; maxBytes: number | undefined } | { error: ErrorDTO }
+
+export interface QuotaRetryRun<R> {
+	account: QuotaCheckDeps
+	// Whether the SDK refused the call up front for storage, before anything was written.
+	refusedUpFront: (report: R) => boolean
+	attempt: (maxBytes: number | undefined) => Promise<QuotaSettlement<R>>
+	cancelRequested: () => boolean
+	// Undoes what the refused call counted, before the second one.
+	beforeRetry?: () => void
+}
+
+// One call, and a second only if a fresh read frees enough to matter to the SDK's own check: a cached
+// figure can predate a delete made elsewhere.
+export async function attemptWithQuotaRetry<R extends { error?: ErrorDTO | undefined }>(
+	run: QuotaRetryRun<R>
+): Promise<QuotaSettlement<R>> {
+	const cachedFresh = run.account.isCachedFresh?.() ?? true
+	let maxBytes = copyMaxBytes(cachedFresh ? run.account.cached() : await readStartingAccount(run.account))
+	let settlement = await run.attempt(maxBytes)
+
+	if (
+		cachedFresh &&
+		"report" in settlement &&
+		run.refusedUpFront(settlement.report) &&
+		maxBytes !== undefined &&
+		!run.cancelRequested()
+	) {
+		const freshMaxBytes = copyMaxBytes(await readFreshAccount(run.account))
+
+		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !run.cancelRequested()) {
+			maxBytes = freshMaxBytes
+			run.beforeRetry?.()
+			settlement = await run.attempt(maxBytes)
+		} else if (freshMaxBytes !== undefined && freshMaxBytes <= maxBytes) {
+			// Never a figure the SDK's own check didn't refuse.
+			settlement = { report: settlement.report, maxBytes: freshMaxBytes }
+		}
+	}
+
+	// Refused before anything was written, by a job stopped meanwhile: it ends as the stop it was.
+	if ("report" in settlement && run.refusedUpFront(settlement.report) && run.cancelRequested()) {
+		settlement = { ...settlement, report: { ...settlement.report, error: STOPPED } }
+	}
+
+	return settlement
+}
+
 export interface TrashResult {
 	moved: number
 	failed: number
@@ -41,6 +89,66 @@ export interface TrashResult {
 
 export function addTrashOutcome(result: TrashResult | null, outcome: BulkOutcome<DriveItem>): TrashResult {
 	return { moved: (result?.moved ?? 0) + outcome.succeeded.length, failed: (result?.failed ?? 0) + outcome.failed.length }
+}
+
+type JobRow = Parameters<TransfersStore["add"]>[0]
+
+interface LateTrashJob {
+	created: DriveItem[]
+	cardVisible: boolean
+	trashResult: TrashResult | null
+}
+
+export interface LateTrashDeps<J extends LateTrashJob> {
+	id: string
+	jobs: JobsAccess<J>
+	transfers: Pick<TransfersStore, "add" | "remove">
+	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
+	// Every item handed to the trash: none goes twice.
+	trashing: Set<string>
+	isTrashPending: (job: J) => boolean
+	// The job as it settled, for one dropped from the store meanwhile.
+	settledJob: () => J | undefined
+	rowOf: (job: J) => JobRow
+	settleRow: (job: J) => void
+}
+
+// Trashes an item a job delivered after its stop asked for the trash.
+export function lateTrasher<J extends LateTrashJob>(deps: LateTrashDeps<J>): (item: DriveItem) => Promise<void> {
+	const { id, jobs, transfers, trashing } = deps
+
+	return async item => {
+		if (trashing.has(item.data.uuid)) {
+			return
+		}
+
+		trashing.add(item.data.uuid)
+
+		const outcome = await deps.trash([item])
+		const current = jobs.get(id)
+
+		// While the stop's own batch is still moving, that batch settles the row, this one's result included.
+		if (outcome.failed.length === 0 || (current !== undefined && deps.isTrashPending(current))) {
+			jobs.update(id, job => ({ ...job, trashResult: addTrashOutcome(job.trashResult, outcome) }))
+
+			return
+		}
+
+		// Left at the destination: a job dropped meanwhile comes back, with the row that says so.
+		const settled = deps.settledJob()
+		const base = jobs.get(id) ?? (settled === undefined ? undefined : { ...settled, cardVisible: false })
+
+		if (base === undefined) {
+			return
+		}
+
+		const job: J = { ...base, created: [], trashResult: addTrashOutcome(base.trashResult, outcome) }
+
+		jobs.put(job)
+		transfers.remove(id)
+		transfers.add(deps.rowOf(job))
+		deps.settleRow(job)
+	}
 }
 
 // The destination listing is usually the one on screen; one nobody has read is left to its first read.

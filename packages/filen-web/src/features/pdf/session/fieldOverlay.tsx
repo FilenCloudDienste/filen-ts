@@ -83,14 +83,15 @@ export function PdfFieldOverlay({ document, page, viewport, swap, snapshot, star
 		}
 	}, [document, page, engine])
 
-	// The editor's widgets of this page, read once it has the document.
+	// The editor's widgets of this page, read once it has the document; asked again on every snapshot while shown (no
+	// read for a held page), so an undo or redo names this page and its controls never go without widgets.
 	useEffect(() => {
-		if (engine && snapshot !== null && widgets === null) {
+		if (engine && snapshot !== null) {
 			swap.withSession(session => {
 				session.want([page - 1])
 			})
 		}
-	}, [engine, snapshot, widgets, swap, page])
+	}, [engine, snapshot, swap, page])
 
 	if (fields === null || fields.length === 0) return null
 

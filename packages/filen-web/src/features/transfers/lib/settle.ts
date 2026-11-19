@@ -7,9 +7,10 @@ import type { TransfersStore } from "@/features/transfers/store/useTransfersStor
 // browser may keep the partial file for its own retry, where the app cannot delete it.
 export type DownloadOutcome = { status: "success" } | { status: "error"; dto: ErrorDTO; browserManaged?: true }
 
-export function toastDownloadFailed(outcome: { browserManaged?: true }): void {
+// One item's download (a file, an archive entry, or one zip of a selection) failed; `name` is what the start toast named.
+export function toastDownloadFailed(name: string, outcome: { browserManaged?: true }): void {
 	toast.error(
-		i18n.t("transfers:transfersDownloadSummaryCompleteWithFailures", { count: 0, failed: 1 }),
+		i18n.t("transfers:transfersDownloadFailed", { name }),
 		outcome.browserManaged === true ? { description: i18n.t("transfers:transfersBrowserKeptPartialHint") } : undefined
 	)
 }

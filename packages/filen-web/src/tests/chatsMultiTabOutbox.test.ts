@@ -7,92 +7,33 @@ import type { Chat } from "@filen/sdk-rs"
 // follower routing, leader ingest, reconcile-on-broadcast, and the leadership-change replay. The cross-tab
 // CHANNEL + db-lock signal are mocked at the transport seam (sync.attachTransport) and by driving role methods
 // directly — no real BroadcastChannel/Web Locks.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
-	sendChatMessage: vi.fn<(chat: Chat, message: string, replyTo?: unknown) => Promise<Chat>>(),
-	markChatRead: vi.fn(() => Promise.resolve()),
-	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
-	getChat: vi.fn((uuid: string) =>
-		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
-	)
-}))
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsSdkMocks()
+)
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
-const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
-	const store = new Map<string, unknown>()
-
-	return {
-		kvStore: store,
-		kvGetJson: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
-		kvSetJson: vi.fn((key: string, value: unknown) => {
-			store.set(key, value)
-
-			return Promise.resolve()
-		}),
-		kvDelete: vi.fn((key: string) => {
-			store.delete(key)
-
-			return Promise.resolve()
-		})
-	}
-})
+const { kvStore, kvGetJson, kvSetJson, kvDelete } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsKvMocks()
+)
 
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { Sync } from "@/features/chats/lib/sync"
+import { reconcileChatFollower, type RemoteChatEnqueue } from "@/features/chats/lib/sync.logic"
+import { useChatsInflightStore, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import {
-	buildOptimisticMessage,
-	reconcileChatFollower,
-	type OptimisticSender,
-	type RemoteChatEnqueue
-} from "@/features/chats/lib/sync.logic"
-import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-
-const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
-
-function makeChat(uuid: string): Chat {
-	return {
-		uuid: uuid as Chat["uuid"],
-		ownerId: 7n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
-}
-
-function optimistic(chatUuid: string, inflightId: string, sentTimestamp: bigint): ChatMessageWithInflightId {
-	return buildOptimisticMessage({
-		chatUuid: chatUuid as ChatMessageWithInflightId["chat"],
-		inflightId: inflightId as ChatMessageWithInflightId["uuid"],
-		content: "hi",
-		replyTo: undefined,
-		sentTimestamp,
-		sender: SENDER
-	})
-}
-
-function group(chatUuid: string, ...messages: ChatMessageWithInflightId[]): InflightChatMessages {
-	return { [chatUuid]: { chat: makeChat(chatUuid), messages } }
-}
-
-// Inferred return type keeps each field a precisely-typed Mock<Sig> — assignable to ChatOutboxTransport AND
-// carrying .mock/.mockClear. An explicit mapped-type annotation collapses them to a bare Mock, no longer
-// assignable to the method signatures, so it is deliberately left to inference.
-function mockTransport() {
-	return {
-		sendEnqueue: vi.fn<(msg: RemoteChatEnqueue) => void>(),
-		sendExecuteNow: vi.fn<() => void>(),
-		requestState: vi.fn<() => void>(),
-		broadcastState: vi.fn<(state: InflightChatMessages) => void>(),
-		broadcastLeaderHello: vi.fn<() => void>(),
-		broadcastPushed: vi.fn<(id: string, hash: string) => void>(),
-		broadcastAnswered: vi.fn<(id: string) => void>(),
-		close: vi.fn<() => void>()
-	}
-}
+	SENDER,
+	confirmedMessage,
+	getStore,
+	group,
+	inflightIds,
+	mockTransport,
+	optimistic,
+	outboxChat,
+	settle
+} from "@/tests/support/chatsOutbox"
 
 // Throw-helper (project lint forbids both bare null-strip `as` and `!`): narrow the first forwarded send
 // without an assertion.
@@ -106,20 +47,8 @@ function firstEnqueue(transport: ReturnType<typeof mockTransport>): RemoteChatEn
 	return msg
 }
 
-function getStore(): InflightChatMessages {
-	return useChatsInflightStore.getState().inflightMessages
-}
-
-function inflightIds(chatUuid: string): string[] {
-	return (getStore()[chatUuid]?.messages ?? []).map(m => m.inflightId)
-}
-
 function pushedChatUuids(): string[] {
 	return sendChatMessage.mock.calls.map(call => call[0].uuid).sort()
-}
-
-function tick(): Promise<void> {
-	return new Promise(resolve => setTimeout(resolve, 15))
 }
 
 beforeEach(() => {
@@ -130,18 +59,7 @@ beforeEach(() => {
 	sendChatMessage.mockImplementation((chat: Chat) =>
 		Promise.resolve({
 			...chat,
-			lastMessage: {
-				uuid: `srv-${chat.uuid}` as ChatMessageWithInflightId["uuid"],
-				chat: chat.uuid,
-				senderId: 7,
-				senderEmail: "me@filen.io",
-				senderNickName: "Me",
-				message: "hi",
-				embedDisabled: false,
-				edited: false,
-				editedTimestamp: 0n,
-				sentTimestamp: 1n
-			}
+			lastMessage: confirmedMessage(chat.uuid, `srv-${chat.uuid}`)
 		})
 	)
 })
@@ -214,7 +132,7 @@ describe("follower send — optimistic local apply + forward, no disk", () => {
 		s.attachTransport(transport)
 		s.startAsFollower()
 
-		const chat = makeChat("chat-a-a-a")
+		const chat = outboxChat("chat-a-a-a")
 		const flushed = await s.enqueue({ chat, content: "hi", sender: SENDER })
 
 		// Optimistic: the store shows it immediately (composeMessageList re-injects it as a pending bubble).
@@ -264,7 +182,7 @@ describe("follower reconcile-on-broadcast — pending bubble clears when the lea
 		s.attachTransport(transport)
 		s.startAsFollower()
 
-		const chat = makeChat("chat-a-a-a")
+		const chat = outboxChat("chat-a-a-a")
 
 		await s.enqueue({ chat, content: "hi", sender: SENDER })
 		const forwarded = firstEnqueue(transport)
@@ -287,8 +205,8 @@ describe("follower re-send on takeover announcement", () => {
 		s.attachTransport(transport)
 		s.startAsFollower()
 
-		await s.enqueue({ chat: makeChat("chat-a-a-a"), content: "one", sender: SENDER })
-		await s.enqueue({ chat: makeChat("chat-b-b-b"), content: "two", sender: SENDER })
+		await s.enqueue({ chat: outboxChat("chat-a-a-a"), content: "one", sender: SENDER })
+		await s.enqueue({ chat: outboxChat("chat-b-b-b"), content: "two", sender: SENDER })
 		transport.sendEnqueue.mockClear()
 
 		// The old leader died before confirming; a new leader announces itself.
@@ -310,7 +228,7 @@ describe("leader ingest — union a forwarded send, persist, broadcast, push", (
 
 		s.attachTransport(transport)
 		s.start() // leader replay-on-launch (empty disk) resolves init
-		await tick()
+		await settle()
 		transport.broadcastState.mockClear()
 
 		return { s, transport }
@@ -318,10 +236,10 @@ describe("leader ingest — union a forwarded send, persist, broadcast, push", (
 
 	it("ingests a forwarded send, persists it, then broadcasts the new queue", async () => {
 		const { s, transport } = await startedLeader()
-		const chat = makeChat("chat-a-a-a")
+		const chat = outboxChat("chat-a-a-a")
 
 		s.ingestRemoteEnqueue({ chat, message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
-		await tick()
+		await settle()
 
 		// The send was pushed to the server, persisted along the way, and the queue broadcast to followers.
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
@@ -334,12 +252,12 @@ describe("leader ingest — union a forwarded send, persist, broadcast, push", (
 		// Never resolve the send so the entry stays queued and the union is observable.
 		sendChatMessage.mockImplementation(() => new Promise(() => undefined))
 
-		const chat = makeChat("chat-a-a-a")
+		const chat = outboxChat("chat-a-a-a")
 		const message = optimistic("chat-a-a-a", "inf-dup-1-1", 500n)
 
 		s.ingestRemoteEnqueue({ chat, message })
 		s.ingestRemoteEnqueue({ chat, message })
-		await tick()
+		await settle()
 
 		expect(inflightIds("chat-a-a-a")).toEqual(["inf-dup-1-1"])
 	})
@@ -356,12 +274,12 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 		s.startAsFollower()
 
 		// Follower sent a message; it lives in the store optimistically. The dead leader never persisted it.
-		await s.enqueue({ chat: makeChat("chat-z-z-z"), content: "z", sender: SENDER })
+		await s.enqueue({ chat: outboxChat("chat-z-z-z"), content: "z", sender: SENDER })
 		expect(kvStore.get("inflightChatMessages")).toBeUndefined()
 
 		// The leader died → this follower is promoted.
 		s.promoteToLeader()
-		await tick()
+		await settle()
 
 		// The message reaches the server without any user action, and this tab announced its takeover.
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
@@ -378,13 +296,13 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 
 		// The dead leader persisted D to disk; the follower still holds L optimistically.
 		kvStore.set("inflightChatMessages", group("chat-d-d-d", optimistic("chat-d-d-d", "inf-d-1-1", 1n)))
-		await s.enqueue({ chat: makeChat("chat-l-l-l"), content: "l", sender: SENDER })
+		await s.enqueue({ chat: outboxChat("chat-l-l-l"), content: "l", sender: SENDER })
 
 		// Both chats must survive the restore prune.
-		listChats.mockResolvedValue([makeChat("chat-d-d-d"), makeChat("chat-l-l-l")])
+		listChats.mockResolvedValue([outboxChat("chat-d-d-d"), outboxChat("chat-l-l-l")])
 
 		s.promoteToLeader()
-		await tick()
+		await settle()
 
 		expect(pushedChatUuids()).toEqual(["chat-d-d-d", "chat-l-l-l"])
 	})
@@ -409,11 +327,11 @@ describe("promoteToLeader — the dead leader's mirrored queue is never re-sent"
 		)
 		kvStore.set("inflightChatMessages", group("chat-a-a-a", optimistic("chat-a-a-a", "inf-3-3-3", 3n)))
 		// This tab's own send, never confirmed by the dead leader.
-		await s.enqueue({ chat: makeChat("chat-b-b-b"), content: "b", sender: SENDER })
-		listChats.mockResolvedValue([makeChat("chat-a-a-a"), makeChat("chat-b-b-b")])
+		await s.enqueue({ chat: outboxChat("chat-b-b-b"), content: "b", sender: SENDER })
+		listChats.mockResolvedValue([outboxChat("chat-a-a-a"), outboxChat("chat-b-b-b")])
 
 		s.promoteToLeader()
-		await tick()
+		await settle()
 
 		expect(pushedChatUuids()).toEqual(["chat-a-a-a", "chat-b-b-b"])
 		expect(getStore()).toEqual({})
@@ -427,7 +345,7 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 
 		s.attachTransport(transport)
 		s.start()
-		await tick()
+		await settle()
 		transport.broadcastState.mockClear()
 
 		return { s, transport }
@@ -449,9 +367,9 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 			return { ...chat, lastMessage: { ...optimistic(chat.uuid, "srv-2-2-2", 2n), uuid: "srv-2-2-2" } }
 		})
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-2-2-2", 2n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-2-2-2", 2n) })
+		await settle()
 
 		// The second send is still in flight, and a follower already knows the first one committed.
 		const latest = transport.broadcastState.mock.calls.at(-1)?.[0] ?? {}
@@ -459,7 +377,7 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 		expect(inflightIdsOf(latest, "chat-a-a-a")).toEqual(["inf-2-2-2"])
 
 		releaseSecond()
-		await tick()
+		await settle()
 
 		expect(transport.broadcastState.mock.calls.at(-1)?.[0]).toEqual({})
 	})
@@ -476,15 +394,15 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 			})
 		})
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		await settle()
 
 		// Committed and dequeued while the ingest write is still pending.
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
 		expect(inflightIds("chat-a-a-a")).toEqual([])
 
 		releaseWrite()
-		await tick()
+		await settle()
 
 		const states = transport.broadcastState.mock.calls.map(call => inflightIdsOf(call[0], "chat-a-a-a"))
 
@@ -506,15 +424,15 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 			})
 		})
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
 		// A follower's state request, answered while the write is pending.
 		s.broadcastState()
-		await tick()
+		await settle()
 
 		expect(transport.broadcastState.mock.calls.map(call => inflightIdsOf(call[0], "chat-a-a-a"))).toEqual([[]])
 
 		releaseWrite()
-		await tick()
+		await settle()
 
 		expect(inflightIdsOf(transport.broadcastState.mock.calls.at(-1)?.[0] ?? {}, "chat-a-a-a")).toEqual(["inf-1-1-1"])
 	})
@@ -526,10 +444,10 @@ describe("leader broadcasts — followers learn each commit as it lands", () => 
 		s.attachTransport(transport)
 		s.startAsFollower()
 		onlineManager.setOnline(false)
-		await s.enqueue({ chat: makeChat("chat-a-a-a"), content: "a", sender: SENDER })
+		await s.enqueue({ chat: outboxChat("chat-a-a-a"), content: "a", sender: SENDER })
 
 		s.promoteToLeader()
-		await tick()
+		await settle()
 
 		const ownId = inflightIds("chat-a-a-a")
 

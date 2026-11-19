@@ -85,7 +85,7 @@ function AddTrackRow({ item, alreadyAdded, selected, disabled, alreadyAddedLabel
 // disabled with an inline hint instead of being hidden — addTracksToPlaylistAction's own dedup against
 // the freshest copy would silently no-op it anyway, so this is purely a click-saving affordance.
 export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracksDialogProps) {
-	const { t } = useTranslation("audio")
+	const { t } = useTranslation(["audio", "drive"])
 	const { pathStack, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [selected, setSelected] = useState<Map<string, DriveItem>>(new Map())
@@ -224,6 +224,8 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 				) : null}
 				<PickerListShell
 					listingQuery={listingQuery}
+					noResults={filter.trim().length > 0}
+					filteredOutMessage={rows.length > 0 ? t("drive:drivePickerNoMatchingFiles") : undefined}
 					count={filtered.length}
 					rowKey={index => filtered[index]?.data.uuid ?? String(index)}
 					renderRow={index => {

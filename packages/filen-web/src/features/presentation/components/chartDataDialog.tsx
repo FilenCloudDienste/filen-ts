@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { chartWorkbookOp, type ShapeRef } from "@filen/office/core/presentation"
-import { createSheetGrid, SheetGrid, useSheetGrid, type SheetGridModel } from "@filen/office/react/sheet"
+import { createSheetGrid, editingChanged, SheetGrid, useSheetGrid, type SheetGridModel } from "@filen/office/react/sheet"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
@@ -72,6 +73,14 @@ async function openChartData(
 	return { handle: { ...measured, events }, converted: workbook.kind === "xls" }
 }
 
+// Whether the grid holds anything Apply would hand the chart: an edit made, or an open cell entry changed. Read at
+// dismissal, never subscribed to.
+function edited(model: SheetGridModel): boolean {
+	const snapshot = model.getSnapshot()
+
+	return snapshot.state.dirty || (snapshot.editing !== null && editingChanged(snapshot.editing))
+}
+
 function ChartDataGrid({ model }: { model: SheetGridModel }) {
 	const { t } = useTranslation("preview")
 	const { theme } = useTheme()
@@ -95,6 +104,9 @@ export function ChartDataDialog({ editor, target, onClose }: { editor: Presentat
 	const { t } = useTranslation(["preview", "common"])
 	const [state, setState] = useState<Opened>({ status: "loading" })
 	const [applying, setApplying] = useState(false)
+	const [discarding, setDiscarding] = useState(false)
+	// Bumped by Retry: opens the chart's data again after it failed.
+	const [attempt, setAttempt] = useState(0)
 
 	useEffect(() => {
 		const leaving = new AbortController()
@@ -123,7 +135,7 @@ export function ChartDataDialog({ editor, target, onClose }: { editor: Presentat
 			leaving.abort()
 			handle?.session.close()
 		}
-	}, [editor, target])
+	}, [editor, target, attempt])
 
 	async function apply(): Promise<void> {
 		if (state.status !== "ready" || applying) return
@@ -157,8 +169,26 @@ export function ChartDataDialog({ editor, target, onClose }: { editor: Presentat
 	return (
 		<Dialog
 			open
-			onOpenChange={open => {
-				if (!open && !applying) onClose()
+			// Only Escape, Cancel and the close button dismiss: a stray click beside the grid loses no typed data.
+			disablePointerDismissal
+			onOpenChange={(open, details) => {
+				if (open) return
+
+				if (applying) {
+					details.cancel()
+
+					return
+				}
+
+				// Escape or the close button with edits made asks first; Cancel is explicit and closes at once.
+				if (state.status === "ready" && edited(state.model)) {
+					details.cancel()
+					setDiscarding(true)
+
+					return
+				}
+
+				onClose()
 			}}
 		>
 			<DialogContent
@@ -187,7 +217,19 @@ export function ChartDataDialog({ editor, target, onClose }: { editor: Presentat
 									{t("previewPptxChartDataLoading")}
 								</>
 							) : (
-								t("previewPptxChartDataFailed")
+								<>
+									{t("previewPptxChartDataFailed")}
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => {
+											setState({ status: "loading" })
+											setAttempt(previous => previous + 1)
+										}}
+									>
+										{t("common:tryAgain")}
+									</Button>
+								</>
 							)}
 						</div>
 					)}
@@ -211,6 +253,20 @@ export function ChartDataDialog({ editor, target, onClose }: { editor: Presentat
 					</Button>
 				</DialogFooter>
 			</DialogContent>
+			<ConfirmDialog
+				open={discarding}
+				pending={false}
+				destructive
+				title={t("previewPptxChartDataDiscardTitle")}
+				body={t("previewPptxChartDataDiscardBody")}
+				confirmLabel={t("previewDiscardAction")}
+				cancelLabel={t("common:cancel")}
+				onOpenChange={setDiscarding}
+				onConfirm={() => {
+					setDiscarding(false)
+					onClose()
+				}}
+			/>
 		</Dialog>
 	)
 }

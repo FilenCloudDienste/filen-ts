@@ -17,7 +17,7 @@ import { isOwnMessage, isSenderBlocked } from "@/features/chats/lib/sender"
 
 export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
 
-// "direct" (reply/copy/edit/retry/remove/disableEmbed — no confirm) vs "dialog" (delete — confirm
+// "direct" (reply/copy/edit/retry/remove/disableEmbed — no confirm) vs "dialog" (delete, block — confirm
 // first). reply/edit set composer state; retry/remove act on a failed optimistic entry; delete acts on
 // a committed message; disableEmbed is the sender's own embed opt-out (confirm-free, mirrors delete's
 // online-only posture minus the confirm step — see messageActions.ts's disableMessageEmbed).
@@ -38,7 +38,7 @@ export type MessageActionDescriptor =
 	| (MessageActionDescriptorShared & { id: "retry"; run: "direct" })
 	| (MessageActionDescriptorShared & { id: "remove"; run: "direct"; destructive: true })
 	| (MessageActionDescriptorShared & { id: "disableEmbed"; run: "direct" })
-	| (MessageActionDescriptorShared & { id: "block"; run: "direct"; destructive: true })
+	| (MessageActionDescriptorShared & { id: "block"; run: "dialog"; destructive: true })
 
 const REPLY: MessageActionDescriptor = { id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" }
 const COPY: MessageActionDescriptor = { id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" }
@@ -68,7 +68,7 @@ const BLOCK: MessageActionDescriptor = {
 	id: "block",
 	labelKey: "chatMessageActionBlock",
 	icon: UserXIcon,
-	run: "direct",
+	run: "dialog",
 	destructive: true
 }
 

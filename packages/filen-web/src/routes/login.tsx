@@ -9,8 +9,9 @@ import { i18n } from "@/lib/i18n"
 import { readSessionEndedNote } from "@/lib/sessionEndedNote"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 
-// Unauthed page: a live session bounces straight to /drive. The shared guard awaits boot — which
-// includes session resume — before reading auth state, so the check is race-free.
+// Unauthed page: a live session bounces straight to the page a signed-out visit asked for, else the start screen.
+// The shared guard awaits boot — which includes session resume — before reading auth state, so the
+// check is race-free.
 export const Route = createFileRoute("/login")({
 	head: routeHead({ title: () => [i18n.t("auth:loginDocumentTitle")] }),
 	beforeLoad: redirectIfAuthed,

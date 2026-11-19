@@ -1,5 +1,6 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -238,7 +239,14 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						open
 						pending={dialogPending}
 						title={t("driveDeletePermanentlyConfirmTitle")}
-						body={t("driveDeletePermanentlyConfirmBody", { count: activeDialog.items.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.items.length,
+								"driveDeletePermanentlyConfirmBodySingle",
+								"driveDeletePermanentlyConfirmBody"
+							),
+							{ count: activeDialog.items.length }
+						)}
 						confirmLabel={t("driveActionDeletePermanently")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -258,7 +266,14 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						open
 						pending={dialogPending}
 						title={t("driveRestoreSelectedConfirmTitle")}
-						body={t("driveRestoreSelectedConfirmBody", { count: activeDialog.items.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.items.length,
+								"driveRestoreSelectedConfirmBodySingle",
+								"driveRestoreSelectedConfirmBody"
+							),
+							{ count: activeDialog.items.length }
+						)}
 						confirmLabel={t("driveActionRestore")}
 						cancelLabel={t("common:cancel")}
 						onOpenChange={open => {
@@ -346,7 +361,9 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						open
 						pending={dialogPending}
 						title={t("driveUnshareConfirmTitle")}
-						body={t("driveUnshareConfirmBody", { count: activeDialog.items.length })}
+						body={t(singleOrCountKey(activeDialog.items.length, "driveUnshareConfirmBodySingle", "driveUnshareConfirmBody"), {
+							count: activeDialog.items.length
+						})}
 						confirmLabel={t("driveActionUnshare")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -366,7 +383,14 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						open
 						pending={dialogPending}
 						title={t("driveLinkDisableSelectedConfirmTitle")}
-						body={t("driveLinkDisableSelectedConfirmBody", { count: activeDialog.items.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.items.length,
+								"driveLinkDisableSelectedConfirmBodySingle",
+								"driveLinkDisableSelectedConfirmBody"
+							),
+							{ count: activeDialog.items.length }
+						)}
 						confirmLabel={t("driveLinkDisableAction")}
 						cancelLabel={t("common:cancel")}
 						destructive

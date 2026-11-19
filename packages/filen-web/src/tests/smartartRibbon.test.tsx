@@ -38,11 +38,11 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@filen/office/core/smartart", async importOriginal => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	SMARTART_LAYOUTS: [
-		{ uniqueId: "urn:test:row", category: "list", nameKey: "previewPptxSmartArtLayoutRow", sample: [] },
+		{ uniqueId: "urn:test:row", category: "list", nameKey: "previewPptxSmartArtLayoutBasicList", sample: [] },
 		{
 			uniqueId: "urn:test:column",
 			category: "process",
-			nameKey: "previewPptxSmartArtLayoutColumn",
+			nameKey: "previewPptxSmartArtLayoutBasicProcess",
 			sample: [
 				{ level: 1, text: "A" },
 				{ level: 2, text: "a" },
@@ -50,8 +50,8 @@ vi.mock("@filen/office/core/smartart", async importOriginal => ({
 			]
 		}
 	],
-	SMARTART_STYLES: [{ uniqueId: "urn:test:flat", nameKey: "previewPptxSmartArtStyleFlat" }],
-	SMARTART_COLORS: [{ uniqueId: "urn:test:accent", nameKey: "previewPptxSmartArtColorsAccent" }]
+	SMARTART_STYLES: [{ uniqueId: "urn:test:flat", nameKey: "previewPptxSmartArtStyleSimple" }],
+	SMARTART_COLORS: [{ uniqueId: "urn:test:accent", nameKey: "previewPptxSmartArtColorsAccent1" }]
 }))
 
 i18n.addResourceBundle("en", "preview", previewPptxSmartArt, true, false)
@@ -274,7 +274,7 @@ describe("Insert ▸ SmartArt", () => {
 		const dialog = await screen.findByRole("dialog", { name: "Choose a SmartArt graphic" })
 		const tiles = within(within(dialog).getByRole("group", { name: "Layouts" })).getAllByRole("button")
 
-		expect(tiles.map(tile => tile.textContent)).toEqual(["Row of blocks", "Column of blocks"])
+		expect(tiles.map(tile => tile.textContent)).toEqual(["Basic list", "Basic process"])
 		await waitFor(() => {
 			expect(session.smartArtPreview).toHaveBeenCalledTimes(2)
 		})
@@ -444,7 +444,7 @@ describe("SmartArt Design tab", () => {
 
 		const items = await screen.findAllByRole("menuitemradio")
 
-		expect(items.map(item => item.textContent)).toEqual(["Row of blocks", "Column of blocks", "Basic block list"])
+		expect(items.map(item => item.textContent)).toEqual(["Basic list", "Basic process", "Basic block list"])
 		expect(items[2]?.getAttribute("aria-checked")).toBe("true")
 
 		await act(async () => {
@@ -466,7 +466,7 @@ describe("SmartArt Design tab", () => {
 
 		const items = await screen.findAllByRole("menuitemradio")
 
-		expect(items.map(item => item.textContent)).toEqual(["Accent color", "Untitled (urn:deck:colors)"])
+		expect(items.map(item => item.textContent)).toEqual(["Accent 1", "Untitled (urn:deck:colors)"])
 		await act(async () => {
 			fireEvent.click(at(items, 1))
 			await Promise.resolve()

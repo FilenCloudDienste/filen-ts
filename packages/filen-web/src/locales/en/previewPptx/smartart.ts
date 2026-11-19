@@ -42,14 +42,6 @@ export const previewPptxSmartArt = {
 	previewPptxSmartArtCategoryPicture: "Picture",
 	/** Presentation editor — the name a newly inserted SmartArt graphic gets (shown in the file's selection pane) */
 	previewPptxSmartArtDefaultName: "Diagram",
-	/** Presentation editor — our own SmartArt layout: blocks side by side in a row */
-	previewPptxSmartArtLayoutRow: "Row of blocks",
-	/** Presentation editor — our own SmartArt layout: blocks stacked in a column */
-	previewPptxSmartArtLayoutColumn: "Column of blocks",
-	/** Presentation editor — our own SmartArt style: shapes without effects */
-	previewPptxSmartArtStyleFlat: "Flat",
-	/** Presentation editor — our own SmartArt colors: the theme's accent color */
-	previewPptxSmartArtColorsAccent: "Accent color",
 	/** Presentation editor — SmartArt menus: heading over the layouts, styles or colors that the open file brings with it */
 	previewPptxSmartArtFromFile: "In this file",
 	/** Presentation editor — SmartArt menus: a definition the file brings without a name; {{id}} is its identifier */

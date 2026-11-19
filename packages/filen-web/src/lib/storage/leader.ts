@@ -84,7 +84,8 @@ const STORAGE_METHODS = [
 	"kvDeleteIfAt",
 	"kvPrefixBytes",
 	"vacuum",
-	"wipe"
+	"wipe",
+	"dumpLogs"
 ] as const satisfies readonly (keyof StorageApi)[]
 
 const RPC_TIMEOUT_MS = 5000

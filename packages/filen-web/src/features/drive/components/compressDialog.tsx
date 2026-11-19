@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { ChevronDownIcon } from "lucide-react"
 import type { AesStrength } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
-import type { ArchiveKey } from "@/lib/i18n"
+import { singleOrCountKey, type ArchiveKey } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { log } from "@/lib/log"
 import { noDiskPersister } from "@/queries/persist"
@@ -651,8 +651,15 @@ function CompressDialogForm({ subject, heading, prefs, infos, budget, onClose, o
 				title={t("archiveDeleteConfirmTitle")}
 				body={
 					encrypted
-						? `${t("archiveDeleteConfirmBodyCompress", { count: facts.itemCount })} ${t("archiveDeleteConfirmPasswordNote")}`
-						: t("archiveDeleteConfirmBodyCompress", { count: facts.itemCount })
+						? `${t(singleOrCountKey(facts.itemCount, "archiveDeleteConfirmBodyCompressSingle", "archiveDeleteConfirmBodyCompress"), { count: facts.itemCount })} ${t("archiveDeleteConfirmPasswordNote")}`
+						: t(
+								singleOrCountKey(
+									facts.itemCount,
+									"archiveDeleteConfirmBodyCompressSingle",
+									"archiveDeleteConfirmBodyCompress"
+								),
+								{ count: facts.itemCount }
+							)
 				}
 				confirmLabel={t("archiveDeleteConfirmAction")}
 				cancelLabel={t("common:cancel")}

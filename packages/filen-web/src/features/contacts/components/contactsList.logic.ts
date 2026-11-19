@@ -1,4 +1,4 @@
-import { fastLocaleCompare, contactDisplayName, type ContactLike } from "@filen/shared"
+import { fastLocaleCompare, contactDisplayName, matchesNameSearch, nameSearchKey, type ContactLike } from "@filen/shared"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactsKey } from "@/lib/i18n"
 
@@ -39,20 +39,20 @@ export interface BuildContactSectionsInput {
 	search: string
 }
 
-// The one email-or-display-name rule; `searchNormalized` is already trimmed and lowercased.
-export function matchesContactSearch(item: ContactLike, searchNormalized: string): boolean {
-	if (searchNormalized.length === 0) {
+// The one email-or-display-name rule; `searchKey` comes from nameSearchKey.
+export function matchesContactSearch(item: ContactLike, searchKey: string): boolean {
+	if (searchKey.length === 0) {
 		return true
 	}
 
-	return item.email.toLowerCase().includes(searchNormalized) || contactDisplayName(item).toLowerCase().includes(searchNormalized)
+	return matchesNameSearch(item.email, searchKey) || matchesNameSearch(contactDisplayName(item), searchKey)
 }
 
 // The page search box's email-or-display-name rule, shared with ContactPickerList.
 export function filterContactsBySearch<T extends ContactLike>(items: readonly T[], search: string): T[] {
-	const normalized = search.trim().toLowerCase()
+	const key = nameSearchKey(search)
 
-	return items.filter(item => matchesContactSearch(item, normalized))
+	return items.filter(item => matchesContactSearch(item, key))
 }
 
 // Contacts not already among `participants` (a chat's or a note's), in source order.
@@ -77,7 +77,7 @@ function sortByEmail<T extends { email: string }>(items: T[]): T[] {
 // has no picker mode to special-case. A section that ends up empty (no data, or search filtered
 // every row out) is omitted entirely rather than rendered with a header and no rows.
 export function buildContactSections(input: BuildContactSectionsInput): ContactSection[] {
-	const searchNormalized = input.search.trim().toLowerCase()
+	const searchNormalized = nameSearchKey(input.search)
 	const sections: ContactSection[] = []
 
 	const requests = sortByEmail(input.incoming.filter(item => matchesContactSearch(item, searchNormalized)))

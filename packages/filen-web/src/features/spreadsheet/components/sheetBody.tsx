@@ -72,6 +72,8 @@ import { useSheetPdfExport } from "@/features/spreadsheet/save/useSheetPdfExport
 import { formOf, pdfFile, pdfRequest, printRequests } from "@/features/spreadsheet/print/print.logic"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
 import { browserLanguage, sheetShortcutFormats } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { sheetBindings } from "@/features/spreadsheet/lib/keymap"
 import { freezeEnabled, freezeTo } from "@/features/spreadsheet/menus/structureCommands"
 import { requestChart } from "@/features/spreadsheet/charts/chartRequests"
@@ -184,8 +186,9 @@ export function SheetBody({
 	const downloadable = usePreviewDownloadable()
 	// The grid's keys as the user has them bound (Settings → Keyboard), one object per change.
 	const bindings = sheetBindings(useBindings())
-	// The format shortcuts' currency, date and time in the browser's locale, as Excel follows the system's.
-	const numberFormats = sheetShortcutFormats(browserLanguage())
+	// The format shortcuts' currency, date and time in the regional format, as typing and the cells follow it.
+	const regional = useRegionalLanguage()
+	const numberFormats = sheetShortcutFormats(regional)
 	const [model] = useState(() => createSheetGrid(handle))
 	const grid = useSheetGrid(model)
 	const { theme } = useTheme()
@@ -402,7 +405,7 @@ export function SheetBody({
 
 						const requests = printRequests(formOf(active.setup), active, [active], grid.selection.ranges) ?? []
 
-						return pdfRequest(requests, fileOf(), workbookOf())
+						return pdfRequest(requests, fileOf(), workbookOf(), regional)
 					})
 				}
 			: undefined
@@ -437,7 +440,7 @@ export function SheetBody({
 			startPdf === undefined
 				? undefined
 				: requests => {
-						startPdf(() => Promise.resolve(pdfRequest(requests, fileOf(), workbookOf())))
+						startPdf(() => Promise.resolve(pdfRequest(requests, fileOf(), workbookOf(), regional)))
 					}
 	})
 	const charts = useSheetCharts({ grid, gridRef, handle, canEdit, text })
@@ -950,7 +953,7 @@ export function SheetBody({
 						{/* A finger's long press is the grid's own touch menu, not this menu's. */}
 						<div
 							data-sheet-pane="grid"
-							className="flex min-h-0 flex-1 flex-col"
+							className="relative flex min-h-0 flex-1 flex-col"
 							{...touch.wrapper}
 						>
 							<SheetGrid
@@ -978,6 +981,17 @@ export function SheetBody({
 									<Fragment key={extension.id}>{extension.overlay}</Fragment>
 								))}
 							</SheetGrid>
+							{/* A sheet the session could not read, over its blank grid; the other sheets stay a tab away. */}
+							{grid.failed === null && grid.sheetError?.sheet === grid.sheet ? (
+								<div className="absolute inset-0 z-10 bg-background">
+									<PreviewErrorState
+										message={t("previewSpreadsheetUnreadable")}
+										onRetry={() => {
+											model.reloadSheet(grid.sheet)
+										}}
+									/>
+								</div>
+							) : null}
 						</div>
 					</SheetGridMenu>
 				</div>

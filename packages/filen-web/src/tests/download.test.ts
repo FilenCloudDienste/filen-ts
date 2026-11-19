@@ -557,12 +557,13 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		expect(toastError).not.toHaveBeenCalled()
 	})
 
-	it("toasts a failure summary when the single download errors", async () => {
+	it("toasts the failed item by name when the single download errors", async () => {
 		downloadFileToWriter.mockRejectedValue(sdkDto("Timeout"))
 
-		await startDownloads([fileItem()])
+		await startDownloads([fileItem({ name: "report.pdf" })])
 
 		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toastError.mock.lastCall?.[0]).toBe("Couldn't download report.pdf")
 		// The app saved this one itself (and deleted the picked file), so there is nothing to point at.
 		expect(toastError.mock.lastCall?.[1]).toBeUndefined()
 		expect(toastSuccess).not.toHaveBeenCalled()
@@ -572,9 +573,9 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		saveDownloadMock.mockResolvedValue({ kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "a.txt" })
 		triggerSwDownloadMock.mockRejectedValue(sdkDto("Network"))
 
-		await startDownloads([fileItem()])
+		await startDownloads([fileItem({ name: "a.txt" })])
 
-		expect(toastError).toHaveBeenCalledWith("0 files downloaded, 1 failed", {
+		expect(toastError).toHaveBeenCalledWith("Couldn't download a.txt", {
 			description: "The part already downloaded may remain where the file was being saved. Delete it there."
 		})
 	})

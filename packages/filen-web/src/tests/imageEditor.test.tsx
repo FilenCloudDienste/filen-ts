@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { isMacPlatform } from "@filen/shared/keymap"
-import { createRef } from "react"
+import { createRef, StrictMode } from "react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@/lib/i18n"
@@ -83,11 +83,12 @@ const INFO: SourceInfo = {
 
 const CAPABILITIES: EditCapabilities = { webgl2: true, maxTextureSize: 4096, maxPixels: 50_000_000, canEncodeWebp: true }
 
-function mount(options: { locked?: boolean; info?: SourceInfo } = {}) {
-	const session = fakeSession()
+function mount(options: { locked?: boolean; info?: SourceInfo; session?: ReturnType<typeof fakeSession>; strict?: boolean } = {}) {
+	const session = options.session ?? fakeSession()
 	const saveRef = createRef<ImageExportSource | null>()
 	const commandsRef = createRef<ImageEditorCommands | null>()
 	const onDirtyChange = vi.fn()
+	const onLoadFailed = vi.fn()
 	const source = { kind: "blob" as const, blob: new Blob(["jpeg"]) }
 	const info = options.info ?? INFO
 	const view = render(
@@ -98,12 +99,14 @@ function mount(options: { locked?: boolean; info?: SourceInfo } = {}) {
 			capabilities={CAPABILITIES}
 			locked={options.locked ?? false}
 			onDirtyChange={onDirtyChange}
+			onLoadFailed={onLoadFailed}
 			saveRef={saveRef}
 			commandsRef={commandsRef}
-		/>
+		/>,
+		options.strict === true ? { wrapper: StrictMode } : {}
 	)
 
-	return { session, saveRef, commandsRef, onDirtyChange, source, view }
+	return { session, saveRef, commandsRef, onDirtyChange, onLoadFailed, source, view }
 }
 
 function lastRendered(session: ReturnType<typeof fakeSession>): ImageEditRecipe {
@@ -165,6 +168,24 @@ describe("ImageEditor", () => {
 		resizeStage(640, 480)
 
 		expect(session.resize).toHaveBeenLastCalledWith(640, 480, window.devicePixelRatio)
+	})
+
+	it("tells the overlay once when the picture cannot be loaded, Strict Mode included", async () => {
+		const session = fakeSession()
+
+		session.load.mockImplementation(() => Promise.reject(new Error("no image")))
+
+		const { onLoadFailed } = mount({ session, strict: true })
+
+		await waitFor(() => {
+			expect(onLoadFailed).toHaveBeenCalled()
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(onLoadFailed).toHaveBeenCalledTimes(1)
+		expect(session.render).not.toHaveBeenCalled()
 	})
 
 	it("marks the root as a preview surface", () => {

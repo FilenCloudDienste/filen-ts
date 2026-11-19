@@ -107,10 +107,11 @@ describe("redaction rules", () => {
 	})
 
 	it("labels marks by kind", () => {
-		expect(markLabel(mark(1, "area"), undefined).key).toBe("previewPdfRedactMarkArea")
-		expect(markLabel(mark(1, "page"), undefined).key).toBe("previewPdfRedactMarkPage")
-		expect(markLabel(mark(1, "text"), "x".repeat(80)).params.text).toHaveLength(60)
-		expect(markLabel(mark(1, "text"), undefined).key).toBe("previewPdfRedactMarkTextUnknown")
+		expect(markLabel(mark(1, "area")).key).toBe("previewPdfRedactMarkArea")
+		expect(markLabel(mark(1, "page")).key).toBe("previewPdfRedactMarkPage")
+		expect(markLabel({ ...mark(1, "text"), text: "x".repeat(80) }).params.text).toHaveLength(60)
+		expect(markLabel({ ...mark(1, "text"), text: "" }).key).toBe("previewPdfRedactMarkTextUnknown")
+		expect(markLabel(mark(1, "text")).key).toBe("previewPdfRedactMarkTextUnknown")
 	})
 })
 
@@ -205,12 +206,11 @@ describe("redaction controls", () => {
 	it("lists the marks, removes one and opens the apply dialog", () => {
 		const onRemove = vi.fn()
 		const onApply = vi.fn()
-		const marks = [mark(7, "text", 0), mark(9, "area", 2)]
+		const marks = [{ ...mark(7, "text", 0), text: "Ada" }, mark(9, "area", 2)]
 
 		render(
 			<RedactionMarksList
 				marks={marks}
-				texts={new Map([[7, "Ada"]])}
 				onRemove={onRemove}
 				onApply={onApply}
 			/>
@@ -346,12 +346,13 @@ describe("redaction controls", () => {
 	})
 })
 
-// An editor session keeping its history as labels (dispatch adds one, undo and redo move it), its marks and the
-// searches its engine ran.
+// An editor session keeping its history as labels (dispatch adds one, undo and redo move it), its marks, the
+// searches its engine ran and how many reads of the marks asked for their text (the panel's).
 function historySession(options: { history?: string[]; marks?: RedactionMark[]; failing?: boolean } = {}) {
 	const history = [...(options.history ?? [])]
 	const redo: string[] = []
 	const finds: RedactionQuery[] = []
+	const textReads = { count: 0 }
 	const listeners = new Set<() => void>()
 	let snapshot = { state: { revision: 1, undoLabel: history.at(-1) ?? null, tagged: false } }
 	const changed = (): void => {
@@ -396,10 +397,14 @@ function historySession(options: { history?: string[]; marks?: RedactionMark[]; 
 			return Promise.resolve({})
 		},
 		engine: {
-			call: (op: string, args: { query?: RedactionQuery }) => {
+			call: (op: string, args: { query?: RedactionQuery; text?: boolean }) => {
 				if (options.failing === true) return Promise.reject(new Error("engine trap"))
 
-				if (op === "redactMarks") return Promise.resolve(options.marks ?? [mark(1, "area", 0)])
+				if (op === "redactMarks") {
+					if (args.text === true) textReads.count++
+
+					return Promise.resolve(options.marks ?? [mark(1, "area", 0)])
+				}
 
 				if (op === "redactFind" && args.query !== undefined) finds.push(args.query)
 
@@ -408,7 +413,7 @@ function historySession(options: { history?: string[]; marks?: RedactionMark[]; 
 		}
 	} as unknown as PdfEditSessionModel
 
-	return { session, history, finds }
+	return { session, history, finds, textReads }
 }
 
 function toolContext(session: PdfEditSessionModel, save: (session: PdfEditSessionModel) => Promise<PdfToolSaveOutcome>): PdfToolContext {
@@ -531,6 +536,65 @@ describe("applying redactions", () => {
 			expect(toastError).toHaveBeenCalledTimes(1)
 		})
 		expect(toastError).toHaveBeenCalledWith("previewPdfSaveFailed")
+		view.unmount()
+	})
+})
+
+describe("the marks list in the panel", () => {
+	it("reads the marks with their text once when an apply ends, not for each page it applies", async () => {
+		toastError.mockClear()
+
+		const { session, history, textReads } = historySession({
+			marks: [mark(1, "text", 0), mark(2, "text", 1), mark(3, "text", 2), mark(4, "text", 3)]
+		})
+		const view = render(
+			<RedactAreaPanel
+				context={toolContext(session, () => Promise.resolve({ status: "failed", error: new Error("upload failed") }))}
+				document={{} as PdfDomDocument}
+				active
+				phone={false}
+			/>
+		)
+
+		await waitFor(() => {
+			expect(screen.getByRole<HTMLButtonElement>("button", { name: "previewPdfRedactApply" }).disabled).toBe(false)
+		})
+		expect(textReads.count).toBe(1)
+		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApply" }))
+		fireEvent.click(screen.getByRole("radio", { name: "previewPdfRedactSaveInPlace" }))
+		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApplyConfirm" }))
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith("previewPdfRedactSaveFailed")
+		})
+		// Four pages applied and undone again: eight changes while the apply ran, one read after it.
+		expect(history).toEqual([])
+		await waitFor(() => {
+			expect(textReads.count).toBe(2)
+		})
+		await new Promise(resolve => setTimeout(resolve, 20))
+		expect(textReads.count).toBe(2)
+		view.unmount()
+	})
+
+	it("shows a mark's page when its row is chosen", async () => {
+		const { session } = historySession({ marks: [mark(4, "area", 0), mark(5, "area", 2)] })
+		const show = vi.fn()
+		const context = {
+			...toolContext(session, () => Promise.resolve({ status: "cancelled" })),
+			pages: { show }
+		} as unknown as PdfToolContext
+		const view = render(
+			<RedactAreaPanel
+				context={context}
+				document={{} as PdfDomDocument}
+				active
+				phone={false}
+			/>
+		)
+		const row = await screen.findByText('previewPdfPageNumber {"page":3}')
+
+		fireEvent.click(row)
+		expect(show).toHaveBeenCalledWith(2)
 		view.unmount()
 	})
 })

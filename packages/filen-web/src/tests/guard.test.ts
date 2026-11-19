@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { isRedirect } from "@tanstack/react-router"
 
 // redirectIfAuthed guards the unauthed-only pages (/login, /register, /reset/$token): a live
-// session bounces straight to Drive instead of re-showing the auth form. Real `redirect`/`isRedirect`
+// session bounces straight to the start screen ("/" resolves it) instead of re-showing the auth form. Real `redirect`/`isRedirect`
 // from the router are used un-mocked below — they're pure (construct + optionally throw a tagged
 // Response), no router instance needed to exercise them.
 
@@ -30,7 +30,7 @@ describe("redirectIfAuthed", () => {
 		await expect(redirectIfAuthed()).resolves.toBeUndefined()
 	})
 
-	it("throws a redirect to /drive/$ with an empty splat when a session is live", async () => {
+	it("throws a redirect to the start screen when a session is live", async () => {
 		whenBootReady.mockResolvedValue(undefined)
 		hasClient.mockResolvedValue(true)
 
@@ -39,10 +39,7 @@ describe("redirectIfAuthed", () => {
 		const rejection: unknown = await redirectIfAuthed().catch((e: unknown) => e)
 
 		expect(isRedirect(rejection)).toBe(true)
-		expect((rejection as { options: { to: string; params: { _splat: string } } }).options).toMatchObject({
-			to: "/drive/$",
-			params: { _splat: "" }
-		})
+		expect((rejection as { options: { to: string } }).options).toMatchObject({ to: "/" })
 	})
 
 	it("treats a hasClient rejection as unauthed (no redirect, no throw)", async () => {

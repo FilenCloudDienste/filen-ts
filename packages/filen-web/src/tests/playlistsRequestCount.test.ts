@@ -251,6 +251,42 @@ describe("usePlaylistsQuery request counts", () => {
 		expect(counts()).toEqual({ list: 2, download: 4 })
 	})
 
+	it("downloads a playlist whose bytes do not parse once, and still counts the list as synced", async () => {
+		// One file is not JSON, another is JSON in a shape that is not a playlist.
+		downloadFileBytes
+			.mockImplementationOnce(() => Promise.resolve(new TextEncoder().encode("not json")))
+			.mockImplementationOnce(() => Promise.resolve(new TextEncoder().encode(JSON.stringify({ name: 1 }))))
+
+		const first = await mountLoaded()
+
+		expect(first.result.current.data?.map(entry => entry.status)).toEqual(["degraded", "degraded", "ok"])
+
+		first.unmount()
+		await mountLoaded()
+		await focus()
+		await reconnect()
+
+		expect(counts()).toEqual({ list: 1, download: 3 })
+	})
+
+	it("downloads an unparsable playlist again only once a later read lists it under a new uuid", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		downloadFileBytes.mockImplementationOnce(() => Promise.resolve(new TextEncoder().encode("not json")))
+		await mountLoaded()
+
+		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
+		await focus()
+
+		// The unparsable file is not downloaded again by the second read.
+		expect(counts()).toEqual({ list: 2, download: 3 })
+
+		listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: EDITED_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) }))
+		vi.setSystemTime(Date.now() + 2 * (PLAYLISTS_STALE_TIME + 1))
+		await focus()
+
+		expect(counts()).toEqual({ list: 3, download: 4 })
+	})
+
 	it("downloads a playlist again only once an edit has given its file a new uuid", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] })
 		await mountLoaded()

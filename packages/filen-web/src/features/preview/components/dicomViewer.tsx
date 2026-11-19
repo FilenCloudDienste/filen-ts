@@ -227,7 +227,7 @@ function Scrubber({
 	const last = info.frames - 1
 
 	return (
-		<div className="flex w-[min(36rem,calc(100vw-4rem))] items-center gap-1">
+		<div className="flex w-[min(36rem,calc(100cqw-4rem))] items-center gap-1">
 			<Button
 				variant="ghost"
 				size="icon-sm"

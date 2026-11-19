@@ -26,6 +26,10 @@ export const SW_MSG_ACTIVE_STREAMS = "FILEN_SW_ACTIVE_STREAMS"
 // every download and stream route needs one.
 export const SW_MSG_CLAIM = "FILEN_SW_CLAIM"
 
+// page → SW: answered on `event.ports[0]` with the worker's own log ring (LogEntry[]). An older worker never answers,
+// which the page's pull treats as no entries, so this needs no protocol bump.
+export const SW_MSG_DUMP_LOGS = "FILEN_SW_DUMP_LOGS"
+
 // The protocol from which a stream download reports `reading` once the browser reads its body (the navigation has
 // become the download).
 export const SW_READING_PROTOCOL = 19

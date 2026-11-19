@@ -1,6 +1,6 @@
-// Pure keydown-guard logic for previewOverlay.tsx's own in-dialog onKeyDown — extracted (like every
-// other viewer's own *.logic.ts sibling, e.g. docxViewer.logic.ts) so it is unit-testable under this
-// project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
+// Pure logic for previewOverlay.tsx: its in-dialog keydown guards, and how a slot is pinned, keyed and saved —
+// extracted (like every other viewer's own *.logic.ts sibling, e.g. docxViewer.logic.ts) so it is unit-testable
+// under this project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import {
@@ -13,6 +13,17 @@ import { PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/p
 import { bindingOf } from "@/lib/keymap/bindingOf"
 import { hasClosest } from "@/lib/domTarget"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
+import { driveItemName } from "@filen/shared"
+import type { DriveItem } from "@/features/drive/lib/item"
+import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { canEditPdf, isEditable, isTextCategory } from "@/features/drive/lib/previewSave.logic"
+import type { ImageEditState } from "@/features/preview/imageEdit/editSession"
+import type { SaveTarget } from "@/features/preview/imageEdit/types"
+import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
+import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
+import { presentationSaveFormat } from "@/features/presentation/lib/fileKind"
+import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
+import { i18n } from "@/lib/i18n"
 
 // The header item-menu never offers Download — the header already has its own dedicated download
 // button right next to the menu's own trigger (previewOverlay.tsx).
@@ -216,4 +227,120 @@ export function previewDownloadable(downloadable: boolean, variant: DriveVariant
 // An Escape pressed while a menu is still opening, before it takes focus and the key, was meant for that menu.
 export function menuOpening(root: ParentNode): boolean {
 	return root.querySelector('[aria-haspopup="menu"][aria-expanded="true"]') !== null
+}
+
+// The edited image as a copy in the format saveTargets chose for one.
+export function copyTargetOf(state: ImageEditState): Extract<SaveTarget, { kind: "copy" }> {
+	const copy = state.targets.copy
+
+	if (copy.kind === "copy") {
+		return copy
+	}
+
+	return state.info.hasAlpha
+		? { kind: "copy", mime: "image/png", extension: "png" }
+		: { kind: "copy", mime: "image/jpeg", extension: "jpg" }
+}
+
+export function imageSaveLabelKey(
+	target: SaveTarget
+): "previewImageSaveSaveAction" | "previewImageSaveAsPngCopyAction" | "previewImageSaveAsJpegCopyAction" {
+	if (target.kind === "inPlace") {
+		return "previewImageSaveSaveAction"
+	}
+
+	return target.mime === "image/png" ? "previewImageSaveAsPngCopyAction" : "previewImageSaveAsJpegCopyAction"
+}
+
+// What a drive slot renders with, and the format its edits are saved in: fixed when the slot opens.
+export interface SlotPin {
+	category: PreviewCategory
+	format: string
+	// Whether the slot was editable as it mounted.
+	editable: boolean
+}
+
+// The format edits are written in: text for every text category, the file kind for a spreadsheet (its
+// writer follows the kind it opened as, the same judgement the grid's own rename note makes), and for a Word
+// document its extension (the writer keeps the content type the file opened with: a document, a template,
+// macro-enabled or not; a rename to another of them would save one under a name that says another).
+export function saveFormat(item: DriveItem): string {
+	const category = previewType(item)
+
+	if (isTextCategory(category)) {
+		return "text"
+	}
+
+	if (category === "docx") {
+		return `docx:${extensionOf(driveItemName(item))}`
+	}
+
+	// An image saves in place in the format its name says (a rename to another leaves the editor saving copies only).
+	if (category === "image") {
+		return `image:${inPlaceFormatByName(driveItemName(item)) ?? ""}`
+	}
+
+	// A video saves in place as the container its name says (a rename to another leaves the editor saving copies only).
+	if (category === "video") {
+		return `video:${inPlaceVideoContainerByName(driveItemName(item)) ?? ""}`
+	}
+
+	// A deck saves as the package it opened as (a template stays a template, a show a show).
+	if (category === "presentation") {
+		const extension = extensionOf(driveItemName(item))
+
+		return `presentation:${presentationSaveFormat(extension) ?? extension}`
+	}
+
+	if (category === "pdf") {
+		return "pdf"
+	}
+
+	if (category !== "spreadsheet") {
+		return ""
+	}
+
+	const extension = extensionOf(driveItemName(item))
+
+	return `spreadsheet:${spreadsheetSaveFormat(extension) ?? extension}`
+}
+
+// Whether the slot's file saves from its editor: isEditable's formats, and a PDF the editor can take (canEditPdf: its
+// size within what this browser's engine edits, pdfEngineMemory's editMaxBytes).
+export function slotEditable(item: DriveItem, variant: DriveVariant, pdfEditMaxBytes: number): boolean {
+	return isEditable(item, variant) || canEditPdf(item, variant, pdfEditMaxBytes)
+}
+
+// Opened as text, the slot stays the text viewer and never editable, whatever a rename later says.
+export function slotPin(item: DriveItem, variant: DriveVariant, asText: boolean, pdfEditMaxBytes: number): SlotPin {
+	if (asText) {
+		return { category: "text", format: "", editable: false }
+	}
+
+	return { category: previewType(item), format: saveFormat(item), editable: slotEditable(item, variant, pdfEditMaxBytes) }
+}
+
+// What remounts the body. A spreadsheet, and a Word document opened for editing, follow their document (see
+// documentKeys), so the user's own save keeps the editor; every other viewer follows the version shown, and a
+// saved text file reopens on what was uploaded. By the pinned renderer, so a rename never remounts.
+export function bodyKey(item: DriveItem, documentKey: string, pin: SlotPin | null): string {
+	if (pin?.category === "spreadsheet") {
+		return `spreadsheet:${documentKey}`
+	}
+
+	// An editable deck follows its document too: its session moves onto each file it saves. So does a PDF's editor.
+	if (pin?.category === "presentation" && pin.editable) {
+		return `presentation:${documentKey}`
+	}
+
+	if (pin?.category === "pdf" && pin.editable) {
+		return `pdf:${documentKey}`
+	}
+
+	return pin?.category === "docx" && pin.editable ? `docx:${documentKey}` : item.data.uuid
+}
+
+// An edited copy's name suffix: "photo (edited).jpg", then "photo (edited 2).jpg", for an image, a video and its frame.
+export function editedCopySuffix(number: number): string {
+	return number <= 1 ? i18n.t("preview:previewImageSaveCopySuffix") : i18n.t("preview:previewImageSaveCopySuffixNumbered", { number })
 }

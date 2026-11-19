@@ -30,8 +30,7 @@ import { PresentationViewer } from "@/features/presentation/components/presentat
 
 // The viewer for a file shown read-only outside the preview overlay's own body: a public link's file and an
 // archive's entry, each fed a fabricated DriveItem under the providers that say where its bytes come from.
-// Never an editing surface. Guarded against a missing category arm by the `default` arm at the bottom,
-// the same way previewOverlay's own PreviewBody is.
+// Never an editing surface.
 export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; category: PreviewCategory; alt: string }): ReactNode {
 	const profile = useDeviceProfile()
 
@@ -46,6 +45,19 @@ export function ReadOnlyPreviewBody({ item, category, alt }: { item: DriveItem; 
 		)
 	}
 
+	return (
+		<ReadOnlyViewer
+			item={item}
+			category={category}
+			alt={alt}
+		/>
+	)
+}
+
+// Each category's viewer as shown read-only (no large-text gate: its host checks first): the one definition of the arms the overlay's PreviewBody (previewBody.tsx)
+// does not override with its editing props or hosts. Guarded against a missing category arm by the `default` arm at
+// the bottom.
+export function ReadOnlyViewer({ item, category, alt }: { item: DriveItem; category: PreviewCategory; alt: string }): ReactNode {
 	switch (category) {
 		case "image":
 			return (

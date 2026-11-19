@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Contact, Dir, File, SharedFile, SharedRootDir, SharedRootDirsAndFiles } from "@filen/sdk-rs"
+import type { Contact, Dir, SharedFile, SharedRootDir, SharedRootDirsAndFiles } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -30,7 +30,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
-import { mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
+import { mockDirItem, mockFileItem, mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
 import { testUuid } from "@/tests/support/uuid"
 
 const noop = (): undefined => undefined
@@ -39,54 +39,6 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
-
-function dirItem(overrides: Partial<Dir> = {}): Extract<DriveItem, { type: "directory" }> {
-	const item = narrowItem(mockDir(overrides))
-	if (item.type !== "directory") {
-		throw new Error("expected a directory arm")
-	}
-	return item
-}
-
-function fileItem(overrides: Partial<File> = {}): Extract<DriveItem, { type: "file" }> {
-	const item = narrowItem(mockFile(overrides))
-	if (item.type !== "file") {
-		throw new Error("expected a file arm")
-	}
-	return item
-}
 
 // Returns the raw wasm fixture ALONGSIDE the narrowed item — unshareItems' whole point is that it
 // forwards the untouched raw (`shareSource`), never the flattened `data`, so tests need the raw's own
@@ -147,8 +99,8 @@ function sharedInRoot() {
 
 describe("shareItems", () => {
 	it("shares N items × M contacts = N×M calls, routing directories to shareDirectory and files to shareFile", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
-		const file = fileItem({ uuid: testUuid("f") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
+		const file = mockFileItem({ uuid: testUuid("f") })
 		const alice = mockContact("alice")
 		const bob = mockContact("bob")
 		const carol = mockContact("carol")
@@ -170,7 +122,7 @@ describe("shareItems", () => {
 	})
 
 	it("shares each contact for one item in sequence (no concurrency machinery)", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
 		const contacts = [mockContact("a"), mockContact("b"), mockContact("c")]
 		const seen: string[] = []
 		const pending: (() => void)[] = []
@@ -209,8 +161,8 @@ describe("shareItems", () => {
 	})
 
 	it("partial failure: an item whose sibling fails still reports the succeeded one, both correctly split", async () => {
-		const ok = dirItem({ uuid: testUuid("ok") })
-		const bad = dirItem({ uuid: testUuid("bad") })
+		const ok = mockDirItem({ uuid: testUuid("ok") })
+		const bad = mockDirItem({ uuid: testUuid("bad") })
 		const contact = mockContact("alice")
 		const dto = sdkDto("Forbidden")
 		// items.map dispatches synchronously in array order (each callback's first await is its
@@ -225,7 +177,7 @@ describe("shareItems", () => {
 	})
 
 	it("an item fails if ANY of its contacts fails, but every contact is still attempted", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
 		const good = mockContact("good")
 		const bad = mockContact("bad")
 		const alsoGood = mockContact("also-good")
@@ -247,7 +199,7 @@ describe("shareItems", () => {
 	})
 
 	it("keeps the FIRST failing contact's error when multiple contacts fail (LABEL-FIRST)", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
 		const firstBad = mockContact("first-bad")
 		const secondBad = mockContact("second-bad")
 		const firstDto = sdkDto("Forbidden")
@@ -264,8 +216,8 @@ describe("shareItems", () => {
 	})
 
 	it("reports the fraction of item-contact pairs done, a directory's pair following its bytes", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
-		const file = fileItem({ uuid: testUuid("f") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
+		const file = mockFileItem({ uuid: testUuid("f") })
 		const fractions: number[] = []
 		shareDirectory.mockImplementation(
 			(_dir: Dir, _contact: Contact, onProgress: (bytes: number, total: number | undefined) => void) => {
@@ -289,7 +241,7 @@ describe("shareItems", () => {
 	})
 
 	it("invalidates the shared-with-others root listing after at least one item succeeds", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 		shareDirectory.mockResolvedValue(undefined)
 
@@ -299,7 +251,7 @@ describe("shareItems", () => {
 	})
 
 	it("does NOT invalidate when every item failed (nothing changed server-side)", async () => {
-		const dir = dirItem({ uuid: testUuid("d") })
+		const dir = mockDirItem({ uuid: testUuid("d") })
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 		shareDirectory.mockRejectedValue(sdkDto("Forbidden"))
 
@@ -434,7 +386,7 @@ describe("unshareItems", () => {
 	})
 
 	it("guards against a non-root item (defense-in-depth — the UI never gates one through): the item fails, removeSharedItem is never called", async () => {
-		const plainDir = dirItem({ uuid: testUuid("plain") })
+		const plainDir = mockDirItem({ uuid: testUuid("plain") })
 
 		const outcome = await unshareItems([plainDir], "sharedOut")
 

@@ -229,6 +229,6 @@ export async function startDownloads(items: DriveItem[]): Promise<void> {
 	const outcome = await runDownload(defaultDownloadDeps, { item })
 
 	if (outcome.status === "error") {
-		toastDownloadFailed(outcome)
+		toastDownloadFailed(driveItemName(item), outcome)
 	}
 }

@@ -22,6 +22,7 @@ import { VolumeControl } from "@/components/media/volumeControl"
 import { IdleTimer } from "@/lib/media/autoHide.logic"
 import { isVideoNativeFullscreen, toggleVideoFullscreen, useIsFullscreen, videoFullscreenSupported } from "@/lib/media/fullscreen"
 import { stepMediaVolume, toggleMediaMuted, warmMediaVolume } from "@/lib/media/mediaVolume"
+import { measureFrameInterval, frameStepSeconds } from "@/lib/media/playerKeyboard"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { MEDIA_SEEK_STEP_SECONDS, mediaKeyAction, mediaKeyRepeats, playerOwnsKey } from "@/lib/media/mediaKeys.logic"
 import type { MediaAction } from "@/lib/media/keymap"
@@ -30,14 +31,7 @@ import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { cancelHeldPause, pauseMedia } from "@filen/shared/heldPause"
-import {
-	chapterTarget,
-	frameDuration,
-	STAGE_MEDIA_ACTIONS,
-	stepPlaybackRate,
-	videoKeyAction,
-	type VideoKeyAction
-} from "@/lib/media/videoKeys.logic"
+import { chapterTarget, STAGE_MEDIA_ACTIONS, stepPlaybackRate, videoKeyAction, type VideoKeyAction } from "@/lib/media/videoKeys.logic"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { seekMedia, setPlaybackRate, toggleMediaPlayback, useMediaPictureInPicture, useSyncedMediaVolume } from "@/lib/media/useMediaState"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
@@ -75,7 +69,6 @@ export interface VideoStageProps {
 	chapters: readonly StageChapter[]
 	// "Part 2 of 3" for a stacked item.
 	partLabel?: string | null
-	frameRate?: number | null
 	cues: CueStore | null
 	// Seconds, positive = later.
 	cueOffset: number
@@ -239,6 +232,15 @@ export function VideoStage(props: VideoStageProps) {
 				element.removeEventListener(event, update)
 			}
 		}
+	}, [video])
+
+	// Frame steps move by the interval measured from what plays.
+	useEffect(() => {
+		if (video === null) {
+			return
+		}
+
+		return measureFrameInterval(video)
 	}, [video])
 
 	// Playback starting shows the controls for one idle period before they fade.
@@ -464,7 +466,7 @@ export function VideoStage(props: VideoStageProps) {
 					pauseMedia(video)
 				}
 
-				seekTo(video.currentTime + action.direction * frameDuration(props.frameRate ?? null))
+				seekTo(video.currentTime + action.direction * frameStepSeconds(video))
 
 				return true
 			case "volumeBy":

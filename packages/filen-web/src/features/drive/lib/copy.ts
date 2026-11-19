@@ -3,7 +3,6 @@ import type { AnyItemWithContext, CopyEntry } from "@filen/sdk-rs"
 import {
 	applyCopyUpdate,
 	copyJobShownBytes,
-	copyMaxBytes,
 	driveItemName,
 	formatBytes,
 	isQuotaPreflightFailure,
@@ -25,12 +24,11 @@ import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/qu
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
 import {
 	addTrashOutcome,
+	attemptWithQuotaRetry,
 	directoriesBetween,
+	lateTrasher,
 	patchJobCreatedItem,
-	pruneSettledDriveJobs,
-	readFreshAccount,
-	readStartingAccount,
-	STOPPED
+	pruneSettledDriveJobs
 } from "@/features/drive/lib/driveJobs"
 import {
 	canRetryCopy,
@@ -46,6 +44,7 @@ import {
 	type CopyDestination,
 	type CopyJob,
 	type CopyJobGlyph,
+	type CopyJobReport,
 	type CopySettlement
 } from "@/features/drive/lib/copy.logic"
 import { reuseCopiedThumbnails } from "@/features/drive/lib/thumbnails"
@@ -222,37 +221,19 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	// Every copy handed to the trash: one both in the report and delivered late goes once.
 	const trashing = new Set<string>()
 
-	const trashLate = async (item: DriveItem): Promise<void> => {
-		if (trashing.has(item.data.uuid)) {
-			return
+	const trashLate = lateTrasher<CopyJob>({
+		id,
+		jobs: deps.jobs,
+		transfers: deps.transfers,
+		trash: deps.trash,
+		trashing,
+		isTrashPending: isCopyTrashPending,
+		settledJob: () => settledJob,
+		rowOf: job => ({ ...row, size: job.totals.bytes, bytesTransferred: job.counts.bytesDone }),
+		settleRow: job => {
+			settleRow(deps.transfers, id, job)
 		}
-
-		trashing.add(item.data.uuid)
-
-		const outcome = await deps.trash([item])
-		const current = deps.jobs.get(id)
-
-		// While the stop's own batch is still moving, that batch settles the row, this one's result included.
-		if (outcome.failed.length === 0 || (current !== undefined && isCopyTrashPending(current))) {
-			deps.jobs.update(id, job => ({ ...job, trashResult: addTrashOutcome(job.trashResult, outcome) }))
-
-			return
-		}
-
-		// Left at the destination: a job dropped meanwhile comes back, with the row that says so.
-		const base = deps.jobs.get(id) ?? (settledJob === undefined ? undefined : { ...settledJob, cardVisible: false })
-
-		if (base === undefined) {
-			return
-		}
-
-		const job: CopyJob = { ...base, created: [], trashResult: addTrashOutcome(base.trashResult, outcome) }
-
-		deps.jobs.put(job)
-		deps.transfers.remove(id)
-		deps.transfers.add({ ...row, size: job.totals.bytes, bytesTransferred: job.counts.bytesDone })
-		settleRow(deps.transfers, id, job)
-	}
+	})
 
 	const onEvent: OnCopyEvent = event => {
 		if (event.type === "created") {
@@ -316,35 +297,12 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 		deps.transfers.setProgress(id, copyJobShownBytes(job))
 	}
 
-	const cancelRequested = (): boolean => deps.jobs.get(id)?.cancelRequest != null
-	const cachedFresh = deps.account.isCachedFresh?.() ?? true
-	let maxBytes = copyMaxBytes(cachedFresh ? deps.account.cached() : await readStartingAccount(deps.account))
-	let settlement = await attempt(deps, id, source, maxBytes, onEvent)
-
-	// A cached figure can predate a delete made elsewhere, so a pre-flight refusal reads it once fresh
-	// and runs again only if that frees enough to matter to the SDK's own check.
-	if (
-		cachedFresh &&
-		"report" in settlement &&
-		isQuotaPreflightFailure(settlement.report) &&
-		maxBytes !== undefined &&
-		!cancelRequested()
-	) {
-		const freshMaxBytes = copyMaxBytes(await readFreshAccount(deps.account))
-
-		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !cancelRequested()) {
-			maxBytes = freshMaxBytes
-			settlement = await attempt(deps, id, source, maxBytes, onEvent)
-		} else if (freshMaxBytes !== undefined && freshMaxBytes <= maxBytes) {
-			// Never a figure the SDK's own check didn't refuse.
-			settlement = { report: settlement.report, maxBytes: freshMaxBytes }
-		}
-	}
-
-	// Refused before anything was written, by a job stopped meanwhile: it ends as the stop it was.
-	if ("report" in settlement && isQuotaPreflightFailure(settlement.report) && cancelRequested()) {
-		settlement = { ...settlement, report: { ...settlement.report, error: STOPPED } }
-	}
+	const settlement: CopySettlement = await attemptWithQuotaRetry<CopyJobReport>({
+		account: deps.account,
+		refusedUpFront: isQuotaPreflightFailure,
+		attempt: maxBytes => attempt(deps, id, source, maxBytes, onEvent),
+		cancelRequested: () => deps.jobs.get(id)?.cancelRequest != null
+	})
 
 	deps.release(id)
 	settleJob(deps.jobs, id, settlement, delivered)

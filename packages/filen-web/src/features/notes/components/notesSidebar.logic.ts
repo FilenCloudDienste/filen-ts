@@ -6,7 +6,15 @@ import {
 	tagDisplayName,
 	compareEditedDescThenUuid
 } from "@/features/notes/lib/sort"
-import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy, partitionNotesByBucket, type NoteBucketId } from "@filen/shared"
+import {
+	isBlocked,
+	matchesNameSearch,
+	type BlockedUsers,
+	sortNoteTags,
+	type NoteTagsSortBy,
+	partitionNotesByBucket,
+	type NoteBucketId
+} from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
@@ -113,7 +121,7 @@ export function groupNotesForView(notes: readonly Note[], now: number): NotesSid
 
 // The notes view's full row model: search-filter first (narrowing the set grouping then walks), then
 // partition into the interleaved header + note rows. `now` is injected for deterministic bucketing.
-// `bodies` holds lowercased bodies (see filterNotesBySearch).
+// `bodies` holds bodies folded by nameSearchKey (see filterNotesBySearch).
 export function buildNotesGroupedRows(
 	notes: readonly Note[],
 	search: string,
@@ -170,11 +178,11 @@ export function buildNotesByTag(notes: readonly Note[]): Record<string, Note[]> 
 }
 
 function tagNameMatches(tag: NoteTag, normalized: string): boolean {
-	return tagDisplayName(tag).toLowerCase().includes(normalized)
+	return matchesNameSearch(tagDisplayName(tag), normalized)
 }
 
 // A tag is shown in the tags view when the search matches its NAME or any of its member notes
-// (title or full body — `bodies` is the eager-fetched, lowercased full-body map from
+// (title or full body — `bodies` is the eager-fetched, nameSearchKey-folded full-body map from
 // useNoteSearchBodies.ts, undefined outside an active search). Empty search shows all.
 export function filterTagsForView(
 	tags: readonly NoteTag[],
@@ -199,7 +207,7 @@ export function filterTagsForView(
 
 // The notes shown inside an expanded tag group: all of them (sorted) when the search is empty or the
 // tag NAME itself matched — a name match reveals the whole group — otherwise only the members that
-// match the search. Always sorted by the shared note sort. `bodies` holds lowercased bodies.
+// match the search. Always sorted by the shared note sort. `bodies` holds nameSearchKey-folded bodies.
 function notesForExpandedTag(
 	tag: NoteTag,
 	notesByTag: Record<string, readonly Note[]>,
@@ -249,7 +257,7 @@ export interface TagsViewParams {
 	sortBy: NoteTagsSortBy
 	// Localized label for the synthesized untagged row (the logic layer stays React-free).
 	untaggedLabel: string
-	// Eager-fetched, lowercased full-body map, undefined outside an active search (see filterTagsForView).
+	// Eager-fetched, nameSearchKey-folded full-body map, undefined outside an active search (see filterTagsForView).
 	bodies?: ReadonlyMap<string, string | undefined>
 }
 

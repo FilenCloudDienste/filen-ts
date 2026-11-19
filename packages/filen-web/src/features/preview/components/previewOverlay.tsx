@@ -7,8 +7,7 @@ import {
 	Component,
 	type FocusEvent as ReactFocusEvent,
 	type KeyboardEvent,
-	type ReactNode,
-	type RefObject
+	type ReactNode
 } from "react"
 import { useTranslation } from "react-i18next"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -25,9 +24,9 @@ import {
 	PencilIcon
 } from "lucide-react"
 import { toast } from "sonner"
-import { asDirectoryOrFile, driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
+import { driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { extensionOf, previewType, needsContentSniff, opensAsLargeText, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { needsContentSniff } from "@/features/drive/lib/preview.logic"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
@@ -35,9 +34,7 @@ import {
 	canEditVideo,
 	canSaveCopyBeside,
 	editedSaveTimes,
-	canEditPdf,
 	isViewOnlyPdf,
-	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
 	presentationSaveRefusalKey,
@@ -59,8 +56,6 @@ import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor
 import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdit/editSession"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
-import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
-import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import { createVideoEditClient } from "@/features/preview/videoEdit/client"
 import { isVideoExportRunning, subscribeVideoExports } from "@/features/preview/videoEdit/save"
 import { VideoEditor, type VideoEditorCommands, type VideoFrameSaveOutcome } from "@/features/preview/videoEdit/components/videoEditor"
@@ -80,52 +75,23 @@ import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
+import { PreviewBody } from "@/features/preview/components/previewBody"
 import { cn, driveItemName } from "@filen/shared"
-import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import type { FileVerdict } from "@filen/shared"
-import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
-import { ComicViewer } from "@/features/comics/components/comicViewer"
-import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 import { fileKindVerdict, subscribeFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
-import { DocxViewer } from "@/features/preview/components/docxViewer"
 import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
-import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
-import { PdfViewer } from "@/features/preview/components/pdfViewer"
-import { FontViewer } from "@/features/preview/components/fontViewer"
-import { TorrentViewer } from "@/features/preview/components/torrentViewer"
-import { EmailViewer } from "@/features/preview/components/emailViewer"
-import { MailboxViewer } from "@/features/preview/components/mailboxViewer"
-import { SubtitleViewer } from "@/features/preview/components/subtitleViewer"
-import { CalendarViewer } from "@/features/preview/components/calendarViewer"
-import { NotebookViewer } from "@/features/preview/components/notebookViewer"
-import { ContactViewer } from "@/features/preview/components/contactViewer"
-import { MermaidViewer } from "@/features/preview/components/mermaidViewer"
-import { BinaryInfoViewer } from "@/features/preview/components/binaryInfoViewer"
-import { SqliteViewer } from "@/features/preview/components/sqliteViewer"
-import { EbookViewer } from "@/features/preview/components/ebookViewer"
-import { GeoViewer } from "@/features/preview/components/geoViewer"
-import { Model3dViewer } from "@/features/preview/components/model3dViewer"
-import { DxfViewer } from "@/features/preview/components/dxfViewer"
-import { DicomViewer } from "@/features/preview/components/dicomViewer"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
-import { TextViewer } from "@/features/preview/components/textViewer"
-import { LargeTextViewer } from "@/features/preview/components/largeTextViewer"
-import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
-import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
-import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
-import { presentationSaveFormat } from "@/features/presentation/lib/fileKind"
 import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
-import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { PreviewReplaceContext, type PreviewReplaceMake } from "@/features/preview/lib/previewReplace"
 import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/passwordDraft"
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
-import { PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isTextEditingTarget,
@@ -135,6 +101,14 @@ import {
 	resolveUnsavedConfirm,
 	slotPinSource,
 	unsavedPromptOpen,
+	bodyKey,
+	copyTargetOf,
+	editedCopySuffix,
+	imageSaveLabelKey,
+	saveFormat,
+	slotEditable,
+	slotPin,
+	type SlotPin,
 	type PreviewDismissIntent,
 	menuOpening,
 	isTypingTarget,
@@ -154,7 +128,6 @@ import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from 
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
-import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
@@ -235,6 +208,22 @@ export interface PreviewOverlayProps {
 // so no tree walk is needed even for a click on the scrubber itself.
 function isMediaTarget(target: EventTarget | null): boolean {
 	return target instanceof HTMLMediaElement
+}
+
+// A removal of `uuid` run as the user's own: its echo can beat the response back, and is no change made elsewhere.
+// Outside the component: the React Compiler cannot lower a try without a catch, and would skip the whole overlay.
+async function asOwnRemoval<T>(
+	remote: Pick<ReturnType<typeof usePreviewRemoteChanges>, "expectOwnChange" | "forgetOwnChange">,
+	uuid: string,
+	run: () => Promise<T>
+): Promise<T> {
+	remote.expectOwnChange(uuid, "remove")
+
+	try {
+		return await run()
+	} finally {
+		remote.forgetOwnChange(uuid)
+	}
 }
 
 interface PreviewErrorBoundaryState {
@@ -378,6 +367,33 @@ export function PreviewOverlay({
 	const logoutRequest = usePreviewUnsavedGuardStore(state => state.logoutRequest)
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PreviewDismissIntent | null>(null)
+	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
+	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
+	const saveAgainRef = useRef<boolean | null>(null)
+
+	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
+	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
+	// fold into Base UI's own onOpenChange(false)), both pager buttons, and the in-dialog arrow keys
+	// funnel through this, so none of them can silently drop an in-progress edit. Gated on `dirty` ALONE,
+	// not `editable && dirty`: a failed save can lock the buffer read-only (setLockedReadOnly above)
+	// without ever clearing `dirty` — the user's unsaved edits are still sitting there, about to be lost,
+	// so the prompt must still fire even though no further edit (or save) is possible anymore. An
+	// in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
+	// prompting "discard?" mid-save would let the user discard while the un-cancellable upload still
+	// lands and patches the listing — a silent contradiction of the choice they just made.
+	function requestOrRun(intent: PreviewDismissIntent, run: () => void): void {
+		if (saving) {
+			return
+		}
+
+		if (dirty) {
+			setPendingIntent(intent)
+			return
+		}
+
+		run()
+	}
+
 	// What a "replace" intent runs once the edits are discarded; kept through the prompt's close (WebKit can report
 	// it before the confirm), cleared by the confirm and replaced by the next request.
 	const pendingReplaceRef = useRef<(() => void) | null>(null)
@@ -432,7 +448,8 @@ export function PreviewOverlay({
 		driveItem === undefined ? undefined : fileKindVerdict(driveItem.data.uuid)
 	)
 	const pinFrom = slotPinSource(pinned, { documentKey: currentDocumentKey, item: driveItem, verdict: streamVerdict })
-	const derivedPin = pinFrom === null ? null : slotPin(pinFrom, variant, asText)
+	const pdfEditMaxBytes = pdfEngineMemory().editMaxBytes
+	const derivedPin = pinFrom === null ? null : slotPin(pinFrom, variant, asText, pdfEditMaxBytes)
 	const pin = driveItem === undefined ? null : (derivedPin ?? pinned?.pin ?? null)
 
 	if (pinFrom !== null && derivedPin !== null) {
@@ -454,7 +471,7 @@ export function PreviewOverlay({
 		driveItem !== undefined &&
 		pin !== null &&
 		!asText &&
-		slotEditable(driveItem, variant) &&
+		slotEditable(driveItem, variant, pdfEditMaxBytes) &&
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 	const slotText = textState !== null && textState.forUuid === rawDriveItem?.data.uuid ? textState : null
@@ -561,23 +578,18 @@ export function PreviewOverlay({
 	// Newer versions of the pager's files saved elsewhere, and a trash, delete or move of the file on
 	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
 	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, readEdits, onItemRemoved })
+	// A question is up: the remote-change one, a menu action's dialog, or the unsaved-changes prompt an in-app intent
+	// opened. Nothing starts behind it.
+	const dialogOpen = remote.prompt !== null || pendingIntent !== null || menuDialogKind !== null
+	// Neither does a new edit mode while one is open, being entered, or saving.
+	const editStartBlocked = anyEditing || enteringEdit || saving || dialogOpen
 
 	// Opens the image on screen in the editor, or says why it cannot. Not while anything else is under way or asked.
 	function startImageEdit(): void {
 		const item = driveItem
 		const raw = rawDriveItem
 
-		if (
-			!imageEditable ||
-			item === undefined ||
-			raw === undefined ||
-			anyEditing ||
-			enteringEdit ||
-			saving ||
-			remote.prompt !== null ||
-			pendingIntent !== null ||
-			menuDialogKind !== null
-		) {
+		if (!imageEditable || item === undefined || raw === undefined || editStartBlocked) {
 			return
 		}
 
@@ -639,18 +651,7 @@ export function PreviewOverlay({
 		const item = driveItem
 		const raw = rawDriveItem
 
-		if (
-			!videoEditable ||
-			item === undefined ||
-			raw === undefined ||
-			anyEditing ||
-			videoMode.entering ||
-			enteringEdit ||
-			saving ||
-			remote.prompt !== null ||
-			pendingIntent !== null ||
-			menuDialogKind !== null
-		) {
+		if (!videoEditable || item === undefined || raw === undefined || videoMode.entering || editStartBlocked) {
 			return
 		}
 
@@ -741,9 +742,7 @@ export function PreviewOverlay({
 			return { status: "unavailable" }
 		}
 
-		const written = await writeEditedCopy(item, { blob }, extension, number =>
-			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
-		)
+		const written = await writeEditedCopy(item, { blob }, extension, editedCopySuffix)
 
 		if (written === null) {
 			return { status: "unavailable" }
@@ -802,16 +801,7 @@ export function PreviewOverlay({
 			driveActivity(
 				[driveItem],
 				keys,
-				async (targets, onSettled, report) => {
-					// Its echo can beat the response back: the user's own removal, not one made elsewhere.
-					remote.expectOwnChange(driveItem.data.uuid, "remove")
-
-					try {
-						return await remove(targets, onSettled, report)
-					} finally {
-						remote.forgetOwnChange(driveItem.data.uuid)
-					}
-				},
+				(targets, onSettled, report) => asOwnRemoval(remote, driveItem.data.uuid, () => remove(targets, onSettled, report)),
 				{
 					onDone: outcome => {
 						if (outcome.succeeded.length > 0) {
@@ -926,7 +916,7 @@ export function PreviewOverlay({
 						open
 						pending={menuPending}
 						title={t("drive:driveUnshareConfirmTitle")}
-						body={t("drive:driveUnshareConfirmBody", { count: 1 })}
+						body={t("drive:driveUnshareConfirmBodySingle")}
 						confirmLabel={t("drive:driveActionUnshare")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -957,7 +947,7 @@ export function PreviewOverlay({
 						open
 						pending={menuPending}
 						title={t("drive:driveDeletePermanentlyConfirmTitle")}
-						body={t("drive:driveDeletePermanentlyConfirmBody", { count: 1 })}
+						body={t("drive:driveDeletePermanentlyConfirmBodySingle")}
 						confirmLabel={t("drive:driveActionDeletePermanently")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -1138,6 +1128,24 @@ export function PreviewOverlay({
 		onClose()
 	}, [logoutRequest, saving, dirty, onClose])
 
+	// A save is never started under a question (dialogOpen), nor under the unsaved-changes prompt a blocked navigation
+	// or a waiting sign-out opened: over the remote-change question it would decide it for the user, and from a prompt
+	// or a menu dialog it would act behind it.
+	const saveBlocked = dialogOpen || unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null)
+
+	// A save that failed says why; one whose parent can never resolve (isUnresolvableParentError) leaves the slot
+	// (frozen uuid) read-only, as retrying can never succeed.
+	function saveFailed(dto: ErrorDTO, frozenUuid: string): void {
+		setSaving(false)
+		remote.saveSettled(null)
+		toast.error(errorLabel(dto))
+
+		if (isUnresolvableParentError(dto)) {
+			setLockedReadOnly({ forUuid: frozenUuid })
+			toast.warning(t("previewReadOnlyAfterSaveFailure"))
+		}
+	}
+
 	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
 	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
 	// can never fix (isUnresolvableParentError, see previewSave.logic.ts's own comment on why); every
@@ -1172,15 +1180,7 @@ export function PreviewOverlay({
 
 		// Nor under a dialog: over the remote-change question it would decide it for the user, and a save
 		// from the unsaved-changes prompt or a menu dialog would act behind it.
-		if (
-			!editable ||
-			!dirty ||
-			targetItem === undefined ||
-			targetRawItem === undefined ||
-			remote.prompt !== null ||
-			unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null) ||
-			menuDialogKind !== null
-		) {
+		if (!editable || !dirty || targetItem === undefined || targetRawItem === undefined || saveBlocked) {
 			return false
 		}
 
@@ -1250,13 +1250,7 @@ export function PreviewOverlay({
 		setSaving(false)
 
 		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			remote.saveSettled(null)
-
-			if (isUnresolvableParentError(outcome.dto)) {
-				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
-				toast.warning(t("previewReadOnlyAfterSaveFailure"))
-			}
+			saveFailed(outcome.dto, targetRawItem.data.uuid)
 
 			return
 		}
@@ -1306,9 +1300,7 @@ export function PreviewOverlay({
 			!dirty ||
 			saving ||
 			(target.kind === "inPlace" && !editable) ||
-			remote.prompt !== null ||
-			unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null) ||
-			menuDialogKind !== null
+			saveBlocked
 		) {
 			return false
 		}
@@ -1350,14 +1342,7 @@ export function PreviewOverlay({
 		const outcome = written.outcome
 
 		if (outcome.status === "error") {
-			setSaving(false)
-			remote.saveSettled(null)
-			toast.error(errorLabel(outcome.dto))
-
-			if (isUnresolvableParentError(outcome.dto)) {
-				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
-				toast.warning(t("previewReadOnlyAfterSaveFailure"))
-			}
+			saveFailed(outcome.dto, targetRawItem.data.uuid)
 
 			return
 		}
@@ -1382,9 +1367,7 @@ export function PreviewOverlay({
 		targetRawItem: DriveItem,
 		target: Extract<SaveTarget, { kind: "copy" }>
 	): Promise<void> {
-		const written = await writeImageCopy(targetItem, target, imageSaveRef.current, number =>
-			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
-		).catch((e: unknown) => {
+		const written = await writeImageCopy(targetItem, target, imageSaveRef.current, editedCopySuffix).catch((e: unknown) => {
 			log.error("preview", "saving the edited image as a copy failed", e)
 
 			return null
@@ -1508,14 +1491,7 @@ export function PreviewOverlay({
 
 		if (outcome.status === "error") {
 			void edits.abandon?.()
-			setSaving(false)
-			remote.saveSettled(null)
-			toast.error(errorLabel(outcome.dto))
-
-			if (isUnresolvableParentError(outcome.dto)) {
-				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
-				toast.warning(t("previewReadOnlyAfterSaveFailure"))
-			}
+			saveFailed(outcome.dto, targetRawItem.data.uuid)
 
 			return
 		}
@@ -1583,9 +1559,6 @@ export function PreviewOverlay({
 	const startVideoEditRef = useLatestRef(startVideoEdit)
 	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
 	const videoSaveSettledRef = useLatestRef(videoSaveSettled)
-	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
-	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
-	const saveAgainRef = useRef<boolean | null>(null)
 
 	useEffect(() => {
 		const auto = saveAgainRef.current
@@ -1683,29 +1656,6 @@ export function PreviewOverlay({
 		IN_EDITORS_AND_FIELDS,
 		[editable, anyEditing, isOnline, driveItem, downloadable, variant]
 	)
-
-	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
-	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
-	// fold into Base UI's own onOpenChange(false)), both pager buttons, and the in-dialog arrow keys
-	// funnel through this, so none of them can silently drop an in-progress edit. Gated on `dirty` ALONE,
-	// not `editable && dirty`: a failed save can lock the buffer read-only (setLockedReadOnly above)
-	// without ever clearing `dirty` — the user's unsaved edits are still sitting there, about to be lost,
-	// so the prompt must still fire even though no further edit (or save) is possible anymore. An
-	// in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
-	// prompting "discard?" mid-save would let the user discard while the un-cancellable upload still
-	// lands and patches the listing — a silent contradiction of the choice they just made.
-	function requestOrRun(intent: PreviewDismissIntent, run: () => void): void {
-		if (saving) {
-			return
-		}
-
-		if (dirty) {
-			setPendingIntent(intent)
-			return
-		}
-
-		run()
-	}
 
 	// Another file in this slot (File ▸ New presentation, made by `make` once allowed) drops the buffer: asked about
 	// first like close/prev/next, so nothing is made when the user keeps the edits; also asked while a save is in
@@ -2317,6 +2267,10 @@ export function PreviewOverlay({
 										info={editing.info}
 										locked={saving}
 										onDirtyChange={setPreviewDirty}
+										onLoadFailed={() => {
+											exitImageEdit()
+											toast.error(t("previewImageSaveOpenFailed"))
+										}}
 										saveRef={imageSaveRef}
 										commandsRef={imageCommandsRef}
 										session={editing.session}
@@ -2486,29 +2440,6 @@ export function PreviewOverlay({
 	)
 }
 
-// The edited image as a copy in the format saveTargets chose for one.
-function copyTargetOf(state: ImageEditState): Extract<SaveTarget, { kind: "copy" }> {
-	const copy = state.targets.copy
-
-	if (copy.kind === "copy") {
-		return copy
-	}
-
-	return state.info.hasAlpha
-		? { kind: "copy", mime: "image/png", extension: "png" }
-		: { kind: "copy", mime: "image/jpeg", extension: "jpg" }
-}
-
-function imageSaveLabelKey(
-	target: SaveTarget
-): "previewImageSaveSaveAction" | "previewImageSaveAsPngCopyAction" | "previewImageSaveAsJpegCopyAction" {
-	if (target.kind === "inPlace") {
-		return "previewImageSaveSaveAction"
-	}
-
-	return target.mime === "image/png" ? "previewImageSaveAsPngCopyAction" : "previewImageSaveAsJpegCopyAction"
-}
-
 type ImageExport = Awaited<ReturnType<ImageExportSource>>
 
 async function exportImage(source: ImageExportSource | null, target: SaveTarget): Promise<ImageExport | null> {
@@ -2637,14 +2568,6 @@ function PreviewName({ name }: { name: string }) {
 	)
 }
 
-// What a drive slot renders with, and the format its edits are saved in: fixed when the slot opens.
-interface SlotPin {
-	category: PreviewCategory
-	format: string
-	// Whether the slot was editable as it mounted.
-	editable: boolean
-}
-
 // A slot's pin and what it was taken for: the document, the item as it stood then, and the verdict.
 interface PinnedSlot {
 	documentKey: string
@@ -2654,453 +2577,4 @@ interface PinnedSlot {
 	// docx viewer reads (a text file is then shown by the text viewer instead).
 	awaitingVerdict: boolean
 	pin: SlotPin
-}
-
-// The format edits are written in: text for every text category, the file kind for a spreadsheet (its
-// writer follows the kind it opened as, the same judgement the grid's own rename note makes), and for a Word
-// document its extension (the writer keeps the content type the file opened with: a document, a template,
-// macro-enabled or not; a rename to another of them would save one under a name that says another).
-function saveFormat(item: DriveItem): string {
-	const category = previewType(item)
-
-	if (isTextCategory(category)) {
-		return "text"
-	}
-
-	if (category === "docx") {
-		return `docx:${extensionOf(driveItemName(item))}`
-	}
-
-	// An image saves in place in the format its name says (a rename to another leaves the editor saving copies only).
-	if (category === "image") {
-		return `image:${inPlaceFormatByName(driveItemName(item)) ?? ""}`
-	}
-
-	// A video saves in place as the container its name says (a rename to another leaves the editor saving copies only).
-	if (category === "video") {
-		return `video:${inPlaceVideoContainerByName(driveItemName(item)) ?? ""}`
-	}
-
-	// A deck saves as the package it opened as (a template stays a template, a show a show).
-	if (category === "presentation") {
-		const extension = extensionOf(driveItemName(item))
-
-		return `presentation:${presentationSaveFormat(extension) ?? extension}`
-	}
-
-	if (category === "pdf") {
-		return "pdf"
-	}
-
-	if (category !== "spreadsheet") {
-		return ""
-	}
-
-	const extension = extensionOf(driveItemName(item))
-
-	return `spreadsheet:${spreadsheetSaveFormat(extension) ?? extension}`
-}
-
-// Whether the slot's file saves from its editor: isEditable's formats, and a PDF the editor can take (canEditPdf: its
-// size within what this browser's engine edits).
-function slotEditable(item: DriveItem, variant: DriveVariant): boolean {
-	return isEditable(item, variant) || canEditPdf(item, variant, pdfEngineMemory().editMaxBytes)
-}
-
-// Opened as text, the slot stays the text viewer and never editable, whatever a rename later says.
-function slotPin(item: DriveItem, variant: DriveVariant, asText: boolean): SlotPin {
-	if (asText) {
-		return { category: "text", format: "", editable: false }
-	}
-
-	return { category: previewType(item), format: saveFormat(item), editable: slotEditable(item, variant) }
-}
-
-// What remounts the body. A spreadsheet, and a Word document opened for editing, follow their document (see
-// documentKeys), so the user's own save keeps the editor; every other viewer follows the version shown, and a
-// saved text file reopens on what was uploaded. By the pinned renderer, so a rename never remounts.
-function bodyKey(item: DriveItem, documentKey: string, pin: SlotPin | null): string {
-	if (pin?.category === "spreadsheet") {
-		return `spreadsheet:${documentKey}`
-	}
-
-	// An editable deck follows its document too: its session moves onto each file it saves. So does a PDF's editor.
-	if (pin?.category === "presentation" && pin.editable) {
-		return `presentation:${documentKey}`
-	}
-
-	if (pin?.category === "pdf" && pin.editable) {
-		return `pdf:${documentKey}`
-	}
-
-	return pin?.category === "docx" && pin.editable ? `docx:${documentKey}` : item.data.uuid
-}
-
-interface PreviewBodyProps {
-	item: DriveItem
-	variant: DriveVariant
-	// The drive slot's pinned renderer (SlotPin).
-	category: PreviewCategory | undefined
-	documentKey: string
-	editable: boolean
-	// Read-only because a rename changed the save format: the spreadsheet grid says so.
-	renamedReadOnly: boolean
-	// Outside the drive nothing is ever editable, so a spreadsheet keeps only what it shows.
-	neverEditable: boolean
-	// A save in flight: text editors go read-only until it settles.
-	locked: boolean
-	onDirtyChange: (dirty: boolean) => void
-	// The text viewer's TextState (a file a save would change leaves the slot read-only).
-	onTextState: (state: TextState) => void
-	// The codepage the version shown is known to be in (this overlay saved it so).
-	readAs: string | null
-	contentRef: RefObject<TextBuffer | null>
-	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
-	docxRef: RefObject<DocxSaveSource | null>
-	// The presentation editor's save source (its session streams each save to the upload).
-	presentationRef: RefObject<PresentationSaveSource | null>
-	// The image viewer's shown <img> (the image editor starts from its pixels).
-	imageRef: RefObject<HTMLImageElement | null>
-	// The image viewer's page from a document engine (the image editor draws it there).
-	imagePageRef: RefObject<ImagePageSlot | null>
-	// A save the user asked for in the viewer (a deck's File ▸ Save); true when one started.
-	onSave: () => boolean
-	// Idle autosave asks the overlay to save; true when a save started.
-	onAutosave: () => boolean
-	// Shows another file in this slot's place (the .xlsx an .xls was just saved as).
-	onOpenFile: (item: DriveItem) => void
-	// A converted copy may be written beside the file (its own drive, however read-only its format).
-	canSaveCopy: boolean
-}
-
-// Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
-// level up) on every item change so a viewer's own pending/success/error state never flashes the
-// previous item's content. Bytes are no longer loaded centrally here: image/video/audio each own their
-// own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx), and
-// every other viewer loads its own bytes. The edit props reach the text family (the "text"/"code"
-// case's TextViewer and the source-mode editors of the "markdown", "subtitle", "calendar", "contact" and
-// "mermaid" cases), and the sheet, Word document, deck and PDF viewers; the image and video editors are
-// mounted by the overlay itself. Every other category ignores them.
-//
-// A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
-// the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
-function PreviewBody({
-	item,
-	variant,
-	category: pinnedCategory,
-	documentKey,
-	editable,
-	renamedReadOnly,
-	neverEditable,
-	locked,
-	onDirtyChange,
-	onTextState,
-	readAs,
-	contentRef,
-	spreadsheetRef,
-	docxRef,
-	presentationRef,
-	imageRef,
-	imagePageRef,
-	onSave,
-	onAutosave,
-	onOpenFile,
-	canSaveCopy
-}: PreviewBodyProps): ReactNode {
-	const { t } = useTranslation("preview")
-	const profile = useDeviceProfile()
-
-	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
-	// previewType/canPreview already guarantee a file arm for every item that ever reaches this
-	// component, but that guarantee lives in a plain function's return value, not a type predicate, so
-	// TS needs this explicit narrow before a `.mime`/`.name` access type-checks.
-	const base = asDirectoryOrFile(item)
-
-	if (base.type !== "file") {
-		return null
-	}
-
-	const alt = driveItemName(base)
-	// The pinned renderer (SlotPin) where the overlay has one.
-	// Stored once (rather than switching on the previewType(item) call directly) so the "video"/"audio"
-	// case below can pass it straight through as MediaViewer's own narrower category prop without a
-	// second, redundant resolution — a raw switch on the call expression doesn't narrow across cases.
-	const category = pinnedCategory ?? previewType(item)
-
-	// A text-family file above the cap it loads whole within: read in ranges, never editable.
-	if (opensAsLargeText(category, base.data.size, profile)) {
-		return (
-			<LargeTextViewer
-				item={item}
-				alt={alt}
-			/>
-		)
-	}
-
-	switch (category) {
-		case "image":
-			return (
-				<ImageViewer
-					item={item}
-					alt={alt}
-					imageRef={imageRef}
-					pageSourceRef={imagePageRef}
-				/>
-			)
-		case "video":
-		case "audio":
-			return (
-				<MediaViewer
-					item={item}
-					category={category}
-					alt={alt}
-				/>
-			)
-		// An editable PDF is keyed by its document (bodyKey): its editor's saves stream through presentationRef's port save
-		// and keep it mounted.
-		case "pdf":
-			return (
-				<PdfViewer
-					item={item}
-					alt={alt}
-					variant={variant}
-					onOpenFile={onOpenFile}
-					{...(neverEditable
-						? {}
-						: {
-								editing: {
-									writable: editable,
-									onDirtyChange,
-									saveRef: presentationRef,
-									onSave
-								}
-							})}
-				/>
-			)
-		case "spreadsheet":
-			return (
-				<SheetViewer
-					item={item}
-					documentKey={documentKey}
-					alt={alt}
-					editable={editable}
-					{...(renamedReadOnly ? { readOnlyReason: "renamed" as const } : {})}
-					neverEditable={neverEditable}
-					onDirtyChange={onDirtyChange}
-					saveRef={spreadsheetRef}
-					onOpenFile={onOpenFile}
-					canSaveCopy={canSaveCopy}
-					onAutosave={onAutosave}
-				/>
-			)
-		case "docx":
-			return (
-				<DocxViewer
-					item={item}
-					alt={alt}
-					variant={variant}
-					canSaveCopy={canSaveCopy}
-					onOpenFile={onOpenFile}
-					{...(neverEditable
-						? {}
-						: {
-								editing: {
-									writable: editable,
-									renamed: renamedReadOnly,
-									onDirtyChange,
-									saveRef: docxRef,
-									onAutosave
-								}
-							})}
-				/>
-			)
-		// An editable deck is keyed by its document (bodyKey): its own saves move the session onto the saved file and
-		// keep it mounted. The editor fills the overlay's presentationRef; one that cannot save shows the deck view-only.
-		case "presentation":
-			return (
-				<PresentationViewer
-					item={item}
-					alt={alt}
-					variant={variant}
-					canSaveCopy={canSaveCopy}
-					onOpenFile={onOpenFile}
-					{...(neverEditable
-						? {}
-						: {
-								editing: {
-									writable: editable,
-									renamed: renamedReadOnly,
-									onDirtyChange,
-									saveRef: presentationRef,
-									onSave,
-									onAutosave
-								}
-							})}
-				/>
-			)
-		case "ebook":
-			return (
-				<EbookViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "text":
-		case "code":
-			return (
-				<TextViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "markdown":
-			return (
-				<MarkdownViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "subtitle":
-			return (
-				<SubtitleViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "notebook":
-			return (
-				<NotebookViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "calendar":
-			return (
-				<CalendarViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "contact":
-			return (
-				<ContactViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "mermaid":
-			return (
-				<MermaidViewer
-					item={item}
-					alt={alt}
-					editable={editable}
-					locked={locked}
-					onDirtyChange={onDirtyChange}
-					onTextState={onTextState}
-					readAs={readAs}
-					contentRef={contentRef}
-				/>
-			)
-		case "rawImage":
-			return (
-				<RawImageViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "archive":
-			return (
-				<ArchiveBrowser
-					item={item}
-					variant={variant}
-				/>
-			)
-		case "comic":
-			return (
-				<ComicViewer
-					item={item}
-					variant={variant}
-				/>
-			)
-		case "iwork":
-			return (
-				<IworkPreview
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "font":
-			return <FontViewer item={item} />
-		case "torrent":
-			return <TorrentViewer item={item} />
-		case "email":
-			return <EmailViewer item={item} />
-		case "mailbox":
-			return <MailboxViewer item={item} />
-		case "binaryInfo":
-			return <BinaryInfoViewer item={item} />
-		case "sqlite":
-			return <SqliteViewer item={item} />
-		case "geo":
-			return <GeoViewer item={item} />
-		case "model3d":
-			return <Model3dViewer item={item} />
-		case "cad":
-			return <DxfViewer item={item} />
-		case "dicom":
-			return <DicomViewer item={item} />
-		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive
-		// switch's required fallback.
-		case "other":
-			return (
-				<PreviewUnsupportedState
-					item={item}
-					message={t("previewUnsupportedType")}
-				/>
-			)
-		// Unreachable by construction, and that is the point: `category` narrows to `never` here only
-		// while every PreviewCategory has an arm above, so adding one without a viewer is a compile error
-		// on this assignment instead of an overlay that renders nothing.
-		default: {
-			const unhandled: never = category
-
-			return unhandled
-		}
-	}
 }

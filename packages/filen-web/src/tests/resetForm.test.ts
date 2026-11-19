@@ -14,8 +14,10 @@ const { completePasswordReset, navigate } = vi.hoisted(() => ({ completePassword
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { completePasswordReset } }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
 vi.mock("@/lib/sdk/session", () => ({ persistSession: vi.fn(), clearSession: vi.fn(), broadcastAuth: vi.fn() }))
+vi.mock("@/lib/sdk/boot", () => ({ whenBootReady: vi.fn() }))
 
 const { ResetForm } = await import("@/features/auth/components/resetForm")
+const { rememberReturnTarget, takeSignInTarget } = await import("@/features/settings/lib/pendingPlans")
 
 // length>=10 with lowercase+special only — ratePasswordStrength's "normal" tier, enough to submit.
 const STRONG_ENOUGH_PASSWORD = "abcdefgh!!"
@@ -35,6 +37,7 @@ function sdkDto(kind: string): Record<string, string> {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	sessionStorage.clear()
 	completePasswordReset.mockImplementation(() => new Promise(() => undefined))
 })
 
@@ -86,5 +89,40 @@ describe("ResetForm — terminal sign-in-required panel", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Go to sign in" }))
 
 		expect(navigate).toHaveBeenCalledWith({ to: "/login" })
+	})
+})
+
+// The automatic sign-in after a reset goes where a form sign-in goes: the page a signed-out visit asked for, else the
+// configured start screen ("/" resolves it). Taking the target clears it, so it never reaches a later sign-in.
+describe("ResetForm — landing after the automatic sign-in", () => {
+	async function submitSuccessfully(): Promise<void> {
+		completePasswordReset.mockResolvedValue("client-blob")
+
+		render(createElement(ResetForm, { token: "reset-token" }))
+
+		fillForm()
+		await waitFor(() => {
+			expect(screen.getByText("Master keys imported (k.txt)")).toBeTruthy()
+		})
+		fireEvent.click(screen.getByRole("button", { name: "Reset password" }))
+
+		await waitFor(() => {
+			expect(navigate).toHaveBeenCalledTimes(1)
+		})
+	}
+
+	it("lands on the start screen when nothing was asked for", async () => {
+		await submitSuccessfully()
+
+		expect(navigate).toHaveBeenCalledWith({ to: "/" })
+	})
+
+	it("lands on the page a signed-out visit asked for and clears it", async () => {
+		rememberReturnTarget("/notes/x")
+
+		await submitSuccessfully()
+
+		expect(navigate).toHaveBeenCalledWith({ href: "/notes/x" })
+		expect(takeSignInTarget()).toBeNull()
 	})
 })

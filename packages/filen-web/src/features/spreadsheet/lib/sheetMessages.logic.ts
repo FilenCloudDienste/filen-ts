@@ -1,5 +1,6 @@
 import type { SheetFileKind, SheetRefusal, SheetViewOnlyReason, SheetWritability } from "@filen/office/core/sheet"
 import type { PreviewKey } from "@/lib/i18n"
+import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetKind"
 
 // A view-only format's note names the format the file is in: an .xls, its template (an .xlt), or an OpenDocument
 // spreadsheet (.ods, .ots).
@@ -20,9 +21,7 @@ export function viewOnlyKey(reason: SheetViewOnlyReason, kind: SheetFileKind): P
 			return "previewSpreadsheetReadOnlyTooLarge"
 		// A text file that would not save back as it was; a workbook the gate could not prove is lossy.
 		case "unsafe":
-			return kind === "csv" || kind === "tsv" || kind === "tab"
-				? "previewSpreadsheetReadOnlyUnsafe"
-				: "previewSpreadsheetReadOnlyLossy"
+			return isTextSheetKind(kind) ? "previewSpreadsheetReadOnlyUnsafe" : "previewSpreadsheetReadOnlyLossy"
 		case "signed":
 			return "previewSheetReadOnlySigned"
 		case "readOnlyRecommended":
@@ -83,8 +82,9 @@ export function refusalKey(refusal: SheetRefusal, kind: SheetFileKind): PreviewK
 	switch (refusal.reason) {
 		case "readOnly":
 			return isViewOnlyReason(refusal.detail) ? viewOnlyKey(refusal.detail, kind) : "previewSpreadsheetReadOnlyLossy"
+		// An insert-drag that would shift only part of the moved block is refused whatever its size.
 		case "tooLarge":
-			return "previewSpreadsheetTooLarge"
+			return refusal.detail === "split" ? "previewSheetMoveSplit" : "previewSpreadsheetTooLarge"
 		case "sheetName":
 			return "previewSpreadsheetSheetNameInvalid"
 		case "lastSheet":
@@ -131,6 +131,8 @@ export function refusalKey(refusal: SheetRefusal, kind: SheetFileKind): PreviewK
 			return "previewSheetObjectLocked"
 		case "chartUnsupported":
 			return "previewSheetChartUnsupported"
+		case "chartValue":
+			return "previewSheetChartValueInvalid"
 		case "occupied":
 			return "previewSheetMoveReplaceBody"
 	}

@@ -1,10 +1,12 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { RotateCwIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { log } from "@/lib/log"
-import { formatLogEntry, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
+import { log, type LogEntry } from "@/lib/log"
+import { collectLogs, formatLogEntry, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
+import { sdkApi } from "@/lib/sdk/client"
+import { storage } from "@/lib/storage/adapter"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/features/settings/components/settingsLayout"
@@ -16,20 +18,36 @@ const LEVEL_CLASS: Record<string, string> = {
 	error: "text-destructive"
 }
 
-// Renders this browser TAB's own in-memory ring buffer (log.dump(), see src/lib/log.ts) — not a
-// merge with the SDK worker's own separate ring buffer instance (different JS realm); see logs.ts's
-// own comment on that scope limit. No live subscription: the ring buffer is a plain array, not an
-// event source, so "Refresh" just re-reads it into local state — cheap (capped at LOG_RING_MAX entries).
+// Renders this tab's ring merged with the SDK worker's, the db worker's and the service worker's (collectLogs, see
+// features/settings/lib/logs.ts). The page's own entries show at once; the pull fills in the rest. No live
+// subscription: the rings are plain arrays, not event sources, so "Refresh" pulls them again (each capped at
+// LOG_RING_MAX entries).
 function LogsBlock() {
 	const { t } = useTranslation("settings")
 	const [entries, setEntries] = useState(() => log.dump())
+	// Only the latest pull lands: an earlier one answering late would show older entries.
+	const pullRef = useRef(0)
 
-	function refresh(): void {
-		setEntries(log.dump())
+	async function refresh(): Promise<LogEntry[]> {
+		const pullId = ++pullRef.current
+		const merged = await collectLogs(log.dump(), { sdk: sdkApi, storage })
+
+		if (pullRef.current === pullId) {
+			setEntries(merged)
+		}
+
+		return merged
 	}
 
-	function handleExport(): void {
-		downloadTextFile(logsExportFilename(), formatLogEntries(entries))
+	useEffect(() => {
+		void refresh()
+	}, [])
+
+	// Pulls afresh rather than reading `entries`, so a click before the mount pull lands still exports every realm.
+	async function handleExport(): Promise<void> {
+		const merged = await refresh()
+
+		downloadTextFile(logsExportFilename(), formatLogEntries(merged))
 		toast.success(t("settingsLogsExportSuccess"))
 	}
 
@@ -53,7 +71,9 @@ function LogsBlock() {
 				<Button
 					type="button"
 					variant="ghost"
-					onClick={refresh}
+					onClick={() => {
+						void refresh()
+					}}
 				>
 					<RotateCwIcon />
 					{t("settingsLogsRefresh")}
@@ -62,7 +82,9 @@ function LogsBlock() {
 					type="button"
 					variant="outline"
 					disabled={entries.length === 0}
-					onClick={handleExport}
+					onClick={() => {
+						void handleExport()
+					}}
 				>
 					{t("settingsLogsExport")}
 				</Button>

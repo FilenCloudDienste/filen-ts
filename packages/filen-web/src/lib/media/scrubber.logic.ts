@@ -1,3 +1,6 @@
+import type { TFunction } from "i18next"
+import type { StageChapter } from "@/components/media/video/stage.logic"
+
 // Pure math behind the media scrubber: pointer position to time, keyboard steps, buffered ranges.
 
 // PageUp/PageDown move a tenth of the file, never less than one arrow step (MEDIA_SEEK_STEP_SECONDS, passed in).
@@ -79,4 +82,13 @@ export function parseBufferedRanges(serialized: string): TimeRange[] {
 	}
 
 	return ranges
+}
+
+// How every scrubber names a chapter: "Chapter 2: Title", or "Chapter 2" when it has no title. `t` is common-bound.
+export function chapterName(chapters: readonly StageChapter[], chapter: StageChapter, t: TFunction): string {
+	const number = chapters.indexOf(chapter) + 1
+
+	return chapter.title !== null && chapter.title.length > 0
+		? t("mediaChapterTitled", { number, title: chapter.title })
+		: t("mediaChapter", { number })
 }

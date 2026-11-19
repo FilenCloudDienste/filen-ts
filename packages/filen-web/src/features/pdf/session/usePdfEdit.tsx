@@ -42,6 +42,7 @@ import { accountKeepsVersions } from "@/features/pdf/save/accountVersions"
 import { PdfEngineError } from "@filen/office/dom/pdfedit"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { singleOrCountKey } from "@/lib/i18n"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
@@ -232,7 +233,12 @@ export function usePdfEdit(
 			onCopied: (names, items) => {
 				for (const made of items) recordOwnSave(made.data.uuid)
 
-				toast.success(t("previewPdfExtractSaved", { count: names.length, name: names[0] ?? "" }))
+				toast.success(
+					t(singleOrCountKey(names.length, "previewPdfExtractSavedSingle", "previewPdfExtractSaved"), {
+						count: names.length,
+						name: names[0] ?? ""
+					})
+				)
 			},
 			onFailed: key => {
 				toast.error(t(key))
@@ -470,7 +476,7 @@ export function usePdfEdit(
 				setDraftSaving(false)
 
 				if (outcome.status === "saved") {
-					toast.success(t("previewPdfExtractSaved", { count: 1, name: outcome.name ?? "" }))
+					toast.success(t("previewPdfExtractSavedSingle", { name: outcome.name ?? "" }))
 					current.onEnd(true)
 				} else if (outcome.status === "failed") saveDeps()?.onCopyFailed(outcome.error)
 			})

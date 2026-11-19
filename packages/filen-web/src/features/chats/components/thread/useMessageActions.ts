@@ -1,3 +1,4 @@
+import { createContext, useContext, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
@@ -39,13 +40,71 @@ export interface MessageActionsHandle {
 	runAction: (descriptor: MessageActionDescriptor) => void
 }
 
+// Block confirms first, as the contacts page and mobile do: it also drops the sender from the contact
+// list, which unblocking does not restore. The thread hosts one confirm for all its rows
+// (useMessageBlockConfirm in messageThread.tsx) and hands its request down through this context; without
+// a host, Block does nothing.
+export const MessageBlockRequestContext = createContext<((message: ChatMessage) => void) | null>(null)
+
+export interface MessageBlockConfirm {
+	// The message whose sender the open confirm would block; null while closed.
+	target: ChatMessage | null
+	pending: boolean
+	request: (message: ChatMessage) => void
+	cancel: () => void
+	confirm: () => Promise<void>
+}
+
+export function useMessageBlockConfirm(): MessageBlockConfirm {
+	const { t } = useTranslation("chats")
+	const [target, setTarget] = useState<ChatMessage | null>(null)
+	const [pending, setPending] = useState(false)
+
+	async function confirm(): Promise<void> {
+		if (target === null) {
+			return
+		}
+
+		setPending(true)
+		const outcome = await blockContactByEmail({
+			email: target.senderEmail,
+			// senderId is `number` on the wasm surface — coerce so the local blocked-set cross-reference
+			// matches by id, not only email.
+			userId: BigInt(target.senderId),
+			nickName: target.senderNickName,
+			avatar: target.senderAvatar
+		})
+		setPending(false)
+		setTarget(null)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+
+			return
+		}
+
+		toast.success(t("chatMessageBlockedToast"))
+	}
+
+	return {
+		target,
+		pending,
+		request: setTarget,
+		cancel: () => {
+			setTarget(null)
+		},
+		confirm
+	}
+}
+
 // Single source of truth for a message's action set AND its dispatch, shared by the right-click context
 // menu, the ⋯-overflow dropdown, and the hover action bar's inline icon buttons (messageActionBar.tsx) —
 // every surface reads the SAME descriptor list (messageMenu.logic.ts's messageMenuActions) and routes
 // through the SAME runAction, so there is one action model, not three. Copy is self-contained (clipboard
 // + toast); retry/remove call the silent inflight helpers directly (the optimistic copy's uuid IS its
 // inflightId, so the ChatMessageWithInflightId they need is reconstructed here); delete only ever
-// dispatches the confirm request; disableEmbed/block are confirm-free (online-only, best-effort).
+// dispatches the confirm request, block the thread's confirm (MessageBlockRequestContext); disableEmbed is
+// confirm-free (online-only, best-effort).
 export function useMessageActions({
 	chat,
 	message,
@@ -58,6 +117,7 @@ export function useMessageActions({
 	const { t } = useTranslation("chats")
 	const isOnline = useIsOnline()
 	const beginReply = useChatComposerStore(state => state.beginReply)
+	const requestBlock = useContext(MessageBlockRequestContext)
 	const descriptors = applyMessageOfflineGate(messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked), isOnline)
 
 	async function handleCopy(): Promise<void> {
@@ -74,25 +134,6 @@ export function useMessageActions({
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
 		}
-	}
-
-	async function handleBlock(): Promise<void> {
-		const outcome = await blockContactByEmail({
-			email: message.senderEmail,
-			// senderId is `number` on the wasm surface — coerce so the local blocked-set cross-reference
-			// matches by id, not only email.
-			userId: BigInt(message.senderId),
-			nickName: message.senderNickName,
-			avatar: message.senderAvatar
-		})
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-
-			return
-		}
-
-		toast.success(t("chatMessageBlockedToast"))
 	}
 
 	function runAction(descriptor: MessageActionDescriptor): void {
@@ -117,7 +158,7 @@ export function useMessageActions({
 		}
 
 		if (descriptor.id === "block") {
-			void handleBlock()
+			requestBlock?.(message)
 
 			return
 		}

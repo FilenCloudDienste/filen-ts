@@ -8,42 +8,10 @@
 
 import DOMPurify from "dompurify"
 import { describe, expect, it } from "vitest"
-import { sanitizeRichTextHtml, RICH_TEXT_ALLOWED_TAGS, RICH_TEXT_ALLOWED_ATTR } from "@/features/notes/lib/sanitizeRichText"
+import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
-// Config pinning: the allowlist MUST match
-// packages/filen-mobile/src/components/textEditor/richText/dom.tsx byte-for-byte — a reviewer diffs
-// these two arrays directly, so any drift here is a real cross-client compat bug, not just a test
-// nicety.
-describe("sanitizeRichTextHtml — allowlist pinning", () => {
-	it("pins the exact allowed tag list mobile's dom.tsx uses", () => {
-		expect([...RICH_TEXT_ALLOWED_TAGS]).toEqual([
-			"p",
-			"strong",
-			"em",
-			"u",
-			"a",
-			"h1",
-			"h2",
-			"h3",
-			"h4",
-			"h5",
-			"h6",
-			"code",
-			"ol",
-			"ul",
-			"li",
-			"blockquote",
-			"pre",
-			"br",
-			"span",
-			"div"
-		])
-	})
-
-	it("pins the exact allowed attribute list mobile's dom.tsx uses", () => {
-		expect([...RICH_TEXT_ALLOWED_ATTR]).toEqual(["href", "target", "rel", "src", "alt", "class", "style"])
-	})
-})
+// The tag and attribute allowlists come from @filen/shared/dom, which every client (web, mobile) passes to
+// DOMPurify; their exact contents are pinned once, in packages/filen-shared/src/tests/dom/richTextSanitizer.test.ts.
 
 describe("sanitizeRichTextHtml — XSS fixture", () => {
 	it("strips <script> tags entirely", () => {

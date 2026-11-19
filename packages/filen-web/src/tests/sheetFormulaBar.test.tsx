@@ -3,19 +3,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { preview } from "@/locales/en/preview"
+import { bar, file, goTo, openViewer as openSheetViewer, sheetBytes, stubSheetCanvas, typeInBar } from "@/tests/support/sheetViewerHarness"
 
 // Typing a formula in the viewer over a real session on this thread: function names offered as a word is typed (Tab
 // takes one), the syntax of the call the caret is in, AutoSum, and entries read in the browser's locale.
 
-const { bytes, nameLists } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
-
-	return { bytes: held, nameLists: { count: 0 } }
-})
+const { nameLists } = vi.hoisted(() => ({ nameLists: { count: 0 } }))
 
 // Counts how often the name box works out the names its list offers.
 vi.mock("@/features/spreadsheet/lib/nameBox.logic", async importOriginal => {
@@ -31,45 +26,22 @@ vi.mock("@/features/spreadsheet/lib/nameBox.logic", async importOriginal => {
 	}
 })
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
 
 // The find field is the document editor's, which binds Mod+F through the app's keymap.
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
+beforeEach(stubSheetCanvas)
 
 const NUMBERS = [["Amount"], [1], [2]]
 
@@ -85,48 +57,7 @@ async function book(sheets: readonly { readonly name: string; readonly rows: rea
 async function openViewer(
 	sheets: readonly { readonly name: string; readonly rows: readonly (readonly BookCell[])[] }[] = [{ name: "Data", rows: NUMBERS }]
 ): Promise<HTMLElement> {
-	bytes.current = await book(sheets)
-
-	render(
-		<SheetViewer
-			item={file("fruit.xlsx")}
-			documentKey="formula"
-			alt="fruit.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	return await screen.findByRole("grid")
-}
-
-function bar(): HTMLTextAreaElement {
-	return screen.getByRole<HTMLTextAreaElement>("textbox", { name: preview.previewSpreadsheetCellContents })
-}
-
-// Starts an entry in the formula bar and types `text` into it, the caret at its end.
-async function typeInBar(text: string): Promise<HTMLTextAreaElement> {
-	const input = bar()
-
-	await act(async () => {
-		input.focus()
-		await Promise.resolve()
-	})
-	fireEvent.input(input, { target: { value: text } })
-
-	return input
-}
-
-async function goTo(reference: string): Promise<void> {
-	const box = screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox })
-
-	fireEvent.focus(box)
-	fireEvent.change(box, { target: { value: reference } })
-	fireEvent.keyDown(box, { key: "Enter" })
-	// The box shows the active cell: a range's top left.
-	await waitFor(() => {
-		expect(box.value).toBe(reference.split(":")[0])
-	})
+	return await openSheetViewer(await book(sheets), { name: "fruit.xlsx", documentKey: "formula" })
 }
 
 describe("typing a formula", () => {
@@ -250,19 +181,7 @@ describe("a result the app does not calculate", () => {
 })
 
 async function openBook(sheet: Parameters<typeof writeXlsx>[0]["sheets"][number]): Promise<void> {
-	bytes.current = await writeXlsx({ sheets: [sheet] })
-
-	render(
-		<SheetViewer
-			item={file("lines.xlsx")}
-			documentKey="formula"
-			alt="lines.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	await screen.findByRole("grid")
+	await openSheetViewer(await writeXlsx({ sheets: [sheet] }), { name: "lines.xlsx", documentKey: "formula" })
 }
 
 function nameBox(): HTMLInputElement {
@@ -289,23 +208,16 @@ describe("the name box", () => {
 	})
 
 	it("goes to another sheet's cell and to a defined name", async () => {
-		bytes.current = await writeXlsx({
-			sheets: [
-				{ name: "Data", rows: [["here"]] },
-				{ name: "Other sheet", rows: [["a"], ["b", "far"]] }
-			],
-			namedRanges: [{ name: "Far", range: "'Other sheet'!$B$2" }]
-		})
-		render(
-			<SheetViewer
-				item={file("names.xlsx")}
-				documentKey="names"
-				alt="names.xlsx"
-				editable
-				saveRef={{ current: null }}
-			/>
+		await openSheetViewer(
+			await writeXlsx({
+				sheets: [
+					{ name: "Data", rows: [["here"]] },
+					{ name: "Other sheet", rows: [["a"], ["b", "far"]] }
+				],
+				namedRanges: [{ name: "Far", range: "'Other sheet'!$B$2" }]
+			}),
+			{ name: "names.xlsx", documentKey: "names" }
 		)
-		await screen.findByRole("grid")
 		enter("'other SHEET'!A2")
 		await waitFor(() => {
 			expect(bar().value).toBe("b")
@@ -322,26 +234,19 @@ describe("the name box", () => {
 	})
 
 	it("works out the names it offers once as it takes focus, not again per key typed nor while blurred", async () => {
-		bytes.current = await writeXlsx({
-			sheets: [
-				{ name: "Data", rows: [["here"], ["there"]] },
-				{ name: "Other", rows: [["far"]] }
-			],
-			namedRanges: [
-				{ name: "Here", range: "Data!$A$1" },
-				{ name: "There", range: "Data!$A$2" }
-			]
-		})
-		render(
-			<SheetViewer
-				item={file("listed.xlsx")}
-				documentKey="listed"
-				alt="listed.xlsx"
-				editable
-				saveRef={{ current: null }}
-			/>
+		await openSheetViewer(
+			await writeXlsx({
+				sheets: [
+					{ name: "Data", rows: [["here"], ["there"]] },
+					{ name: "Other", rows: [["far"]] }
+				],
+				namedRanges: [
+					{ name: "Here", range: "Data!$A$1" },
+					{ name: "There", range: "Data!$A$2" }
+				]
+			}),
+			{ name: "listed.xlsx", documentKey: "listed" }
 		)
-		await screen.findByRole("grid")
 
 		const box = nameBox()
 
@@ -375,19 +280,14 @@ describe("the name box", () => {
 	})
 
 	it("refuses a range on a protected sheet whose cells may not be selected", async () => {
-		bytes.current = await writeXlsx({
-			sheets: [{ name: "Locked", rows: [["a"]], protection: { sheet: true, selectLockedCells: false, selectUnlockedCells: true } }]
-		})
-		render(
-			<SheetViewer
-				item={file("locked.xlsx")}
-				documentKey="locked"
-				alt="locked.xlsx"
-				editable
-				saveRef={{ current: null }}
-			/>
+		await openSheetViewer(
+			await writeXlsx({
+				sheets: [
+					{ name: "Locked", rows: [["a"]], protection: { sheet: true, selectLockedCells: false, selectUnlockedCells: true } }
+				]
+			}),
+			{ name: "locked.xlsx", documentKey: "locked" }
 		)
-		await screen.findByRole("grid")
 
 		enter("C3:D4")
 		await act(async () => {
@@ -399,7 +299,7 @@ describe("the name box", () => {
 
 describe("a read-only formula bar", () => {
 	it("names the active cell's contents", async () => {
-		bytes.current = await writeXlsx({ sheets: [{ name: "Data", rows: [["here"]] }] })
+		sheetBytes.current = await writeXlsx({ sheets: [{ name: "Data", rows: [["here"]] }] })
 		render(
 			<SheetViewer
 				item={file("view.xlsx")}

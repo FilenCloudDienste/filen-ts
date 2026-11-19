@@ -58,6 +58,8 @@ export interface OfficeTemplateLocale {
 	paper?: TemplatePaper | undefined
 	// A workbook's first sheet, in the user's language.
 	sheetName: string
+	// A presentation's layouts by type (ST_SlideLayoutType), in the user's language.
+	layoutNames?: Readonly<Record<string, string>> | undefined
 }
 
 // The blank file, built in a worker spawned for it and ended after (officeTemplates.ts): New ▸ Office is rare, and

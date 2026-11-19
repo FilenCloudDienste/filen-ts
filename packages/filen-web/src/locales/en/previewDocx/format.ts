@@ -1,4 +1,4 @@
-// "preview" namespace, Word document editor — the editor's font, size, colour and paragraph controls. Spread into preview.ts; same catalog rules.
+// "preview" namespace, Word document editor — the editor's font, size, color and paragraph controls. Spread into preview.ts; same catalog rules.
 export const previewDocxFormat = {
 	/** Docx editor — toolbar toggle/menu item: raises the selected text as superscript */
 	previewDocxSuperscript: "Superscript",
@@ -40,9 +40,9 @@ export const previewDocxFormat = {
 	previewDocxSpacingLoose: "Loose",
 	/** Docx editor — character spacing step: expanded by 3 points */
 	previewDocxSpacingVeryLoose: "Very loose",
-	/** Docx editor — toolbar button: text colour picker */
+	/** Docx editor — toolbar button: text color picker */
 	previewDocxFontColor: "Font color",
-	/** Docx editor — toolbar button: highlighter colour picker */
+	/** Docx editor — toolbar button: highlighter color picker */
 	previewDocxHighlightColor: "Highlight color",
 	/** Docx editor — ⋯ submenu: line spacing */
 	previewDocxLineSpacing: "Line spacing",
@@ -70,35 +70,35 @@ export const previewDocxFormat = {
 	previewDocxFontBody: "{{name}} (Body)",
 	/** Docx editor — font or size picker value while the selection has several */
 	previewDocxValueMixed: "Several",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightYellow: "Yellow",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightGreen: "Bright green",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightCyan: "Turquoise",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightMagenta: "Pink",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightBlue: "Blue",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightRed: "Red",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkBlue: "Dark blue",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkCyan: "Teal",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkGreen: "Green",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkMagenta: "Violet",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkRed: "Dark red",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkYellow: "Dark yellow",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightDarkGray: "Gray 50%",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightLightGray: "Gray 25%",
-	/** Docx editor — highlighter colour name */
+	/** Docx editor — highlighter color name */
 	previewDocxHighlightBlack: "Black",
 	/** Docx editor — ⋯ menu item opening the Paragraph dialog (indents and spacing) */
 	previewDocxParagraphAction: "Paragraph…",

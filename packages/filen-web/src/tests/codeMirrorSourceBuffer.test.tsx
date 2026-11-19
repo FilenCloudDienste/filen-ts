@@ -4,6 +4,7 @@ import { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { act, render } from "@testing-library/react"
 import { EditorView } from "@codemirror/view"
+import { editorView } from "@/tests/support/codeMirror"
 
 vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
 	languageExtensionFor: () => null,
@@ -14,17 +15,6 @@ const { CodeMirrorSource } = await import("@/features/preview/components/codeMir
 const { Text } = await import("@codemirror/state")
 const { undo } = await import("@codemirror/commands")
 type TextBuffer = import("@/features/preview/lib/textFile").TextBuffer
-
-function editorView(container: HTMLElement): EditorView {
-	const dom = container.querySelector<HTMLElement>(".cm-editor")
-	const view = dom === null ? null : EditorView.findFromDOM(dom)
-
-	if (view === null) {
-		throw new Error("no editor view")
-	}
-
-	return view
-}
 
 function append(view: EditorView, text: string): void {
 	act(() => {

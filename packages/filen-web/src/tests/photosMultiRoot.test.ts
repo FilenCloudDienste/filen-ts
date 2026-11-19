@@ -24,7 +24,14 @@ vi.mock("@/queries/persist", async importOriginal => ({
 
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
-import { mergePhotosListings, photosListingQueryKey, usePhotosTimeline, type PhotosListing } from "@/features/photos/queries/photos"
+import {
+	mergePhotosListings,
+	photosListingQueryKey,
+	unreadPhotosRootCount,
+	usePhotosTimeline,
+	type PhotosListing
+} from "@/features/photos/queries/photos"
+import { DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { directoryRootChainQueryOptions } from "@/lib/directoryRoots"
 import { mergePhotosByCaptureDesc, sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -264,5 +271,56 @@ describe("the photos timeline over several directories", () => {
 		await waitFor(() => {
 			expect(failing.result.current.timeline.status).toBe("error")
 		})
+	})
+
+	it("counts a directory that failed with nothing held as unread, and its retry reads it again", async () => {
+		listPhotosRecursive.mockImplementation(rootUuid =>
+			rootUuid === PICS
+				? Promise.reject(new Error("boom"))
+				: Promise.resolve({ dirs: [], files: [mockFile(testUuid("ok"), OTHER, BASE)] })
+		)
+
+		const view = renderHook(() => usePhotosTimeline([PICS, OTHER]), { wrapper })
+
+		await waitFor(() => {
+			expect(view.result.current.failures).toHaveLength(1)
+		})
+		expect(view.result.current.timeline.status).toBe("success")
+		expect(unreadPhotosRootCount(view.result.current.failures, true)).toBe(1)
+
+		listPhotosRecursive.mockResolvedValue({ dirs: [], files: [mockFile(testUuid("late"), PICS, BASE + DAY)] })
+
+		act(() => {
+			view.result.current.retry()
+		})
+
+		await waitFor(() => {
+			expect(view.result.current.failures).toEqual([])
+		})
+		expect(listPhotosRecursive.mock.calls.filter(([rootUuid]) => rootUuid === PICS)).toHaveLength(2)
+		expect(unreadPhotosRootCount(view.result.current.failures, true)).toBe(0)
+	})
+
+	it("a directory whose refetch failed over a held listing is not unread", async () => {
+		queryClient.setQueryData(photosListingQueryKey(PICS), { photos: [photo("held", BASE)], folders: {} })
+		await queryClient.invalidateQueries({ queryKey: photosListingQueryKey(PICS) })
+		listPhotosRecursive.mockImplementation(rootUuid =>
+			rootUuid === PICS ? Promise.reject(new Error("boom")) : Promise.resolve({ dirs: [], files: [] })
+		)
+
+		const view = renderHook(() => usePhotosTimeline([PICS, OTHER]), { wrapper })
+
+		await waitFor(() => {
+			expect(view.result.current.failures.map(failure => failure.rootUuid)).toEqual([PICS])
+		})
+		expect(view.result.current.failures[0]?.held).toBe(true)
+		expect(unreadPhotosRootCount(view.result.current.failures, true)).toBe(0)
+	})
+
+	it("a gone directory is not unread while online (it is removed instead)", () => {
+		const gone = { rootUuid: PICS, error: new Error(`${DIRECTORY_NOT_FOUND_PREFIX} ${PICS}`), held: false }
+
+		expect(unreadPhotosRootCount([gone], true)).toBe(0)
+		expect(unreadPhotosRootCount([gone, { rootUuid: OTHER, error: new Error("boom"), held: false }], true)).toBe(1)
 	})
 })

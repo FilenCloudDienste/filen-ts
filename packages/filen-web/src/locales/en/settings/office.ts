@@ -138,6 +138,15 @@ export const settingsOffice = {
 	settingsOfficeFormattingMarks: "Show formatting marks",
 	/** Settings > Office — formatting marks switch description */
 	settingsOfficeFormattingMarksDescription: "Paragraph marks, spaces, tabs and breaks.",
+	/** Settings > Office — switch: typed straight quotes become typographic quotes (Word's AutoFormat As You Type "Straight quotes with smart quotes") */
+	settingsOfficeAutoQuotes: "Replace straight quotes with smart quotes",
+	/** Settings > Office — smart quotes switch description; the quote marks follow the language of the text */
+	settingsOfficeAutoQuotesDescription: "As you type, in the quote marks of the text's language. Applies to documents opened afterwards.",
+	/** Settings > Office — switch: typing a number or a dash and a space at the start of a paragraph starts a list (Word's "Automatic numbered and bulleted lists") */
+	settingsOfficeAutoLists: "Automatic numbered and bulleted lists",
+	/** Settings > Office — automatic lists switch description; "1. " and "- " are what the user types, keep them as written */
+	settingsOfficeAutoListsDescription:
+		"Typing 1. or - and a space at the start of a paragraph starts a list. Applies to documents opened afterwards.",
 
 	// ── Editor layout (this device) ──────────────────────────────────────────
 	/** Settings > Office — group title: how the editors are laid out */

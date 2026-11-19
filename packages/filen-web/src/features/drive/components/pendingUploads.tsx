@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { useShallow } from "zustand/shallow"
 import { ArrowUpIcon, FilesIcon, XIcon } from "lucide-react"
 import { cn, formatBytesFixed, isWaitingForArchiveSlot } from "@filen/shared"
@@ -625,7 +626,16 @@ function PendingCancelDialog({
 				: [
 						t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.jobs }),
 						subject.kept === null ? null : t(KEPT_KEYS[subject.kept]),
-						subject.archives === 0 ? null : t("drive:drivePendingTransfersCancelArchiveDiscarded", { count: subject.archives })
+						subject.archives === 0
+							? null
+							: t(
+									singleOrCountKey(
+										subject.archives,
+										"drive:drivePendingTransfersCancelArchiveDiscardedSingle",
+										"drive:drivePendingTransfersCancelArchiveDiscarded"
+									),
+									{ count: subject.archives }
+								)
 					]
 						.filter(part => part !== null)
 						.join(" ")

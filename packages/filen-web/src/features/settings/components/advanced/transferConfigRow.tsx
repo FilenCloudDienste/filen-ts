@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { saveSetting } from "@/lib/saveSetting"
 import { useTransferPreferencesQuery } from "@/features/settings/queries/preferences"
 import { setTransferPreferences, type TransferPreferences } from "@/features/settings/lib/transferConfig"
 import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
@@ -23,16 +24,11 @@ function TransferConfigRow() {
 	const prefs = query.data
 
 	// The restart note only for a value that was stored.
-	function apply(next: TransferPreferences): void {
-		setTransferPreferences(next).then(
-			() => {
-				void query.refetch()
-				toast.info(t("settingsAdvancedRestartRequired"))
-			},
-			() => {
-				toast.error(t("settingsDocumentsSaveFailed"))
-			}
-		)
+	async function apply(next: TransferPreferences): Promise<void> {
+		if (await saveSetting(() => setTransferPreferences(next))) {
+			void query.refetch()
+			toast.info(t("settingsAdvancedRestartRequired"))
+		}
 	}
 
 	return (
@@ -46,7 +42,7 @@ function TransferConfigRow() {
 			onChange={preset => {
 				// The select only renders once prefs loaded.
 				if (prefs !== undefined) {
-					apply({ ...prefs, preset })
+					void apply({ ...prefs, preset })
 				}
 			}}
 		/>

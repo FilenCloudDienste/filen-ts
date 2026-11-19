@@ -146,6 +146,51 @@ describe("DocxPageSetupDialog", () => {
 		})
 	})
 
+	it("turns the page landscape when the typed width is the longer side, the margins as shown", () => {
+		const { execute } = renderDialog()
+
+		fireEvent.change(screen.getByRole("textbox", { name: "Width (in)" }), { target: { value: "11" } })
+		fireEvent.change(screen.getByRole("textbox", { name: "Height (in)" }), { target: { value: "8.5" } })
+		expect(screen.getByRole("combobox", { name: "Orientation" }).textContent).toContain("Landscape")
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(execute).toHaveBeenCalledWith({
+			type: "page.setup",
+			size: { width: 12_240, height: 15_840 },
+			orientation: "landscape",
+			margins: { top: 1440, bottom: 1440, left: 1441, right: 1440 },
+			scope: "section"
+		})
+	})
+
+	it("keeps the chosen orientation for a square paper", () => {
+		const { execute } = renderDialog()
+
+		fireEvent.change(screen.getByRole("textbox", { name: "Width (in)" }), { target: { value: "11" } })
+		expect(screen.getByRole("combobox", { name: "Orientation" }).textContent).toContain("Portrait")
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(execute.mock.lastCall).toMatchObject([{ size: { width: 15_840, height: 15_840 }, orientation: "portrait" }])
+	})
+
+	it("never turns the margins while a length is typed digit by digit", () => {
+		const { execute } = renderDialog()
+		const width = screen.getByRole("textbox", { name: "Width (in)" })
+
+		fireEvent.change(screen.getByRole("textbox", { name: "Right (in)" }), { target: { value: "1.5" } })
+		fireEvent.change(screen.getByRole("textbox", { name: "Height (in)" }), { target: { value: "8.5" } })
+
+		for (const text of ["1", "11", "1", "11"]) {
+			fireEvent.change(width, { target: { value: text } })
+		}
+
+		expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Top (in)" }).value).toBe("1")
+		expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Right (in)" }).value).toBe("1.5")
+		expect(screen.getByRole("combobox", { name: "Orientation" }).textContent).toContain("Landscape")
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(execute.mock.lastCall).toMatchObject([
+			{ orientation: "landscape", margins: { top: 1440, bottom: 1440, left: 1441, right: 2160 } }
+		])
+	})
+
 	it("stays open and says so when the document refuses the settings", () => {
 		const { execute, onInputDone } = renderDialog(false)
 

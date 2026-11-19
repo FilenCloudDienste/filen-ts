@@ -20,6 +20,7 @@ import type { DocxObjectPress, DocxPageOverlay } from "@filen/office/react/docx/
 import type { DocxAuthorGate } from "@/features/preview/components/docxAuthorGate.logic"
 import { useInputForm, type DocxInputChannelProps } from "@/features/preview/components/docxEditor.logic"
 import { Byline } from "@/features/preview/components/docxAnnotations"
+import { splitBalloons } from "@/features/preview/components/docxViewer.logic"
 import {
 	asideRoom,
 	changeTitle,
@@ -1009,7 +1010,7 @@ function PageColumn({
 	}
 	const placed = placeColumn(balloons, frame, zoom, heights, activeKey, SIZES)
 	const left = frame.left + frame.width + COLUMN_GAP
-	const shown = balloons.slice(0, placed.shown)
+	const { shown, hidden } = splitBalloons(balloons, placed)
 
 	return (
 		<div>
@@ -1060,20 +1061,20 @@ function PageColumn({
 					onComposed={onComposed}
 				/>
 			))}
-			{placed.shown < balloons.length ? (
+			{hidden.length > 0 ? (
 				<Popover>
 					<PopoverTrigger
 						className="pointer-events-auto absolute flex items-center justify-center rounded-xl border border-border bg-popover text-xs font-medium text-popover-foreground shadow-sm outline-none hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50"
 						style={{ left, top: placed.moreTop, width, height: MORE_HEIGHT }}
 					>
-						{t("previewDocxMoreBalloons", { count: balloons.length - placed.shown })}
+						{t("previewDocxMoreBalloons", { count: hidden.length })}
 					</PopoverTrigger>
 					<PopoverContent
 						align="start"
 						className="max-h-96 w-72 gap-3 overflow-y-auto rounded-2xl p-3 text-xs"
 						{...REVIEW_ATTRIBUTE}
 					>
-						{balloons.slice(placed.shown).map(balloon => (
+						{hidden.map(balloon => (
 							<BalloonBody
 								key={balloon.key}
 								balloon={balloon}

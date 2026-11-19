@@ -5,57 +5,25 @@
 // values opened and left from the keyboard.
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { SheetGridModel } from "@filen/office/react/sheet"
 import { writeXlsx } from "hucre/xlsx"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
+import { goTo, openViewer as openSheetViewer, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
-
-	return { bytes: held }
-})
-
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
+beforeEach(stubSheetCanvas)
 
 // A whole number 1 to 10 in A1:A10 and a list in C1:C10, both stopping an invalid entry.
 async function workbook(): Promise<Uint8Array> {
@@ -74,30 +42,7 @@ async function workbook(): Promise<Uint8Array> {
 }
 
 async function openViewer(): Promise<HTMLElement> {
-	bytes.current = await workbook()
-	render(
-		<SheetViewer
-			item={file("dv.xlsx")}
-			documentKey="dv"
-			alt="dv.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-	await screen.findByRole("textbox", { name: preview.previewSpreadsheetCellContents })
-
-	return await screen.findByRole("grid", {}, { timeout: 5000 })
-}
-
-async function goTo(reference: string): Promise<void> {
-	const box = screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox })
-
-	fireEvent.focus(box)
-	fireEvent.change(box, { target: { value: reference } })
-	fireEvent.keyDown(box, { key: "Enter" })
-	await waitFor(() => {
-		expect(box.value).toBe(reference)
-	})
+	return await openSheetViewer(await workbook(), { name: "dv.xlsx", documentKey: "dv" })
 }
 
 async function type(grid: HTMLElement, text: string): Promise<void> {

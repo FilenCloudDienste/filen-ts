@@ -1,8 +1,8 @@
 import { NUMFMT_EN_US, type NumFmtLocale } from "@filen/office/core/sheet"
 
-// What numbers and dates show in, from the browser's formatting locale, as Excel shows them in the system's
-// regional settings: its numeric date for built-in 14 (and 22), its full date for [$-F800] and its time for [$-F400]
-// as format codes, month and day names, AM and PM, and the separators. Gregorian dates in Latin digits whatever the
+// What numbers and dates show in, from the regional format (Settings, Office; else the browser's locale), as Excel
+// shows them in the system's regional settings: its numeric date for built-in 14 (and 22), its full date for [$-F800]
+// and its time for [$-F400] as format codes, month and day names, AM and PM, and the separators. Gregorian dates in Latin digits whatever the
 // locale's own calendar and digits, as the codes count them.
 
 // Sunday 2 January 2000, 09:05:09: every number one digit, so a pattern's padding shows.

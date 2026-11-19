@@ -247,7 +247,7 @@ test.describe("context menus", () => {
 			// the activity's result toast — read it back so a rejected trash names itself here instead of
 			// surfacing as a bare row count below. A single-item bulk can only fail wholesale, so the
 			// rejection copy is fully determined.
-			const trashFailureToast = driveDict.driveTrashFailed_one.replace("{{name}}", dirName)
+			const trashFailureToast = driveDict.driveTrashFailedNamed.replace("{{name}}", dirName)
 			await expect(toasts(page).filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
 
 			// On the live page: trashItems patches the row out only after the write succeeded, and a refetch

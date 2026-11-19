@@ -13,6 +13,8 @@ const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "locales
 const EN_DIR = join(LOCALES_DIR, "en")
 
 const IMPORT_PATTERN = /^import\s+\{([^}]*)\}\s+from\s+"@\/locales\/en\/([^"]+)"/gm
+// {{count}} or a formatted {{count, number}}.
+const COUNT = /\{\{count[,}]/
 // A key of the namespace's own object literal: one tab deep, bare or quoted.
 const OWN_KEY_PATTERN = /^\t(?:"([^"]+)"|([A-Za-z_$][\w$]*))\s*:/gm
 
@@ -95,6 +97,35 @@ describe("English catalog files", () => {
 			// _zero is i18next's own count-0 form; the other CLDR categories come from translation.
 			if (category === "two" || category === "few" || category === "many") {
 				problems.push(`${key}: English has only _zero / _one / _other`)
+			}
+		}
+
+		expect(problems).toEqual([])
+	})
+
+	// A plural `_one` is a CLDR category, not "one thing": Russian and Ukrainian put 21, 31 and 101 in it. A count-less
+	// `_one` beside a counted `_other` would tell them about one thing while 21 are affected; the one-thing wording takes
+	// its own key (singleOrCountKey).
+	it("counts in every English _one whose _other counts", () => {
+		const problems: string[] = []
+
+		for (const ns of EN_NAMESPACES) {
+			const catalog: Record<string, string> = EN_CATALOGS[ns]
+
+			for (const [key, value] of Object.entries(catalog)) {
+				const base = /^(.+)_one$/.exec(key)?.[1]
+
+				if (base === undefined) {
+					continue
+				}
+
+				const other = catalog[`${base}_other`] ?? ""
+
+				// A pair that counts needs the count in `_one` too. A pair that does not count and whose `_one` shows no
+				// value at all tells one thing from many by wording alone, the same defect, so its `_one` reads as `_other`.
+				if (COUNT.test(other) ? !COUNT.test(value) : value !== other && !value.includes("{{")) {
+					problems.push(`${ns}:${key}`)
+				}
 			}
 		}
 

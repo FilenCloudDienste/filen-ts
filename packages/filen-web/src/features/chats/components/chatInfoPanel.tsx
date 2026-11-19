@@ -165,7 +165,7 @@ function ChatInfoSurface({
 	onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
 	onClose: () => void
 }) {
-	const { t } = useTranslation(["chats", "common"])
+	const { t } = useTranslation(["chats", "common", "contacts"])
 	const isOnline = useIsOnline()
 	// The thread's own dialog host is outside the sheet; one rendered in here keeps rename/leave/delete nested in it.
 	const dialogHost = useChatDialogHost()
@@ -177,6 +177,8 @@ function ChatInfoSurface({
 	// removal's spinner or its confirm's, nor the other way round.
 	const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
 	const [removing, setRemoving] = useState<ChatParticipant | null>(null)
+	// Block confirms first, as everywhere else it is offered (it also drops the contact); unblock does not.
+	const [blocking, setBlocking] = useState<ChatParticipant | null>(null)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [filter, setFilter] = useState("")
 	const [addPending, setAddPending] = useState(false)
@@ -237,6 +239,7 @@ function ChatInfoSurface({
 		setActionPending(key, true)
 		const outcome = await toggled
 		setActionPending(key, false)
+		setBlocking(current => (current?.userId === participant.userId ? null : current))
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -351,7 +354,11 @@ function ChatInfoSurface({
 					}
 					onRemove={setRemoving}
 					onToggleBlock={(target, isBlockedNow) => {
-						void handleToggleBlock(target, isBlockedNow)
+						if (isBlockedNow) {
+							void handleToggleBlock(target, true)
+						} else {
+							setBlocking(target)
+						}
 					}}
 				/>
 			</li>
@@ -500,6 +507,25 @@ function ChatInfoSurface({
 				onConfirm={() => {
 					if (removing !== null) {
 						void handleRemoveConfirmed(removing)
+					}
+				}}
+			/>
+			<ConfirmDialog
+				open={blocking !== null}
+				pending={blocking !== null && pending.has(participantPendingKey("block", blocking.userId))}
+				title={t("contacts:contactsBlockConfirmTitle")}
+				body={t("contacts:contactsBlockConfirmBodySingle")}
+				confirmLabel={t("contacts:contactsActionBlock")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) {
+						setBlocking(null)
+					}
+				}}
+				onConfirm={() => {
+					if (blocking !== null) {
+						void handleToggleBlock(blocking, false)
 					}
 				}}
 			/>

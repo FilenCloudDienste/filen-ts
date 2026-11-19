@@ -6,6 +6,7 @@ import {
 	dragPan,
 	wheelZoom,
 	doubleClickZoom,
+	pinchZoom,
 	IMAGE_MIN_SCALE,
 	IMAGE_MAX_SCALE,
 	IMAGE_DOUBLE_CLICK_SCALE,
@@ -141,6 +142,59 @@ describe("wheelZoom", () => {
 		)
 
 		expect(Math.abs(result.x)).toBeLessThanOrEqual((result.scale * 100 - 100) / 2 + 0.001)
+	})
+})
+
+describe("pinchZoom", () => {
+	const container = { width: 1000, height: 1000 }
+
+	it("scales by the fingers' spread around their midpoint, keeping the point under it fixed", () => {
+		const start: ZoomTransform = { scale: 1, x: 0, y: 0 }
+		const mid = { x: 100, y: -50 }
+		const result = pinchZoom(start, 100, mid, 200, mid, container, null)
+
+		expect(result.scale).toBe(2)
+		// The content point under the midpoint: (mid - translate) / scale, the same before and after.
+		expect((mid.x - result.x) / result.scale).toBeCloseTo((mid.x - start.x) / start.scale)
+		expect((mid.y - result.y) / result.scale).toBeCloseTo((mid.y - start.y) / start.scale)
+	})
+
+	it("pans with the midpoint as both fingers move", () => {
+		const result = pinchZoom({ scale: 2, x: 0, y: 0 }, 100, { x: 0, y: 0 }, 100, { x: 30, y: 20 }, container, null)
+
+		expect(result).toEqual({ scale: 2, x: 30, y: 20 })
+	})
+
+	it("clamps to the scale limits, resetting the pan at 1x or below", () => {
+		expect(pinchZoom({ scale: 4, x: 10, y: 10 }, 10, { x: 0, y: 0 }, 1000, { x: 0, y: 0 }, container, null).scale).toBe(IMAGE_MAX_SCALE)
+		expect(pinchZoom({ scale: 2, x: 40, y: 40 }, 1000, { x: 0, y: 0 }, 1, { x: 0, y: 0 }, container, null)).toEqual({
+			scale: IMAGE_MIN_SCALE,
+			x: 0,
+			y: 0
+		})
+	})
+
+	it("clamps the pan to the content once its size is known", () => {
+		const result = pinchZoom(
+			{ scale: 1, x: 0, y: 0 },
+			100,
+			{ x: 0, y: 0 },
+			200,
+			{ x: 5000, y: 0 },
+			{ width: 100, height: 100 },
+			{
+				width: 100,
+				height: 100
+			}
+		)
+
+		expect(result.x).toBe(50)
+	})
+
+	it("keeps the start for fingers that started on one spot", () => {
+		const start: ZoomTransform = { scale: 2, x: 5, y: 5 }
+
+		expect(pinchZoom(start, 0, { x: 0, y: 0 }, 50, { x: 0, y: 0 }, container, null)).toBe(start)
 	})
 })
 

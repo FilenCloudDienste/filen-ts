@@ -107,6 +107,42 @@ export function wheelZoom(
 	return { scale: nextScale, ...clampPan(container, containSize(container, natural), nextScale, raw) }
 }
 
+// A two-finger pinch step, from the transform and the fingers at the pinch's start (`startDistance` apart around
+// `startMid`) to where they are now (`distance` apart around `mid`); midpoints relative to the container's center.
+// Scales by the fingers' spread and keeps the content point that was under the start midpoint under the current
+// one (so moving both fingers pans too), clamped like wheelZoom, with pan reset at 1x or below.
+export function pinchZoom(
+	start: ZoomTransform,
+	startDistance: number,
+	startMid: { x: number; y: number },
+	distance: number,
+	mid: { x: number; y: number },
+	container: Size,
+	natural: Size | null
+): ZoomTransform {
+	if (startDistance <= 0 || start.scale <= 0) {
+		return start
+	}
+
+	const nextScale = clampImageScale((start.scale * distance) / startDistance)
+
+	if (nextScale <= 1) {
+		return { scale: nextScale, x: 0, y: 0 }
+	}
+
+	const ratio = nextScale / start.scale
+	const raw = {
+		x: mid.x - (startMid.x - start.x) * ratio,
+		y: mid.y - (startMid.y - start.y) * ratio
+	}
+
+	if (natural === null) {
+		return { scale: nextScale, ...raw }
+	}
+
+	return { scale: nextScale, ...clampPan(container, containSize(container, natural), nextScale, raw) }
+}
+
 // Double-click toggle: zoomed in (scale > 1) snaps back to 1x with pan reset (nothing left to clamp
 // against at 1x — the whole content already fits); at rest, jumps to IMAGE_DOUBLE_CLICK_SCALE centered
 // (no pan offset — a centered zoom-in is the sensible default the spec calls for, unlike wheel-zoom's

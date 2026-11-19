@@ -15,7 +15,8 @@ import { decodeValue } from "@/lib/storage/decode"
 // request state. leader → followers: authoritative state + a takeover announcement + what is being pushed
 // for an item, and again once the cloud holds it (`landed`, also when nothing had to be sent): the hash, and
 // the tab and entry it came from (`origin`, `stamp`), so a follower knows the item's socket echo, and its own
-// push, for what they are. Any tab → any tab: a question about an item's newer version was answered (and
+// push, for what they are; and an item the leader gave up on (`failed`, chats only), so every tab can show
+// it as failed. Any tab → any tab: a question about an item's newer version was answered (and
 // how), so the other tabs stop asking it.
 
 // How a question about an item's newer version was answered: their version, mine kept over it, or mine
@@ -37,14 +38,15 @@ export type OutboxChannelMsg =
 	| { kind: "executeNow" }
 	| { kind: "stateRequest" }
 	| { kind: "state"; payload: unknown }
+	| { kind: "failed"; payload: unknown }
 	| { kind: "leaderHello" }
 	| ({ kind: "pushed"; id: string; hash: string } & PushDetail)
 	| { kind: "answered"; id: string; choice?: AnswerChoice }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
-// leader's broadcast-state shape. Both cross the channel as structured clones, which carry bigint as is. The
+// leader's broadcast-state shape, F the shape of an item the leader gave up on. All cross the channel as structured clones, which carry bigint as is. The
 // transport is always attached; a lone tab only skips the full-state broadcast (see broadcastState below).
-export interface OutboxChannelTransport<E, S> {
+export interface OutboxChannelTransport<E, S, F = unknown> {
 	// follower → leader
 	sendEnqueue: (msg: E) => void
 	// Optional: only an outbox whose tabs can discard queued edits (notes) sends it.
@@ -55,6 +57,8 @@ export interface OutboxChannelTransport<E, S> {
 	broadcastState: (state: S) => void
 	broadcastLeaderHello: () => void
 	broadcastPushed: (id: string, hash: string, detail?: PushDetail) => void
+	// Optional: only an outbox that gives up on an item (chats) sends it.
+	broadcastFailed?: (failed: F) => void
 	// any tab → any tab
 	broadcastAnswered: (id: string, choice: AnswerChoice) => void
 	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
@@ -64,7 +68,7 @@ export interface OutboxChannelTransport<E, S> {
 
 // Bind a channel to the transport surface — the identical mechanical mapping both features used inline:
 // post the shared message kinds, the feature payload as is.
-export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): OutboxChannelTransport<E, S> {
+export function makeOutboxChannelTransport<E, S, F = unknown>(channel: BroadcastChannel): OutboxChannelTransport<E, S, F> {
 	const post = (msg: OutboxChannelMsg): void => {
 		channel.postMessage(msg)
 	}
@@ -95,6 +99,12 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		broadcastState: state => {
 			if (channelPeerSeen || storageHasPeers()) {
 				post({ kind: "state", payload: state })
+			}
+		},
+		// Skipped without a peer, like the state broadcast: a lone tab already shows its own failed item.
+		broadcastFailed: failed => {
+			if (channelPeerSeen || storageHasPeers()) {
+				post({ kind: "failed", payload: failed })
 			}
 		},
 		broadcastLeaderHello: () => {
@@ -147,6 +157,8 @@ export interface OutboxRouteTarget<E, S> {
 	broadcastState: () => void
 	applyLeaderState: (state: S) => void
 	resendUnacked: () => void
+	// Optional: an outbox that broadcasts failed items decodes the payload itself.
+	applyLeaderFailed?: (payload: unknown) => void
 }
 
 // A feature's payload schemas and the labels an invalid payload is logged under. Hold it in a module const
@@ -200,6 +212,11 @@ export function routeOutboxMessage<E, S>(msg: OutboxChannelMsg, target: OutboxRo
 		}
 		case "leaderHello": {
 			target.resendUnacked()
+
+			return
+		}
+		case "failed": {
+			target.applyLeaderFailed?.(msg.payload)
 
 			return
 		}

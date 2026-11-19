@@ -3,6 +3,9 @@ import { dirname, extname, join, resolve, sep } from "node:path"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import type { Plugin, ResolvedConfig } from "vite"
+import { COI_HEADERS } from "./shared"
+
+export { COI_HEADERS }
 
 const require = createRequire(import.meta.url)
 // The package is located through its node_modules LINK, whose target is re-read on every use:
@@ -48,11 +51,6 @@ function packageRoot(): string {
 // with reason "pool" while every check stays green. closeBundle below fails the build instead.
 export const SDK_ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
-export const COI_HEADERS = {
-	"Cross-Origin-Opener-Policy": "same-origin",
-	"Cross-Origin-Embedder-Policy": "require-corp",
-	"Cross-Origin-Resource-Policy": "same-origin"
-} as const
 
 // Map a request path to the package-relative artifact it serves, or null — directory-agnostic so it
 // works both at the worker's dev source dir and at the built assets dir. `sdk.worker.ts` and Vite's

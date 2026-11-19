@@ -1,4 +1,4 @@
-import { mimeForExtension } from "@filen/shared"
+import { extensionOf, mimeForExtension } from "@filen/shared"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
 import type { SaveTarget, SourceInfo, SourceMime } from "@/features/preview/imageEdit/types"
 
@@ -36,12 +36,6 @@ export function saveTargets(info: SourceInfo, canEncodeWebp: boolean): { primary
 			return { primary: copy, copy }
 		}
 	}
-}
-
-function extensionOf(name: string): string {
-	const dot = name.lastIndexOf(".")
-
-	return dot > 0 ? name.slice(dot + 1).toLowerCase() : ""
 }
 
 // The format an in-place save writes, from the name alone (sync; the sniffed bytes decide the rest later): the type the

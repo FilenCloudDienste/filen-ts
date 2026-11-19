@@ -291,7 +291,7 @@ describe("VideoEditor", () => {
 
 		fireEvent.click(screen.getByRole("tab", { name: "Adjust" }))
 
-		expect(await screen.findByText("Colour changes save this HDR video as SDR.")).toBeTruthy()
+		expect(await screen.findByText("Color changes save this HDR video as SDR.")).toBeTruthy()
 	})
 
 	it("offers to export without audio when only the sound blocks the save", async () => {
@@ -738,6 +738,81 @@ describe("VideoEditor", () => {
 
 		await waitFor(() => {
 			expect(lastPlanned(plans).keep).toEqual([{ start: 0, end: 100 }])
+		})
+	})
+
+	it("keeps the split markers through a removal, its undo and a revert", async () => {
+		const { root, plans } = mount()
+
+		await waitFor(() => {
+			expect(plans.length).toBeGreaterThan(0)
+		})
+
+		const video = document.querySelector("video")
+		const track = screen.getByRole("group", { name: "Timeline" })
+
+		if (video === null) {
+			throw new Error("no video")
+		}
+
+		// 1000 px for the clip's 100 s: a click at x is at x / 10 s.
+		vi.spyOn(track, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1000, 80))
+
+		const clickPart = (clientX: number): void => {
+			fireEvent.pointerDown(track, { pointerId: 1, pointerType: "mouse", button: 0, clientX })
+			fireEvent.pointerUp(track, { pointerId: 1, pointerType: "mouse", button: 0, clientX })
+		}
+		const remove = (): void => {
+			fireEvent.keyDown(root, { key: "Delete", code: "Delete" })
+		}
+
+		for (const time of [10, 20, 30]) {
+			video.currentTime = time
+			fireEvent.keyDown(root, { key: "s", code: "KeyS" })
+		}
+
+		clickPart(150)
+		remove()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([
+				{ start: 0, end: 10 },
+				{ start: 20, end: 100 }
+			])
+		})
+
+		// Undone, the part is one click away again.
+		modKey(root, "z")
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([{ start: 0, end: 100 }])
+		})
+		clickPart(150)
+		remove()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([
+				{ start: 0, end: 10 },
+				{ start: 20, end: 100 }
+			])
+		})
+
+		// Revert, then Undo: the cut is back with the splits that bound the next part.
+		fireEvent.click(screen.getByRole("button", { name: "Revert" }))
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([{ start: 0, end: 100 }])
+		})
+		modKey(root, "z")
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([
+				{ start: 0, end: 10 },
+				{ start: 20, end: 100 }
+			])
+		})
+		clickPart(250)
+		remove()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep).toEqual([
+				{ start: 0, end: 10 },
+				{ start: 30, end: 100 }
+			])
 		})
 	})
 })

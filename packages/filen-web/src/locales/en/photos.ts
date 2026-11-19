@@ -24,9 +24,15 @@ export const photos = {
 	/** Empty state — the photos directories (and every subdirectory under them) have no photos or videos */
 	photosEmptyTitle: "No photos yet",
 	/** Empty state — body explaining what would show up here, with one photos directory */
-	photosEmptyBody_one: "Images and videos anywhere inside this directory, including its subdirectories, show up here.",
+	photosEmptyBodySingle: "Images and videos anywhere inside this directory, including its subdirectories, show up here.",
+	/** Empty state — body explaining what would show up here, with several photos directories */
+	photosEmptyBody_one: "Images and videos anywhere inside these directories, including their subdirectories, show up here.",
 	/** Empty state — body explaining what would show up here, with several photos directories */
 	photosEmptyBody_other: "Images and videos anywhere inside these directories, including their subdirectories, show up here.",
+	/** Notice above the timeline — some photos directories could not be read while others could, so their photos are missing; next to a Try again button — singular */
+	photosUnreadDirectories_one: "{{count, number}} directory could not be read, so its photos are missing.",
+	/** Notice above the timeline — some photos directories could not be read while others could, so their photos are missing; next to a Try again button — plural */
+	photosUnreadDirectories_other: "{{count, number}} directories could not be read, so their photos are missing.",
 
 	// ── Root-gone handling ──────────────────────────────────────────────────────
 	/** Toast shown when a photos directory no longer exists (deleted/trashed elsewhere) and was removed from Photos; with no directory left the screen falls back to the unset hero */

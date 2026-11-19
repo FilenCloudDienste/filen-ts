@@ -3,6 +3,7 @@ import { test, expect } from "./fixtures"
 import { enterFixtureRoot } from "./helpers/fixtures"
 import { centerOf } from "./helpers/geometry"
 import { bootTo, expectBreadcrumbAt } from "./helpers/listing"
+import { leadingNamePattern } from "./helpers/rows"
 
 // The touch model of the click-to-select lists (useTouchLongPress + touchTapIntent): a tap opens, a
 // long-press selects without the context menu, a tap in selection mode toggles, and a pan selects
@@ -20,7 +21,7 @@ test.describe("touch", () => {
 	const HOLD_MS = 900
 
 	function row(listbox: Locator, name: string): Locator {
-		return listbox.getByRole("option", { name: new RegExp(`^${name}\\b`) })
+		return listbox.getByRole("option", { name: leadingNamePattern(name) })
 	}
 
 	async function touchStart(cdp: CDPSession, point: { x: number; y: number }): Promise<void> {

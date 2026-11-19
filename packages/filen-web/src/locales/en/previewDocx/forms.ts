@@ -51,5 +51,13 @@ export const previewDocxForms = {
 	/** Docx editor — new dropdown list dialog: an item already in the list */
 	previewDocxDropdownDuplicate: "That item is already in the list.",
 	/** Docx editor — new dropdown list dialog submit */
-	previewDocxDropdownInsert: "Insert"
+	previewDocxDropdownInsert: "Insert",
+	/** Docx editor — text saved into the document: what a new text form control shows until something is typed in (Word's own wording) */
+	previewDocxControlPlaceholderText: "Click or tap here to enter text.",
+	/** Docx editor — text saved into the document: what a new date form control shows until a date is picked (Word's own wording) */
+	previewDocxControlPlaceholderDate: "Click or tap to enter a date.",
+	/** Docx editor — text saved into the document: a new dropdown list's first entry, shown until an item is chosen (Word's own wording) */
+	previewDocxControlPlaceholderList: "Choose an item.",
+	/** Docx editor — text saved into the document: a table of contents built where the document has no headings (Word's own wording) */
+	previewDocxTocNoEntries: "No table of contents entries found."
 } as const

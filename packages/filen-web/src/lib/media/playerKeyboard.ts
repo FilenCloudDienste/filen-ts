@@ -16,7 +16,7 @@ import {
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import type { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
-import { chapterTarget, frameDuration, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
+import { chapterTarget, frameDuration, FrameIntervalMeter, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
 import { mediaDuration, seekMedia, setPlaybackRate, toggleMediaPlayback } from "@/lib/media/useMediaState"
 
 const IS_MAC = isMacPlatform()
@@ -65,6 +65,106 @@ function togglePictureInPicture(video: HTMLVideoElement): void {
 	} else if (document.pictureInPictureEnabled) {
 		void video.requestPictureInPicture().catch(() => undefined)
 	}
+}
+
+const frameMeters = new WeakMap<HTMLVideoElement, FrameIntervalMeter>()
+
+// Measures the frame interval of what `video` plays, for frame steps: a few presented frames each time playback starts
+// (requestVideoFrameCallback), none while paused. A new source starts over. Once per element; the returned function
+// stops it.
+export function measureFrameInterval(video: HTMLVideoElement): () => void {
+	if (frameMeters.has(video) || !("requestVideoFrameCallback" in video)) {
+		return () => undefined
+	}
+
+	const meter = new FrameIntervalMeter()
+	let request: number | null = null
+
+	function cancel(): void {
+		if (request !== null) {
+			video.cancelVideoFrameCallback(request)
+			request = null
+		}
+	}
+
+	function onFrame(_now: number, metadata: VideoFrameCallbackMetadata): void {
+		request = null
+
+		if (meter.add(metadata, video.playbackRate) && !video.paused) {
+			request = video.requestVideoFrameCallback(onFrame)
+		}
+	}
+
+	// Idempotent: "seeked" and "playing" can both follow one seek, and a second call must not drop the run's frames.
+	function start(): void {
+		if (request !== null || video.playbackRate !== 1) {
+			return
+		}
+
+		meter.restart()
+		request = video.requestVideoFrameCallback(onFrame)
+	}
+
+	// A seek inside the buffer may fire no "playing": the run resumes once it lands, if playback goes on.
+	function seeked(): void {
+		if (!video.paused) {
+			start()
+		}
+	}
+
+	// A seek's frame is not the next one: a run ends with a pause or a seek, and "playing" or "seeked" starts the next.
+	function stop(): void {
+		cancel()
+		meter.restart()
+	}
+
+	function reset(): void {
+		cancel()
+		meter.reset()
+	}
+
+	// Back at normal speed mid-playback starts a run; off it ends one.
+	function rateChanged(): void {
+		if (video.paused || video.playbackRate !== 1) {
+			stop()
+		} else {
+			start()
+		}
+	}
+
+	const listeners: [string, () => void][] = [
+		["playing", start],
+		["pause", stop],
+		["seeking", stop],
+		["seeked", seeked],
+		["waiting", stop],
+		["ratechange", rateChanged],
+		["emptied", reset]
+	]
+
+	frameMeters.set(video, meter)
+
+	for (const [type, listener] of listeners) {
+		video.addEventListener(type, listener)
+	}
+
+	if (!video.paused && !video.seeking) {
+		start()
+	}
+
+	return () => {
+		cancel()
+		frameMeters.delete(video)
+
+		for (const [type, listener] of listeners) {
+			video.removeEventListener(type, listener)
+		}
+	}
+}
+
+// Seconds one frame step moves on `video`: its measured frame interval, else 24 fps.
+export function frameStepSeconds(video: HTMLVideoElement): number {
+	return frameDuration(frameMeters.get(video)?.interval ?? null)
 }
 
 // A preview player's keydown handler, under `combos` (useBindings). Returns whether the key was the player's. A handled
@@ -176,7 +276,7 @@ function runPreviewAction(
 			}
 
 			// From where a held seek is headed, not from the position it left.
-			seekTo(seeks.target() + (action === "media.frameBack" ? -1 : 1) * frameDuration(null))
+			seekTo(seeks.target() + (action === "media.frameBack" ? -1 : 1) * frameStepSeconds(video))
 			break
 		case "media.pictureInPicture":
 			togglePictureInPicture(video)

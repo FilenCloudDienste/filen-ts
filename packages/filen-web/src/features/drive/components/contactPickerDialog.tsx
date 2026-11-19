@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { contactDisplayName, toggleInSet } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
@@ -115,7 +116,9 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 			>
 				<DialogHeader>
 					<DialogTitle>{t("driveShareDialogTitle")}</DialogTitle>
-					<DialogDescription>{t("driveShareDialogBody", { count: items.length })}</DialogDescription>
+					<DialogDescription>
+						{t(singleOrCountKey(items.length, "driveShareDialogBodySingle", "driveShareDialogBody"), { count: items.length })}
+					</DialogDescription>
 				</DialogHeader>
 				<ContactPickerList
 					contactsQuery={contactsQuery}

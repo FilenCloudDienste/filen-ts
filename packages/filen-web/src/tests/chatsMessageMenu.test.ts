@@ -183,11 +183,11 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n, "failed").map(d => d.id)).not.toContain("block")
 	})
 
-	it("block descriptor carries its expected label and icon (destructive, direct)", () => {
+	it("block descriptor carries its expected label and icon (destructive, confirmed through a dialog)", () => {
 		const message = mockMessage({ senderId: 5 })
 		const block = messageMenuActions(message, 1n).find(d => d.id === "block")
 
-		expect(block).toEqual({ id: "block", labelKey: "chatMessageActionBlock", icon: UserXIcon, run: "direct", destructive: true })
+		expect(block).toEqual({ id: "block", labelKey: "chatMessageActionBlock", icon: UserXIcon, run: "dialog", destructive: true })
 	})
 
 	it("descriptor facts: reply/copy/edit/delete carry their expected label and icon", () => {

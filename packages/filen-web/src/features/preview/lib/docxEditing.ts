@@ -4,6 +4,7 @@ import {
 	findUnsavableBlocks,
 	revertFeatureUnits,
 	withRevertedUnits,
+	type DocxEditStrings,
 	type DocxEditorSession,
 	type RevertibleUnit
 } from "@filen/office/core/docx/edit"
@@ -26,6 +27,7 @@ import { DOCX_FONT_URLS } from "@/features/preview/lib/docxEngine"
 import DocxZipWorker from "@/features/preview/workers/docxZip.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { log } from "@/lib/log"
+import { docxAutoFormat } from "@/features/office/lib/officeViewSettings"
 
 // Editing a Word document on the page's own thread (the viewer stays in its worker): model, layout and the
 // editing session in one realm, laid out again as far as the pages in view on each keystroke. Every block is
@@ -74,11 +76,13 @@ export interface DocxEditingBackend {
 // opened with its password (docxViewer.tsx): every save is sealed with its key after the zip and checked.
 // `backend`: the proof and writer of a document saved in another format (default: the docx writer's).
 // `protectionUnlocked`: the user stopped the protection that kept it view-only (docxRestrictEditing.tsx).
+// `strings`: the text the editor writes into the document, in the user's language (docxEditStrings).
 export function docxEditingHost(
 	writeUnlocked = false,
 	encryption?: DocxSealer,
 	backend?: DocxEditingBackend,
-	protectionUnlocked = false
+	protectionUnlocked = false,
+	strings?: DocxEditStrings
 ): DocxEditingHost {
 	return inThreadEditingHost(
 		options => windowServices(window, fetchFontAssets(options.fontUrls ?? DOCX_FONT_URLS), hyphenationLibrary(OFFICE_HYPHENATION_URLS)),
@@ -86,9 +90,12 @@ export function docxEditingHost(
 			proof: backend?.proof ?? writerProof,
 			writer: backend?.writer ?? { prepare: prepareDocxSave, zipper },
 			writeUnlocked,
+			// The user's AutoFormat As You Type, for the body and every story entered later.
+			session: { autoFormat: docxAutoFormat() },
 			...(protectionUnlocked ? { protectionUnlocked } : {}),
 			...(encryption === undefined ? {} : { encryption }),
-			...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate })
+			...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate }),
+			...(strings === undefined ? {} : { strings })
 		}
 	)
 }

@@ -1,15 +1,60 @@
-import { useQueries } from "@tanstack/react-query"
+import { useQueries, type QueryObserverResult } from "@tanstack/react-query"
 import { useShallow } from "zustand/shallow"
 import type { Note } from "@filen/sdk-rs"
+import { nameSearchKey } from "@filen/shared"
 import { fetchTrackedNoteContent, noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore, noteIsEditing } from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
-// Module-level so the select reference is stable: react-query then memoizes it per observer, lowering
-// each body once per search instead of on every filter pass. The editor's own observer has no select, so
-// the cache keeps the raw content.
-function lowerCaseBody(content: string): string {
-	return content.toLowerCase()
+// A stable module-level select (nameSearchKey): react-query then memoizes it per observer, folding each
+// body once per search instead of on every filter pass. The fold is the search key's own (lowercased, NFC
+// when non-ASCII), so a decomposed body matches a composed query. The editor's own observer has no select,
+// so the cache keeps the raw content.
+
+export interface NoteSearchBodies {
+	// Bodies folded by nameSearchKey, keyed by note uuid, the form filterNotesBySearch expects; undefined = not read.
+	bodies: ReadonlyMap<string, string | undefined>
+	// Candidate bodies still being read: a search with no rows may yet match one of them.
+	pending: number
+	// Candidate bodies that were not searched: the read failed, or it is paused (offline) and would never
+	// land on its own, so it must not count as loading.
+	failed: number
+}
+
+// What a search with no rows tells the user: still reading bodies, some bodies could not be searched,
+// or a real "no results".
+export type NoteSearchEmptyState = "searching" | "unsearched" | "empty"
+
+export function noteSearchEmptyState({ pending, failed }: Pick<NoteSearchBodies, "pending" | "failed">): NoteSearchEmptyState {
+	if (pending > 0) {
+		return "searching"
+	}
+
+	return failed > 0 ? "unsearched" : "empty"
+}
+
+// A result with data was searched (a later failed refetch keeps its data); one without data is either
+// fetching or, when errored or paused, unsearched.
+function combineBodies(results: QueryObserverResult<string>[]): { data: (string | undefined)[]; pending: number; failed: number } {
+	const data: (string | undefined)[] = []
+	let pending = 0
+	let failed = 0
+
+	for (const result of results) {
+		data.push(result.data)
+
+		if (result.data !== undefined) {
+			continue
+		}
+
+		if (result.fetchStatus === "fetching") {
+			pending++
+		} else {
+			failed++
+		}
+	}
+
+	return { data, pending, failed }
 }
 
 // Eager, OPT-IN full-body fetch for notes search: title-matching notes never need their body
@@ -27,22 +72,22 @@ function lowerCaseBody(content: string): string {
 // alone is not that test — a push empties it while the user keeps typing. An edited note simply falls
 // back to its `preview` snippet for the duration — see filterNotesBySearch's own fallback.
 //
-// Bodies come back LOWERCASED (lowerCaseBody), the form filterNotesBySearch expects.
-export function useNoteSearchBodies(notes: readonly Note[], search: string): ReadonlyMap<string, string | undefined> {
+// Bodies come back FOLDED by nameSearchKey, the form filterNotesBySearch expects.
+export function useNoteSearchBodies(notes: readonly Note[], search: string): NoteSearchBodies {
 	// Shallow-compared slice, not the whole store: `inflightContent` changes identity on every keystroke,
 	// but this only changes when a candidate's editing edge flips (and is a stable [] with no search).
 	const searchCandidates = noteSearchBodyCandidates(notes, search)
 	const candidates = useNotesInflightStore(useShallow(state => searchCandidates.filter(note => !noteIsEditing(state, note.uuid))))
 
-	const bodies = useQueries({
+	const { data, pending, failed } = useQueries({
 		queries: candidates.map(note => ({
 			queryKey: noteContentQueryKey(note.uuid),
 			queryFn: () => fetchTrackedNoteContent(note),
 			staleTime: Infinity,
-			select: lowerCaseBody
+			select: nameSearchKey
 		})),
-		combine: results => results.map(result => result.data)
+		combine: combineBodies
 	})
 
-	return buildNoteBodiesMap(candidates, bodies)
+	return { bodies: buildNoteBodiesMap(candidates, data), pending, failed }
 }

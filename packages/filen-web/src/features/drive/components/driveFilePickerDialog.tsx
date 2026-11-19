@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { driveItemName } from "@filen/shared"
@@ -24,11 +25,13 @@ export interface DriveFilePickerListProps {
 }
 
 export function DriveFilePickerList({ listingQuery, rows, accept, pending, onDescend, onPick }: DriveFilePickerListProps) {
+	const { t } = useTranslation("drive")
 	const shown = accept === undefined ? rows : rows.filter(item => item.type === "directory" || accept(item))
 
 	return (
 		<PickerListShell
 			listingQuery={listingQuery}
+			filteredOutMessage={rows.length > 0 ? t("drivePickerNoMatchingFiles") : undefined}
 			count={shown.length}
 			rowKey={index => shown[index]?.data.uuid ?? String(index)}
 			renderRow={index => {

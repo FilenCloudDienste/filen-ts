@@ -27,10 +27,11 @@ import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
 
 // Pictures, shapes, text boxes and chart frames over the grid: drawn on their anchors, selected by a click (a click
-// on a cell gives the selection back to the cells), moved and resized by dragging, nudged by the arrows, deleted,
-// given alternative text from the grid's menu, and pictures inserted at the active cell from this device or the drive
-// (the grid's menu, the toolbar's Insert menu through insertRequests). Ctrl+Alt+5 selects the first object in view
-// from the cells (Excel's key for floating shapes); Tab then cycles them. Chart frames are drawn by `renderChart`.
+// on a cell gives the selection back to the cells), moved and resized by dragging, nudged by the arrows and resized
+// by Shift with them (from the trailing or bottom edge; Alt for 1 px steps), deleted, given alternative text from
+// the grid's menu, and pictures inserted at the active cell from this device or the drive (the grid's menu, the
+// toolbar's Insert menu through insertRequests). Ctrl+Alt+5 selects the first object in view from the cells (Excel's
+// key for floating shapes); Tab then cycles them. Chart frames are drawn by `renderChart`.
 
 // What the file chooser offers: pictures a workbook shows, and WebP (converted).
 const PICTURE_ACCEPT = "image/*,.svg,.emf,.wmf,.tif,.tiff,.webp"

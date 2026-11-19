@@ -4,6 +4,7 @@ import { expect, settleLeases } from "../fixtures"
 import { waitForE2eHooks } from "./e2eHooks"
 import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 import { menuItemName } from "./menu"
+import { namePattern, scrollListing } from "./rows"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
 // the authed shell raises once per page LOAD. They are LATCHED CLOSED in the e2e build before the first
@@ -88,12 +89,8 @@ export async function waitForListingSettled(page: Page, settleTimeoutMs?: number
 // and the columns after it are always space-separated. NOT pinned to the string start, because grid
 // view renders an `.sr-only` badge span before the tile's name (driveTile.tsx). Never right after a
 // comma: that is the year of a Modified date ("Jan 1, 2024"), which a directory named "2024" would match.
-function itemNamePattern(name: string): RegExp {
-	return new RegExp(`(^|(?<!,)\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`)
-}
-
 function rowByName(listbox: Locator, name: string): Locator {
-	return listbox.getByRole("option", { name: itemNamePattern(name) })
+	return listbox.getByRole("option", { name: namePattern(name) })
 }
 
 // Scrolls the listing from its top until `name`'s row is mounted (the virtualizer mounts only the rows near
@@ -101,32 +98,8 @@ function rowByName(listbox: Locator, name: string): Locator {
 // leaves it in view. Scrolls whatever holds the listbox: the nearest ancestor (or itself) that scrolls.
 async function revealRow(listbox: Locator, name: string): Promise<void> {
 	const row = rowByName(listbox, name)
-	const scroll = (from: "top" | "next"): Promise<boolean> =>
-		listbox.evaluate(async (element, step) => {
-			let scroller: HTMLElement | null = element instanceof HTMLElement ? element : null
 
-			while (scroller !== null) {
-				const { overflowY } = getComputedStyle(scroller)
-
-				if ((overflowY === "auto" || overflowY === "scroll") && scroller.scrollHeight > scroller.clientHeight) break
-
-				scroller = scroller.parentElement
-			}
-
-			const target = scroller ?? document.scrollingElement
-
-			if (target === null) return false
-
-			const before = target.scrollTop
-
-			target.scrollTop = step === "top" ? 0 : before + Math.max(1, Math.floor(target.clientHeight * 0.8))
-			// Two frames for the virtualizer to mount what the scroll brought near.
-			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-
-			return step === "top" || target.scrollTop !== before
-		}, from)
-
-	await scroll("top")
+	await scrollListing(listbox, "top")
 
 	for (;;) {
 		if ((await row.count()) > 0) {
@@ -135,7 +108,7 @@ async function revealRow(listbox: Locator, name: string): Promise<void> {
 			return
 		}
 
-		if (!(await scroll("next"))) return
+		if (!(await scrollListing(listbox, "next"))) return
 	}
 }
 

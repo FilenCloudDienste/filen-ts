@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { cappedList } from "@filen/shared"
 import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { jobCancelPrompt, jobCardDuration, jobCardModel } from "@/features/transfers/components/driveJobCard.logic"
-import { copyCardDuration, copyJobNotes, copyJobStatus } from "@/features/transfers/components/copyJobToast.logic"
+import { COPY_CARD_FAILURES_SHOWN, copyCardDuration, copyJobNotes, copyJobStatus } from "@/features/transfers/components/copyJobToast.logic"
 import { ARCHIVE_ITEM, compressJob, createdDirectory, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
 
 const ERROR = { species: "plain" as const, message: "offline", label: "offline" }
@@ -66,6 +66,22 @@ describe("jobCardModel for a copy", () => {
 
 		expect(jobCardModel(job, NO_SLOT).details.failures).toEqual([{ key: "s:a", path: "dir/a", error: ERROR }])
 		expect(jobCardModel(job, NO_SLOT).actions.retry).toBeNull()
+	})
+
+	it("offers the report once a settled copy failed more than its card lists", () => {
+		const failures = Array.from({ length: COPY_CARD_FAILURES_SHOWN + 1 }, (_, index) => ({
+			sourceUuid: `s${String(index)}`,
+			sourcePath: `dir/${String(index)}`,
+			destName: String(index),
+			error: ERROR
+		}))
+		const listed = copyJob({ outcome: { status: "doneWithFailures" }, failures: failures.slice(0, COPY_CARD_FAILURES_SHOWN) })
+		const overflowing = copyJob({ outcome: { status: "doneWithFailures" }, failures })
+
+		expect(jobCardModel(listed, NO_SLOT).actions.report).toBe(false)
+		expect(jobCardModel(overflowing, NO_SLOT).actions.report).toBe(true)
+		expect(jobCardModel(overflowing, NO_SLOT).details.moreFailures).toBe(1)
+		expect(jobCardModel(copyJob({ ...COPYING, failures }), NO_SLOT).actions.report).toBe(false)
 	})
 })
 

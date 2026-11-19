@@ -134,17 +134,21 @@ export interface JobCardContext {
 	slotHeldWhilePaused: boolean
 }
 
-function copyCardModel(job: CopyJob): JobCardModel {
+export function copyCardTitle(job: CopyJob): JobCardTitle {
 	const title = copyJobTitle(job)
+
+	return title.key === "transfersCopyCardTitleEnded"
+		? { key: title.key, values: { destination: title.destination } }
+		: { key: title.key, values: { count: title.count, destination: title.destination } }
+}
+
+function copyCardModel(job: CopyJob): JobCardModel {
 	const status: CopyJobStatus = copyJobStatus(job)
 	const failures = job.failures.slice(0, COPY_CARD_FAILURES_SHOWN)
 
 	return {
 		labels: LABELS.copy,
-		title:
-			title.key === "transfersCopyCardTitleEnded"
-				? { key: title.key, values: { destination: title.destination } }
-				: { key: title.key, values: { count: title.count, destination: title.destination } },
+		title: copyCardTitle(job),
 		status,
 		statusFailed: job.outcome.status === "failed" || job.outcome.status === "quotaExceeded",
 		percent: copyJobPercent(job),
@@ -167,7 +171,7 @@ function copyCardModel(job: CopyJob): JobCardModel {
 		actions: {
 			pauseCancel: isCopyJobRunning(job),
 			retry: canRetryCopy(job) ? "failed" : null,
-			report: false,
+			report: jobHasReport(job),
 			password: false,
 			showDirectory: null
 		}

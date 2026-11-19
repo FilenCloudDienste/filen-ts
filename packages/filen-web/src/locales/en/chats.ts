@@ -99,7 +99,9 @@ export const chats = {
 	/** Message row — reveals a hidden blocked-sender message for this session */
 	chatMessageHiddenBlockedShow: "Show",
 	/** Thread — screen-reader-only announcement when a message arrives from someone else; {{name}} is its sender */
-	chatNewMessageAnnouncement_one: "New message from {{name}}",
+	chatNewMessageAnnouncementSingle: "New message from {{name}}",
+	/** Thread — screen-reader-only announcement when messages arrive from someone else; {{count}} = messages, {{name}} is their sender */
+	chatNewMessageAnnouncement_one: "{{count}} new message from {{name}}",
 	/** Thread — screen-reader-only announcement when messages arrive from someone else (plural) */
 	chatNewMessageAnnouncement_other: "{{count}} new messages from {{name}}",
 	/** Thread — screen-reader-only announcement when one batch of arriving messages comes from several senders, so naming one would misattribute the others */
@@ -240,15 +242,19 @@ export const chats = {
 	chatsKeyHintMessage: "On the focused message",
 	/** Bulk delete confirm — heading */
 	chatsDeleteSelectedConfirmTitle: "Delete conversations?",
-	/** Bulk delete confirm — body copy */
-	chatsDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete this conversation? This cannot be undone.",
+	/** Bulk delete confirm — body copy for a single conversation */
+	chatsDeleteSelectedConfirmBodySingle: "Are you sure you want to permanently delete this conversation? This cannot be undone.",
+	/** Bulk delete confirm — body copy; {{count}} = conversations being deleted */
+	chatsDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete {{count}} conversation? This cannot be undone.",
 	/** Bulk delete confirm — body copy (plural) */
 	chatsDeleteSelectedConfirmBody_other:
 		"Are you sure you want to permanently delete these {{count}} conversations? This cannot be undone.",
 	/** Bulk leave confirm — heading */
 	chatsLeaveSelectedConfirmTitle: "Leave conversations?",
-	/** Bulk leave confirm — body copy */
-	chatsLeaveSelectedConfirmBody_one: "Are you sure you want to leave this conversation? You will lose access to it.",
+	/** Bulk leave confirm — body copy for a single conversation */
+	chatsLeaveSelectedConfirmBodySingle: "Are you sure you want to leave this conversation? You will lose access to it.",
+	/** Bulk leave confirm — body copy; {{count}} = conversations being left */
+	chatsLeaveSelectedConfirmBody_one: "Are you sure you want to leave {{count}} conversation? You will lose access to it.",
 	/** Bulk leave confirm — body copy (plural) */
 	chatsLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} conversations? You will lose access to them.",
 
@@ -329,18 +335,24 @@ export const chats = {
 	chatTypingSeveral: "Several people are typing…",
 
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
-	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one
 	// conversation (or participant), `_other` counts them; a partial result counts the ones that succeeded.
 	/** Activity toast — marking conversations as read running; one item named ({{name}}) */
-	chatsMarkReadRunning_one: "Marking {{name}} as read",
+	chatsMarkReadRunningNamed: "Marking {{name}} as read",
+	/** Activity toast — marking conversations as read running; {{count}} items */
+	chatsMarkReadRunning_one: "Marking {{count}} conversation as read",
 	/** Activity toast — marking conversations as read running; {{count}} items */
 	chatsMarkReadRunning_other: "Marking {{count}} conversations as read",
 	/** Activity toast — marking conversations as read finished; one item named ({{name}}) */
-	chatsMarkReadDone_one: "Marked {{name}} as read",
+	chatsMarkReadDoneNamed: "Marked {{name}} as read",
+	/** Activity toast — marking conversations as read finished; {{count}} items */
+	chatsMarkReadDone_one: "Marked {{count}} conversation as read",
 	/** Activity toast — marking conversations as read finished; {{count}} items */
 	chatsMarkReadDone_other: "Marked {{count}} conversations as read",
 	/** Activity toast — marking conversations as read failed for every item; one item named ({{name}}) */
-	chatsMarkReadFailed_one: "Couldn't mark {{name}} as read",
+	chatsMarkReadFailedNamed: "Couldn't mark {{name}} as read",
+	/** Activity toast — marking conversations as read failed for every item; {{count}} items */
+	chatsMarkReadFailed_one: "Couldn't mark {{count}} conversation as read",
 	/** Activity toast — marking conversations as read failed for every item; {{count}} items */
 	chatsMarkReadFailed_other: "Couldn't mark {{count}} conversations as read",
 	/** Activity toast — marking conversations as read partly failed; {{count}} succeeded, {{failed}} failed */
@@ -348,15 +360,21 @@ export const chats = {
 	/** Activity toast — marking conversations as read partly failed; {{count}} succeeded, {{failed}} failed */
 	chatsMarkReadPartial_other: "Marked {{count}} conversations as read, {{failed}} failed",
 	/** Activity toast — muting conversations running; one item named ({{name}}) */
-	chatsMuteRunning_one: "Muting {{name}}",
+	chatsMuteRunningNamed: "Muting {{name}}",
+	/** Activity toast — muting conversations running; {{count}} items */
+	chatsMuteRunning_one: "Muting {{count}} conversation",
 	/** Activity toast — muting conversations running; {{count}} items */
 	chatsMuteRunning_other: "Muting {{count}} conversations",
 	/** Activity toast — muting conversations finished; one item named ({{name}}) */
-	chatsMuteDone_one: "Muted {{name}}",
+	chatsMuteDoneNamed: "Muted {{name}}",
+	/** Activity toast — muting conversations finished; {{count}} items */
+	chatsMuteDone_one: "Muted {{count}} conversation",
 	/** Activity toast — muting conversations finished; {{count}} items */
 	chatsMuteDone_other: "Muted {{count}} conversations",
 	/** Activity toast — muting conversations failed for every item; one item named ({{name}}) */
-	chatsMuteFailed_one: "Couldn't mute {{name}}",
+	chatsMuteFailedNamed: "Couldn't mute {{name}}",
+	/** Activity toast — muting conversations failed for every item; {{count}} items */
+	chatsMuteFailed_one: "Couldn't mute {{count}} conversation",
 	/** Activity toast — muting conversations failed for every item; {{count}} items */
 	chatsMuteFailed_other: "Couldn't mute {{count}} conversations",
 	/** Activity toast — muting conversations partly failed; {{count}} succeeded, {{failed}} failed */
@@ -364,15 +382,21 @@ export const chats = {
 	/** Activity toast — muting conversations partly failed; {{count}} succeeded, {{failed}} failed */
 	chatsMutePartial_other: "Muted {{count}} conversations, {{failed}} failed",
 	/** Activity toast — unmuting conversations running; one item named ({{name}}) */
-	chatsUnmuteRunning_one: "Unmuting {{name}}",
+	chatsUnmuteRunningNamed: "Unmuting {{name}}",
+	/** Activity toast — unmuting conversations running; {{count}} items */
+	chatsUnmuteRunning_one: "Unmuting {{count}} conversation",
 	/** Activity toast — unmuting conversations running; {{count}} items */
 	chatsUnmuteRunning_other: "Unmuting {{count}} conversations",
 	/** Activity toast — unmuting conversations finished; one item named ({{name}}) */
-	chatsUnmuteDone_one: "Unmuted {{name}}",
+	chatsUnmuteDoneNamed: "Unmuted {{name}}",
+	/** Activity toast — unmuting conversations finished; {{count}} items */
+	chatsUnmuteDone_one: "Unmuted {{count}} conversation",
 	/** Activity toast — unmuting conversations finished; {{count}} items */
 	chatsUnmuteDone_other: "Unmuted {{count}} conversations",
 	/** Activity toast — unmuting conversations failed for every item; one item named ({{name}}) */
-	chatsUnmuteFailed_one: "Couldn't unmute {{name}}",
+	chatsUnmuteFailedNamed: "Couldn't unmute {{name}}",
+	/** Activity toast — unmuting conversations failed for every item; {{count}} items */
+	chatsUnmuteFailed_one: "Couldn't unmute {{count}} conversation",
 	/** Activity toast — unmuting conversations failed for every item; {{count}} items */
 	chatsUnmuteFailed_other: "Couldn't unmute {{count}} conversations",
 	/** Activity toast — unmuting conversations partly failed; {{count}} succeeded, {{failed}} failed */
@@ -380,15 +404,21 @@ export const chats = {
 	/** Activity toast — unmuting conversations partly failed; {{count}} succeeded, {{failed}} failed */
 	chatsUnmutePartial_other: "Unmuted {{count}} conversations, {{failed}} failed",
 	/** Activity toast — deleting conversations running; one item named ({{name}}) */
-	chatsDeleteRunning_one: "Deleting {{name}}",
+	chatsDeleteRunningNamed: "Deleting {{name}}",
+	/** Activity toast — deleting conversations running; {{count}} items */
+	chatsDeleteRunning_one: "Deleting {{count}} conversation",
 	/** Activity toast — deleting conversations running; {{count}} items */
 	chatsDeleteRunning_other: "Deleting {{count}} conversations",
 	/** Activity toast — deleting conversations finished; one item named ({{name}}) */
-	chatsDeleteDone_one: "Deleted {{name}}",
+	chatsDeleteDoneNamed: "Deleted {{name}}",
+	/** Activity toast — deleting conversations finished; {{count}} items */
+	chatsDeleteDone_one: "Deleted {{count}} conversation",
 	/** Activity toast — deleting conversations finished; {{count}} items */
 	chatsDeleteDone_other: "Deleted {{count}} conversations",
 	/** Activity toast — deleting conversations failed for every item; one item named ({{name}}) */
-	chatsDeleteFailed_one: "Couldn't delete {{name}}",
+	chatsDeleteFailedNamed: "Couldn't delete {{name}}",
+	/** Activity toast — deleting conversations failed for every item; {{count}} items */
+	chatsDeleteFailed_one: "Couldn't delete {{count}} conversation",
 	/** Activity toast — deleting conversations failed for every item; {{count}} items */
 	chatsDeleteFailed_other: "Couldn't delete {{count}} conversations",
 	/** Activity toast — deleting conversations partly failed; {{count}} succeeded, {{failed}} failed */
@@ -396,15 +426,21 @@ export const chats = {
 	/** Activity toast — deleting conversations partly failed; {{count}} succeeded, {{failed}} failed */
 	chatsDeletePartial_other: "Deleted {{count}} conversations, {{failed}} failed",
 	/** Activity toast — leaving conversations running; one item named ({{name}}) */
-	chatsLeaveRunning_one: "Leaving {{name}}",
+	chatsLeaveRunningNamed: "Leaving {{name}}",
+	/** Activity toast — leaving conversations running; {{count}} items */
+	chatsLeaveRunning_one: "Leaving {{count}} conversation",
 	/** Activity toast — leaving conversations running; {{count}} items */
 	chatsLeaveRunning_other: "Leaving {{count}} conversations",
 	/** Activity toast — leaving conversations finished; one item named ({{name}}) */
-	chatsLeaveDone_one: "Left {{name}}",
+	chatsLeaveDoneNamed: "Left {{name}}",
+	/** Activity toast — leaving conversations finished; {{count}} items */
+	chatsLeaveDone_one: "Left {{count}} conversation",
 	/** Activity toast — leaving conversations finished; {{count}} items */
 	chatsLeaveDone_other: "Left {{count}} conversations",
 	/** Activity toast — leaving conversations failed for every item; one item named ({{name}}) */
-	chatsLeaveFailed_one: "Couldn't leave {{name}}",
+	chatsLeaveFailedNamed: "Couldn't leave {{name}}",
+	/** Activity toast — leaving conversations failed for every item; {{count}} items */
+	chatsLeaveFailed_one: "Couldn't leave {{count}} conversation",
 	/** Activity toast — leaving conversations failed for every item; {{count}} items */
 	chatsLeaveFailed_other: "Couldn't leave {{count}} conversations",
 	/** Activity toast — leaving conversations partly failed; {{count}} succeeded, {{failed}} failed */

@@ -6,6 +6,7 @@ import {
 	alignPatch,
 	decimalsPatch,
 	fontGroups,
+	numberItems,
 	numberLabel,
 	sampleOf,
 	themeSwatchRows,
@@ -16,6 +17,7 @@ import {
 	fontStep,
 	ORIENTATIONS
 } from "@/features/spreadsheet/toolbar/toolbar.logic"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
 import { preview } from "@/locales/en/preview"
 
 // The spreadsheet ribbon's and Format Cells dialog's logic: what they read from the active cell and the workbook,
@@ -135,14 +137,45 @@ describe("spreadsheet toolbar", () => {
 	})
 
 	it("names the format in effect as the menu lists it", () => {
-		expect(numberLabel("General")).toBe("previewSheetNumberGeneral")
-		expect(numberLabel("m/d/yyyy")).toBe("previewSheetNumberShortDate")
-		expect(numberLabel("[$-F800]dddd, mmmm dd, yyyy")).toBe("previewSheetNumberLongDate")
-		expect(numberLabel("#,##0.0")).toBe("previewSheetNumberNumber")
-		expect(numberLabel('0.0" kg"')).toBe("previewSheetNumberNumber")
-		expect(numberLabel("yyyy")).toBe("previewSheetNumberDate")
+		expect(numberLabel("General", "$")).toBe("previewSheetNumberGeneral")
+		expect(numberLabel("m/d/yyyy", "$")).toBe("previewSheetNumberShortDate")
+		expect(numberLabel("[$-F800]dddd, mmmm dd, yyyy", "$")).toBe("previewSheetNumberLongDate")
+		expect(numberLabel("#,##0.0", "$")).toBe("previewSheetNumberNumber")
+		expect(numberLabel('0.0" kg"', "$")).toBe("previewSheetNumberNumber")
+		expect(numberLabel("yyyy", "$")).toBe("previewSheetNumberDate")
 		for (const key of ["previewSheetNumberGeneral", "previewSheetNumberCustom", "previewSheetNumberLongDate"] as const)
 			expect(preview[key]).toBeDefined()
+	})
+
+	it("lists the Currency and Accounting formats in the regional format's currency", () => {
+		expect(numberItems("$").map(item => item.code)).toStrictEqual([
+			"General",
+			"0.00",
+			'"$"#,##0.00',
+			'_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)',
+			"m/d/yyyy",
+			"[$-F800]dddd, mmmm dd, yyyy",
+			"[$-F400]h:mm:ss AM/PM",
+			"0.00%",
+			"# ?/?",
+			"0.00E+00",
+			"@"
+		])
+
+		const symbol = sheetLocaleOf("de-DE").currencies?.[0]
+
+		expect(symbol).toBe("€")
+
+		const euro = numberItems(symbol ?? "$")
+		const currency = euro.find(item => item.label === "previewSheetNumberCurrency")
+		const accounting = euro.find(item => item.label === "previewSheetNumberAccounting")
+
+		expect(currency?.code).toBe('"€"#,##0.00')
+		expect(accounting?.code).toBe('_("€"* #,##0.00_);_("€"* \\(#,##0.00\\);_("€"* "-"??_);_(@_)')
+		expect(numFmtCategory(currency?.code ?? "")).toBe("currency")
+		expect(numFmtCategory(accounting?.code ?? "")).toBe("accounting")
+		expect(numberLabel('"€"#,##0.00', "€")).toBe("previewSheetNumberCurrency")
+		expect(numberItems("€")).toBe(euro)
 	})
 
 	it("adds and takes decimal places from what a General cell shows", () => {

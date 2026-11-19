@@ -25,7 +25,7 @@ import {
 import { readCalendarFile } from "@/features/preview/lib/textFamilyClient"
 import { useTextFamilyReading } from "@/features/preview/hooks/useTextFamilyReading"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
-import { i18n } from "@/lib/i18n"
+import { i18n, singleOrCountKey } from "@/lib/i18n"
 
 // Wall times are formatted from epoch ms read as UTC, so they show exactly as written.
 const WALL_DAY = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeZone: "UTC" })
@@ -99,19 +99,19 @@ function every(t: TFunction<"preview">, rule: CalendarRecurrence): string {
 
 	switch (rule.frequency) {
 		case "secondly":
-			return t("previewCalendarEverySecond", { count })
+			return t(singleOrCountKey(count, "previewCalendarEverySecondSingle", "previewCalendarEverySecond"), { count })
 		case "minutely":
-			return t("previewCalendarEveryMinute", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryMinuteSingle", "previewCalendarEveryMinute"), { count })
 		case "hourly":
-			return t("previewCalendarEveryHour", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryHourSingle", "previewCalendarEveryHour"), { count })
 		case "daily":
-			return t("previewCalendarEveryDay", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryDaySingle", "previewCalendarEveryDay"), { count })
 		case "weekly":
-			return t("previewCalendarEveryWeek", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryWeekSingle", "previewCalendarEveryWeek"), { count })
 		case "monthly":
-			return t("previewCalendarEveryMonth", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryMonthSingle", "previewCalendarEveryMonth"), { count })
 		case "yearly":
-			return t("previewCalendarEveryYear", { count })
+			return t(singleOrCountKey(count, "previewCalendarEveryYearSingle", "previewCalendarEveryYear"), { count })
 	}
 }
 

@@ -6,7 +6,8 @@ import { setRibbonCollapsed, useRibbonCollapsed } from "@/features/office/lib/ri
 import { MARKUP_LABELS } from "@/features/preview/components/docxViewer.logic"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
 
-// Office → Word documents: how a document opens on this device (its markup, pages or Mobile view, formatting marks).
+// Office → Word documents: how a document opens on this device (its markup, pages or Mobile view, formatting marks)
+// and the AutoFormat As You Type it is edited with (smart quotes, automatic lists).
 export function OfficeWordRows() {
 	const { t } = useTranslation(["settings", "preview"])
 	const view = useOfficeViewSettings()
@@ -46,6 +47,24 @@ export function OfficeWordRows() {
 				checked={formattingMarks}
 				disabled={false}
 				onCheckedChange={setDocxFormattingMarks}
+			/>
+			<PreferenceToggleRow
+				title={t("settingsOfficeAutoQuotes")}
+				description={t("settingsOfficeAutoQuotesDescription")}
+				checked={view.autoQuotes ?? true}
+				disabled={false}
+				onCheckedChange={autoQuotes => {
+					setOfficeViewSettings({ autoQuotes })
+				}}
+			/>
+			<PreferenceToggleRow
+				title={t("settingsOfficeAutoLists")}
+				description={t("settingsOfficeAutoListsDescription")}
+				checked={view.autoLists ?? true}
+				disabled={false}
+				onCheckedChange={autoLists => {
+					setOfficeViewSettings({ autoLists })
+				}}
 			/>
 		</>
 	)

@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Chat, ChatMessage, ChatParticipant, ChatTypingType } from "@filen/sdk-rs"
 
-// sdkApi is mocked to the one op the send-typing path calls; the query modules import sdkApi but never
-// invoke it here (only their cache patchers run).
-const { sendTypingSignal } = vi.hoisted(() => ({ sendTypingSignal: vi.fn<() => Promise<void>>(() => Promise.resolve()) }))
+// sdkApi is mocked to the ops these paths call: the send-typing signal, the read-position write the open
+// chat's messageNew schedules, and the list read that write must survive.
+const { sendTypingSignal, updateLastChatFocusTimesNow, listChats } = vi.hoisted(() => ({
+	sendTypingSignal: vi.fn<() => Promise<void>>(() => Promise.resolve()),
+	updateLastChatFocusTimesNow: vi.fn<(chats: Chat[]) => Promise<Chat[]>>(chats => Promise.resolve(chats)),
+	listChats: vi.fn<() => Promise<Chat[]>>(() => Promise.resolve([]))
+}))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendTypingSignal } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendTypingSignal, updateLastChatFocusTimesNow, listChats } }))
 
 // Purge is mocked so conversationDeleted's ordering is observable and the outbox's heavy deps stay out of
 // node.
@@ -28,7 +32,7 @@ vi.mock("@/features/chats/lib/refetchChatsAndMessages", () => ({ refetchChatsAnd
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
+import { CHATS_QUERY_KEY, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { useChatTypingStore } from "@/features/chats/store/useChatTyping"
@@ -40,7 +44,9 @@ import {
 	handleConversationDeleted,
 	handleReconnecting,
 	handleAuthSuccess,
-	resetSocketReconnectState
+	resetSocketReconnectState,
+	flushChatFocusPersist,
+	CHAT_FOCUS_PERSIST_DELAY_MS
 } from "@/features/chats/lib/socketHandlers"
 import { sync } from "@/features/chats/lib/sync"
 import { testUuid } from "@/tests/support/uuid"
@@ -126,6 +132,8 @@ beforeEach(() => {
 	// shuffle seeds before this line.
 	resetSocketReconnectState()
 	vi.clearAllMocks()
+	updateLastChatFocusTimesNow.mockImplementation(chats => Promise.resolve(chats))
+	listChats.mockImplementation(() => Promise.resolve([]))
 })
 
 afterEach(() => {
@@ -272,6 +280,82 @@ describe("chat socket handlers — messages", () => {
 		const chat = getChats()[0]
 		expect(chat?.lastFocus).toBe(200n)
 		expect(chat !== undefined ? chatHasUnread(chat, 1n) : true).toBe(false)
+	})
+
+	// The read position the open chat advanced must reach the server: a list re-read (tab return, reconnect,
+	// reload) replaces the row with the server's lastFocus.
+	it("a FOCUSED burst persists lastFocus once after the debounce, so a list re-read keeps the chat read", async () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		// The server's row once the burst landed: its lastMessage moved, its lastFocus only on a write.
+		let server = makeChat("c1", { lastFocus: 50n, lastMessage: makeMessage("m3", "c1", { sentTimestamp: 400n }) })
+		listChats.mockImplementation(() => Promise.resolve([server]))
+		updateLastChatFocusTimesNow.mockImplementation(chats => {
+			server = { ...server, lastFocus: 500n }
+
+			return Promise.resolve(chats.map(c => ({ ...c, lastFocus: 500n })))
+		})
+		seedChats([makeChat("c1", { lastFocus: 50n })])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("c1"))
+
+		for (const [uuid, sentTimestamp] of [
+			["m1", 200n],
+			["m2", 300n],
+			["m3", 400n]
+		] as const) {
+			handleChatEvent({ inner: { type: "messageNew", msg: makeMessage(uuid, "c1", { sentTimestamp }) }, chatMessageId: 0n })
+			vi.advanceTimersByTime(10)
+		}
+
+		expect(updateLastChatFocusTimesNow).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(CHAT_FOCUS_PERSIST_DELAY_MS)
+
+		expect(updateLastChatFocusTimesNow).toHaveBeenCalledTimes(1)
+		expect(updateLastChatFocusTimesNow.mock.calls[0]?.[0][0]?.lastFocus).toBe(400n)
+		expect(getChats()[0]?.lastFocus).toBe(500n)
+
+		vi.useRealTimers()
+		await chatsQueryFetch()
+
+		const chat = getChats()[0]
+		expect(chat?.lastFocus).toBe(500n)
+		expect(chat !== undefined ? chatHasUnread(chat, 1n) : true).toBe(false)
+	})
+
+	it("a message in a hidden tab schedules no read-position write", () => {
+		vi.useFakeTimers()
+		vi.stubGlobal("document", { visibilityState: "hidden" })
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { lastFocus: 50n })])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("c1"))
+
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { sentTimestamp: 200n }) }, chatMessageId: 0n })
+		vi.runAllTimers()
+		flushChatFocusPersist()
+
+		expect(getChats()[0]?.lastFocus).toBe(50n)
+		expect(updateLastChatFocusTimesNow).not.toHaveBeenCalled()
+	})
+
+	it("closing the thread flushes a pending read-position write at once", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { lastFocus: 50n })])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("c1"))
+
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { sentTimestamp: 200n }) }, chatMessageId: 0n })
+		vi.advanceTimersByTime(10)
+		flushChatFocusPersist(testUuid("c1"))
+
+		expect(updateLastChatFocusTimesNow).toHaveBeenCalledTimes(1)
+
+		vi.runAllTimers()
+
+		expect(updateLastChatFocusTimesNow).toHaveBeenCalledTimes(1)
 	})
 
 	it("unread gating: a FOREIGN message in a NON-focused chat leaves lastFocus (derives unread)", () => {

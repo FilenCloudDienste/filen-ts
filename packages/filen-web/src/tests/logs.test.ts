@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { LOG_RING_MAX, log, type LogEntry } from "@/lib/log"
-import { formatLogEntry, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
+import { collectLogs, formatLogEntry, formatLogEntries, logsExportFilename, mergeLogEntries } from "@/features/settings/lib/logs"
 
 // The global setup mocks this module; the ring buffer test needs the real one.
 vi.unmock("@/lib/log")
@@ -55,5 +55,93 @@ describe("log ring buffer", () => {
 		expect(entries).toHaveLength(LOG_RING_MAX)
 		expect(entries[0]?.msg).toBe("entry 5")
 		expect(entries.at(-1)?.msg).toBe(`entry ${(LOG_RING_MAX + 4).toString()}`)
+	})
+})
+
+describe("mergeLogEntries", () => {
+	it("orders page and worker entries by time and tags each worker entry's scope with its realm", () => {
+		const page = [entry({ t: 10, scope: "drive", msg: "page first" }), entry({ t: 40, scope: "drive", msg: "page last" })]
+		const merged = mergeLogEntries(page, [
+			{ realm: "sdk-worker", entries: [entry({ t: 20, scope: "sdk.worker", msg: "listDir" })] },
+			{ realm: "service-worker", entries: [entry({ t: 30, scope: "sw", msg: "stream failed" })] }
+		])
+
+		expect(merged.map(e => [e.t, e.scope, e.msg])).toEqual([
+			[10, "drive", "page first"],
+			[20, "sdk-worker/sdk.worker", "listDir"],
+			[30, "service-worker/sw", "stream failed"],
+			[40, "drive", "page last"]
+		])
+	})
+
+	it("leaves the realm's own entries untouched", () => {
+		const own = entry({ t: 5, scope: "db.worker" })
+
+		mergeLogEntries([], [{ realm: "db-worker", entries: [own] }])
+
+		expect(own.scope).toBe("db.worker")
+	})
+})
+
+describe("collectLogs", () => {
+	it("pulls the SDK worker's and the db worker's rings and merges them with the page's", async () => {
+		const merged = await collectLogs([entry({ t: 3, scope: "page" })], {
+			sdk: { dumpLogs: () => Promise.resolve([entry({ t: 1, scope: "sdk.worker" })]) },
+			storage: () => Promise.resolve({ api: { dumpLogs: () => Promise.resolve([entry({ t: 2, scope: "db.worker" })]) } })
+		})
+
+		expect(merged.map(e => e.scope)).toEqual(["sdk-worker/sdk.worker", "db-worker/db.worker", "page"])
+	})
+
+	it("keeps the page's entries when a worker cannot answer", async () => {
+		const merged = await collectLogs([entry({ scope: "page" })], {
+			sdk: { dumpLogs: () => Promise.reject(new Error("gone")) },
+			storage: () => Promise.reject(new Error("no db leader after 10s"))
+		})
+
+		expect(merged.map(e => e.scope)).toEqual(["page"])
+	})
+
+	const noWorkers = {
+		sdk: { dumpLogs: () => Promise.resolve([]) },
+		storage: () => Promise.resolve({ api: { dumpLogs: () => Promise.resolve([]) } })
+	}
+
+	function stubController(postMessage: (message: unknown, transfer: MessagePort[]) => void): void {
+		vi.stubGlobal("navigator", { serviceWorker: { controller: { postMessage } } })
+	}
+
+	it("merges the controlling service worker's ring, answered on the transferred port", async () => {
+		stubController((message, [port]) => {
+			expect(message).toEqual({ type: "FILEN_SW_DUMP_LOGS" })
+			port?.postMessage([entry({ t: 1, scope: "sw" })])
+		})
+
+		try {
+			const merged = await collectLogs([entry({ t: 2, scope: "page" })], noWorkers)
+
+			expect(merged.map(e => e.scope)).toEqual(["service-worker/sw", "page"])
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
+	it("gives up on a silent service worker after the timeout and closes its port", async () => {
+		vi.useFakeTimers()
+		stubController(() => undefined)
+		const close = vi.spyOn(MessagePort.prototype, "close")
+
+		try {
+			const pending = collectLogs([entry({ scope: "page" })], noWorkers)
+
+			await vi.advanceTimersByTimeAsync(2_000)
+
+			expect((await pending).map(e => e.scope)).toEqual(["page"])
+			expect(close).toHaveBeenCalledTimes(1)
+		} finally {
+			close.mockRestore()
+			vi.unstubAllGlobals()
+			vi.useRealTimers()
+		}
 	})
 })

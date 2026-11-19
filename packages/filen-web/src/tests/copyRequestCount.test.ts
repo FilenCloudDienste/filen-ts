@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, renderHook, waitFor } from "@testing-library/react"
-import type { Dir, File, ItemCounts, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import { renderHook } from "@testing-library/react"
+import type { Dir, File, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
 import type { CopyReportDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
@@ -38,6 +38,8 @@ import { getCopyJob } from "@/features/transfers/store/useDriveJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"
+import { counts } from "@/tests/fixtures/copyJob"
+import { drain } from "@/tests/support/drain"
 
 const ROOT = testUuid("root")
 const TOP = testUuid("top")
@@ -67,39 +69,11 @@ function mockFile(uuid: UuidStr, parent: UuidStr): File {
 	}
 }
 
-function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
-	return {
-		dirsCreated: 0n,
-		dirsFailed: 0n,
-		filesDone: 0n,
-		filesFailed: 0n,
-		bytesDone: 0n,
-		bytesFailed: 0n,
-		dirsNotAttempted: 0n,
-		filesNotAttempted: 0n,
-		bytesNotAttempted: 0n,
-		entriesSkipped: 0n,
-		bytesSkipped: 0n,
-		...overrides
-	}
-}
-
 function driveEvent(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): Extract<SocketEvent, { type: "drive" }> {
 	return { type: "drive", inner, driveMessageId: 0n }
 }
 
 const wrapper = queryClientWrapper(queryClient)
-
-async function drain(): Promise<void> {
-	await act(async () => {
-		for (let i = 0; i < 20; i++) {
-			await new Promise(resolve => setTimeout(resolve, 0))
-		}
-	})
-	await waitFor(() => {
-		expect(queryClient.isFetching()).toBe(0)
-	})
-}
 
 function listingKeys(): string[] {
 	return queryClient
@@ -142,7 +116,7 @@ describe("copy request counts", () => {
 	it("a large copy into the open directory reads nothing more and creates no listings, and recents reads once after it", async () => {
 		renderHook(() => useDirectoryListingQuery("drive", null), { wrapper })
 		renderHook(() => useDirectoryListingQuery("recents", null), { wrapper })
-		await drain()
+		await drain(queryClient)
 
 		const readsBefore = listDirectory.mock.calls.length
 		const keysBefore = listingKeys()
@@ -163,7 +137,7 @@ describe("copy request counts", () => {
 
 		const id = startCopy([source], { uuid: null, name: "My Drive" })
 
-		await drain()
+		await drain(queryClient)
 
 		const write = vi.spyOn(queryClient, "setQueryData")
 
@@ -188,7 +162,7 @@ describe("copy request counts", () => {
 			counts: counts({ dirsCreated: 41n, filesDone: 1_000n, bytesDone: 10_000n }),
 			error: undefined
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(getCopyJob(id ?? "")?.outcome).toEqual({ status: "done" })
 		// Exactly one more read, for recents, now that no copy runs.

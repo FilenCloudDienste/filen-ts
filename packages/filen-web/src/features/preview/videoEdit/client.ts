@@ -14,8 +14,8 @@ import type { ExportPlan, TimeRange, VideoEditClient, VideoSaveOutcome, VideoSou
 import { idleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { isAppleMobile } from "@/lib/appleMobile"
-import { i18n } from "@/lib/i18n"
 import { sdkApi } from "@/lib/sdk/client"
+import { editedCopySuffix } from "@/features/preview/components/previewOverlay.logic"
 
 // The page side of the video editor. Its preview worker (exact frames, filmstrip, waveform) is spun up on the first
 // request and held for as long as an editor is open on the file, then torn down once idle; it reads the file through
@@ -223,11 +223,6 @@ async function probeOf(file: AnyFile, given: VideoProbe | null | undefined): Pro
 	const record = await probeService.request({ uuid: file.uuid, file }, "full", { rank: () => PROBE_RANK.explicit }).catch(() => null)
 
 	return record?.probe ?? null
-}
-
-// A copy's name: "clip (edited).mp4", then "clip (edited 2).mp4", worded as the image editor's.
-function copySuffix(number: number): string {
-	return number <= 1 ? i18n.t("preview:previewImageSaveCopySuffix") : i18n.t("preview:previewImageSaveCopySuffixNumbered", { number })
 }
 
 // One client's use of a preview worker, ended on dispose or when that worker is lost.
@@ -544,7 +539,7 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 						return { status: "cancelled" }
 					}
 
-					const handle = startVideoSave(deps(), { item, recipe, info, target, copySuffix }, onProgress)
+					const handle = startVideoSave(deps(), { item, recipe, info, target, copySuffix: editedCopySuffix }, onProgress)
 
 					run.handle = handle
 

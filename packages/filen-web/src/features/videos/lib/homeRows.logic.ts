@@ -123,7 +123,7 @@ export function titleCard({
 		play: play?.stableUuid ?? null,
 		resumeSec: play?.resumeSec ?? 0,
 		progress: watch.progress,
-		badge: cardBadge(title.kind, watch),
+		badge: title.unsupported ? null : cardBadge(title.kind, watch),
 		unsupported: title.unsupported,
 		hideable: false
 	}

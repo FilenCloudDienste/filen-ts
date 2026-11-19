@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import { patchQuery, replaceOrAppend } from "@/queries/patch"
-import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
+import { fetchPlaylistEntries, isSettledPlaylistEntry } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
 
 // One global playlists list query — the playlists sidebar and screen (and the add-tracks picker they
@@ -43,9 +43,9 @@ async function fetchPlaylistsQuery(): Promise<PlaylistEntry[]> {
 	const entries = await fetchPlaylistEntries()
 
 	// A degraded row may be a transient download failure — keep retrying it on mount/focus as before, even
-	// after an earlier clean read.
+	// after an earlier clean read. One whose bytes do not parse reads the same every time, so it does not.
 	if (patchCount === patches) {
-		syncedAtSignal = socketLiveSince(epoch) && entries.every(entry => entry.status === "ok") ? signals : -1
+		syncedAtSignal = socketLiveSince(epoch) && entries.every(isSettledPlaylistEntry) ? signals : -1
 		syncedEpoch = epoch
 	}
 

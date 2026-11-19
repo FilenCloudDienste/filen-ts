@@ -12,28 +12,13 @@ import {
 } from "./listing"
 import { gotoSettings, openSettingsSection } from "./settings"
 import { menuItemName } from "./menu"
+import { escapeRegExp, leadingNamePattern, namePattern, scrollListing } from "./rows"
+
+export { escapeRegExp, leadingNamePattern, namePattern }
 
 // Page objects for compress, extract and the archive browser: the drive menus that start them, their
 // dialogs, the browser in the preview overlay, the archive memory setting. Every lookup by item name
 // is anchored (namePattern), every submenu opened by its exact name.
-
-// A name as a whole token of an accessible name: a drive row's or an archive row's name is followed by
-// its size and date columns (and preceded, in grid view, by a badge), so `exact` never matches one and
-// a bare substring matches every sibling whose name starts with it. Never right after a comma, where a
-// Modified date's year ("Jan 1, 2024") would pass for a name.
-export function namePattern(name: string): RegExp {
-	return new RegExp(`(^|(?<!,)\\s)${escapeRegExp(name)}(\\s|$)`)
-}
-
-export function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-// A name at the start of an accessible name: an archive row's (or a list-view drive row's) name leads,
-// so its size and date columns can never match a name such as "2024" the way a token match does.
-export function leadingNamePattern(name: string): RegExp {
-	return new RegExp(`^${escapeRegExp(name)}(\\s|$)`)
-}
 
 // A drive row by its whole leading name. A token match takes a name such as "2024" for a row whose date
 // column reads "Jan 1, 2024", and "x" for its keep-both sibling "x (1)"; this does neither.
@@ -720,35 +705,11 @@ export async function openTrash(page: Page): Promise<Locator> {
 // Scrolls the listing's own scroller most of a screen at a time from the top until `row` renders: the
 // listing virtualizes its rows, so one far down is not in the DOM until scrolled to.
 export async function revealRow(listbox: Locator, row: Locator, timeout = 30_000): Promise<void> {
-	const scroll = (top: boolean): Promise<boolean> =>
-		listbox.evaluate(async (element, toTop) => {
-			let scroller: HTMLElement | null = element as HTMLElement
-
-			while (
-				scroller !== null &&
-				!(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))
-			) {
-				scroller = scroller.parentElement
-			}
-
-			if (scroller === null) {
-				return false
-			}
-
-			const before = scroller.scrollTop
-
-			scroller.scrollTop = toTop ? 0 : before + Math.max(1, Math.floor(scroller.clientHeight * 0.8))
-			// Two frames for the virtualizer to mount what the scroll brought near.
-			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-
-			return scroller.scrollTop !== before
-		}, top)
-
 	await expect(async () => {
-		await scroll(true)
+		await scrollListing(listbox, "top")
 
 		for (let step = 0; step < 64 && (await row.count()) === 0; step++) {
-			if (!(await scroll(false))) {
+			if (!(await scrollListing(listbox, "next"))) {
 				break
 			}
 		}

@@ -8,6 +8,7 @@ import { addSlideOp, type ShapeRef, type SlideRef } from "@filen/office/core/pre
 import {
 	createShapeSelection,
 	createTextEditing,
+	disposeFormatPainter,
 	firstPlaceholder,
 	paintEditorSlide,
 	paintSlide,
@@ -86,13 +87,8 @@ import {
 import { useDeckPresentation, type DeckKeyEvent } from "@/features/presentation/hooks/useDeckPresentation"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
 import { onFormatKey } from "@/features/presentation/lib/formatKeys"
-import {
-	presentationWheelZoom,
-	presentationZoom,
-	type PresentationZoom,
-	type PresentationZoomChange
-} from "@/features/presentation/lib/zoom"
-import { useLatestRef } from "@/lib/useLatestRef"
+import type { PresentationZoomChange } from "@/features/presentation/lib/zoom"
+import { usePresentationZoom } from "@/features/presentation/hooks/usePresentationZoom"
 import { PresentationStatusZoom } from "@/features/presentation/components/ribbon/view"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
@@ -468,21 +464,14 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const [editingText, setEditingText] = useState<ShapeRef | undefined>(undefined)
 	// Where a double-click entered the body (slide px): the first caret goes there; "all": Enter, its text selected.
 	const [textAt, setTextAt] = useState<{ readonly x: number; readonly y: number } | "all" | undefined>(undefined)
-	// Screen px per slide px, as the slide view shows it (fitting, or at the zoom).
-	const [scale, setScale] = useState(1)
-	// Fit to the window, or a zoom; this session's only, never written to the file.
-	const [zoomMode, setZoomMode] = useState<PresentationZoom>("fit")
-	// Read by the wheel's steps, which build on the zoom shown.
-	const scaleRef = useLatestRef(scale)
-	const zoomBy = (change: PresentationZoomChange): void => {
-		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
-	}
 	// The find field in place of the command row (Mod+F; with its replace field, the editors' replace key).
 	const [find, setFind] = useState({ open: false, replace: false, focus: 0 })
 	// The ribbon's command row mounts in a transition after the first paint: its controls are most of the editor's
 	// mount, which a transition renders in slices instead of one long task.
 	const [commands, setCommands] = useState(false)
 	const canvasRef = useRef<HTMLDivElement | null>(null)
+	// The slide view's zoom, and Ctrl/Cmd+wheel (a trackpad pinch) on the slide, as the document editor's page.
+	const { scale, setScale, zoomMode, zoomBy } = usePresentationZoom(canvasRef)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const info = deck.info
 	const reasons = presentationViewOnlyReasons(info?.gate ?? [], info?.format, variant, { writable, renamed })
@@ -525,6 +514,15 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 
 	// The Comments pane's state and the review the panes last showed are this deck's: closed with it.
 	useEffect(() => resetSlideReview, [])
+
+	// The Format Painter is this deck's: left on, it goes with the deck (its document listeners and its hold on the
+	// session). Not the ribbon's: a sticky painter stays on while the user switches ribbon tabs.
+	useEffect(
+		() => () => {
+			disposeFormatPainter(text)
+		},
+		[text]
+	)
 
 	// The body a cell or placeholder key went to (the one it left is closed, its text sent): another cell or
 	// placeholder, a cell of a row added at the table's bottom, or the first placeholder of a new slide on this layout.
@@ -717,29 +715,6 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		onEditorKey(event, editor, overrides, zoomBy, selectionPane, focusCanvas)
 	})
 
-	// Ctrl/Cmd+wheel (a trackpad pinch) zooms the slide, as the document editor's page; a plain wheel scrolls. A native
-	// non-passive listener, so the browser's own page zoom stays out.
-	useEffect(() => {
-		const canvas = canvasRef.current
-
-		if (canvas === null) return undefined
-
-		const onWheel = (event: WheelEvent): void => {
-			if (!event.ctrlKey && !event.metaKey) return
-
-			event.preventDefault()
-
-			const { deltaY } = event
-
-			setZoomMode(previous => presentationWheelZoom(previous, scaleRef.current, deltaY))
-		}
-
-		canvas.addEventListener("wheel", onWheel, { passive: false })
-
-		return () => {
-			canvas.removeEventListener("wheel", onWheel)
-		}
-	}, [scaleRef])
 	const scope: PresentationEditorScope = {
 		editor,
 		view: {
@@ -1045,10 +1020,14 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 								{show.showing || slideEditor === undefined ? null : <AnimationPreview editor={slideEditor} />}
 							</div>
 						</SlideCanvasContextMenu>
-						{notesOpen && count > 0 ? (
+						{count > 0 ? (
 							<PresentationNotesPane
 								text={render?.notesText ?? ""}
 								phone={phone}
+								collapsed={!notesOpen}
+								onCollapsedChange={collapsed => {
+									setNotesOpen(!collapsed)
+								}}
 								{...(editor.editable && slideEditor !== undefined
 									? {
 											editor: slideEditor,

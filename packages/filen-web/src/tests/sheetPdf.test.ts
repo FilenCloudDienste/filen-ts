@@ -20,13 +20,14 @@ vi.mock("@/lib/downloadBlob", () => ({
 }))
 
 const { downloadSheetPdf, pdfDownloadName } = await import("@/features/spreadsheet/save/sheetPdf")
-const { formOf, pdfRequest, printRequests } = await import("@/features/spreadsheet/print/print.logic")
+const { formOf, headerValues, pdfRequest, printRequests } = await import("@/features/spreadsheet/print/print.logic")
 const { DEFAULT_PAGE_SETUP } = await import("@filen/office/core/sheet/print")
 
 const REQUEST: SheetPdfRequest = pdfRequest(
 	[],
 	{ name: "Budget.xlsx", title: "Budget", lang: "de-DE" },
 	{ kind: "xlsx", sheets: [], date1904: false, showFormulas: false },
+	"de-DE",
 	new Date(2026, 0, 2, 10, 0)
 )
 
@@ -48,12 +49,18 @@ describe("a spreadsheet's PDF download", () => {
 		expect(REQUEST.values.date).not.toBe("")
 	})
 
+	it("prints the header's date and time in the regional language it is given", () => {
+		expect(REQUEST.values).toMatchObject({ date: "02.01.26", time: "10:00" })
+		expect(headerValues("a.xlsx", "en-US", new Date(2026, 2, 14, 10, 0))).toMatchObject({ date: "3/14/26", file: "a.xlsx" })
+		expect(headerValues("a.xlsx", "de-DE", new Date(2026, 2, 14, 10, 0)).date).toBe("14.03.26")
+	})
+
 	it("runs the PDF job, counts its pages in the toast and downloads the Blob it answers", async () => {
 		const blob = new Blob(["%PDF"], { type: "application/pdf" })
 		const job = vi.fn((_name: string, _args: unknown, options: { signal?: AbortSignal; onProgress?: (value: unknown) => void }) => {
 			options.onProgress?.({ done: 3, total: 9 })
 
-			return Promise.resolve({ ok: true, blob, pages: 9, missingImages: 0, missingGlyphs: 0, unshapedRuns: 0 })
+			return Promise.resolve({ ok: true, blob, pages: 9, missingImages: 0, missingGlyphs: 0, unshapedRuns: 0, missingObjects: 0 })
 		})
 
 		await downloadSheetPdf(session(job), REQUEST, "Budget.xlsx")
@@ -68,7 +75,17 @@ describe("a spreadsheet's PDF download", () => {
 
 	it("says when characters or pictures could not be put in", async () => {
 		await downloadSheetPdf(
-			session(() => Promise.resolve({ ok: true, blob: new Blob([]), pages: 1, missingImages: 1, missingGlyphs: 0, unshapedRuns: 0 })),
+			session(() =>
+				Promise.resolve({
+					ok: true,
+					blob: new Blob([]),
+					pages: 1,
+					missingImages: 1,
+					missingGlyphs: 0,
+					unshapedRuns: 0,
+					missingObjects: 0
+				})
+			),
 			REQUEST,
 			"a.xlsx"
 		)
@@ -78,7 +95,17 @@ describe("a spreadsheet's PDF download", () => {
 
 	it("says when some text is drawn without its font's shaping", async () => {
 		await downloadSheetPdf(
-			session(() => Promise.resolve({ ok: true, blob: new Blob([]), pages: 1, missingImages: 0, missingGlyphs: 0, unshapedRuns: 2 })),
+			session(() =>
+				Promise.resolve({
+					ok: true,
+					blob: new Blob([]),
+					pages: 1,
+					missingImages: 0,
+					missingGlyphs: 0,
+					unshapedRuns: 2,
+					missingObjects: 0
+				})
+			),
 			REQUEST,
 			"a.xlsx"
 		)
@@ -161,7 +188,15 @@ describe("a spreadsheet's PDF download", () => {
 
 	it("sends the password with that one export, to encrypt the PDF", async () => {
 		const job = vi.fn((_name: string, _args: unknown) =>
-			Promise.resolve({ ok: true, blob: new Blob([]), pages: 1, missingImages: 0, missingGlyphs: 0, unshapedRuns: 0 })
+			Promise.resolve({
+				ok: true,
+				blob: new Blob([]),
+				pages: 1,
+				missingImages: 0,
+				missingGlyphs: 0,
+				unshapedRuns: 0,
+				missingObjects: 0
+			})
 		)
 
 		await downloadSheetPdf(session(job), REQUEST, "a.xlsx", "secret")

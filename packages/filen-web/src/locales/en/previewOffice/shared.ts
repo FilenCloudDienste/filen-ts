@@ -77,5 +77,11 @@ export const previewOfficeShared = {
 	/** Office editors — that prompt, while the password is checked */
 	previewOfficePdfPasswordChecking: "Checking password…",
 	/** Office editors — that prompt, under the field after a wrong password */
-	previewOfficePdfPasswordWrong: "That is not the document's password"
+	previewOfficePdfPasswordWrong: "That is not the document's password",
+	/** Office documents — drawn in a chart as the name of a data series the file leaves unnamed; {{n}} is its position (1, 2, …), written without a space as Excel does */
+	previewOfficeChartSeriesName: "Series{{n}}",
+	/** Office documents — drawn as a chart's title where the file asks for an automatic one and names none */
+	previewOfficeChartTitle: "Chart Title",
+	/** Office documents — drawn as a chart axis's title where the file shows one without its text */
+	previewOfficeChartAxisTitle: "Axis Title"
 }

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { ParentNaming } from "@/features/drive/lib/archiveTargets"
@@ -61,7 +62,7 @@ export function TrashConfirmDialog({ count, pending, onConfirm, onClose }: Trash
 			open
 			pending={pending}
 			title={t("driveTrashConfirmTitle")}
-			body={t("driveTrashConfirmBody", { count })}
+			body={t(singleOrCountKey(count, "driveTrashConfirmBodySingle", "driveTrashConfirmBody"), { count })}
 			confirmLabel={t("driveActionTrash")}
 			cancelLabel={t("common:cancel")}
 			onOpenChange={open => {

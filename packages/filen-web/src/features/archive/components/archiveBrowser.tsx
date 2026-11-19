@@ -1,6 +1,11 @@
-import { useEffect, useEffectEvent, useId, useRef, useState, type MouseEvent } from "react"
+import { useEffect, useEffectEvent, useId, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
+import { isImeKeydown, matchesCombo } from "@filen/shared/keymap"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { bindingOf } from "@/lib/keymap/bindingOf"
+import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -110,6 +115,8 @@ interface MarqueeStep {
 
 const DEFAULT_SORT: ChildSort = { key: "name", descending: false }
 const NO_REFS = new Int32Array(0)
+const IS_MAC = isMacPlatform()
+const BACK = ARCHIVE_ACTIONS.find(def => def.id === "archive.back")
 
 export interface ArchiveBrowserProps {
 	item: DriveItem
@@ -230,6 +237,85 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	)
 }
 
+interface InnerLevelFrameProps {
+	outer: readonly OuterCrumb[]
+	rootName: string
+	active: boolean
+	onLeave: () => void
+	children: ReactNode
+}
+
+// An inner archive while no list is shown (its gate, password, wait, failure): the outer crumbs stay, and Escape (or the
+// back key) leaves it as the list's would, instead of closing the overlay. Heard at the document before the overlay's
+// dismissal, for a key pressed in the frame and for one nothing shown holds (focus on the overlay or the page, or left on
+// the hidden outer list it was entered from); a key in a dialog or menu over it (the password prompt's Escape, which
+// only dismisses that prompt) is not its own.
+function InnerLevelFrame({ outer, rootName, active, onLeave, children }: InnerLevelFrameProps) {
+	const bindings = useBindings()
+	const frameRef = useRef<HTMLDivElement>(null)
+
+	const handleDocumentKey = useEffectEvent((event: KeyboardEvent) => {
+		const frame = frameRef.current
+		const target = event.target
+
+		if (
+			frame === null ||
+			event.defaultPrevented ||
+			isImeKeydown(event) ||
+			isRecordingCombo() ||
+			!(target instanceof Node) ||
+			!(frame.contains(target) || target.contains(frame) || (target instanceof Element && target.closest("[hidden]") !== null))
+		) {
+			return
+		}
+
+		const escape = event.key === "Escape" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
+
+		if (!escape && (BACK === undefined || !matchesCombo(event, bindingOf(bindings, BACK, IS_MAC), IS_MAC))) {
+			return
+		}
+
+		event.preventDefault()
+		event.stopPropagation()
+
+		if (!event.repeat) {
+			onLeave()
+		}
+	})
+
+	useEffect(() => {
+		if (!active) {
+			return
+		}
+
+		const listener = (event: KeyboardEvent): void => {
+			handleDocumentKey(event)
+		}
+
+		document.addEventListener("keydown", listener, true)
+
+		return () => {
+			document.removeEventListener("keydown", listener, true)
+		}
+	}, [active])
+
+	return (
+		<div
+			ref={frameRef}
+			className="flex size-full flex-col"
+		>
+			<ArchiveToolbar
+				outer={outer}
+				rootName={rootName}
+				shown={[]}
+				hidden={[]}
+				onNavigate={() => undefined}
+			/>
+			<div className="min-h-0 flex-1">{children}</div>
+		</div>
+	)
+}
+
 interface ArchiveLevelBrowserProps extends ArchiveSourceBrowserProps {
 	// The level shown; an outer one stays mounted, hidden, while an archive it holds is browsed.
 	active: boolean
@@ -295,6 +381,8 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	const marqueeStep = useRef<MarqueeStep | null>(null)
 	// A password was typed for this archive itself: a refusal after it is its own, not the outer one's.
 	const typedPassword = useRef(false)
+	// The confirmed entry's gate was listed once: a cancel back to the gate shows it, never starts again.
+	const autoStarted = useRef(false)
 
 	// A new run (List again, a password) lists into a fresh store: the view starts over at its root. A
 	// store replacing one that holds nothing (the placeholder before the session opened, a run that read
@@ -337,9 +425,14 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 			return
 		}
 
-		// Confirmed on the way in: its own gate asks nothing again.
-		if (entered.confirmed && phase.type === "gate") {
-			listing.session()?.start()
+		// Confirmed on the way in: its own gate asks nothing again, once.
+		if (entered.confirmed && phase.type === "gate" && !autoStarted.current) {
+			const session = listing.session()
+
+			if (session !== null) {
+				autoStarted.current = true
+				session.start()
+			}
 		}
 
 		const parent = entered.parentPassword
@@ -845,8 +938,23 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 		)
 	}
 
+	// An inner archive's states shown in the list's place keep the way back out.
+	const framed = (body: ReactNode): ReactNode =>
+		onLeave === null ? (
+			body
+		) : (
+			<InnerLevelFrame
+				outer={outer}
+				rootName={source.name}
+				active={active}
+				onLeave={onLeave}
+			>
+				{body}
+			</InnerLevelFrame>
+		)
+
 	if (phase.type === "gate") {
-		return (
+		return framed(
 			<ArchiveGate
 				source={source}
 				format={phase.format}
@@ -863,7 +971,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	}
 
 	if (phase.type === "needsPassword") {
-		return (
+		return framed(
 			<ArchivePasswordGate
 				name={source.name}
 				wrong={phase.wrong}
@@ -876,7 +984,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	}
 
 	if (phase.type === "waiting") {
-		return (
+		return framed(
 			<ArchiveWaiting
 				onCancel={() => {
 					listing.session()?.stop()
@@ -886,7 +994,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	}
 
 	if ((phase.type === "resolving" || phase.type === "starting") && store.entryCount === 0) {
-		return (
+		return framed(
 			<Delayed ms={ARCHIVE_SPINNER_DELAY_MS}>
 				<PreviewLoading />
 			</Delayed>
@@ -896,7 +1004,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	if (phase.type === "failed" && store.entryCount === 0) {
 		const failureKey = failureLabelKey(phase.error)
 
-		return (
+		return framed(
 			<PreviewErrorState
 				message={failureKey === null ? errorLabel(phase.error) : t(failureKey)}
 				onRetry={() => {
@@ -956,14 +1064,13 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 				rootName={source.name}
 				shown={shown.map(id => ({ id, name: store.dirName(id) }))}
 				hidden={hidden.map(id => ({ id, name: store.dirName(id) }))}
-				query={query}
+				search={{ query, onQueryChange: handleQueryChange }}
 				searchBoxRef={searchBoxRef}
 				onNavigate={target => {
 					if (target !== dir || searchMode) {
 						navigate(target, null)
 					}
 				}}
-				onQueryChange={handleQueryChange}
 			/>
 			{phase.type === "reading" ? (
 				<Delayed ms={ARCHIVE_PROGRESS_DELAY_MS}>

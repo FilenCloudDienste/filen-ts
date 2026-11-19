@@ -54,3 +54,10 @@ export function chatHasUnread(
 		() => getMessages?.(chat.uuid)?.map(toSenderRef)
 	)
 }
+
+// True when the list row alone proves the chat has no unread message, so its message page need not be read
+// to count it: muted, no last message, or a last message (the newest one) no newer than lastFocus. A newer
+// last message, from a blocked sender or our own, proves nothing.
+export function chatUnreadProvablyZero(chat: Chat): boolean {
+	return chat.muted || chat.lastMessage === undefined || chat.lastMessage.sentTimestamp <= chatLastFocus(chat)
+}

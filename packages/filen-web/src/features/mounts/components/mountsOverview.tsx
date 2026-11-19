@@ -10,6 +10,7 @@ import { FuseCallout } from "@/features/mounts/components/fuseCallout"
 import { DriveHero } from "@/features/mounts/components/driveHero"
 import { FinderCallouts, FinderHero } from "@/features/mounts/components/finderHero"
 import { ServeTile } from "@/features/mounts/components/serveHero"
+import { RoleErrorCallout } from "@/features/mounts/components/mountsPage"
 
 // The platform never changes mid-session.
 const PROTOCOLS = offeredProtocols(desktopPlatform())
@@ -53,6 +54,7 @@ export function MountsOverview() {
 										controls={controls}
 										overview
 									/>
+									<RoleErrorCallout error={controls.drive.error} />
 									{controls.available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
 									<FuseCallout />
 								</div>

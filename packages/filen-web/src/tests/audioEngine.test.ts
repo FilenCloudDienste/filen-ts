@@ -39,6 +39,9 @@ import {
 	type AudioEngineDeps,
 	type TrackSource
 } from "@/features/audio/lib/engine"
+import type { AudioOutput } from "@/features/audio/lib/audioOutput"
+import { DEFAULT_SMOOTH_TRANSITIONS_PREFS } from "@/features/audio/lib/smoothTransitions.types"
+import { useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
 import { loadedUrl, urlSource } from "@/tests/audioTestSources"
 
 // Every source the engine released, by URL.
@@ -549,6 +552,146 @@ describe("bounded auto-skip", () => {
 		expect(useAudioStore.getState().status).toBe("playing")
 		expect(useAudioStore.getState().currentIndex).toBe(1)
 		expect(useAudioStore.getState().lastError).toBeNull()
+	})
+})
+
+describe("offline failures", () => {
+	it("holds paused on the failed track instead of skipping while offline", async () => {
+		const h = makeHarness({ isOnline: () => false })
+
+		h.resolveSource.mockRejectedValue(new ErrorWithDTO(mediaFailureDTO("other")))
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError).not.toBeNull()
+	})
+
+	it("keeps the position of a track that fails mid-play and reloads it from there on resume", async () => {
+		let online = true
+		const h = makeHarness({ isOnline: () => online })
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.fake.setSample({ currentTimeMs: 90_000, durationMs: 240_000, paused: false, ended: false })
+		online = false
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+
+		online = true
+		h.engine.resume()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(h.resolveSource.mock.calls[1]?.[0].uuid).toBe("a")
+		expect(h.fake.calls.seek).toEqual([90])
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("skips as before while online", async () => {
+		const h = makeHarness({ isOnline: () => true })
+
+		h.resolveSource.mockRejectedValueOnce(new ErrorWithDTO(mediaFailureDTO("other")))
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("on WebKit releases a routed element held offline after the idle close and resumes it where it stood", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		try {
+			useSmoothTransitionsStore.setState({
+				prefs: { ...DEFAULT_SMOOTH_TRANSITIONS_PREFS, enabled: true, matchLoudness: false },
+				unavailable: null
+			})
+
+			let closes = 0
+			const output: AudioOutput = {
+				unlock: () => undefined,
+				usable: true,
+				contextSeconds: 0,
+				contextState: "running",
+				selfSuspended: false,
+				routedCount: 0,
+				connect: () => null,
+				setMaster: () => undefined,
+				idle: () => undefined,
+				active: () => undefined,
+				resume: () => undefined,
+				setKeepOpen: () => undefined,
+				closeIfUnused: () => {
+					closes++
+				},
+				close: () => undefined,
+				onStateChange: () => undefined
+			}
+			let online = true
+			const h = makeHarness({
+				isOnline: () => online,
+				smoothTransitions: { output, getEdges: () => Promise.resolve(null), webkit: true, inGesture: () => true }
+			})
+
+			h.fake.adapter.route = () => ({
+				setTrim: () => undefined,
+				holdFade: () => undefined,
+				scheduleFade: () => undefined,
+				whenAudible: () => Promise.resolve(true),
+				release: () => undefined
+			})
+
+			await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+			await flush()
+
+			h.fake.setSample({ currentTimeMs: 90_000, durationMs: 240_000, paused: false, ended: false })
+			online = false
+			h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+			await flush()
+
+			expect(useAudioStore.getState().status).toBe("paused")
+			expect(h.fake.calls.dispose).toBe(0)
+
+			vi.advanceTimersByTime(5 * 60_000)
+
+			expect(h.fake.calls.dispose).toBe(1)
+			expect(closes).toBe(1)
+
+			online = true
+			h.engine.resume()
+			await flush()
+
+			expect(h.resolveSource).toHaveBeenCalledTimes(2)
+			expect(h.resolveSource.mock.calls[1]?.[0].uuid).toBe("a")
+			expect(h.fake.calls.seek).toEqual([90])
+			expect(useAudioStore.getState().currentIndex).toBe(0)
+		} finally {
+			useSmoothTransitionsStore.setState({ prefs: DEFAULT_SMOOTH_TRANSITIONS_PREFS, unavailable: null })
+			vi.useRealTimers()
+		}
+	})
+
+	it("still skips a track whose format the browser cannot play while offline", async () => {
+		const h = makeHarness({ isOnline: () => false })
+
+		h.resolveSource.mockRejectedValueOnce(new ErrorWithDTO(mediaFailureDTO("format")))
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(useAudioStore.getState().currentIndex).toBe(1)
 	})
 })
 

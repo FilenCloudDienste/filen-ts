@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import { mergeInflightQueuesByUnion } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
-import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import type { ChatMessageWithInflightId, InflightChatMessageError, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import { compareBySentTimestamp } from "@/features/chats/lib/sort"
 
 // Pure, testable core of the chat send outbox — a faithful port of filen-mobile's chats sync/store
@@ -146,9 +146,10 @@ export const inflightChatMessagesSchema = type({
 // the pending bubble paints without a round trip (composeMessageList re-injects the store queue on top of the
 // confirmed message cache). The leader is authoritative: its state broadcast (the whole per-chat queue)
 // reconciles followers by inflightId UNION — chat sends are append-only, so a union, never notes' newest-per-
-// key overwrite. The follower's own realtime echo delivers the COMMITTED copy after the leader sends; a
-// follower learns a send FAILURE only as leader-only detail (no error broadcast — same leader-owned rejection
-// model as notes) — retry/remove stay leader-tab affordances.
+// key overwrite. The follower's own realtime echo delivers the COMMITTED copy after the leader sends. A send
+// the leader drops at the rejection bound is broadcast once as a failed entry, so every tab shows the failed
+// bubble with its text; it lives in memory only (no durable failed set), and a follower's retry forwards the
+// send to the leader again.
 
 // A single send a follower forwards to the leader: the FULLY-BUILT optimistic message (carrying its own
 // inflightId, content, replyTo, sender snapshot + sentTimestamp) plus the live Chat it targets. The leader
@@ -166,6 +167,14 @@ export const remoteChatEnqueueSchema = type({
 	chat: "object",
 	message: inflightChatMessageEntrySchema
 }).as<RemoteChatEnqueue>()
+
+// Trust-boundary schema for a send the leader dropped at the rejection bound (invalid → dropped): the
+// load-bearing scalars only, the message snapshot through the queue's own entry schema.
+export const droppedChatSendSchema = type({
+	error: "object",
+	permanentRejections: "number",
+	message: inflightChatMessageEntrySchema
+}).as<InflightChatMessageError>()
 
 // A bounded ledger of recently-committed inflightIds. On a leadership takeover the new leader clears its
 // unacked and announces itself; a surviving follower then re-forwards its own unacked, which can carry an id

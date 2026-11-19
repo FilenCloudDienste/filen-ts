@@ -6,9 +6,12 @@ import {
 	type OpenCapability,
 	type OpenedPackage,
 	type PresentationEvent,
-	type PresentationWorkerLike
+	type PresentationOpenOptions,
+	type PresentationWorkerLike,
+	type PresentationWorkerPool
 } from "@filen/office/dom/presentation"
 import { connectPresentation } from "@/features/presentation/lib/presentationEngine"
+import { officeChartText } from "@/features/office/lib/chartText"
 import { servePresentationDeckWorker } from "@/features/presentation/workers/presentationScope"
 import { exposeRangePort } from "@/lib/media/rangePort"
 
@@ -167,6 +170,35 @@ function deckBytes(size: number): Uint8Array {
 const OPTIONS = { format: "pptx", fileName: "a.pptx" } as const
 
 describe("presentation engine connection", () => {
+	it("opens with the app's chart text unless the caller brings its own", () => {
+		const pool = presentationWorkerPool(inThreadWorker({ pptx: opener() }))
+		const asked: PresentationOpenOptions[] = []
+		const watched: PresentationWorkerPool = {
+			open: (source, options, listener) => {
+				asked.push(options)
+
+				return pool.open(source, options, listener)
+			},
+			prewarm: () => {
+				pool.prewarm()
+			},
+			get workers() {
+				return pool.workers
+			},
+			dispose: () => {
+				pool.dispose()
+			}
+		}
+		const own = { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" }
+
+		connectPresentation(watched, { kind: "bytes", bytes: deckBytes(100) }, () => undefined, OPTIONS).dispose()
+		connectPresentation(watched, { kind: "bytes", bytes: deckBytes(100) }, () => undefined, { ...OPTIONS, chartText: own }).dispose()
+
+		expect(asked.map(options => options.chartText)).toEqual([officeChartText(), own])
+		expect(asked[0]?.chartText?.series).toBe("Series{n}")
+		pool.dispose()
+	})
+
 	it("opens a drive deck through the worker's block cache and shuts its port with the session", async () => {
 		const read = opener(5)
 		const pool = presentationWorkerPool(inThreadWorker({ pptx: read }))

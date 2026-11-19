@@ -12,6 +12,7 @@ import {
 	ContextMenuSubTrigger,
 	ContextMenuTrigger
 } from "@/components/ui/context-menu"
+import { singleOrCountKey } from "@/lib/i18n"
 import { useEscapeClosesMenu } from "@/features/spreadsheet/components/menuEscape"
 import { useLocalPane } from "@/features/spreadsheet/menus/localPane"
 import { FREEZE_ITEMS, MERGE_ITEMS, freezeEnabled, freezeTo, selectionHasMerge } from "@/features/spreadsheet/menus/structureCommands"
@@ -22,17 +23,47 @@ import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToo
 // The structural items, in menu order; a separator follows each axis's delete. `after` inserts past the
 // selection's end rather than at its start.
 const STRUCTURE_ITEMS = [
-	{ key: "previewSpreadsheetInsertRowsAbove", type: "axis.insert", axis: "rows", after: false },
-	{ key: "previewSpreadsheetInsertRowsBelow", type: "axis.insert", axis: "rows", after: true },
-	{ key: "previewSpreadsheetDeleteRows", type: "axis.delete", axis: "rows", after: false },
-	{ key: "previewSpreadsheetInsertColumnsLeft", type: "axis.insert", axis: "cols", after: false },
-	{ key: "previewSpreadsheetInsertColumnsRight", type: "axis.insert", axis: "cols", after: true },
-	{ key: "previewSpreadsheetDeleteColumns", type: "axis.delete", axis: "cols", after: false }
+	{
+		key: "previewSpreadsheetInsertRowsAbove",
+		single: "previewSpreadsheetInsertRowsAboveSingle",
+		type: "axis.insert",
+		axis: "rows",
+		after: false
+	},
+	{
+		key: "previewSpreadsheetInsertRowsBelow",
+		single: "previewSpreadsheetInsertRowsBelowSingle",
+		type: "axis.insert",
+		axis: "rows",
+		after: true
+	},
+	{ key: "previewSpreadsheetDeleteRows", single: "previewSpreadsheetDeleteRowsSingle", type: "axis.delete", axis: "rows", after: false },
+	{
+		key: "previewSpreadsheetInsertColumnsLeft",
+		single: "previewSpreadsheetInsertColumnsLeftSingle",
+		type: "axis.insert",
+		axis: "cols",
+		after: false
+	},
+	{
+		key: "previewSpreadsheetInsertColumnsRight",
+		single: "previewSpreadsheetInsertColumnsRightSingle",
+		type: "axis.insert",
+		axis: "cols",
+		after: true
+	},
+	{
+		key: "previewSpreadsheetDeleteColumns",
+		single: "previewSpreadsheetDeleteColumnsSingle",
+		type: "axis.delete",
+		axis: "cols",
+		after: false
+	}
 ] as const
 
 const HIDE_ITEMS = [
-	{ axis: "rows", hide: "previewSheetHideRows", unhide: "previewSheetUnhideRows" },
-	{ axis: "cols", hide: "previewSheetHideColumns", unhide: "previewSheetUnhideColumns" }
+	{ axis: "rows", hide: "previewSheetHideRows", hideSingle: "previewSheetHideRowsSingle", unhide: "previewSheetUnhideRows" },
+	{ axis: "cols", hide: "previewSheetHideColumns", hideSingle: "previewSheetHideColumnsSingle", unhide: "previewSheetUnhideColumns" }
 ] as const
 
 // The ribbon's own handlers, so the clipboard with its refusals, and the dialogs, are reached one way.
@@ -185,7 +216,7 @@ export function SheetGridMenu({
 												run(move)
 											}}
 										>
-											{t(item.key, { count })}
+											{t(singleOrCountKey(count, item.single, item.key), { count })}
 										</ContextMenuItem>
 										{item.type === "axis.delete" ? <ContextMenuSeparator /> : null}
 									</Fragment>
@@ -196,6 +227,7 @@ export function SheetGridMenu({
 									{HIDE_ITEMS.map(item => {
 										const spans = selectionSpans(selection.ranges, item.axis)
 										const shown = unhideSpans(spans, layout, item.axis)
+										const hideCount = spanCount(spans)
 
 										return (
 											<Fragment key={item.axis}>
@@ -204,7 +236,7 @@ export function SheetGridMenu({
 														run({ type: "axis.hide", sheet, axis: item.axis, spans, hidden: true })
 													}}
 												>
-													{t(item.hide, { count: spanCount(spans) })}
+													{t(singleOrCountKey(hideCount, item.hideSingle, item.hide), { count: hideCount })}
 												</ContextMenuItem>
 												<ContextMenuItem
 													disabled={shown === null}
@@ -310,7 +342,9 @@ function ResetItems({ resets, onReset }: { resets: (axis: SheetAxis) => number[]
 					onReset("cols", cols)
 				}}
 			>
-				{t("previewSpreadsheetResetColumnWidth", { count: cols.length })}
+				{t(singleOrCountKey(cols.length, "previewSpreadsheetResetColumnWidthSingle", "previewSpreadsheetResetColumnWidth"), {
+					count: cols.length
+				})}
 			</ContextMenuItem>
 			<ContextMenuItem
 				disabled={rows.length === 0}
@@ -318,7 +352,9 @@ function ResetItems({ resets, onReset }: { resets: (axis: SheetAxis) => number[]
 					onReset("rows", rows)
 				}}
 			>
-				{t("previewSpreadsheetResetRowHeight", { count: rows.length })}
+				{t(singleOrCountKey(rows.length, "previewSpreadsheetResetRowHeightSingle", "previewSpreadsheetResetRowHeight"), {
+					count: rows.length
+				})}
 			</ContextMenuItem>
 		</>
 	)

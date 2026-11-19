@@ -8,28 +8,23 @@ import { writeXlsx } from "hucre/xlsx"
 import { inThreadSheetHost } from "@filen/office/dom/sheet"
 import { isSealedOfficeFile } from "@filen/office/dom/encryption"
 import type { SheetFileKind, SheetOpenResult } from "@filen/office/core/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import type { SpreadsheetSnapshot } from "@/features/spreadsheet/save/sheetSave.logic"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
 import { preview } from "@/locales/en/preview"
+import { file, sheetBytes, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // The spreadsheet viewer over real sessions, on this thread (the in-thread host stands in for the workers):
 // what is typed in the formula bar reaches the session, and the overlay's save hands out what it holds.
 
-const { bytes, hosts } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
-
-	return { bytes: held, hosts: { current: null as ReturnType<typeof import("@filen/office/dom/sheet").inThreadSheetHost> | null } }
-})
-
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
+const { hosts } = vi.hoisted(() => ({
+	hosts: { current: null as ReturnType<typeof import("@filen/office/dom/sheet").inThreadSheetHost> | null }
 }))
 
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
+
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
 // A host of its own per test (beforeEach): a test that times out leaves its sessions' work behind, which a shared host
 // would make the next test's open wait behind.
@@ -46,26 +41,13 @@ const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
 
 beforeEach(() => {
 	hosts.current = inThreadSheetHost()
-	// jsdom lays nothing out and draws no canvas: the grid sees neither a size nor a context.
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+	stubSheetCanvas()
 })
 
 afterEach(() => {
 	hosts.current?.dispose()
 	hosts.current = null
 })
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
 
 async function budget(): Promise<Uint8Array> {
 	return await writeXlsx({
@@ -135,7 +117,7 @@ describe("the spreadsheet viewer", () => {
 	// reopenings: 0.6–1.6 s alone (3.5 s with its transforms cold), several times that on a saturated CPU (5.1–5.7 s
 	// measured with every core busy), past the default 5 s. Its own budget, as the password test has.
 	it("edits a workbook through the formula bar and saves it for the overlay", async () => {
-		bytes.current = await budget()
+		sheetBytes.current = await budget()
 
 		const saveRef = createRef<(() => Promise<SpreadsheetSnapshot>) | null>() as { current: (() => Promise<SpreadsheetSnapshot>) | null }
 		const dirty = vi.fn()
@@ -176,7 +158,7 @@ describe("the spreadsheet viewer", () => {
 	}, 30_000)
 
 	it("opens a password-protected workbook with its password and saves it sealed", async () => {
-		bytes.current = await encryptedWorkbook("agile")
+		sheetBytes.current = await encryptedWorkbook("agile")
 
 		const saveRef = { current: null as (() => Promise<SpreadsheetSnapshot>) | null }
 
@@ -213,7 +195,7 @@ describe("the spreadsheet viewer", () => {
 
 	it("keeps a file whose name is not a spreadsheet's read-only, saying why", async () => {
 		// This realm's array: jsdom's TextEncoder answers in its own.
-		bytes.current = Uint8Array.from(new TextEncoder().encode("a,b\r\n1,2\r\n"))
+		sheetBytes.current = Uint8Array.from(new TextEncoder().encode("a,b\r\n1,2\r\n"))
 
 		const saveRef = { current: null as (() => Promise<SpreadsheetSnapshot>) | null }
 

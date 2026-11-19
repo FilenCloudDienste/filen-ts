@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { chapterTarget, frameDuration, STAGE_MEDIA_ACTIONS, stepPlaybackRate, videoKeyAction } from "@/lib/media/videoKeys.logic"
+import {
+	chapterTarget,
+	FRAME_INTERVAL_MAX_FRAMES,
+	FRAME_INTERVAL_SAMPLES,
+	frameDuration,
+	FrameIntervalMeter,
+	STAGE_MEDIA_ACTIONS,
+	stepPlaybackRate,
+	videoKeyAction
+} from "@/lib/media/videoKeys.logic"
 import { mediaKeyAction } from "@/lib/media/mediaKeys.logic"
 import { MEDIA_ACTIONS } from "@/lib/media/keymap"
 import type { PlayerKeyTarget } from "@/lib/media/playerKeys.logic"
@@ -104,9 +113,66 @@ describe("player key helpers", () => {
 		expect(chapterTarget([], 10, 1)).toBeNull()
 	})
 
-	it("uses the frame rate for a frame step, 24 fps when unknown", () => {
-		expect(frameDuration(25)).toBeCloseTo(0.04)
+	it("uses the measured frame interval for a frame step, 24 fps when unknown", () => {
+		expect(frameDuration(0.04)).toBeCloseTo(0.04)
 		expect(frameDuration(null)).toBeCloseTo(1 / 24)
+		expect(frameDuration(0)).toBeCloseTo(1 / 24)
+	})
+})
+
+describe("FrameIntervalMeter", () => {
+	it("measures the interval between frames presented one after another", () => {
+		const meter = new FrameIntervalMeter()
+
+		expect(meter.add({ mediaTime: 10, presentedFrames: 100 }, 1)).toBe(true)
+		expect(meter.interval).toBeNull()
+		meter.add({ mediaTime: 10 + 1 / 60, presentedFrames: 101 }, 1)
+		expect(meter.interval).toBeCloseTo(1 / 60)
+	})
+
+	it("skips a frame the display dropped, a seek and other speeds, and keeps the shortest interval", () => {
+		const meter = new FrameIntervalMeter()
+
+		meter.add({ mediaTime: 0, presentedFrames: 1 }, 1)
+		// Two presentations apart: not one interval.
+		meter.add({ mediaTime: 2 / 50, presentedFrames: 3 }, 1)
+		expect(meter.interval).toBeNull()
+		// A jump: a seek or a stall.
+		meter.add({ mediaTime: 30, presentedFrames: 4 }, 1)
+		expect(meter.interval).toBeNull()
+		meter.add({ mediaTime: 30 + 2 / 50, presentedFrames: 5 }, 1)
+		meter.add({ mediaTime: 30 + 3 / 50, presentedFrames: 6 }, 1)
+		expect(meter.interval).toBeCloseTo(1 / 50)
+		expect(meter.add({ mediaTime: 31, presentedFrames: 7 }, 2)).toBe(false)
+		expect(meter.interval).toBeCloseTo(1 / 50)
+	})
+
+	it("stops a run once it has its samples or has looked at enough frames", () => {
+		const meter = new FrameIntervalMeter()
+		let wants = true
+		let frame = 0
+
+		while (wants) {
+			wants = meter.add({ mediaTime: frame / 30, presentedFrames: frame }, 1)
+			frame++
+		}
+
+		expect(frame).toBe(FRAME_INTERVAL_SAMPLES + 1)
+
+		meter.restart()
+		wants = true
+		frame = 0
+
+		while (wants) {
+			wants = meter.add({ mediaTime: frame, presentedFrames: frame * 2 }, 1)
+			frame++
+		}
+
+		expect(frame).toBe(FRAME_INTERVAL_MAX_FRAMES)
+		// The last run's interval stays until a run measures one; a new source forgets it.
+		expect(meter.interval).toBeCloseTo(1 / 30)
+		meter.reset()
+		expect(meter.interval).toBeNull()
 	})
 })
 

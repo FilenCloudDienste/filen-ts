@@ -17,7 +17,7 @@ import {
 	type DocxAnnotationIndex,
 	type DocxPageFrame
 } from "@filen/office/react/docx"
-import { formattingKeys } from "@/features/preview/components/docxViewer.logic"
+import { formattingKeys, splitBalloons } from "@/features/preview/components/docxViewer.logic"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { formatShortDate } from "@/lib/formatDate"
 
@@ -102,9 +102,11 @@ function pageBalloons(annotations: DocxAnnotations, index: DocxAnnotationIndex, 
 interface PlacedColumn {
 	readonly frame: DocxPageFrame
 	readonly balloons: readonly Balloon[]
+	// The balloons beside the page, at `tops`.
+	readonly shown: readonly Balloon[]
 	readonly tops: Float64Array
-	// Balloons [shown, length) did not fit beside the page: behind a "+N more" control at moreTop.
-	readonly shown: number
+	// Those that did not fit beside the page: behind a "+N more" control at moreTop.
+	readonly hidden: readonly Balloon[]
 	readonly moreTop: number
 }
 
@@ -133,7 +135,7 @@ function placeColumns(
 			...(activeAt >= 0 ? { active: activeAt } : {})
 		})
 
-		return { frame, balloons, tops: placed.tops, shown: placed.shown, moreTop: placed.moreTop }
+		return { frame, balloons, ...splitBalloons(balloons, placed), tops: placed.tops, moreTop: placed.moreTop }
 	})
 }
 
@@ -398,9 +400,7 @@ function Column({
 }) {
 	const { t } = useTranslation("preview")
 	const ids = useId()
-	const { frame, tops, shown } = column
-	const balloons = column.balloons.slice(0, shown)
-	const hidden = column.balloons.slice(shown)
+	const { frame, tops, shown: balloons, hidden } = column
 	const left = frame.left + frame.width + COLUMN_GAP
 
 	return (

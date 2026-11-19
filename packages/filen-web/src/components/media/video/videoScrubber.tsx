@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
-import { percentOf, ratioAt, timeAtRatio } from "@/lib/media/scrubber.logic"
+import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
+import { chapterName, percentOf, ratioAt, timeAtRatio } from "@/lib/media/scrubber.logic"
 import { chapterAt, type StageChapter } from "@/components/media/video/stage.logic"
 
 // The player's full-width seek bar. The playhead, the time readouts and the buffered ranges are written
@@ -45,7 +46,9 @@ export function VideoScrubber({
 	onToggleRemaining: () => void
 	partLabel?: string | null | undefined
 }) {
-	const { t } = useTranslation(["videos", "common"])
+	const { t } = useTranslation("videos")
+	// The chapter names and the accessible value come from the shared scrubber strings.
+	const { t: tCommon } = useTranslation("common")
 	const inputRef = useRef<HTMLInputElement>(null)
 	const fillRef = useRef<HTMLDivElement>(null)
 	const thumbRef = useRef<HTMLDivElement>(null)
@@ -122,10 +125,17 @@ export function VideoScrubber({
 			// The accessible value follows once a second, not every frame.
 			if (second !== lastValueSecond && inputRef.current !== null) {
 				lastValueSecond = second
+
+				const current = formatSecondsToMediaClock(time)
+				const totalText = formatSecondsToMediaClock(total)
+				const chapter = chapterAt(chapters, time)
+
 				inputRef.current.value = String(time)
 				inputRef.current.setAttribute(
 					"aria-valuetext",
-					t("common:mediaTimeOf", { current: formatSecondsToMediaClock(time), total: formatSecondsToMediaClock(total) })
+					chapter === null
+						? tCommon("mediaTimeOf", { current, total: totalText })
+						: tCommon("mediaTimeOfInChapter", { current, total: totalText, chapter: chapterName(chapters, chapter, tCommon) })
 				)
 			}
 		}
@@ -217,7 +227,7 @@ export function VideoScrubber({
 				element.removeEventListener("timeupdate", onTime)
 			}
 		}
-	}, [video, visible, paused, override, remainingMode, t])
+	}, [video, visible, paused, override, remainingMode, chapters, tCommon])
 
 	const disabled = duration <= 0
 	const bubbleTime = dragTime ?? hoverTime
@@ -270,11 +280,11 @@ export function VideoScrubber({
 		switch (event.key) {
 			case "ArrowLeft":
 			case "ArrowDown":
-				onSeekBy(-10)
+				onSeekBy(-MEDIA_SEEK_STEP_SECONDS)
 				break
 			case "ArrowRight":
 			case "ArrowUp":
-				onSeekBy(10)
+				onSeekBy(MEDIA_SEEK_STEP_SECONDS)
 				break
 			case "Home":
 				onSeek(0)
@@ -385,9 +395,9 @@ export function VideoScrubber({
 						style={{ left: `${String(percentOf(bubbleTime, duration))}%` }}
 					>
 						{formatSecondsToMediaClock(bubbleTime)}
-						{bubbleChapter?.title !== null && bubbleChapter?.title !== undefined && bubbleChapter.title.length > 0 ? (
-							<span className="max-w-48 truncate text-white/70">· {bubbleChapter.title}</span>
-						) : null}
+						{bubbleChapter === null ? null : (
+							<span className="max-w-48 truncate text-white/70">· {chapterName(chapters, bubbleChapter, tCommon)}</span>
+						)}
 					</div>
 				) : null}
 			</div>
@@ -397,7 +407,7 @@ export function VideoScrubber({
 			<button
 				ref={totalRef}
 				type="button"
-				aria-label={remainingMode ? t("videos:playerShowTotal") : t("videos:playerShowRemaining")}
+				aria-label={remainingMode ? t("playerShowTotal") : t("playerShowRemaining")}
 				className="min-w-12 shrink-0 rounded-md text-left text-xs font-medium text-white/80 tabular-nums outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-white/60"
 				onClick={onToggleRemaining}
 			>

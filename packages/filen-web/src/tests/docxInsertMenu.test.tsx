@@ -278,6 +278,62 @@ describe("DocxInsertDialogs", () => {
 		expect(execute).toHaveBeenCalledWith({ type: "link.set", target: "https://example.com", text: "old" })
 	})
 
+	// Word stores https://example.com/docs#install as the target plus an anchor.
+	it("edits a web link with an anchor as a web address, its target and anchor kept", () => {
+		const state = snapshot()
+		const linked = {
+			...state,
+			context: { ...state.context, link: { target: "https://example.com/docs", anchor: "install", text: "Install" } }
+		}
+		const unchanged = renderDialog("link.set", linked)
+
+		expect(screen.getByLabelText<HTMLInputElement>("Address").value).toBe("https://example.com/docs")
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(unchanged.execute).toHaveBeenCalledWith({
+			type: "link.set",
+			target: "https://example.com/docs",
+			anchor: "install",
+			text: "Install"
+		})
+		cleanup()
+
+		const edited = renderDialog("link.set", linked)
+
+		fireEvent.change(screen.getByLabelText("Text to display"), { target: { value: "Setup" } })
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(edited.execute).toHaveBeenCalledWith({
+			type: "link.set",
+			target: "https://example.com/docs",
+			anchor: "install",
+			text: "Setup"
+		})
+		cleanup()
+
+		// A new address is the whole target: the old anchor does not go with it.
+		const retargeted = renderDialog("link.set", linked)
+
+		fireEvent.change(screen.getByLabelText("Address"), { target: { value: "example.org" } })
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(retargeted.execute).toHaveBeenCalledWith({ type: "link.set", target: "https://example.org", text: "Install" })
+	})
+
+	// A file may hold w:anchor="" beside its target: that is no anchor.
+	it("edits a web link with an empty anchor as its target alone", () => {
+		const state = snapshot()
+		const { execute } = renderDialog("link.set", {
+			...state,
+			context: { ...state.context, link: { target: "https://example.com/docs", anchor: "", text: "x" } }
+		})
+
+		fireEvent.change(screen.getByLabelText("Text to display"), { target: { value: "Docs" } })
+
+		const apply = screen.getByRole("button", { name: "Apply" })
+
+		expect(apply.hasAttribute("disabled") || apply.getAttribute("aria-disabled") === "true").toBe(false)
+		fireEvent.click(apply)
+		expect(execute).toHaveBeenCalledWith({ type: "link.set", target: "https://example.com/docs", text: "Docs" })
+	})
+
 	it("links to a heading by its position (the core makes or reuses its hidden bookmark); empty ones are not offered", async () => {
 		paged.outline = [
 			{ level: 0, text: " ", pos: 4 },

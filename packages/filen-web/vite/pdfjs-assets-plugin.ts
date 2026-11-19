@@ -1,8 +1,8 @@
-import { createReadStream, readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, extname, join } from "node:path"
 import type { Plugin } from "vite"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
+import { serveListedFiles } from "./shared"
 
 // pdf.js's own data files, served from 'self': the CJK character maps (non-embedded Asian fonts), the standard 14
 // fonts (so documents lay out alike on every platform), the JPEG 2000 / JBIG2 / colour-management decoders with their
@@ -78,34 +78,8 @@ export function pdfjsAssets(): Plugin {
 		load(id) {
 			return id === RESOLVED_ID ? `export const PDFJS_ASSETS = Object.freeze(${JSON.stringify(urls)})\n` : null
 		},
-		// The preview serves the build's copies from dist/ instead, under the preview header set.
 		configureServer(server) {
-			server.middlewares.use((req, res, next) => {
-				const path = (req.url ?? "").split("?")[0] ?? ""
-				const rel = path.startsWith(PDFJS_ASSETS_BASE) ? path.slice(PDFJS_ASSETS_BASE.length) : null
-
-				if (rel === null || !served.has(rel)) {
-					next()
-
-					return
-				}
-
-				const file = join(PDFJS_DIR, rel)
-
-				res.setHeader("Content-Type", mimeOf(rel))
-				res.setHeader("Content-Length", statSync(file).size)
-
-				for (const [name, value] of Object.entries(COI_HEADERS)) {
-					res.setHeader(name, value)
-				}
-
-				createReadStream(file)
-					.on("error", () => {
-						res.statusCode = 500
-						res.end()
-					})
-					.pipe(res)
-			})
+			serveListedFiles(server, { base: PDFJS_ASSETS_BASE, dir: PDFJS_DIR, served, mime: mimeOf })
 		},
 		generateBundle() {
 			for (const file of files) {

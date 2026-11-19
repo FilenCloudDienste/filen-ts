@@ -3,6 +3,7 @@ import { COMMON_PAPER_SIZES, paperPoints, type SheetPageSetup, type SheetPrintPa
 import type { PrintChart, PrintSheetRequest, SheetPdfRequest } from "@filen/office/react/sheet/print"
 import { i18n, type PreviewKey } from "@/lib/i18n"
 import { fileStem } from "@/features/spreadsheet/save/sheetSave.logic"
+import { regionalLanguage } from "@/features/office/lib/regionalFormat"
 
 // The print dialog's choices and what they print: the sheets and ranges, each sheet's setup with the dialog's choices
 // over the active sheet's, and the patch that writes them into the file.
@@ -195,11 +196,16 @@ export function printRequests(
 		.map(settings => (settings.sheet.id === active.sheet.id ? request(settings, own) : request(settings, settings.setup)))
 }
 
-// What &D, &T, &F and &Z print: today's date and time as the app formats them, the file's name (no path here).
-export function headerValues(name: string, now: Date = new Date()): { date: string; time: string; file: string; path: string } {
+// What &D, &T, &F and &Z print: today's date and time in the regional format, as the cells print their dates, the
+// file's name (no path here).
+export function headerValues(
+	name: string,
+	language: string,
+	now: Date = new Date()
+): { date: string; time: string; file: string; path: string } {
 	return {
-		date: new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(now),
-		time: new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(now),
+		date: new Intl.DateTimeFormat(language, { dateStyle: "short" }).format(now),
+		time: new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(now),
 		file: name,
 		path: ""
 	}
@@ -228,8 +234,8 @@ export function pdfFile(
 	}
 }
 
-// A print as the PDF export takes it: the print's sheets and ranges, the header and footer values, the document's
-// title (pdfFile) and language, and what the grid shows of the workbook.
+// A print as the PDF export takes it: the print's sheets and ranges, the header and footer values (in the regional
+// language), the document's title (pdfFile) and language, and what the grid shows of the workbook.
 export function pdfRequest(
 	sheets: readonly PrintSheetRequest[],
 	file: SheetPdfFile,
@@ -239,11 +245,12 @@ export function pdfRequest(
 		readonly date1904: boolean
 		readonly showFormulas: boolean
 	},
+	language: string = regionalLanguage(),
 	now?: Date
 ): SheetPdfRequest {
 	return {
 		sheets,
-		values: headerValues(file.name, now),
+		values: headerValues(file.name, language, now),
 		title: file.title,
 		...(file.properties === undefined ? {} : { properties: file.properties }),
 		lang: file.lang,

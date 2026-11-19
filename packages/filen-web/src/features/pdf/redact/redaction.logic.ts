@@ -91,10 +91,12 @@ export function failureReason(failure: RedactionFailure): Phrase {
 	}
 }
 
-// How a mark reads in the review list; `text` is the marked text when the caller knows it.
-export function markLabel(mark: RedactionMark, text: string | undefined): Phrase {
+// How a mark reads in the review list: a text mark by its text, when the engine read any under it.
+export function markLabel(mark: RedactionMark): Phrase {
 	if (mark.kind === "page") return phrase("previewPdfRedactMarkPage")
 	if (mark.kind === "area") return phrase("previewPdfRedactMarkArea")
+
+	const text = mark.text
 
 	return text === undefined || text.trim().length === 0
 		? phrase("previewPdfRedactMarkTextUnknown")

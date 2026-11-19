@@ -1,4 +1,4 @@
-import { driveItemName, isBlocked, filterHiddenItems, type BlockedUsers } from "@filen/shared"
+import { driveItemName, isBlocked, filterHiddenItems, matchesNameSearch, nameSearchKey, type BlockedUsers } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -139,7 +139,7 @@ export function resolveListingDisplayItems(input: {
 // sharedOut/links have no navigable subtree of their own for the cache-backed engine to search — see
 // directoryListing.tsx's own useDriveSearch(uuid, variant === "drive") gate) and for the move/import
 // picker's directory browser (moveTargetDialog.tsx passes its own already-type-filtered `directories`
-// list straight through here). Name-substring only, case-insensitive, over whatever's already loaded —
+// list straight through here). Name-substring only, case- and composition-insensitive, over whatever's already loaded —
 // mirrors mobile's own non-cache-backed variants, which do an instant local substring filter with no
 // content and no recursion beyond what's already listed. Same display-name fallback every other
 // per-item name read in this codebase uses (decryptedMeta?.name ?? uuid), so an undecryptable item
@@ -149,13 +149,13 @@ export function resolveListingDisplayItems(input: {
 // `.filter(item => item.type === "directory")` — gets that same narrowing back out, instead of this
 // widening it back to the full six-arm union.
 export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readonly T[], search: string): T[] {
-	const normalized = search.trim().toLowerCase()
+	const key = nameSearchKey(search)
 
-	if (normalized.length === 0) {
+	if (key.length === 0) {
 		return [...items]
 	}
 
-	return items.filter(item => driveItemName(item).toLowerCase().includes(normalized))
+	return items.filter(item => matchesNameSearch(driveItemName(item), key))
 }
 
 // Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in

@@ -1,49 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir } from "@filen/sdk-rs"
+import type { File, SharedDir } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
-import { mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
+import { mockDir, mockDirItem, mockFile, mockFileItem, mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
-
-function dirItem(overrides: Partial<Dir> = {}): DriveItem {
-	return narrowItem(mockDir(overrides))
-}
-
-function fileItem(overrides: Partial<File> = {}): DriveItem {
-	return narrowItem(mockFile(overrides))
-}
 
 function undecryptableFile(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem({ ...mockFile(overrides), meta: { type: "encrypted", data: "ciphertext" } })
@@ -90,15 +50,15 @@ describe("aggregateDriveSelectionFlags", () => {
 	})
 
 	it("counts the selection", () => {
-		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockDirItem({ uuid: testUuid("a") }), mockFileItem({ uuid: testUuid("b") })])
 
 		expect(flags.count).toBe(2)
 	})
 
 	it("includesFavorited is true when any selected item is favorited", () => {
 		const flags = aggregateDriveSelectionFlags([
-			dirItem({ uuid: testUuid("a"), favorited: false }),
-			fileItem({ uuid: testUuid("b"), favorited: true })
+			mockDirItem({ uuid: testUuid("a"), favorited: false }),
+			mockFileItem({ uuid: testUuid("b"), favorited: true })
 		])
 
 		expect(flags.includesFavorited).toBe(true)
@@ -106,48 +66,48 @@ describe("aggregateDriveSelectionFlags", () => {
 
 	it("includesFavorited is false when nothing selected is favorited", () => {
 		const flags = aggregateDriveSelectionFlags([
-			dirItem({ uuid: testUuid("a"), favorited: false }),
-			fileItem({ uuid: testUuid("b"), favorited: false })
+			mockDirItem({ uuid: testUuid("a"), favorited: false }),
+			mockFileItem({ uuid: testUuid("b"), favorited: false })
 		])
 
 		expect(flags.includesFavorited).toBe(false)
 	})
 
 	it("everyDirectory is true and everyFile is false when the whole selection is directories", () => {
-		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), dirItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockDirItem({ uuid: testUuid("a") }), mockDirItem({ uuid: testUuid("b") })])
 
 		expect(flags.everyDirectory).toBe(true)
 		expect(flags.everyFile).toBe(false)
 	})
 
 	it("everyFile is true and everyDirectory is false when the whole selection is files", () => {
-		const flags = aggregateDriveSelectionFlags([fileItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockFileItem({ uuid: testUuid("a") }), mockFileItem({ uuid: testUuid("b") })])
 
 		expect(flags.everyFile).toBe(true)
 		expect(flags.everyDirectory).toBe(false)
 	})
 
 	it("a mixed file+directory selection has both everyFile and everyDirectory false", () => {
-		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockDirItem({ uuid: testUuid("a") }), mockFileItem({ uuid: testUuid("b") })])
 
 		expect(flags.everyFile).toBe(false)
 		expect(flags.everyDirectory).toBe(false)
 	})
 
 	it("includesUndecryptable is true when any selected item is undecryptable", () => {
-		const flags = aggregateDriveSelectionFlags([fileItem({ uuid: testUuid("a") }), undecryptableFile({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockFileItem({ uuid: testUuid("a") }), undecryptableFile({ uuid: testUuid("b") })])
 
 		expect(flags.includesUndecryptable).toBe(true)
 	})
 
 	it("includesUndecryptable is false when nothing selected is undecryptable", () => {
-		const flags = aggregateDriveSelectionFlags([fileItem({ uuid: testUuid("a") }), dirItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockFileItem({ uuid: testUuid("a") }), mockDirItem({ uuid: testUuid("b") })])
 
 		expect(flags.includesUndecryptable).toBe(false)
 	})
 
 	it("a single-item directory selection is every{Directory,File} correctly (true/false, not vacuously both)", () => {
-		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") })])
+		const flags = aggregateDriveSelectionFlags([mockDirItem({ uuid: testUuid("a") })])
 
 		expect(flags).toEqual({
 			count: 1,
@@ -163,7 +123,7 @@ describe("aggregateDriveSelectionFlags", () => {
 
 	it("a fully-mixed selection (favorited dir, undecryptable file) aggregates every flag independently in one pass", () => {
 		const flags = aggregateDriveSelectionFlags([
-			dirItem({ uuid: testUuid("a"), favorited: true }),
+			mockDirItem({ uuid: testUuid("a"), favorited: true }),
 			undecryptableFile({ uuid: testUuid("b") })
 		])
 
@@ -194,7 +154,7 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 	})
 
 	it("is false when a shared-root item is mixed with an owned item", () => {
-		const flags = aggregateDriveSelectionFlags([sharedRootDirItem(), dirItem({ uuid: testUuid("owned") })])
+		const flags = aggregateDriveSelectionFlags([sharedRootDirItem(), mockDirItem({ uuid: testUuid("owned") })])
 
 		expect(flags.everySharedRoot).toBe(false)
 	})
@@ -206,7 +166,7 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 	})
 
 	it("is false for a plain owned selection", () => {
-		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
+		const flags = aggregateDriveSelectionFlags([mockDirItem({ uuid: testUuid("a") }), mockFileItem({ uuid: testUuid("b") })])
 
 		expect(flags.everySharedRoot).toBe(false)
 	})
@@ -214,7 +174,7 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 
 describe("aggregateDriveSelectionFlags — everyArchive", () => {
 	function named(label: string, name: string): DriveItem {
-		return fileItem({
+		return mockFileItem({
 			uuid: testUuid(label),
 			meta: { type: "decoded", data: { name, mime: "application/octet-stream", modified: 0n, size: 1n, key: "key", version: 2 } }
 		})
@@ -235,7 +195,7 @@ describe("aggregateDriveSelectionFlags — everyArchive", () => {
 	it("everyArchive fails on one other file, a directory named like an archive or an unreadable name", () => {
 		expect(aggregateDriveSelectionFlags([named("a", "a.zip"), named("b", "b.pdf")]).everyArchive).toBe(false)
 		expect(
-			aggregateDriveSelectionFlags([named("a", "a.zip"), dirItem({ meta: { type: "decoded", data: { name: "old.zip" } } })])
+			aggregateDriveSelectionFlags([named("a", "a.zip"), mockDirItem({ meta: { type: "decoded", data: { name: "old.zip" } } })])
 				.everyArchive
 		).toBe(false)
 		expect(aggregateDriveSelectionFlags([undecryptableFile()]).everyArchive).toBe(false)
@@ -244,9 +204,9 @@ describe("aggregateDriveSelectionFlags — everyArchive", () => {
 
 describe("selectableForSelectAll — the select-all set", () => {
 	it("drops undecryptable items, keeping every decryptable one in order", () => {
-		const a = dirItem({ uuid: testUuid("a") })
+		const a = mockDirItem({ uuid: testUuid("a") })
 		const enc = undecryptableFile({ uuid: testUuid("enc") })
-		const b = fileItem({ uuid: testUuid("b") })
+		const b = mockFileItem({ uuid: testUuid("b") })
 
 		expect(selectableForSelectAll([a, enc, b])).toEqual([a, b])
 	})
@@ -256,7 +216,7 @@ describe("selectableForSelectAll — the select-all set", () => {
 	})
 
 	it("passes a fully-decryptable selection through unchanged", () => {
-		const items = [dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })]
+		const items = [mockDirItem({ uuid: testUuid("a") }), mockFileItem({ uuid: testUuid("b") })]
 
 		expect(selectableForSelectAll(items)).toEqual(items)
 	})

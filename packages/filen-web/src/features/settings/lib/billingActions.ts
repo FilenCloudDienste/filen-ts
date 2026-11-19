@@ -45,8 +45,17 @@ export async function setAppearOffline(enabled: boolean): Promise<void> {
 }
 
 // Each checkout creates a gateway session (and, for one-off purchases, an unpaid invoice) and the server caps
-// creates per hour, so a (plan, method) pair is created at most once per page and concurrent asks share one call.
-const checkouts = new Map<string, Promise<ActionOutcome<string>>>()
+// creates per hour, so a (plan, method) pair is created at most once per CHECKOUT_TTL_MS and concurrent asks share
+// one call. Past that a held session may have expired or been used, so the next ask creates a fresh one.
+export const CHECKOUT_TTL_MS = 60 * 60 * 1000
+
+interface HeldCheckout {
+	promise: Promise<ActionOutcome<string>>
+	createdAt: number
+	settled: boolean
+}
+
+const checkouts = new Map<string, HeldCheckout>()
 
 function checkoutKey(planId: number, method: PaymentMethod): string {
 	return `${String(planId)}:${method}`
@@ -79,29 +88,33 @@ export async function createCheckout(planId: number, method: PaymentMethod): Pro
 	const key = checkoutKey(planId, method)
 	const held = checkouts.get(key)
 
-	if (held !== undefined) {
-		return held
+	// A pending create is always shared; a settled one only while it is fresh.
+	if (held !== undefined && (!held.settled || Date.now() - held.createdAt < CHECKOUT_TTL_MS)) {
+		return held.promise
 	}
 
 	if (!onlineManager.isOnline()) {
 		return offlineOutcome()
 	}
 
-	const pending = requestCheckout(planId, method)
+	const entry: HeldCheckout = { promise: requestCheckout(planId, method), createdAt: Date.now(), settled: false }
 
-	checkouts.set(key, pending)
+	checkouts.set(key, entry)
 
-	const outcome = await pending
+	const outcome = await entry.promise
 
-	// A refused create is not kept, so a retry asks again.
-	if (outcome.status === "error") {
+	entry.settled = true
+
+	// A refused create is not kept, so a retry asks again (unless the map moved on meanwhile).
+	if (outcome.status === "error" && checkouts.get(key) === entry) {
 		checkouts.delete(key)
 	}
 
 	return outcome
 }
 
-// Tests only.
+// A change to the account's subscriptions (a cancellation, a withdrawal) makes a held checkout stale: buying the
+// same plan again needs a new session. Also used by tests.
 export function forgetCheckouts(): void {
 	checkouts.clear()
 }
@@ -119,6 +132,7 @@ export async function cancelSubscription(sub: Pick<UserAccountSubs, "id">): Prom
 
 	// The whole effect is known: no read back.
 	accountQueryUpdate(prev => ({ ...prev, subs: withCancelled(prev.subs, sub.id) }), { readNow: false })
+	forgetCheckouts()
 
 	return { status: "success" }
 }
@@ -149,6 +163,7 @@ export async function withdrawSubscription(request: WithdrawalRequest): Promise<
 	}
 
 	accountQueryUpdate(prev => ({ ...prev, subs: withWithdrawal(prev.subs, request.subId, at) }), { readNow: false })
+	forgetCheckouts()
 
 	return { status: "received", at }
 }
@@ -159,7 +174,13 @@ async function recheckWithdrawal(subId: string, dto: ErrorDTO): Promise<Withdraw
 		const info = await fetchAccountFresh()
 		const at = info.subs.find(sub => sub.id === subId)?.withdrawRequested
 
-		return at === undefined ? { status: "error", dto } : { status: "unconfirmed", at }
+		if (at === undefined) {
+			return { status: "error", dto }
+		}
+
+		forgetCheckouts()
+
+		return { status: "unconfirmed", at }
 	} catch {
 		return { status: "error", dto }
 	}

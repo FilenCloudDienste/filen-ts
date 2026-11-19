@@ -14,6 +14,7 @@ import {
 } from "react"
 import type { Options } from "react-hotkeys-hook"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { toast } from "sonner"
 import { defaultRangeExtractor, elementScroll, useVirtualizer, type Range, type VirtualizerOptions } from "@tanstack/react-virtual"
 import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon } from "lucide-react"
@@ -42,6 +43,7 @@ import { useChatReplyingToUuid } from "@/features/chats/store/useChatComposer"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
+import { flushChatFocusPersist } from "@/features/chats/lib/socketHandlers"
 import { dayTimeLabel } from "@/features/chats/components/thread/timeLabel"
 import { chatTitle, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
@@ -50,7 +52,12 @@ import { markChatRead } from "@/features/chats/lib/actions"
 import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
-import type { MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
+import {
+	MessageBlockRequestContext,
+	useMessageBlockConfirm,
+	type MessageActionsHandle
+} from "@/features/chats/components/thread/useMessageActions"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import type { MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
 import { adjacentMessageIndex, edgeMessageIndex, MESSAGE_FOCUS_SELECTOR } from "@/features/chats/lib/keyboard.logic"
 import { ignoredUnderOverlays, useAction } from "@/lib/keymap/useAction"
@@ -878,7 +885,10 @@ function ThreadList({
 				{announcement !== null ? (
 					<span key={announcement.seq}>
 						{announcement.name !== null
-							? t("chatNewMessageAnnouncement", { count: announcement.count, name: announcement.name })
+							? t(singleOrCountKey(announcement.count, "chatNewMessageAnnouncementSingle", "chatNewMessageAnnouncement"), {
+									count: announcement.count,
+									name: announcement.name
+								})
 							: t("chatNewMessagesMixedAnnouncement", { count: announcement.count })}
 					</span>
 				) : null}
@@ -893,8 +903,10 @@ function ThreadList({
 // header's ⋯ trigger hosts the conversation menu (rename/mute/participants/leave/delete + the explicit
 // "mark as read" entry) — one of two places markChatRead is wired (chatMenu.tsx's row context menu is the
 // other): never auto-fired on mount — old-web's explicit-mark model, not mobile's own screen-open trigger.
+// Messages that arrive while the thread is open and visible are read as they land: the socket handler
+// advances lastFocus and persists it (debounced), see flushChatFocusPersist.
 export function MessageThread({ chat }: { chat: Chat }) {
-	const { t } = useTranslation(["chats", "common"])
+	const { t } = useTranslation(["chats", "common", "contacts"])
 	const chatUuid = chat.uuid
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
@@ -922,6 +934,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	// composer excludes them from the ArrowUp-edit target (an uncommitted send has no server uuid to edit).
 	const nonConfirmedUuids = new Set<string>([...queuedMessages, ...failedMessages].map(message => message.uuid))
 	const dialogHost = useChatDialogHost()
+	const blockConfirm = useMessageBlockConfirm()
 	const threadListRef = useRef<ThreadListHandle | null>(null)
 	const titleId = useId()
 
@@ -948,12 +961,13 @@ export function MessageThread({ chat }: { chat: Chat }) {
 
 	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
 	// message landing in the chat the user is looking at must not flip it unread. Cleared on unmount /
-	// chat change.
+	// chat change, which also sends the read position a message read here is still waiting to persist.
 	useEffect(() => {
 		setFocusedChat(chatUuid)
 
 		return () => {
 			setFocusedChat(null)
+			flushChatFocusPersist(chatUuid)
 		}
 	}, [chatUuid])
 
@@ -1007,24 +1021,26 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				</DropdownMenu>
 			</header>
 			<div className="h-px shrink-0 bg-border/50" />
-			<ThreadList
-				key={chatUuid}
-				ref={threadListRef}
-				chat={chat}
-				labelledBy={titleId}
-				messages={messages}
-				rows={rows}
-				messageKeys={messageKeys}
-				newestMessageKey={newestMessageKey}
-				isPending={messagesQuery.isPending}
-				isError={blockingQueryError(messagesQuery) !== null}
-				onRetry={() => {
-					void messagesQuery.refetch()
-				}}
-				currentUserId={currentUserId}
-				ownAvatarUrl={accountQuery.data?.avatarUrl}
-				blocked={blocked}
-			/>
+			<MessageBlockRequestContext value={blockConfirm.request}>
+				<ThreadList
+					key={chatUuid}
+					ref={threadListRef}
+					chat={chat}
+					labelledBy={titleId}
+					messages={messages}
+					rows={rows}
+					messageKeys={messageKeys}
+					newestMessageKey={newestMessageKey}
+					isPending={messagesQuery.isPending}
+					isError={blockingQueryError(messagesQuery) !== null}
+					onRetry={() => {
+						void messagesQuery.refetch()
+					}}
+					currentUserId={currentUserId}
+					ownAvatarUrl={accountQuery.data?.avatarUrl}
+					blocked={blocked}
+				/>
+			</MessageBlockRequestContext>
 			<Composer
 				chat={chat}
 				messages={messages}
@@ -1034,6 +1050,24 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				}}
 			/>
 			{dialogHost.renderActiveDialog()}
+			{/* One block confirm for every row's Block entry (MessageBlockRequestContext above). */}
+			<ConfirmDialog
+				open={blockConfirm.target !== null}
+				pending={blockConfirm.pending}
+				title={t("contacts:contactsBlockConfirmTitle")}
+				body={t("contacts:contactsBlockConfirmBodySingle")}
+				confirmLabel={t("chatMessageActionBlock")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) {
+						blockConfirm.cancel()
+					}
+				}}
+				onConfirm={() => {
+					void blockConfirm.confirm()
+				}}
+			/>
 			<ChatInfoHost
 				chat={chat}
 				currentUserId={currentUserId}

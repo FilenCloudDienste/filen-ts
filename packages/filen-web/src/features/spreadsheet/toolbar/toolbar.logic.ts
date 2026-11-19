@@ -1,10 +1,10 @@
 import {
 	CellFlag,
 	COMMA_STYLE,
-	NUMBER_FORMAT_PRESETS,
 	PERCENT_STYLE,
 	applyTint,
 	changedDecimals,
+	numberFormatPresets,
 	numFmtCategory,
 	themeTints,
 	type NumFmtCategory,
@@ -369,18 +369,36 @@ const CATEGORY_LABELS_BY_NAME: Readonly<Record<NumFmtCategory, PreviewKey>> = {
 	custom: "previewSheetNumberCustom"
 }
 
-// The Number Format menu's items: Excel's Home tab list (core NUMBER_FORMAT_PRESETS), each with its label.
-export const NUMBER_ITEMS: readonly { readonly code: string; readonly label: PreviewKey }[] = NUMBER_FORMAT_PRESETS.map(
-	(preset, index) => ({
-		code: preset.code,
-		label:
-			preset.category === "date"
-				? index === NUMBER_FORMAT_PRESETS.findIndex(entry => entry.category === "date")
-					? "previewSheetNumberShortDate"
-					: "previewSheetNumberLongDate"
-				: CATEGORY_LABELS_BY_NAME[preset.category]
-	})
-)
+export interface NumberItem {
+	readonly code: string
+	readonly label: PreviewKey
+}
+
+const numberItemLists = new Map<string, readonly NumberItem[]>()
+
+// The Number Format menu's items: Excel's Home tab list (core numberFormatPresets) with its currency and accounting
+// formats in `symbol` (the regional format's currency), each with its label. Built once per symbol.
+export function numberItems(symbol: string): readonly NumberItem[] {
+	let items = numberItemLists.get(symbol)
+
+	if (items === undefined) {
+		const presets = numberFormatPresets(symbol)
+		const shortDate = presets.findIndex(entry => entry.category === "date")
+
+		items = presets.map((preset, index) => ({
+			code: preset.code,
+			label:
+				preset.category === "date"
+					? index === shortDate
+						? "previewSheetNumberShortDate"
+						: "previewSheetNumberLongDate"
+					: CATEGORY_LABELS_BY_NAME[preset.category]
+		}))
+		numberItemLists.set(symbol, items)
+	}
+
+	return items
+}
 
 // The Format Cells dialog's categories, in its order.
 export const CATEGORIES: readonly NumFmtCategory[] = [
@@ -399,9 +417,9 @@ export const CATEGORIES: readonly NumFmtCategory[] = [
 
 export const CATEGORY_LABELS: Readonly<Record<NumFmtCategory, PreviewKey>> = CATEGORY_LABELS_BY_NAME
 
-// The menu trigger's label: the item showing the code, else its category's name.
-export function numberLabel(code: string): PreviewKey {
-	const item = NUMBER_ITEMS.find(entry => entry.code === code)
+// The menu trigger's label: the item of the `symbol` list showing the code, else its category's name.
+export function numberLabel(code: string, symbol: string): PreviewKey {
+	const item = numberItems(symbol).find(entry => entry.code === code)
 
 	return item?.label ?? CATEGORY_LABELS[numFmtCategory(code)]
 }

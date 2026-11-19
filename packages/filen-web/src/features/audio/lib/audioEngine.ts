@@ -1,3 +1,4 @@
+import { onlineManager } from "@tanstack/react-query"
 import { AudioEngine } from "@/features/audio/lib/engine"
 import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
@@ -63,6 +64,7 @@ export const audioEngine = new AudioEngine({
 	mediaSession: createMediaSessionPublisher(audioMediaSession),
 	resolveCover: track => trackMetadata.playbackCover(track),
 	onFormatFailure: notifyFormatFailure,
+	isOnline: () => onlineManager.isOnline(),
 	smoothTransitions: {
 		output: createAudioOutput({
 			createContext,

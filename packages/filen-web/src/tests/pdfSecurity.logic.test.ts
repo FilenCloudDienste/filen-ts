@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { PDF_PERMISSIONS_ALL, type PdfAllowed } from "@filen/office/core/pdfedit/security"
-import type { PdfSecurityDescription } from "@filen/office/dom/pdfedit/security"
+import { PDF_PERMISSIONS_ALL, type PdfAllowed, type PdfSecuritySummary } from "@filen/office/core/pdfedit/security"
 import {
 	changesSomething,
 	currentMode,
@@ -11,9 +10,8 @@ import {
 } from "@/features/pdf/security/security.logic"
 
 const ALL: PdfAllowed = { print: true, copy: true, change: true }
-const GRANTED = { print: true, printHq: true, copy: true, edit: true, annotate: true, form: true, assemble: true, accessibility: true }
 
-function description(overrides: Partial<PdfSecurityDescription>): PdfSecurityDescription {
+function description(overrides: Partial<PdfSecuritySummary>): PdfSecuritySummary {
 	return {
 		method: "none",
 		rc4: false,
@@ -22,7 +20,6 @@ function description(overrides: Partial<PdfSecurityDescription>): PdfSecurityDes
 		restricted: false,
 		allowed: ALL,
 		ownerAccess: true,
-		granted: GRANTED,
 		upgrade: "notRc4",
 		...overrides
 	}
@@ -32,7 +29,7 @@ const plain = description({})
 const opened = description({ method: "aes-256", openPassword: true })
 const restricted = description({ method: "aes-256", restricted: true, allowed: { print: true, copy: false, change: false } })
 
-function form(current: PdfSecurityDescription, overrides: Partial<ProtectForm>): ProtectForm {
+function form(current: PdfSecuritySummary, overrides: Partial<ProtectForm>): ProtectForm {
 	return { ...initialForm(current), ...overrides }
 }
 

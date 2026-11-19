@@ -10,24 +10,14 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("comlink", () => ({ expose: mocks.expose }))
-vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
-	const actual = await importOriginal<typeof import("@sqlite.org/sqlite-wasm")>()
-
-	return {
-		default: async () => {
-			const sqlite3 = await actual.default()
-
-			class MemoryDb extends sqlite3.oo1.DB {
-				public constructor() {
-					super(":memory:")
-					mocks.db = this
-				}
-			}
-
-			return { installOpfsSAHPoolVfs: () => Promise.resolve({ OpfsSAHPoolDb: MemoryDb, wipeFiles: () => Promise.resolve() }) }
-		}
-	}
-})
+vi.mock("@sqlite.org/sqlite-wasm", async importOriginal =>
+	(await import("@/tests/support/dbWorkerSqlite")).memorySqliteModule(await importOriginal(), {
+		onOpen: db => {
+			mocks.db = db
+		},
+		wipeFiles: () => Promise.resolve()
+	})
+)
 
 let api: StorageApi
 

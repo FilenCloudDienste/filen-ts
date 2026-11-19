@@ -38,6 +38,8 @@ interface PlanCardProps {
 	// Another card's checkout is being created.
 	locked: boolean
 	onBuy: (method: PaymentMethod) => void
+	// Back to the method menu from a created checkout.
+	onChangeMethod: () => void
 }
 
 // A deep-linked plan scrolls into view once, when its card mounts.
@@ -50,7 +52,7 @@ function StorageFigure({ children }: { children?: ReactNode }) {
 	return <span className="font-heading text-2xl font-semibold tracking-tight text-foreground tabular-nums">{children}</span>
 }
 
-function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, locked, onBuy }: PlanCardProps) {
+function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, locked, onBuy, onChangeMethod }: PlanCardProps) {
 	const { t } = useTranslation("settings")
 	const { plan, price, discountPercent, limited, methods, annualSavingsPercent } = card
 	// Annual plans lead with what a month costs; the yearly charge follows in small print.
@@ -151,20 +153,31 @@ function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, loc
 						{t("settingsBillingCurrentPlanBadge")}
 					</Button>
 				) : purchase.status === "ready" ? (
-					<a
-						href={purchase.url}
-						target="_blank"
-						rel="noopener noreferrer"
-						className={cn(buttonVariants(), "w-full")}
-						// The new subscription shows up on the next focus after paying, without polling.
-						onClick={markAccountStale}
-					>
-						{t("settingsBillingPayInvoice")}
-						<ArrowUpRightIcon
-							aria-hidden="true"
-							data-icon="inline-end"
-						/>
-					</a>
+					<div className="flex w-full flex-col gap-2">
+						<a
+							href={purchase.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							className={cn(buttonVariants(), "w-full")}
+							// The new subscription shows up on the next focus after paying, without polling.
+							onClick={markAccountStale}
+						>
+							{t("settingsBillingPayInvoice")}
+							<ArrowUpRightIcon
+								aria-hidden="true"
+								data-icon="inline-end"
+							/>
+						</a>
+						{/* The created checkout stays held, so picking the same method again creates nothing new. */}
+						<Button
+							type="button"
+							variant="ghost"
+							className="w-full"
+							onClick={onChangeMethod}
+						>
+							{t("settingsBillingChangePaymentMethod")}
+						</Button>
+					</div>
 				) : (
 					<DropdownMenu>
 						<DropdownMenuTrigger

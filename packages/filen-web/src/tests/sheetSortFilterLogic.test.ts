@@ -235,7 +235,8 @@ describe("condition dialogs", () => {
 		expect(isoSerial("2024-03-01", true)).toBe(45_352 - 1462)
 		expect(serialIso(45_352.75, false)).toBe("2024-03-01")
 		expect(serialIso(45_352 - 1462, true)).toBe("2024-03-01")
-		expect(serialIso(0, false)).toBe("1899-12-30")
+		expect(serialIso(0, false)).toBe("1899-12-31")
+		expect(isoSerial("1899-12-31", false)).toBe(0)
 		expect(serialIso(2_958_465, false)).toBe("9999-12-31")
 		expect(serialIso(2_958_465 - 1462, true)).toBe("9999-12-31")
 		expect(dialogCriteria([{ operator: "less", value: "2024-03-01" }], false, "date", false, EN)).toEqual({
@@ -255,6 +256,22 @@ describe("condition dialogs", () => {
 			conditions: [{ operator: "greater", value: "2024-03-01" }],
 			and: false
 		})
+	})
+
+	it("counts the 1900 system's 1900-02-29 as the engine does, around it and on it", () => {
+		expect(isoSerial("1900-01-01", false)).toBe(1)
+		expect(isoSerial("1900-02-15", false)).toBe(46)
+		expect(isoSerial("1900-02-28", false)).toBe(59)
+		expect(isoSerial("1900-03-01", false)).toBe(61)
+		expect(serialIso(1, false)).toBe("1900-01-01")
+		expect(serialIso(46, false)).toBe("1900-02-15")
+		expect(serialIso(59, false)).toBe("1900-02-28")
+		expect(serialIso(61, false)).toBe("1900-03-01")
+		// 1900-02-29 is no day a date field takes.
+		expect(serialIso(60, false)).toBe("")
+		expect(serialIso(60.5, false)).toBe("")
+		expect(isoSerial("1904-01-01", true)).toBe(0)
+		expect(serialIso(0, true)).toBe("1904-01-01")
 	})
 
 	it("leaves a date field empty for a stored serial outside the date system", () => {

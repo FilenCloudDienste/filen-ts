@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from "react"
 import type { SheetFilterCriteria, SheetRange } from "@filen/office/core/sheet"
 import type { SheetGridModel } from "@filen/office/react/sheet"
 import type { DialogOperator, FilterKind } from "@/features/spreadsheet/data/sortFilter.logic"
+import { createModelStore } from "@/features/spreadsheet/lib/modelStore"
 
 // What the sort and filter UI has open on a grid, shared by what opens it (a header's button, the toolbar's menu,
 // the grid's menu, the shortcuts) and the extension that renders it: the filter menu of a header, the custom sort
@@ -28,50 +28,12 @@ export type SortFilterOpen =
 			readonly criteria: SheetFilterCriteria | null
 	  }
 
-interface Store {
-	open: SortFilterOpen | null
-	readonly listeners: Set<() => void>
-}
-
-const stores = new WeakMap<SheetGridModel, Store>()
-
-function storeOf(model: SheetGridModel): Store {
-	let store = stores.get(model)
-
-	if (store === undefined) {
-		store = { open: null, listeners: new Set() }
-		stores.set(model, store)
-	}
-
-	return store
-}
+const store = createModelStore<SortFilterOpen | null>(null)
 
 export function setSortFilterOpen(model: SheetGridModel, open: SortFilterOpen | null): void {
-	const store = storeOf(model)
-
-	if (store.open === open) {
-		return
-	}
-
-	store.open = open
-
-	for (const listener of store.listeners) {
-		listener()
-	}
+	store.set(model, open)
 }
 
 export function useSortFilterOpen(model: SheetGridModel): SortFilterOpen | null {
-	const store = storeOf(model)
-
-	return useSyncExternalStore(
-		listener => {
-			store.listeners.add(listener)
-
-			return () => {
-				store.listeners.delete(listener)
-			}
-		},
-		() => store.open,
-		() => store.open
-	)
+	return store.useValue(model)
 }

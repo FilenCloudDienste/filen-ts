@@ -15,7 +15,14 @@ import {
 	type DocxNotePosition,
 	type DocxNoteRestart
 } from "@filen/office/core/docx/edit"
-import { currentNoteOptions, docxBookmarks, docxOutline, formatDatePicture, type PagedEditor } from "@filen/office/core/docx/paged"
+import {
+	DOCX_NOTE_POSITIONS,
+	currentNoteOptions,
+	docxBookmarks,
+	docxOutline,
+	formatDatePicture,
+	type PagedEditor
+} from "@filen/office/core/docx/paged"
 import { cn } from "@filen/shared"
 import type { DocxInputRequest } from "@/features/preview/components/docxEditor.logic"
 import {
@@ -236,6 +243,8 @@ function placeLink(place: string, extra: { text?: string }): object {
 function LinkDialog({ editor, snapshot, enabled, run, close }: DialogProps) {
 	const { t } = useTranslation("preview")
 	const link = snapshot?.context.link ?? null
+	// An empty anchor is no anchor (the writer drops it too).
+	const linkAnchor = link === null || link.anchor === "" ? null : link.anchor
 	const body = editor.activeStory === editor.body.session.story.story.index
 	// Read once, as the dialog opens (never per keystroke).
 	const [places] = useState(() => {
@@ -245,12 +254,13 @@ function LinkDialog({ editor, snapshot, enabled, run, close }: DialogProps) {
 					.entries.filter(entry => entry.text.trim() !== "")
 					.map(entry => ({ value: `${HEADING_PLACE}${String(entry.pos)}`, label: entry.text }))
 			: []
-		// Names a link can go to (link.set takes ASCII names).
+		// Names a link can go to (what link.set takes: Unicode letters, digits and "_", 40 at most).
 		const bookmarks = docxBookmarks(editor)
 			.filter(bookmark => parseDocxEditorCommand({ type: "link.set", anchor: bookmark.name }) !== undefined)
 			.map(bookmark => ({ value: `${BOOKMARK_PLACE}${bookmark.name}`, label: bookmark.name }))
 
-		const anchor = link?.anchor ?? null
+		// A link to a place has an anchor alone; a web link's anchor is the location inside its target.
+		const anchor = link !== null && link.target === null ? linkAnchor : null
 		const initial =
 			anchor === null
 				? (headings[0]?.value ?? bookmarks[0]?.value ?? "")
@@ -259,20 +269,23 @@ function LinkDialog({ editor, snapshot, enabled, run, close }: DialogProps) {
 		return { headings, bookmarks, initial }
 	})
 	const [showText] = useState(() => link !== null || editor.selection().empty)
-	const [kind, setKind] = useState(link?.anchor == null ? "web" : "place")
+	const [kind, setKind] = useState(link !== null && link.target === null && linkAnchor !== null ? "place" : "web")
 	const [text, setText] = useState(link?.text ?? "")
 	const [address, setAddress] = useState(link?.target ?? "")
 	const [place, setPlace] = useState(places.initial)
 	// The link's own target, while its address is untouched, goes back verbatim (a relative path or an app's scheme is
-	// never read as a typed web address); a new address goes only to the web, email or a phone.
-	const target = link !== null && link.target !== null && address === link.target ? link.target : linkTarget(address)
+	// never read as a typed web address), with its anchor (the location inside it, as the file holds it); a new
+	// address goes only to the web, email or a phone.
+	const untouched = link !== null && link.target !== null && address === link.target
+	const target = untouched ? link.target : linkTarget(address)
 	const refusal = target === null ? undefined : linkTargetRefusal(target, link?.target)
 	const shownText = showText && text.trim() !== "" ? text : undefined
 	const extra = shownText === undefined ? {} : { text: shownText }
+	const webExtra = untouched && linkAnchor !== null ? { anchor: linkAnchor, ...extra } : extra
 	const valid =
 		enabled("link.set") &&
 		(kind === "web"
-			? target !== null && refusal === undefined && parseDocxEditorCommand({ type: "link.set", target, ...extra }) !== undefined
+			? target !== null && refusal === undefined && parseDocxEditorCommand({ type: "link.set", target, ...webExtra }) !== undefined
 			: parseDocxEditorCommand(placeLink(place, extra)) !== undefined)
 	const textId = useId()
 	const addressId = useId()
@@ -283,7 +296,7 @@ function LinkDialog({ editor, snapshot, enabled, run, close }: DialogProps) {
 			return
 		}
 
-		run(kind === "web" ? { type: "link.set", target, ...extra } : placeLink(place, extra))
+		run(kind === "web" ? { type: "link.set", target, ...webExtra } : placeLink(place, extra))
 
 		close()
 	}
@@ -887,11 +900,6 @@ const POSITION_LABELS: Readonly<Record<DocxNotePosition, PreviewKey>> = {
 	docEnd: "previewDocxNoteDocumentEnd"
 }
 
-const KIND_POSITIONS: Readonly<Record<DocxNoteKind, readonly DocxNotePosition[]>> = {
-	footnote: ["pageBottom", "beneathText"],
-	endnote: ["sectEnd", "docEnd"]
-}
-
 const RESTART_LABELS: Readonly<Record<DocxNoteRestart, PreviewKey>> = {
 	continuous: "previewDocxNoteContinuous",
 	eachSect: "previewDocxLineNumbersSection",
@@ -973,7 +981,7 @@ function NoteOptionsDialog({ editor, snapshot, enabled, run, close }: DialogProp
 			<DocxChoiceField
 				label={t("previewDocxNoteLocation")}
 				value={values.position}
-				items={KIND_POSITIONS[values.kind].map(position => ({ value: position, label: t(POSITION_LABELS[position]) }))}
+				items={DOCX_NOTE_POSITIONS[values.kind].map(position => ({ value: position, label: t(POSITION_LABELS[position]) }))}
 				onChange={position => {
 					set({ position })
 				}}

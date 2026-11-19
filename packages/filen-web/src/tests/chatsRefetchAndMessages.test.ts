@@ -14,9 +14,14 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
+import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { testUuid } from "@/tests/support/uuid"
 
-function mockChat(label: string): Chat {
+// By default a chat with a last message newer than its lastFocus: one whose unread the list cannot rule out.
+// `lastMessage: null` builds one with no last message.
+function mockChat(label: string, overrides: Omit<Partial<Chat>, "lastMessage"> & { lastMessage?: ChatMessage | null } = {}): Chat {
+	const { lastMessage = mockMessage(`last-${label}`, label), ...rest } = overrides
+
 	return {
 		uuid: testUuid(label),
 		ownerId: 1n,
@@ -24,7 +29,9 @@ function mockChat(label: string): Chat {
 		participants: [],
 		muted: false,
 		created: 0n,
-		lastFocus: 0n
+		lastFocus: 0n,
+		...(lastMessage !== null ? { lastMessage } : {}),
+		...rest
 	}
 }
 
@@ -46,6 +53,7 @@ function mockMessage(label: string, chatLabel: string): ChatMessage {
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
+	setFocusedChat(null)
 })
 
 describe("refetchChatsAndMessages", () => {
@@ -125,5 +133,63 @@ describe("refetchChatsAndMessages", () => {
 		await Promise.all([refetchChatsAndMessages(), refetchChatsAndMessages(), refetchChatsAndMessages()])
 
 		expect(maxConcurrent).toBe(1)
+	})
+
+	// The list row proves these read, so their pages are not read; opening the thread reads them.
+	it("reads no page for a chat that is muted, has no last message, or whose last message is not newer than lastFocus", async () => {
+		const muted = mockChat("muted", { muted: true })
+		const empty = mockChat("empty", { lastMessage: null })
+		const read = mockChat("read", { lastFocus: 10n })
+		const unread = mockChat("unread", { lastFocus: 9n })
+		listChats.mockResolvedValueOnce([muted, empty, read, unread])
+		listMessagesBefore.mockResolvedValue([])
+
+		await refetchChatsAndMessages()
+
+		expect(listMessagesBefore.mock.calls.map(([chat]) => chat.uuid)).toEqual([unread.uuid])
+		expect(chatMessagesQueryGet(muted.uuid)).toBeUndefined()
+		expect(chatMessagesQueryGet(read.uuid)).toBeUndefined()
+	})
+
+	it("still reads the page of a chat whose newer last message is from a blocked sender", async () => {
+		// The list cannot tell a blocked sender apart, and an older unread may sit behind their message.
+		const blockedLast = mockChat("blocked-last", { lastMessage: { ...mockMessage("bm", "blocked-last"), senderEmail: "blocked@x.io" } })
+		listChats.mockResolvedValueOnce([blockedLast])
+		listMessagesBefore.mockResolvedValue([])
+
+		await refetchChatsAndMessages()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+	})
+
+	it("the missing-only heal skips a provably read chat too", async () => {
+		testQueryClient.setQueryData(["chats", "list"], [mockChat("read", { lastFocus: 10n }), mockChat("unread")])
+		listMessagesBefore.mockResolvedValue([])
+
+		await refetchChatsAndMessages({ onlyMissing: true })
+
+		expect(listMessagesBefore.mock.calls.map(([chat]) => chat.uuid)).toEqual([testUuid("unread")])
+	})
+
+	// A mounted thread does not re-read on its own, so the reconnect pass is what brings in what it missed.
+	it("reads the open thread's page on the full pass even when its row proves it read", async () => {
+		const muted = mockChat("muted", { muted: true })
+		const read = mockChat("read", { lastFocus: 10n })
+		listChats.mockResolvedValue([muted, read])
+		listMessagesBefore.mockResolvedValue([])
+
+		setFocusedChat(muted.uuid)
+		await refetchChatsAndMessages()
+		expect(listMessagesBefore.mock.calls.map(([chat]) => chat.uuid)).toEqual([muted.uuid])
+
+		listMessagesBefore.mockClear()
+		setFocusedChat(read.uuid)
+		await refetchChatsAndMessages()
+		expect(listMessagesBefore.mock.calls.map(([chat]) => chat.uuid)).toEqual([read.uuid])
+
+		listMessagesBefore.mockClear()
+		setFocusedChat(null)
+		await refetchChatsAndMessages()
+		expect(listMessagesBefore).not.toHaveBeenCalled()
 	})
 })

@@ -150,9 +150,10 @@ export async function startZipDownload(items: DriveItem[]): Promise<void> {
 		return
 	}
 
-	const outcome = await runZipDownload(defaultZipDownloadDeps, { items, suggestedName: resolveSuggestedZipName(items) })
+	const suggestedName = resolveSuggestedZipName(items)
+	const outcome = await runZipDownload(defaultZipDownloadDeps, { items, suggestedName })
 
 	if (outcome.status === "error") {
-		toastDownloadFailed(outcome)
+		toastDownloadFailed(suggestedName, outcome)
 	}
 }

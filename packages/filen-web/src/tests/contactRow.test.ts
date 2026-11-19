@@ -3,10 +3,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
-import type { Contact } from "@filen/sdk-rs"
 import "@/lib/i18n"
 import { ContactRow, ContactActions, type ContactRowProps } from "@/features/contacts/components/contactRow"
 import { touchLongPress, touchTap } from "@/tests/support/touch"
+import { mockContact } from "@/tests/support/contactFixtures"
 
 const CHECK_GLYPH = "check-glyph"
 
@@ -15,24 +15,11 @@ afterEach(() => {
 	vi.useRealTimers()
 })
 
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: "11111111-1111-1111-1111-111111111111",
-		userId: 1n,
-		email: "alice@filen.io",
-		nickName: "Alice",
-		lastActive: BigInt(Date.now()),
-		timestamp: 1_700_000_000_000n,
-		publicKey: "alice-public-key",
-		...overrides
-	}
-}
-
 // The contact-avatar presence badge was removed; a contact row must never render one, regardless
 // of how recent lastActive is (the badge used to key off exactly this field).
 describe("ContactRow — presence badge removed", () => {
 	it("renders no avatar-badge element even for a lastActive well inside the old 5-minute presence window", () => {
-		const { container } = render(createElement(ContactRow, { contact: mockContact() }))
+		const { container } = render(createElement(ContactRow, { contact: mockContact({ lastActive: BigInt(Date.now()) }) }))
 
 		expect(container.querySelector('[data-slot="avatar-badge"]')).toBeNull()
 	})

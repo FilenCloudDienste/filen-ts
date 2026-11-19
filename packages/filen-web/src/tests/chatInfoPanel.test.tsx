@@ -334,8 +334,11 @@ describe("chat info panel — participant actions", () => {
 		expect(screen.getByRole("complementary", { name: "Chat info" })).toBeTruthy()
 	})
 
-	it("keeps a removal's confirm pending while a block on someone else settles", async () => {
+	// Block asks for confirmation first (a modal of its own); unblock runs straight away, so it is the toggle that can
+	// still be in flight while another participant's removal is confirmed.
+	it("keeps a removal's confirm pending while an unblock of someone else settles", async () => {
 		const target = chat()
+		const blockedRecord = mockBlockedContact({ userId: 3n, email: CAROL.email })
 		let finishRemove: (value: unknown) => void = () => undefined
 		let finishBlock: (value: unknown) => void = () => undefined
 
@@ -349,13 +352,14 @@ describe("chat info panel — participant actions", () => {
 				finishBlock = resolve
 			})
 		)
-		renderThread(target)
+		contacts.data = { contacts: [], blocked: [blockedRecord] }
+		renderThread(target, deriveBlockedUsers([blockedRecord]))
 
 		const panel = openPanel()
 
-		// Carol's block starts first; Bob's remove confirm is not pending because of it.
+		// Carol's unblock starts first; Bob's remove confirm is not pending because of it.
 		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Carol" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Block" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Unblock" }))
 		fireEvent.click(within(panel).getByRole("button", { name: "Actions for Bob" }))
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
 
@@ -368,7 +372,7 @@ describe("chat info panel — participant actions", () => {
 			expect(within(confirm).getByRole<HTMLButtonElement>("button", { name: /Remove/ }).disabled).toBe(true)
 		})
 
-		// The block settling leaves the removal running: its confirm stays pending and open.
+		// The unblock settling leaves the removal running: its confirm stays pending and open.
 		await act(async () => {
 			finishBlock({ status: "success" })
 			await Promise.resolve()

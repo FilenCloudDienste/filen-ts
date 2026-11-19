@@ -307,7 +307,7 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 
 			return createFailedAs(
 				await addTagToNote(outcome.item, tag),
-				t("notesTagFailed", { count: 1, name: noteActivityName(outcome.item), tag: tagDisplayName(tag) })
+				t("notesTagFailedNamed", { name: noteActivityName(outcome.item), tag: tagDisplayName(tag) })
 			)
 		})
 

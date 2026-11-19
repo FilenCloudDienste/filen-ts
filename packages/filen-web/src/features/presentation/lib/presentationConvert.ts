@@ -16,6 +16,7 @@ import { savePortReader } from "@filen/shared/savePort"
 import { uploadConvertedCopy } from "@/features/drive/lib/convertedCopy"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { LegacySaveCopy } from "@/features/presentation/components/legacyView"
+import { officeChartText } from "@/features/office/lib/chartText"
 import { i18n, type PreviewKey } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { log } from "@/lib/log"
@@ -131,7 +132,6 @@ const LOSS_KEYS = {
 	chartDetail: "previewPptxConvertLossChartDetail",
 	field: "previewPptxConvertLossField",
 	smartArt: "previewPptxConvertLossSmartArt",
-	threeD: "previewPptxConvertLossThreeD",
 	ink: "previewPptxConvertLossInk",
 	shape: "previewPptxConvertLossShape",
 	background: "previewPptxConvertLossBackground",
@@ -296,7 +296,7 @@ export function openConvertSession(
 			)
 	}
 	const opened = next()
-	const client = pool.open(source, { ...options, viewOnly: true }, listener)
+	const client = pool.open(source, { ...options, viewOnly: true, chartText: officeChartText() }, listener)
 
 	return {
 		client,

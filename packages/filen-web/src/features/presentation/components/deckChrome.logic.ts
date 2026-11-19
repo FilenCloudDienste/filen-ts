@@ -143,6 +143,16 @@ const LAYOUT_TYPE_KEYS: Readonly<Record<string, PreviewKey>> = {
 	vertTitleAndTx: "previewPptxRibbonLayoutVertTitleAndTx"
 }
 
+// The names a deck Filen makes (New ▸ Presentation, a gallery theme) writes its layouts with, by type, in the
+// user's language.
+export function layoutNames(t: TFunction<"preview">): Record<string, string> {
+	const names: Record<string, string> = {}
+
+	for (const [type, key] of Object.entries(LAYOUT_TYPE_KEYS)) names[type] = t(key)
+
+	return names
+}
+
 // What a layout menu shows for a layout: the file's name, else its type's name, else "Layout N".
 export function layoutLabel(t: TFunction<"preview">, layout: LayoutChoice): string {
 	if (layout.name !== undefined) return layout.name

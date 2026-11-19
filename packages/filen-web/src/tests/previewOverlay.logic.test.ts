@@ -14,6 +14,13 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 })
 
 import {
+	bodyKey,
+	copyTargetOf,
+	editedCopySuffix,
+	imageSaveLabelKey,
+	saveFormat,
+	slotEditable,
+	slotPin,
 	isTextEditingTarget,
 	previewDownloadable,
 	previewMenuHiddenActionIds,
@@ -25,6 +32,7 @@ import {
 import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
+import type { ImageEditState } from "@/features/preview/imageEdit/editSession"
 
 // Minimal duck-typed stand-in for a DOM EventTarget: this file runs in the default node environment
 // (vitest.config.ts; only files that opt in with `// @vitest-environment jsdom` get a DOM), and
@@ -259,5 +267,91 @@ describe("what the preview lets be downloaded", () => {
 		expect(previewDownloadable(true, "drive")).toBe(true)
 		expect(previewDownloadable(false, "drive")).toBe(false)
 		expect(previewDownloadable(true, "trash")).toBe(false)
+	})
+})
+
+function named(name: string, mime = "", size = 1_024n): DriveItem {
+	return fileItem({
+		size,
+		meta: { type: "decoded", data: { name, mime, modified: 1_700_000_000_000n, size, key: "key", version: 2 } }
+	})
+}
+
+// What a slot pins as it opens, what remounts its body, and how its edits are saved (previewOverlay.tsx).
+describe("slot pin, body key and save format", () => {
+	it("saves each category in the format its name says", () => {
+		expect(saveFormat(named("notes.txt"))).toBe("text")
+		expect(saveFormat(named("readme.md"))).toBe("text")
+		expect(saveFormat(named("letter.docx"))).toBe("docx:docx")
+		expect(saveFormat(named("letter.dotm"))).toBe("docx:dotm")
+		expect(saveFormat(named("photo.jpg", "image/jpeg"))).toBe("image:image/jpeg")
+		expect(saveFormat(named("photo.heic", "image/heic"))).toBe("image:")
+		expect(saveFormat(named("clip.mov", "video/quicktime"))).toBe("video:mov")
+		expect(saveFormat(named("deck.pptx"))).toBe("presentation:pptx")
+		expect(saveFormat(named("deck.ppt"))).toBe("presentation:ppt")
+		expect(saveFormat(named("report.pdf", "application/pdf"))).toBe("pdf")
+		expect(saveFormat(named("sheet.xlsx"))).toBe("spreadsheet:xlsx")
+		expect(saveFormat(named("song.mp3", "audio/mpeg"))).toBe("")
+	})
+
+	it("edits a PDF only within the engine's limit, and nothing outside the drive", () => {
+		const pdf = named("report.pdf", "application/pdf", 2_000n)
+
+		expect(slotEditable(pdf, "drive", 4_000)).toBe(true)
+		expect(slotEditable(pdf, "drive", 1_000)).toBe(false)
+		expect(slotEditable(named("notes.txt"), "drive", 0)).toBe(true)
+		expect(slotEditable(named("notes.txt"), "trash", 4_000)).toBe(false)
+	})
+
+	it("pins the renderer, its format and editability, and opened as text pins the text viewer, never editable", () => {
+		expect(slotPin(named("sheet.xlsx"), "drive", false, 0)).toEqual({
+			category: "spreadsheet",
+			format: "spreadsheet:xlsx",
+			editable: true
+		})
+		expect(slotPin(named("sheet.xlsx"), "drive", true, 0)).toEqual({ category: "text", format: "", editable: false })
+	})
+
+	it("keys a spreadsheet, and an editable document, deck or PDF by its document; anything else by the version shown", () => {
+		const item = named("x.bin")
+		const uuid = item.data.uuid
+
+		expect(bodyKey(item, "doc", { category: "spreadsheet", format: "", editable: false })).toBe("spreadsheet:doc")
+		expect(bodyKey(item, "doc", { category: "presentation", format: "", editable: true })).toBe("presentation:doc")
+		expect(bodyKey(item, "doc", { category: "presentation", format: "", editable: false })).toBe(uuid)
+		expect(bodyKey(item, "doc", { category: "pdf", format: "", editable: true })).toBe("pdf:doc")
+		expect(bodyKey(item, "doc", { category: "docx", format: "", editable: true })).toBe("docx:doc")
+		expect(bodyKey(item, "doc", { category: "docx", format: "", editable: false })).toBe(uuid)
+		expect(bodyKey(item, "doc", { category: "text", format: "text", editable: true })).toBe(uuid)
+		expect(bodyKey(item, "doc", null)).toBe(uuid)
+	})
+
+	it("writes an image copy in the format chosen for one, else PNG with alpha and JPEG without", () => {
+		const state = (copy: ImageEditState["targets"]["copy"], hasAlpha: boolean): ImageEditState =>
+			({ targets: { primary: copy, copy }, info: { hasAlpha } }) as unknown as ImageEditState
+
+		expect(copyTargetOf(state({ kind: "copy", mime: "image/png", extension: "png" }, false))).toEqual({
+			kind: "copy",
+			mime: "image/png",
+			extension: "png"
+		})
+		expect(copyTargetOf(state({ kind: "inPlace", mime: "image/jpeg" }, true))).toEqual({
+			kind: "copy",
+			mime: "image/png",
+			extension: "png"
+		})
+		expect(copyTargetOf(state({ kind: "inPlace", mime: "image/jpeg" }, false))).toEqual({
+			kind: "copy",
+			mime: "image/jpeg",
+			extension: "jpg"
+		})
+	})
+
+	it("labels the image save by its target, and names an edited copy", () => {
+		expect(imageSaveLabelKey({ kind: "inPlace", mime: "image/jpeg" })).toBe("previewImageSaveSaveAction")
+		expect(imageSaveLabelKey({ kind: "copy", mime: "image/png", extension: "png" })).toBe("previewImageSaveAsPngCopyAction")
+		expect(imageSaveLabelKey({ kind: "copy", mime: "image/jpeg", extension: "jpg" })).toBe("previewImageSaveAsJpegCopyAction")
+		expect(editedCopySuffix(1)).toBe("edited")
+		expect(editedCopySuffix(2)).toBe("edited 2")
 	})
 })

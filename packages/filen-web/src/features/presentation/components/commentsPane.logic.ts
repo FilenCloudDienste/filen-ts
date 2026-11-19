@@ -220,19 +220,20 @@ export function newCommentGuid(): string {
 	return `{${crypto.randomUUID().toUpperCase()}}`
 }
 
-// The notes pane's layout (collapsed, and its height in px), the viewer's own on this device. Read during boot
-// (lib/sdk/boot.ts), so the pane's first render has it; null while nothing is stored (the pane's own defaults).
+// The notes pane's layout (its height in px), the viewer's own on this device. Read during boot (lib/sdk/boot.ts),
+// so the pane's first render has it; null while nothing is stored (the pane's own default). Whether the notes show is
+// the view's (its notes button and the pane's chevron), never stored here.
 export interface NotesLayout {
-	readonly collapsed: boolean
 	readonly height: number
 }
 
 const notesLayoutPreference = preloadedPreference<NotesLayout | null>({
 	key: "presentation.notesLayout.v1",
-	schema: type({ collapsed: "boolean", height: "number" }).or("null"),
+	// A value stored before (with its `collapsed`) still loads: the old key is dropped.
+	schema: type({ height: "number", "+": "delete" }).or("null"),
 	fallback: null,
 	scope: "presentation",
-	same: (a, b) => a === b || (a !== null && b !== null && a.collapsed === b.collapsed && a.height === b.height)
+	same: (a, b) => a === b || (a !== null && b !== null && a.height === b.height)
 })
 
 export const loadPresentationNotesLayout = notesLayoutPreference.load

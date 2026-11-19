@@ -1,5 +1,6 @@
 import {
 	CellFlag,
+	dateSerial,
 	EN_US_LOCALE,
 	FilterButton,
 	filterNumber,
@@ -7,6 +8,8 @@ import {
 	localizedNumber,
 	MAX_SERIAL_1900,
 	MAX_SERIAL_1904,
+	serialDate,
+	type DateParts,
 	type SheetDynamicFilter,
 	type SheetFilterCondition,
 	type SheetFilterCriteria,
@@ -343,27 +346,28 @@ export function operatorKey(operator: DialogOperator, kind: FilterKind): Preview
 	return keys[operator]
 }
 
-// Days from 1899-12-30 to a date: its serial in the 1900 system (from 1900-03-01 on); the 1904 system's is 1,462
-// days less.
+// A date field's ISO date as a serial in the workbook's date system (the engine's, the 1900 system counting the
+// 1900-02-29 it does not have); NaN when it is no date.
 export function isoSerial(iso: string, date1904: boolean): number {
 	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
 
-	if (match === null) return Number.NaN
-
-	const days = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86_400_000 + 25_569
-
-	return date1904 ? days - 1462 : days
+	return match === null ? Number.NaN : dateSerial(Number(match[1]), Number(match[2]), Number(match[3]), date1904)
 }
 
+const SERIAL_DATE: DateParts = { year: 0, month: 0, day: 0, weekday: 0 }
+
 // A serial as an ISO date (for a date field); "" for one outside the date system (a stored value as large as 1e300 has
-// no date, and a far year is no four-digit one a date field takes).
+// no date, and a far year is no four-digit one a date field takes) and for the 1900 system's 60 (1900-02-29, a day a
+// date field does not take). That system's 0 (shown as 1900-01-00) is 1899-12-31, the date isoSerial reads as 0.
 export function serialIso(serial: number, date1904: boolean): string {
 	if (!(serial >= 0 && serial <= (date1904 ? MAX_SERIAL_1904 : MAX_SERIAL_1900))) return ""
 
-	const days = Math.floor(serial) + (date1904 ? 1462 : 0)
-	const date = new Date((days - 25_569) * 86_400_000)
+	const { year, month, day } = serialDate(Math.floor(serial), date1904, SERIAL_DATE)
 
-	return date.toISOString().slice(0, 10)
+	if (day === 0) return "1899-12-31"
+	if (year === 1900 && month === 2 && day === 29) return ""
+
+	return `${String(year)}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 }
 
 // A number as typed in the user's locale (its grouping, decimal point and percent; en-US's form when the locale's does

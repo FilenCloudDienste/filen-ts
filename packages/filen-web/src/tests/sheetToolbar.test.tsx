@@ -10,6 +10,7 @@ import type { SheetOpened, SheetRenderStyle } from "@filen/office/core/sheet"
 import { createSheetGrid, useSheetGrid, type SheetGridModel } from "@filen/office/react/sheet"
 import { act } from "react"
 import type { SheetRibbonCommands } from "@/features/spreadsheet/components/sheetExtension"
+import { workbookStructureLocks } from "@/features/spreadsheet/lib/modelStore"
 import { borderShortcut, setFormatCellsOpen } from "@/features/spreadsheet/toolbar/formatCellsState"
 import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToolbar"
 import { ribbonActions } from "@/tests/sheetMenusFixtures"
@@ -480,6 +481,19 @@ describe("spreadsheet ribbon", () => {
 		expect(toggle).toHaveBeenCalledTimes(1)
 		fireEvent.click(screen.getByRole("button", { name: "Protect sheet…" }))
 		expect(requests.tab).toHaveBeenLastCalledWith(expect.anything(), "protectSheet")
+	})
+
+	it("labels the workbook button by the structure protection the sheet tabs read", async () => {
+		const { model } = await mounted()
+
+		fireEvent.click(screen.getByRole("tab", { name: "Review" }))
+		expect(screen.getByRole("button", { name: "Protect workbook…" })).toBeTruthy()
+		act(() => {
+			workbookStructureLocks.set(model, true)
+		})
+		fireEvent.click(screen.getByRole("button", { name: "Unprotect workbook…" }))
+		expect(requests.tab).toHaveBeenLastCalledWith(expect.anything(), "protectWorkbook")
+		expect(screen.queryByRole("button", { name: "Protect workbook…" })).toBeNull()
 	})
 
 	it("zooms and shows formulas from the View tab, the zoom shown at the tab row's end", async () => {

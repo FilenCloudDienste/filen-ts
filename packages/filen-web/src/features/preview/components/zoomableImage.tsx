@@ -1,6 +1,13 @@
 import { use, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
-import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
+import {
+	type Size,
+	type ZoomTransform,
+	wheelZoom,
+	dragPan,
+	doubleClickZoom,
+	pinchZoom
+} from "@/features/preview/components/imageViewer.logic"
 import { imageKeyTransform, imageViewerKey } from "@/features/preview/lib/imageViewerKeys.logic"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
@@ -31,6 +38,10 @@ function useZoom(natural: Size | null): { containerRef: RefObject<HTMLDivElement
 	// position — every subsequent pointermove computes its delta against THIS, never the previous
 	// pointermove's position, so per-event float drift can never accumulate.
 	const dragOrigin = useRef<{ x: number; y: number; pointerX: number; pointerY: number } | null>(null)
+	// The pointers down on the picture (`touch-none` hands every touch to us): a one-pointer drag pans, a second
+	// pointer turns the press into a pinch, measured against its start as the drag is.
+	const pointers = useRef(new Map<number, { x: number; y: number }>())
+	const pinch = useRef<{ distance: number; mid: { x: number; y: number }; transform: ZoomTransform } | null>(null)
 
 	// A React onWheel prop can never preventDefault a page scroll here: react-dom registers the wheel
 	// listener PASSIVE at its root for scroll performance (verified against the installed react-dom
@@ -111,29 +122,86 @@ function useZoom(natural: Size | null): { containerRef: RefObject<HTMLDivElement
 		}
 	}, [onViewerKey])
 
+	// The two pointers' spread and midpoint (relative to the container's center); null unless exactly two are down.
+	function pinchOf(rect: DOMRect): { distance: number; mid: { x: number; y: number } } | null {
+		if (pointers.current.size !== 2) {
+			return null
+		}
+
+		const [a, b] = [...pointers.current.values()]
+
+		if (a === undefined || b === undefined) {
+			return null
+		}
+
+		return {
+			distance: Math.hypot(a.x - b.x, a.y - b.y),
+			mid: { x: (a.x + b.x) / 2 - rect.left - rect.width / 2, y: (a.y + b.y) / 2 - rect.top - rect.height / 2 }
+		}
+	}
+
 	function handlePointerDown(event: ReactPointerEvent<HTMLElement>): void {
-		if (transform.scale <= 1) {
+		const container = containerRef.current
+
+		if (container === null || (event.pointerType === "mouse" && event.button !== 0)) {
 			return
 		}
 
+		pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
 		event.currentTarget.setPointerCapture(event.pointerId)
+
+		if (pointers.current.size === 2) {
+			// A second finger: the drag ends and the press becomes a pinch.
+			dragOrigin.current = null
+
+			const started = pinchOf(container.getBoundingClientRect())
+
+			pinch.current = started === null ? null : { ...started, transform }
+
+			return
+		}
+
+		if (pointers.current.size !== 1 || transform.scale <= 1) {
+			return
+		}
+
 		dragOrigin.current = { x: transform.x, y: transform.y, pointerX: event.clientX, pointerY: event.clientY }
 	}
 
 	function handlePointerMove(event: ReactPointerEvent<HTMLElement>): void {
-		const origin = dragOrigin.current
 		const container = containerRef.current
 
-		if (!origin || !container) {
+		if (container === null || !pointers.current.has(event.pointerId)) {
 			return
 		}
 
+		pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
 		const rect = container.getBoundingClientRect()
+		const size: Size = { width: rect.width, height: rect.height }
+		const start = pinch.current
+
+		if (start !== null) {
+			const now = pinchOf(rect)
+
+			if (now !== null) {
+				setTransform(pinchZoom(start.transform, start.distance, start.mid, now.distance, now.mid, size, natural))
+			}
+
+			return
+		}
+
+		const origin = dragOrigin.current
+
+		if (origin === null || pointers.current.size !== 1) {
+			return
+		}
+
 		const delta = { x: event.clientX - origin.pointerX, y: event.clientY - origin.pointerY }
 
 		setTransform(prev => ({
 			...prev,
-			...dragPan({ x: origin.x, y: origin.y }, delta, prev.scale, { width: rect.width, height: rect.height }, natural)
+			...dragPan({ x: origin.x, y: origin.y }, delta, prev.scale, size, natural)
 		}))
 	}
 
@@ -142,7 +210,15 @@ function useZoom(natural: Size | null): { containerRef: RefObject<HTMLDivElement
 			event.currentTarget.releasePointerCapture(event.pointerId)
 		}
 
+		pointers.current.delete(event.pointerId)
 		dragOrigin.current = null
+
+		// A pinch ends with its first lifted finger (the one left pans only once pressed again); two fingers left
+		// of three pinch on from where they are.
+		const container = containerRef.current
+		const resumed = container === null ? null : pinchOf(container.getBoundingClientRect())
+
+		pinch.current = resumed === null ? null : { ...resumed, transform }
 	}
 
 	return {

@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
-import { PageViewport, type PdfEditSessionModel } from "@filen/office/react/pdfedit"
+import { MupdfPdfDocument, PageViewport, type PdfEditSessionModel, type PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import type { PdfWidgetSummary } from "@filen/office/core/pdfedit"
 import { fakeToolContext } from "@/tests/support/pdfToolContext"
 import "@/lib/i18n"
@@ -209,6 +209,46 @@ describe("a clicked radio button the editor refuses", () => {
 		await waitFor(() => {
 			expect(radio).toHaveProperty("checked", false)
 		})
+	})
+})
+
+describe("an overlay over the editor's document", () => {
+	it("asks for its page on every snapshot, also while its widgets are held", () => {
+		// The editor's document (only its class is read here).
+		const document = Object.create(MupdfPdfDocument.prototype) as MupdfPdfDocument
+		const want = vi.fn()
+		const session = { want } as unknown as PdfEditSessionModel
+		const swap = {
+			prefetch: vi.fn(),
+			warm: vi.fn(),
+			edit: vi.fn(),
+			withSession: vi.fn((use: (session: PdfEditSessionModel) => void) => {
+				use(session)
+			})
+		}
+		const snapshotOf = (): PdfEditSnapshot =>
+			({ document, state: {}, widgets: new Map([[2, []]]), pending: 0, touched: [] }) as unknown as PdfEditSnapshot
+		const overlay = (snapshot: PdfEditSnapshot) => (
+			<PdfFieldOverlay
+				document={document}
+				page={3}
+				viewport={VIEWPORT}
+				swap={swap as never}
+				snapshot={snapshot}
+				starting={false}
+				editable
+			/>
+		)
+
+		const { rerender } = render(overlay(snapshotOf()))
+
+		// Held: no read, but the page is named again so an undo or redo answers its widgets.
+		expect(want).toHaveBeenCalledTimes(1)
+		expect(want).toHaveBeenLastCalledWith([2])
+
+		rerender(overlay(snapshotOf()))
+		expect(want).toHaveBeenCalledTimes(2)
+		expect(want).toHaveBeenLastCalledWith([2])
 	})
 })
 

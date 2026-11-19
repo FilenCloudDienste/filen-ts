@@ -287,7 +287,7 @@ describe("React Compiler coverage", () => {
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "PagesOverlay" && (event.memoSlots ?? 0) > 0)).toBe(
 			true
 		)
-		expect(unguardedCalls(code, "PagesOverlay", ["frameLeft(", "props.overlay("])).toEqual([])
+		expect(unguardedCalls(code, "PagesOverlay", ["pageLeft(", "props.overlay("])).toEqual([])
 	})
 
 	it("compiles the archive browser, its rows and footer, so a listing notification re-renders only what changed", () => {

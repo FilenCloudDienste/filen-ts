@@ -5,48 +5,64 @@ import { log } from "@/lib/log"
 import { persister, restorePersistedQueries, purgePersistedQueries, removeQueriesAndPersisted, PERSIST_PREFIX } from "@/queries/persist"
 import { registerCheckQueryOptions } from "@/features/auth/queries/registerCheck"
 
-// Map-backed fake of the kv worker api (mirrors src/lib/storage/adapter.test.ts), mocked at
-// `@/lib/storage/adapter`'s `storage()` — the persister's kv bridge calls that directly with RAW
-// strings (kvGet/kvSet/kvDelete/kvKeys, never kvGetJson/kvSetJson: the persister owns its own
+// Map-backed fake of the kv worker api (mirrors src/tests/adapter.test.ts), mocked at the leader
+// election, so the persister's kv bridge runs through the real `@/lib/storage/adapter` with RAW
+// strings (kvGet/kvSet/kvDelete/kvEntriesPage, never kvGetJson/kvSetJson: the persister owns its own
 // envelope, so the JSON-aware helpers would double-envelope every row). `writes` records every
 // kvSet key so tests can assert per-query write isolation (the point of this architecture).
-const { fakeStore, writes, reads } = vi.hoisted(() => ({
-	fakeStore: new Map<string, string>(),
-	writes: [] as string[],
-	reads: { count: 0 }
-}))
-
-vi.mock("@/lib/storage/adapter", () => ({
-	storage: () =>
-		Promise.resolve({
-			role: "leader" as const,
-			api: {
-				kvGet: (key: string) => {
-					reads.count++
-					return Promise.resolve(fakeStore.get(key) ?? null)
-				},
-				kvSet: (key: string, value: string) => {
-					fakeStore.set(key, value)
-					writes.push(key)
-					return Promise.resolve()
-				},
-				kvDelete: (key: string) => {
-					fakeStore.delete(key)
-					return Promise.resolve()
-				},
-				kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix))),
-				kvEntries: (prefix: string) => Promise.resolve([...fakeStore.entries()].filter(([k]) => k.startsWith(prefix))),
-				kvDeletePrefix: (prefix: string) => {
-					for (const k of [...fakeStore.keys()]) {
-						if (k.startsWith(prefix)) {
-							fakeStore.delete(k)
-						}
-					}
-					return Promise.resolve()
+const { fakeStore, writes, reads, fakeApi } = vi.hoisted(() => {
+	const fakeStore = new Map<string, string>()
+	const writes: string[] = []
+	const reads = { count: 0 }
+	const fakeApi = {
+		kvGet: (key: string) => {
+			reads.count++
+			return Promise.resolve(fakeStore.get(key) ?? null)
+		},
+		kvSet: (key: string, value: string) => {
+			fakeStore.set(key, value)
+			writes.push(key)
+			return Promise.resolve()
+		},
+		kvDelete: (key: string) => {
+			fakeStore.delete(key)
+			return Promise.resolve()
+		},
+		kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix))),
+		kvEntries: (prefix: string) => Promise.resolve([...fakeStore.entries()].filter(([k]) => k.startsWith(prefix))),
+		kvEntriesPage: (prefix: string, after: string | null, limit: number) =>
+			Promise.resolve(
+				[...fakeStore.entries()]
+					.filter(([k]) => k.startsWith(prefix) && (after === null || k > after))
+					.sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
+					.slice(0, limit)
+			),
+		kvDeletePrefix: (prefix: string) => {
+			for (const k of [...fakeStore.keys()]) {
+				if (k.startsWith(prefix)) {
+					fakeStore.delete(k)
 				}
 			}
-		})
+			return Promise.resolve()
+		}
+	}
+
+	return { fakeStore, writes, reads, fakeApi }
+})
+
+vi.mock("@/lib/storage/leader", () => ({
+	acquireStorage: () => Promise.resolve({ role: "leader" as const, api: fakeApi })
 }))
+
+// A fresh, current-buster row as the persister itself writes it.
+function persistedRow(queryKey: unknown[], data: unknown, dataUpdatedAt = Date.now()): [string, string] {
+	const queryHash = JSON.stringify(queryKey)
+
+	return [
+		`${PERSIST_PREFIX}-${queryHash}`,
+		stringifyEnvelope({ buster: PERSIST_PREFIX, queryHash, queryKey, state: { data, dataUpdatedAt, status: "success" } })
+	]
+}
 
 // A client wired the way the real singleton is wired: the per-query persister as a default, so
 // every fetch persists/restores its own row automatically through real TanStack machinery — no
@@ -181,17 +197,93 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
 	})
 
-	it("restore reads every row in one bulk call, never one kvGet per row", async () => {
+	it("restore reads rows a page at a time, never one kvGet per row and never the whole family in one message", async () => {
 		await seedTwoQueries()
 
 		reads.count = 0
 
+		const bulk = vi.spyOn(fakeApi, "kvEntries")
 		const target = new QueryClient()
 
 		await restorePersistedQueries(target)
 
 		expect(reads.count).toBe(0)
+		expect(bulk).not.toHaveBeenCalled()
 		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+	})
+
+	it("a restore spanning several pages yields the same client state as one bulk read", async () => {
+		const rows = Array.from({ length: 4500 }, (_, i) => persistedRow(["drive", "listing", i], { n: BigInt(i) }))
+
+		for (const [key, value] of rows) {
+			fakeStore.set(key, value)
+		}
+
+		const page = vi.spyOn(fakeApi, "kvEntriesPage")
+		const paged = new QueryClient()
+
+		await restorePersistedQueries(paged)
+
+		expect(page.mock.calls.length).toBeGreaterThan(2)
+
+		page.mockRejectedValue(new TypeError("unknown method kvEntriesPage"))
+
+		const bulk = new QueryClient()
+
+		await restorePersistedQueries(bulk)
+
+		// Cache order follows read order (key order paged, insertion order in bulk), so compare per query.
+		const state = (client: QueryClient) =>
+			new Map(
+				client
+					.getQueryCache()
+					.getAll()
+					.map(query => [query.queryHash, [query.state.data, query.state.dataUpdatedAt]])
+			)
+
+		expect(state(paged).size).toBe(4500)
+		expect(state(paged)).toEqual(state(bulk))
+		expect(paged.getQueryData(["drive", "listing", 4499])).toEqual({ n: 4499n })
+	})
+
+	it("deletes an undecodable and an expired row across pages, restoring the rest", async () => {
+		vi.spyOn(log, "warn").mockImplementation(() => undefined)
+
+		for (let i = 0; i < 2500; i++) {
+			const [key, value] = persistedRow(["drive", "listing", i], i)
+
+			fakeStore.set(key, value)
+		}
+
+		const [expiredKey, expiredValue] = persistedRow(["drive", "listing", "expired"], 1, Date.now() - 86400 * 365 * 1000 * 11)
+		const brokenKey = `${PERSIST_PREFIX}-["zz","broken"]`
+
+		fakeStore.set(expiredKey, expiredValue)
+		fakeStore.set(brokenKey, "{not valid json")
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(fakeStore.has(expiredKey)).toBe(false)
+		expect(fakeStore.has(brokenKey)).toBe(false)
+		expect(target.getQueryData(["drive", "listing", "expired"])).toBeUndefined()
+		expect(target.getQueryCache().getAll()).toHaveLength(2500)
+	})
+
+	it("falls back to one bulk read when the leader has no kvEntriesPage", async () => {
+		await seedTwoQueries()
+
+		vi.spyOn(fakeApi, "kvEntriesPage").mockRejectedValue(new TypeError("unknown method kvEntriesPage"))
+
+		const bulk = vi.spyOn(fakeApi, "kvEntries")
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(bulk).toHaveBeenCalledTimes(1)
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
 	})
 
 	it("removeQueriesAndPersisted drops the query from memory AND its kv row, so no later boot restores it", async () => {

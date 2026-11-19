@@ -23,6 +23,7 @@ vi.mock("@/lib/downloadBlob", () => ({ downloadBlob }))
 import {
 	billingErrorLabel,
 	cancelSubscription,
+	CHECKOUT_TTL_MS,
 	createCheckout,
 	downloadInvoice,
 	forgetCheckouts,
@@ -55,6 +56,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.useRealTimers()
 	onlineManager.setOnline(true)
 })
 
@@ -73,6 +75,72 @@ describe("createCheckout", () => {
 		await createCheckout(27, "paypal")
 
 		expect(sdk.createSubscription).toHaveBeenCalledTimes(2)
+	})
+
+	it("reuses a created checkout inside its lifetime and creates a fresh one after it", async () => {
+		vi.useFakeTimers({ now: 0, toFake: ["Date"] })
+		sdk.createSubscription.mockResolvedValueOnce("https://checkout.example/old").mockResolvedValueOnce("https://checkout.example/new")
+
+		expect(await createCheckout(27, "stripe")).toEqual({ status: "success", item: "https://checkout.example/old" })
+
+		vi.setSystemTime(CHECKOUT_TTL_MS - 1)
+
+		expect(await createCheckout(27, "stripe")).toEqual({ status: "success", item: "https://checkout.example/old" })
+		expect(sdk.createSubscription).toHaveBeenCalledTimes(1)
+
+		vi.setSystemTime(CHECKOUT_TTL_MS)
+
+		expect(await createCheckout(27, "stripe")).toEqual({ status: "success", item: "https://checkout.example/new" })
+		expect(sdk.createSubscription).toHaveBeenCalledTimes(2)
+	})
+
+	it("shares a pending create however long it takes", async () => {
+		vi.useFakeTimers({ now: 0, toFake: ["Date"] })
+
+		let resolve: (url: string) => void = () => undefined
+
+		sdk.createSubscription.mockReturnValue(
+			new Promise<string>(done => {
+				resolve = done
+			})
+		)
+
+		const first = createCheckout(27, "stripe")
+
+		vi.setSystemTime(CHECKOUT_TTL_MS * 2)
+
+		const second = createCheckout(27, "stripe")
+
+		resolve("https://checkout.example/a")
+
+		expect(await second).toEqual(await first)
+		expect(sdk.createSubscription).toHaveBeenCalledTimes(1)
+	})
+
+	it.each([
+		["a cancellation", async () => cancelSubscription({ id: "b" })],
+		["a withdrawal", async () => withdrawSubscription({ subId: "b", name: "Jane Doe", email: "jane@example.com", lang: "en" })]
+	])("forgets held checkouts after %s", async (_, change) => {
+		sdk.createSubscription.mockResolvedValueOnce("https://checkout.example/old").mockResolvedValueOnce("https://checkout.example/new")
+		sdk.cancelSubscription.mockResolvedValue(undefined)
+		sdk.withdrawSubscription.mockResolvedValue(1_000n)
+
+		await createCheckout(27, "stripe")
+		await change()
+
+		expect(await createCheckout(27, "stripe")).toEqual({ status: "success", item: "https://checkout.example/new" })
+		expect(sdk.createSubscription).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps held checkouts after a refused cancellation", async () => {
+		sdk.createSubscription.mockResolvedValue("https://checkout.example/a")
+		sdk.cancelSubscription.mockRejectedValue(serverError("cannot_cancel_sub_now"))
+
+		await createCheckout(27, "stripe")
+		await cancelSubscription({ id: "b" })
+		await createCheckout(27, "stripe")
+
+		expect(sdk.createSubscription).toHaveBeenCalledTimes(1)
 	})
 
 	it("asks again after a refusal", async () => {

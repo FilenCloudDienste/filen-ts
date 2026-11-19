@@ -51,6 +51,8 @@ export function RedactFindPanel(props: PdfToolPanelProps) {
 function RedactPanel({ context, mode }: RedactPanelProps) {
 	const { t } = useTranslation("preview")
 	const { session, stale } = useToolSession(context)
+	// A mark chosen in the list shows its page (absent where the viewer has no page navigation).
+	const pages = context.pages
 	const snapshot = usePdfEditSession(session)
 	const revision = snapshot?.state.revision ?? -1
 	const [marks, setMarks] = useState<readonly RedactionMark[]>([])
@@ -66,13 +68,14 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 		stale()
 	})
 
-	// The marks, read again after every change (undo and redo included).
+	// The marks with their text, read again after every change (undo and redo included). Not while an apply runs (each
+	// page it applies is a change, and the list is disabled): once when it ends, its steps kept or undone.
 	useEffect(() => {
-		if (session === null || revision < 0) return
+		if (session === null || revision < 0 || busy) return
 
 		let live = true
 
-		void session.engine.call("redactMarks", {}).then(
+		void session.engine.call("redactMarks", { text: true }).then(
 			read => {
 				if (live) setMarks(read)
 			},
@@ -84,7 +87,7 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 		return () => {
 			live = false
 		}
-	}, [session, revision])
+	}, [session, revision, busy])
 
 	const apply = (options: ApplyRedactionsOptions): void => {
 		setBusy(true)
@@ -166,6 +169,13 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 				<RedactionMarksList
 					marks={marks}
 					disabled={busy}
+					onSelect={
+						pages === undefined
+							? undefined
+							: mark => {
+									pages.show(mark.page)
+								}
+					}
 					onRemove={mark => {
 						context.edit(current => current.dispatch("redact.removeMark", { page: mark.page, id: mark.id }))
 					}}

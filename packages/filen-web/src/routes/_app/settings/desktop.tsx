@@ -9,11 +9,13 @@ import { SettingsGroup, SettingsPage, SettingsRow } from "@/features/settings/co
 import { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { AppLockSettings } from "@/features/desktop/components/appLockSettings"
 import { DownloadDirectorySettings } from "@/features/desktop/components/downloadDirectorySettings"
-import { formatLogEntries } from "@/features/settings/lib/logs"
+import { collectLogs, formatLogEntries } from "@/features/settings/lib/logs"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { desktopBridge } from "@/lib/desktop"
 import { log } from "@/lib/log"
+import { sdkApi } from "@/lib/sdk/client"
+import { storage } from "@/lib/storage/adapter"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
@@ -44,9 +46,9 @@ function DesktopPage() {
 		}
 
 		setExporting(true)
-		// This page's own ring buffer; main adds its log, redacts both and asks where to save.
-		bridge.logs
-			.export(formatLogEntries(log.dump()))
+		// Every realm's ring merged (collectLogs); main adds its log, redacts both and asks where to save.
+		collectLogs(log.dump(), { sdk: sdkApi, storage })
+			.then(entries => bridge.logs.export(formatLogEntries(entries)))
 			.then(outcome => {
 				if (outcome === "saved") {
 					toast.success(t("desktop:logsExported"))

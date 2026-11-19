@@ -91,7 +91,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		dialog = await open(page, listbox, name)
 		await goTo(dialog, "A2")
 		await dialog.getByRole("grid").click({ button: "right", position: { x: 44, y: 20 + 20 + 10 } })
-		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetInsertRowsAbove_one) }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetInsertRowsAboveSingle) }).click()
 		await typeInto(page, dialog, "A2", "Inserted")
 		await expect(saveButton).toBeVisible()
 		await page.keyboard.press(`${mod}+S`)

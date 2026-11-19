@@ -15,7 +15,7 @@ import {
 	type ToolKeyName,
 	type ToolPointer
 } from "@filen/office/react/pdfedit/tools"
-import { placementPosition } from "@filen/office/react/pdfedit"
+import { rectPosition } from "@filen/office/react/pdfedit"
 import { useToolSession } from "@/features/pdf/session/useToolSession"
 import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
 import type { PdfToolOverlayProps } from "@/features/pdf/tools/registry"
@@ -92,13 +92,7 @@ export function RedactAreaOverlay(props: PdfToolOverlayProps) {
 	}
 
 	const placed = state.placement?.rect ?? null
-	const position =
-		placed === null
-			? null
-			: placementPosition(
-					{ x: placed[0], y: box[3] - placed[3], width: placed[2] - placed[0], height: placed[3] - placed[1] },
-					{ width: box[2], height: box[3] }
-				)
+	const position = placed === null ? null : rectPosition(placed, box)
 
 	useAnnouncement(props.context.swap, position === null ? null : t("previewPdfPlacementPosition", position))
 

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
-import { build } from "vite"
+import { bundleBuild, bundleCode, workerBuild } from "@/tests/fixtures/bundleBuild"
 
 // The PDF editor's heavy engines (MuPDF's wasm glue, Tesseract, the PKCS#12 and CMS libraries) live in their workers,
 // never in the page's single bundle: only a worker module imports them by value, and @filen/office only by type (the
@@ -83,9 +83,7 @@ describe("the PDF engines stay out of the page bundle", { timeout: 60_000 }, () 
 	// The page as the app builds it, its workers stubbed (each is a bundle of its own, checked below and in
 	// ocrWorkerBundle.test.ts): what remains is the page's code, which must hold none of the engines.
 	it("builds the page without any of them", async () => {
-		const result: unknown = await build({
-			configFile: join(import.meta.dirname, "../../vite.config.ts"),
-			logLevel: "silent",
+		const files = await bundleBuild({
 			plugins: [
 				{
 					name: "stub-workers",
@@ -93,14 +91,10 @@ describe("the PDF engines stay out of the page bundle", { timeout: 60_000 }, () 
 					resolveId: (id: string) => (/\?worker(&|$)/.test(id) ? WORKER_STUB : null),
 					load: (id: string) => (id === WORKER_STUB ? "export default class {}" : null)
 				}
-			],
-			build: { write: false, minify: false }
+			]
 		})
-		const outputs = (Array.isArray(result) ? result : [result]) as {
-			readonly output: readonly { readonly type: string; readonly fileName: string; readonly code?: string }[]
-		}[]
-		const chunks = outputs.flatMap(output => output.output).filter(file => file.type === "chunk")
-		const code = chunks.map(chunk => chunk.code ?? "").join("\n")
+		const chunks = files.filter(file => file.type === "chunk")
+		const code = bundleCode(files)
 
 		expect(chunks.length).toBeGreaterThan(0)
 		// The page's own code is in what was built (the viewer's pdf.js glue among it).
@@ -110,26 +104,7 @@ describe("the PDF engines stay out of the page bundle", { timeout: 60_000 }, () 
 
 	// node-forge only for containers that need its legacy ciphers: the signer every signing starts is built without it.
 	it("builds the certificate signer without node-forge, and the legacy signer with it", async () => {
-		const workerCode = async (name: string): Promise<string> => {
-			const result: unknown = await build({
-				configFile: join(import.meta.dirname, "../../vite.config.ts"),
-				logLevel: "silent",
-				build: {
-					write: false,
-					minify: false,
-					rolldownOptions: {
-						input: join(import.meta.dirname, `../features/pdf/workers/${name}`),
-						output: { format: "es", codeSplitting: false }
-					}
-				}
-			})
-			const outputs = (Array.isArray(result) ? result : [result]) as { readonly output: readonly { readonly code?: string }[] }[]
-
-			return outputs
-				.flatMap(output => output.output)
-				.map(chunk => chunk.code ?? "")
-				.join("\n")
-		}
+		const workerCode = async (name: string): Promise<string> => bundleCode(await workerBuild(name))
 		const signer = await workerCode("pdfSigner.worker.ts")
 		const legacy = await workerCode("pdfSignerLegacy.worker.ts")
 
@@ -139,24 +114,9 @@ describe("the PDF engines stay out of the page bundle", { timeout: 60_000 }, () 
 	}, 300_000)
 
 	it("builds the engine worker into one module with MuPDF and its wasm as an asset", async () => {
-		const result: unknown = await build({
-			configFile: join(import.meta.dirname, "../../vite.config.ts"),
-			logLevel: "silent",
-			build: {
-				write: false,
-				minify: false,
-				rolldownOptions: {
-					input: join(import.meta.dirname, "../features/pdf/workers/pdfEngine.worker.ts"),
-					output: { format: "es", codeSplitting: false }
-				}
-			}
-		})
-		const outputs = (Array.isArray(result) ? result : [result]) as {
-			readonly output: readonly { readonly type: string; readonly fileName: string; readonly code?: string }[]
-		}[]
-		const files = outputs.flatMap(output => output.output)
+		const files = await workerBuild("pdfEngine.worker.ts")
 		const chunks = files.filter(file => file.type === "chunk")
-		const code = chunks.map(chunk => chunk.code ?? "").join("\n")
+		const code = bundleCode(files)
 
 		expect(chunks).toHaveLength(1)
 		expect(code).toContain("$libmupdf_wasm_Module")

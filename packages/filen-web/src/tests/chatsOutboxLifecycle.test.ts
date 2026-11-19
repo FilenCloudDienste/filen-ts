@@ -7,43 +7,23 @@ import type { Chat } from "@filen/sdk-rs"
 // LEADER LIFECYCLE hardening: the role state machine (unresolved no-ops leader ingestion; a terminal cancel
 // flips to shutdown and gates ingest + flush + closes the channel), the committed-id ledger (a late re-forward
 // of an already-committed send is dropped, never re-sent), and closeOutbox itself.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
-	sendChatMessage: vi.fn<(chat: Chat, message: string, replyTo?: unknown) => Promise<Chat>>(),
-	markChatRead: vi.fn(() => Promise.resolve()),
-	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
-	getChat: vi.fn((uuid: string) =>
-		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
-	)
-}))
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsSdkMocks()
+)
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
-const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
-	const store = new Map<string, unknown>()
-
-	return {
-		kvStore: store,
-		kvGetJson: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
-		kvSetJson: vi.fn((key: string, value: unknown) => {
-			store.set(key, value)
-
-			return Promise.resolve()
-		}),
-		kvDelete: vi.fn((key: string) => {
-			store.delete(key)
-
-			return Promise.resolve()
-		})
-	}
-})
+const { kvStore, kvGetJson, kvSetJson, kvDelete } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsKvMocks()
+)
 
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { Sync } from "@/features/chats/lib/sync"
-import { buildOptimisticMessage, CommittedIdLedger, type OptimisticSender, type RemoteChatEnqueue } from "@/features/chats/lib/sync.logic"
-import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { CommittedIdLedger, type RemoteChatEnqueue } from "@/features/chats/lib/sync.logic"
+import { useChatsInflightStore, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { confirmedMessage, getStore, group, inflightIds, mockTransport, optimistic, outboxChat, settle } from "@/tests/support/chatsOutbox"
 import {
 	closeOutbox,
 	decodeOutboxPayload,
@@ -55,59 +35,6 @@ import {
 } from "@/lib/storage/outboxChannel"
 import { inflightChatMessagesSchema, remoteChatEnqueueSchema } from "@/features/chats/lib/sync.logic"
 
-const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
-
-function makeChat(uuid: string): Chat {
-	return {
-		uuid: uuid as Chat["uuid"],
-		ownerId: 7n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
-}
-
-function optimistic(chatUuid: string, inflightId: string, sentTimestamp: bigint): ChatMessageWithInflightId {
-	return buildOptimisticMessage({
-		chatUuid: chatUuid as ChatMessageWithInflightId["chat"],
-		inflightId: inflightId as ChatMessageWithInflightId["uuid"],
-		content: "hi",
-		replyTo: undefined,
-		sentTimestamp,
-		sender: SENDER
-	})
-}
-
-function group(chatUuid: string, ...messages: ChatMessageWithInflightId[]): InflightChatMessages {
-	return { [chatUuid]: { chat: makeChat(chatUuid), messages } }
-}
-
-function mockTransport() {
-	return {
-		sendEnqueue: vi.fn<(msg: RemoteChatEnqueue) => void>(),
-		sendExecuteNow: vi.fn<() => void>(),
-		requestState: vi.fn<() => void>(),
-		broadcastState: vi.fn<(state: InflightChatMessages) => void>(),
-		broadcastLeaderHello: vi.fn<() => void>(),
-		broadcastPushed: vi.fn<(id: string, hash: string) => void>(),
-		broadcastAnswered: vi.fn<(id: string) => void>(),
-		close: vi.fn<() => void>()
-	}
-}
-
-function getStore(): InflightChatMessages {
-	return useChatsInflightStore.getState().inflightMessages
-}
-
-function inflightIds(chatUuid: string): string[] {
-	return (getStore()[chatUuid]?.messages ?? []).map(m => m.inflightId)
-}
-
-function tick(): Promise<void> {
-	return new Promise(resolve => setTimeout(resolve, 15))
-}
-
 beforeEach(() => {
 	kvStore.clear()
 	vi.clearAllMocks()
@@ -116,18 +43,7 @@ beforeEach(() => {
 	sendChatMessage.mockImplementation((chat: Chat) =>
 		Promise.resolve({
 			...chat,
-			lastMessage: {
-				uuid: `srv-${chat.uuid}` as ChatMessageWithInflightId["uuid"],
-				chat: chat.uuid,
-				senderId: 7,
-				senderEmail: "me@filen.io",
-				senderNickName: "Me",
-				message: "hi",
-				embedDisabled: false,
-				edited: false,
-				editedTimestamp: 0n,
-				sentTimestamp: 1n
-			}
+			lastMessage: confirmedMessage(chat.uuid, `srv-${chat.uuid}`)
 		})
 	)
 })
@@ -147,8 +63,8 @@ describe("outbox role state machine — unresolved / leader / follower / shutdow
 		// Deliberately no start()/startAsFollower(): leadership is not yet decided.
 		expect(s.outboxRole).toBe("unresolved")
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
+		await settle()
 
 		// A forward arriving before the role resolves paints nothing, sends nothing, persists nothing.
 		expect(getStore()["chat-a-a-a"]).toBeUndefined()
@@ -162,7 +78,7 @@ describe("outbox role state machine — unresolved / leader / follower / shutdow
 
 		s.attachTransport(transport)
 		s.start()
-		await tick()
+		await settle()
 		vi.clearAllMocks()
 
 		s.cancel()
@@ -171,8 +87,8 @@ describe("outbox role state machine — unresolved / leader / follower / shutdow
 		expect(transport.close).toHaveBeenCalledTimes(1)
 
 		// A forward landing after the terminal shutdown is ignored — no re-queue, no send.
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
+		await settle()
 
 		expect(getStore()["chat-a-a-a"]).toBeUndefined()
 		expect(sendChatMessage).not.toHaveBeenCalled()
@@ -182,7 +98,7 @@ describe("outbox role state machine — unresolved / leader / follower / shutdow
 		const s = new Sync()
 
 		s.start()
-		await tick()
+		await settle()
 		s.cancel()
 		kvSetJson.mockClear()
 
@@ -202,7 +118,7 @@ describe("committed-id ledger — a late re-forward of a committed send is dropp
 
 		s.attachTransport(transport)
 		s.start()
-		await tick()
+		await settle()
 
 		return { s, transport }
 	}
@@ -211,8 +127,8 @@ describe("committed-id ledger — a late re-forward of a committed send is dropp
 		const { s } = await startedLeader()
 		const message = optimistic("chat-a-a-a", "inf-dup-1-1", 500n)
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message })
+		await settle()
 
 		// First forward: committed once, then dequeued.
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
@@ -221,8 +137,8 @@ describe("committed-id ledger — a late re-forward of a committed send is dropp
 		sendChatMessage.mockClear()
 
 		// A surviving follower re-forwards the SAME id on a takeover — it was already committed, so drop it.
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message })
+		await settle()
 
 		expect(sendChatMessage).not.toHaveBeenCalled()
 		expect(inflightIds("chat-a-a-a")).toEqual([])
@@ -231,12 +147,12 @@ describe("committed-id ledger — a late re-forward of a committed send is dropp
 	it("still ingests a genuinely-new id after a committed one", async () => {
 		const { s } = await startedLeader()
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 500n) })
+		await settle()
 		sendChatMessage.mockClear()
 
-		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-2-2-2", 600n) })
-		await tick()
+		s.ingestRemoteEnqueue({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-2-2-2", 600n) })
+		await settle()
 
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
 	})
@@ -317,7 +233,7 @@ describe("outbox transport — payloads cross as structured clones", () => {
 				resolve(ev.data)
 			}
 		})
-		const forward: RemoteChatEnqueue = { chat: makeChat("c1"), message: optimistic("c1", "i1", 5n) }
+		const forward: RemoteChatEnqueue = { chat: outboxChat("c1"), message: optimistic("c1", "i1", 5n) }
 
 		makeOutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>(sender).sendEnqueue(forward)
 
@@ -383,17 +299,19 @@ describe("routeOutboxMessage — role-routed dispatch of the shared kinds", () =
 			executeNow: vi.fn(),
 			broadcastState: vi.fn(),
 			applyLeaderState: vi.fn(),
-			resendUnacked: vi.fn()
+			resendUnacked: vi.fn(),
+			applyLeaderFailed: vi.fn()
 		}
 	}
 
-	const forward: RemoteChatEnqueue = { chat: makeChat("c1"), message: optimistic("c1", "i1", 5n) }
+	const forward: RemoteChatEnqueue = { chat: outboxChat("c1"), message: optimistic("c1", "i1", 5n) }
 	const all: OutboxChannelMsg[] = [
 		{ kind: "enqueue", payload: forward },
 		{ kind: "executeNow" },
 		{ kind: "stateRequest" },
 		{ kind: "state", payload: {} },
 		{ kind: "leaderHello" },
+		{ kind: "failed", payload: "dropped" },
 		{ kind: "drop", id: "n1" }
 	]
 
@@ -409,6 +327,7 @@ describe("routeOutboxMessage — role-routed dispatch of the shared kinds", () =
 		expect(t.broadcastState).toHaveBeenCalledTimes(1)
 		expect(t.applyLeaderState).not.toHaveBeenCalled()
 		expect(t.resendUnacked).not.toHaveBeenCalled()
+		expect(t.applyLeaderFailed).not.toHaveBeenCalled()
 	})
 
 	it("any other role acts on leader broadcasts only", () => {
@@ -424,6 +343,7 @@ describe("routeOutboxMessage — role-routed dispatch of the shared kinds", () =
 			expect(t.broadcastState).not.toHaveBeenCalled()
 			expect(t.applyLeaderState).toHaveBeenCalledWith({})
 			expect(t.resendUnacked).toHaveBeenCalledTimes(1)
+			expect(t.applyLeaderFailed).toHaveBeenCalledWith("dropped")
 		}
 	})
 

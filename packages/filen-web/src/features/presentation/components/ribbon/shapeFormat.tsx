@@ -1,9 +1,7 @@
-import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { PaintBucketIcon, PenLineIcon } from "lucide-react"
 import { oneStep, type DeckOp, type FillProps, type LineProps, type SlideRef } from "@filen/office/core/presentation"
 import { selectedShapes, useShapeSelection, type SlideShape } from "@filen/office/react/presentation"
-import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { DocxColorGrid } from "@/features/office/components/officeColorGrid"
 import { STANDARD_SWATCHES, keepFocus } from "@/features/office/lib/officeControls"
@@ -12,7 +10,8 @@ import { sizeGroup } from "@/features/presentation/components/ribbon/sizeControl
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 
 // The Shape Format tab: the fill and the outline (colour and weight) of the selected shapes, one op for all of them,
-// and their size.
+// and their size. An outline colour or weight pick changes that field of each shape's line and keeps the rest (its
+// weight or colour, dash, caps, joins and arrowheads).
 // Colours are sRGB, which both formats hold as they are (ODF graphic properties take no theme colours).
 
 const BUTTON = 30
@@ -45,6 +44,11 @@ function propsOp(
 	props: { fill?: FillProps | "none"; ln?: LineProps | "none" }
 ): DeckOp | undefined {
 	return oneStep(ids.map(id => ({ family: "shape", kind: "setProps", target: { slide, id }, props }) as const))[0]
+}
+
+// One patchLine per shape, one step: each shape's own line with `line`'s fields replaced.
+function lineOp(slide: SlideRef, ids: readonly number[], line: LineProps): DeckOp | undefined {
+	return oneStep(ids.map(id => ({ family: "shape", kind: "patchLine", target: { slide, id }, line }) as const))[0]
 }
 
 function FillControl({ editor }: { editor: PresentationRibbonEditor }) {
@@ -81,11 +85,7 @@ function FillControl({ editor }: { editor: PresentationRibbonEditor }) {
 function OutlineControl({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const { slide, ids } = useFormatTargets(editor)
-	const [weight, setWeight] = useState<number>(1)
-	const [rgb, setRgb] = useState("000000")
-	const apply = (ln: LineProps | "none"): void => {
-		const op = slide === undefined ? undefined : propsOp(slide, ids, { ln })
-
+	const send = (op: DeckOp | undefined): void => {
 		if (op !== undefined) void editor.command(op)
 	}
 
@@ -106,14 +106,9 @@ function OutlineControl({ editor }: { editor: PresentationRibbonEditor }) {
 						onPick={swatch => {
 							close()
 
-							if (swatch === null) {
-								apply("none")
+							if (slide === undefined) return
 
-								return
-							}
-
-							setRgb(swatch.rgb)
-							apply({ w: Math.round(weight * EMU_PER_PT), fill: solid(swatch.rgb) })
+							send(swatch === null ? propsOp(slide, ids, { ln: "none" }) : lineOp(slide, ids, { fill: solid(swatch.rgb) }))
 						}}
 					/>
 					<p className="text-xs text-muted-foreground">{t("previewPptxShapeOutlineWeight")}</p>
@@ -127,13 +122,12 @@ function OutlineControl({ editor }: { editor: PresentationRibbonEditor }) {
 								key={points}
 								variant="ghost"
 								size="sm"
-								aria-pressed={points === weight}
-								className={cn("justify-start text-xs", points === weight && "bg-accent")}
+								className="justify-start text-xs"
 								onMouseDown={keepFocus}
 								onClick={() => {
 									close()
-									setWeight(points)
-									apply({ w: Math.round(points * EMU_PER_PT), fill: solid(rgb) })
+
+									if (slide !== undefined) send(lineOp(slide, ids, { w: Math.round(points * EMU_PER_PT) }))
 								}}
 							>
 								{t("previewPptxShapeOutlinePoints", { points })}

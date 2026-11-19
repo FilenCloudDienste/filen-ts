@@ -1,5 +1,5 @@
 import type { DocxPdfErrorReason, DocxPdfExportReport, DocxPdfProgress } from "@filen/office/dom/docx/pdfClient"
-import { fileStem } from "@/features/spreadsheet/save/sheetSave.logic"
+import { fileStem } from "@filen/shared"
 import type { PreviewKey } from "@/lib/i18n"
 
 // Download as PDF, the parts without a DOM: the file name, what the progress toast says, and what the outcome

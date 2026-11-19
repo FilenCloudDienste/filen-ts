@@ -236,9 +236,12 @@ export const archive = {
 	archiveAfterwardsDeleteArchiveHint: "Once everything is extracted and checked. It will not be in the trash.",
 	/** Confirmation before a job that deletes its originals permanently — title */
 	archiveDeleteConfirmTitle: "Delete permanently?",
+	/** Compress delete confirmation — body for a single selected item */
+	archiveDeleteConfirmBodyCompressSingle:
+		"After the archive is saved it is downloaded again and checked; only then is the original deleted permanently. It will not be in the trash.",
 	/** Compress delete confirmation — body; {{count}} = items selected; singular */
 	archiveDeleteConfirmBodyCompress_one:
-		"After the archive is saved it is downloaded again and checked; only then is the original deleted permanently. It will not be in the trash.",
+		"After the archive is saved it is downloaded again and checked; only then is the {{count}} original deleted permanently. It will not be in the trash.",
 	/** Compress delete confirmation — body; {{count}} = items selected; plural */
 	archiveDeleteConfirmBodyCompress_other:
 		"After the archive is saved it is downloaded again and checked; only then are the {{count}} originals deleted permanently. They will not be in the trash.",
@@ -307,8 +310,10 @@ export const archive = {
 	archivePasswordRequiredBody: "“{{name}}” is encrypted. Enter its password to extract it.",
 	/** Password prompt — body after a wrong password; {{name}} = the archive's name */
 	archiveWrongPasswordBody: "That password didn't open “{{name}}”. Try again.",
+	/** Password prompt — switch trying the same password on the one other archive waiting for one */
+	archivePasswordApplyAllSingle: "Also try it for the other archive waiting for a password",
 	/** Password prompt — switch trying the same password on the other archives waiting for one; {{count}} = how many; singular */
-	archivePasswordApplyAll_one: "Also try it for the other archive waiting for a password",
+	archivePasswordApplyAll_one: "Also try it for the {{count}} other archive waiting for a password",
 	/** Password prompt — switch trying the same password on the other archives waiting for one; {{count}} = how many; plural */
 	archivePasswordApplyAll_other: "Also try it for the {{count}} other archives waiting for a password",
 	/** Password prompt — submit button extracting again with the password */

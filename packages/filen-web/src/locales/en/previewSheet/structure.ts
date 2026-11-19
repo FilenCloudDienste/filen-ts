@@ -2,13 +2,17 @@
 // sheet tabs' menu and protection. Spread into preview.ts; same catalog rules.
 export const previewSheetStructure = {
 	/** Spreadsheet grid menu — hides the selected rows */
-	previewSheetHideRows_one: "Hide row",
+	previewSheetHideRowsSingle: "Hide row",
+	/** Spreadsheet grid menu — hides the selected rows */
+	previewSheetHideRows_one: "Hide {{count}} row",
 	/** Spreadsheet grid menu — hides the selected rows */
 	previewSheetHideRows_other: "Hide {{count}} rows",
 	/** Spreadsheet grid menu — shows again the hidden rows in and next to the selection */
 	previewSheetUnhideRows: "Unhide rows",
 	/** Spreadsheet grid menu — hides the selected columns */
-	previewSheetHideColumns_one: "Hide column",
+	previewSheetHideColumnsSingle: "Hide column",
+	/** Spreadsheet grid menu — hides the selected columns */
+	previewSheetHideColumns_one: "Hide {{count}} column",
 	/** Spreadsheet grid menu — hides the selected columns */
 	previewSheetHideColumns_other: "Hide {{count}} columns",
 	/** Spreadsheet grid menu — shows again the hidden columns in and next to the selection */

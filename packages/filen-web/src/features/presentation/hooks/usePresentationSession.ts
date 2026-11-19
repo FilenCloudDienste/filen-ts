@@ -192,6 +192,13 @@ export function refusalToTell(refusal: PresentationRefusal): boolean {
 	return refusal !== "closed"
 }
 
+// The detail the engine names a refusal by (which shape blocked it): English, for the log and bug reports, never shown.
+function logRefusalDetail(what: string, result: Extract<CommandResult, { ok: false }>): void {
+	if (result.detail !== undefined) {
+		log.info("presentation", `${what} was refused`, { refusal: result.refusal, detail: result.detail })
+	}
+}
+
 export function refusalKey(refusal: PresentationRefusal): PreviewKey {
 	return REFUSAL_KEYS[refusal] ?? "previewPptxEditorRefused"
 }
@@ -398,8 +405,12 @@ export function usePresentationSession({
 			}
 		)
 
-		if (!result.ok && refusalToTell(result.refusal)) {
-			toast.error(t(refusalKey(result.refusal)))
+		if (!result.ok) {
+			logRefusalDetail("a command", result)
+
+			if (refusalToTell(result.refusal)) {
+				toast.error(t(refusalKey(result.refusal)))
+			}
 		}
 
 		return result
@@ -444,6 +455,7 @@ export function usePresentationSession({
 		void stepped
 			.then(result => {
 				if (!result.ok) {
+					logRefusalDetail(direction, result)
 					toast.error(t(refusalKey(result.refusal)))
 				}
 			})

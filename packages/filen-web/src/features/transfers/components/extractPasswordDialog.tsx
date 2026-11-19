@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { useShallow } from "zustand/shallow"
 import { rerunExtractWithPassword } from "@/features/drive/lib/archiveJobs"
 import { ARCHIVE_PASSWORD_MAX_CHARS, archivePasswordProblem } from "@/features/drive/lib/archivePassword"
@@ -144,7 +145,9 @@ function ExtractPasswordForm({ prompt, open }: { prompt: PasswordPrompt; open: b
 				{others > 0 ? (
 					<Field orientation="horizontal">
 						<FieldContent>
-							<FieldLabel htmlFor={`${passwordId}-all`}>{t("archivePasswordApplyAll", { count: others })}</FieldLabel>
+							<FieldLabel htmlFor={`${passwordId}-all`}>
+								{t(singleOrCountKey(others, "archivePasswordApplyAllSingle", "archivePasswordApplyAll"), { count: others })}
+							</FieldLabel>
 						</FieldContent>
 						<Switch
 							id={`${passwordId}-all`}

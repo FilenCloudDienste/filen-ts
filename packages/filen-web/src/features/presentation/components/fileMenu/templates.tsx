@@ -12,6 +12,7 @@ import { takenNamesInDirectory } from "@/features/drive/lib/nameTaken"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { usePreviewReplace } from "@/features/preview/lib/previewReplace"
 import type { PresentationFileMenuEntryProps } from "@/features/presentation/components/fileMenu/save"
+import { layoutNames } from "@/features/presentation/components/deckChrome.logic"
 import { browserLanguage } from "@/features/spreadsheet/formulaBar/sheetLocale"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { log } from "@/lib/log"
@@ -41,7 +42,7 @@ export function PresentationTemplatesEntries({ context }: PresentationFileMenuEn
 			const parent = normalizeParentUuid(base.data.parent, currentRootUuid())
 			const taken = await takenNamesInDirectory(parent)
 			const name = freeOfficeFileName(t("drive:driveNewPptxUntitled"), kind, taken)
-			const bytes = await officeFileBytes(kind, { locale: browserLanguage(), sheetName: "" })
+			const bytes = await officeFileBytes(kind, { locale: browserLanguage(), sheetName: "", layoutNames: layoutNames(t) })
 			const outcome = await runCreateFile(
 				{
 					uploadFileBytes: (parentUuid, data, uploadName, mime) => sdkApi.uploadFileBytes(parentUuid, data, uploadName, mime),

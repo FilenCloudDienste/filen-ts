@@ -9,6 +9,7 @@ import {
 import type { PresentationConnection } from "@filen/office/react/presentation"
 import PresentationWorker from "@/features/presentation/workers/presentation.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { officeChartText } from "@/features/office/lib/chartText"
 
 // The page's side of the presentation workers (the package, model, text layout and rendering all live there): one
 // worker per open deck, and a closed deck's worker kept for a minute for the next one, which then skips start-up and
@@ -46,14 +47,14 @@ function presentationWorker(): PresentationWorkerLike {
 export const presentationPool: PresentationWorkerPool = presentationWorkerPool(presentationWorker, PRESENTATION_WORKER_IDLE_MS)
 
 // Opens `source` on a pooled worker, as the viewer's store asks (once per open): the session, the password answer,
-// and the session's end.
+// and the session's end. Its charts name what the file leaves unnamed in the app's language.
 export function connectPresentation(
 	pool: PresentationWorkerPool,
 	source: SourceSpec,
 	listener: (event: PresentationEvent) => void,
 	options: PresentationOpenOptions
 ): PresentationConnection {
-	const client = pool.open(source, options, listener)
+	const client = pool.open(source, { ...options, chartText: options.chartText ?? officeChartText() }, listener)
 
 	return {
 		session: client,

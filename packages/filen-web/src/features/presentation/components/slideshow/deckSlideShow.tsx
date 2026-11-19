@@ -157,6 +157,8 @@ export function DeckSlideShow({
 				onEnd={onEnd}
 				label={t("previewPptxShowLabel")}
 				endLabel={t("previewPptxShowEnd")}
+				blackLabel={t("previewPptxPresenterBlack")}
+				whiteLabel={t("previewPptxPresenterWhite")}
 				slideLabel={(slide, total) => t("previewPptxSlideLabel", { current: slide + 1, total })}
 				actionLabel={(action, layer) => actionLabel(t, action, layer)}
 				triggerLabel={layer => {

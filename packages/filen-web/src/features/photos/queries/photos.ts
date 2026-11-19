@@ -21,6 +21,8 @@ import { mergePhotosByCaptureDesc, sortPhotosByCaptureDesc, type PhotoItem } fro
 import { outermostOfRoots, useDirectoryRootChains } from "@/lib/directoryRoots"
 import { photoFolderPaths } from "@/features/photos/lib/search"
 import { isOwnSave } from "@/features/preview/lib/ownSaves"
+import { shouldResetRootOnError } from "@/features/photos/lib/root"
+import { asErrorDTO } from "@/lib/sdk/errors"
 
 // Owns the photos query-key namespace (["photos", …], per client.ts's [domain, entity, params?]
 // taxonomy) — separate from ["drive", "listing", …] because a local mutation (favorite/trash/rename)
@@ -233,9 +235,29 @@ export interface PhotosTimelineResult {
 	// The roots listed: the configured ones minus any another holds (resolved from their chains, only with two roots
 	// or more), so no directory is walked twice. Empty until known.
 	listedRoots: readonly string[]
-	// Roots whose listing failed (others may still have listed).
-	failures: readonly { rootUuid: string; error: unknown }[]
+	// Roots whose listing failed (others may still have listed); `held` when a listing read earlier still shows.
+	failures: readonly PhotosRootFailure[]
 	retry: () => void
+}
+
+export interface PhotosRootFailure {
+	rootUuid: string
+	error: unknown
+	held: boolean
+}
+
+// The roots whose photos are missing from a timeline that shows: failed with nothing held, and not gone (those
+// are removed from the library instead).
+export function unreadPhotosRootCount(failures: readonly PhotosRootFailure[], isOnline: boolean): number {
+	let count = 0
+
+	for (const failure of failures) {
+		if (!failure.held && !shouldResetRootOnError(asErrorDTO(failure.error), isOnline)) {
+			count++
+		}
+	}
+
+	return count
 }
 
 // Every root's listing (one recursive walk each), merged into the one timeline the grid shows. Pending until every
@@ -263,7 +285,7 @@ export function usePhotosTimeline(roots: readonly string[]): PhotosTimelineResul
 
 	const version = useSyncExternalStore(subscribeShownPhotos, shownPhotosVersion)
 	const listings: PhotosListing[] = []
-	const failures: { rootUuid: string; error: unknown }[] = []
+	const failures: PhotosRootFailure[] = []
 	let pending = false
 
 	for (let index = 0; index < results.length; index++) {
@@ -279,7 +301,7 @@ export function usePhotosTimeline(roots: readonly string[]): PhotosTimelineResul
 		}
 
 		if (result.status === "error") {
-			failures.push({ rootUuid, error: result.error })
+			failures.push({ rootUuid, error: result.error, held: result.data !== undefined })
 		} else if (result.data === undefined && result.fetchStatus !== "paused") {
 			pending = true
 		}

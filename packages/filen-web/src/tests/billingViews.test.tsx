@@ -8,17 +8,27 @@ import type { UserAccountSubs, UserAccountSubsInvoices, UserInfo } from "@filen/
 import type { AccountQuerySuccess } from "@/queries/account"
 import type { Pricing, PricingPlan } from "@/features/settings/lib/remoteConfig"
 
-const { pricingQuery, createCheckout, withdrawSubscription, downloadInvoice, cancelSubscription, markAccountStale, desktopBridge, toast } =
-	vi.hoisted(() => ({
-		pricingQuery: { current: {} as { data: Pricing | null | undefined; isStale: boolean; isFetching: boolean; refetch: () => void } },
-		createCheckout: vi.fn(),
-		withdrawSubscription: vi.fn(),
-		downloadInvoice: vi.fn(),
-		cancelSubscription: vi.fn(),
-		markAccountStale: vi.fn(),
-		desktopBridge: vi.fn<() => object | undefined>(() => undefined),
-		toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
-	}))
+const {
+	pricingQuery,
+	createCheckout,
+	createSubscription,
+	withdrawSubscription,
+	downloadInvoice,
+	cancelSubscription,
+	markAccountStale,
+	desktopBridge,
+	toast
+} = vi.hoisted(() => ({
+	pricingQuery: { current: {} as { data: Pricing | null | undefined; isStale: boolean; isFetching: boolean; refetch: () => void } },
+	createCheckout: vi.fn(),
+	createSubscription: vi.fn<(planId: number, method: string) => Promise<string>>(),
+	withdrawSubscription: vi.fn(),
+	downloadInvoice: vi.fn(),
+	cancelSubscription: vi.fn(),
+	markAccountStale: vi.fn(),
+	desktopBridge: vi.fn<() => object | undefined>(() => undefined),
+	toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+}))
 
 vi.mock("@/features/settings/lib/remoteConfig", () => ({ useRemotePricingQuery: () => pricingQuery.current }))
 vi.mock("@/features/settings/lib/billingActions", async () => ({
@@ -28,6 +38,8 @@ vi.mock("@/features/settings/lib/billingActions", async () => ({
 	downloadInvoice,
 	cancelSubscription
 }))
+// Only the checkout the real createCheckout asks for, in the test that runs it.
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createSubscription } }))
 vi.mock("@/queries/account", () => ({ markAccountStale, accountQueryUpdate: vi.fn() }))
 vi.mock("@/lib/desktop", () => ({ desktopBridge, desktopPlatform: () => undefined }))
 vi.mock("sonner", () => ({ toast }))
@@ -267,6 +279,44 @@ describe("PlansView", () => {
 
 		fireEvent.click(link)
 		expect(markAccountStale).toHaveBeenCalled()
+	})
+
+	it("brings the method menu back from a created checkout without creating the same one again", async () => {
+		vi.stubEnv("DEV", false)
+
+		const actual = await vi.importActual<typeof import("@/features/settings/lib/billingActions")>(
+			"@/features/settings/lib/billingActions"
+		)
+
+		actual.forgetCheckouts()
+		createCheckout.mockImplementation(actual.createCheckout)
+		createSubscription.mockResolvedValue("https://checkout.example/s")
+		renderPlans()
+
+		async function pick(method: string): Promise<void> {
+			await openMenu(screen.getByRole("button", { name: new RegExp(EN.settingsBillingBuy) }))
+			await act(async () => {
+				fireEvent.click(screen.getByRole("menuitem", { name: method }))
+				await Promise.resolve()
+			})
+			await settle()
+		}
+
+		await pick(EN.settingsBillingMethodPaypal)
+
+		expect(screen.getByRole("link", { name: new RegExp(EN.settingsBillingPayInvoice) })).toBeDefined()
+
+		fireEvent.click(screen.getByRole("button", { name: EN.settingsBillingChangePaymentMethod }))
+
+		expect(screen.queryByRole("link", { name: new RegExp(EN.settingsBillingPayInvoice) })).toBeNull()
+
+		await pick(EN.settingsBillingMethodPaypal)
+
+		expect(screen.getByRole("link", { name: new RegExp(EN.settingsBillingPayInvoice) }).getAttribute("href")).toBe(
+			"https://checkout.example/s"
+		)
+		expect(createSubscription).toHaveBeenCalledExactlyOnceWith(27, "paypal")
+		actual.forgetCheckouts()
 	})
 
 	it("asks for a country first and names the VAT reason", async () => {

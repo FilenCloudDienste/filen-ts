@@ -62,10 +62,10 @@ export const settingsStorage = {
 	storageVideosBody:
 		"Every open Filen tab reloads. Your video library is then indexed again, which reads its directories and parts of your videos, and artwork is made again. Watch progress is kept.",
 	/** Settings > Advanced, local data group — confirm dialog body for the Music row: track details are read again when
-	 *  shown, and tracks are analysed again for smooth transitions (blending each track into the next), which downloads
+	 *  shown, and tracks are analyzed again for smooth transitions (blending each track into the next), which downloads
 	 *  parts of them again */
 	storageMusicBody:
-		"Track details are read from your audio files again the next time they are shown, and tracks are analysed again for smooth transitions, which downloads parts of them.",
+		"Track details are read from your audio files again the next time they are shown, and tracks are analyzed again for smooth transitions, which downloads parts of them.",
 	/** Settings > Advanced, local data group — confirm dialog body for cached lists and content: every open tab reloads and refetches */
 	storageQueryCacheBody: "Every open Filen tab reloads, and lists and content are downloaded again as you open them.",
 	/** Settings > Advanced, local data group — confirm dialog body for the desktop browser cache */

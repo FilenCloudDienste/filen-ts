@@ -90,7 +90,10 @@ const DOWNLOAD_AS_GROUPS: readonly (readonly DownloadAsTarget[])[] = [["pdf"], [
 // What format an exportable file is in, by its extension; null for one named otherwise (opened by its content), which
 // is offered the PDF only: what it converts to is not known before it is read. A presentation is always named as one.
 export function downloadAsFormat(item: DriveItem): DownloadAsFormat | null {
-	return DOWNLOAD_AS_FORMATS[extensionOf(driveItemName(item))] ?? null
+	const extension = extensionOf(driveItemName(item))
+
+	// Own rows only: a name such as "a.constructor" is not a format.
+	return Object.hasOwn(DOWNLOAD_AS_FORMATS, extension) ? (DOWNLOAD_AS_FORMATS[extension] ?? null) : null
 }
 
 // What a file is exported from; null for anything the viewers do not open: a directory, an undecryptable file, a

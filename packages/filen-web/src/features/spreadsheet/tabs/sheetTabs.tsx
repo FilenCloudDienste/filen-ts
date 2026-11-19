@@ -5,6 +5,7 @@ import { CheckIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { newSheetName, type SheetCommand, type SheetId, type SheetSummary } from "@filen/office/core/sheet"
 import type { SheetGridState } from "@filen/office/react/sheet"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
 	ContextMenu,
@@ -34,6 +35,7 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 import { TAB_COLORS, addSheetAndShow, cssColor, moveTarget, nextShown } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { useProtection } from "@/features/spreadsheet/tabs/useProtection"
 import { useSheetTabRequests } from "@/features/spreadsheet/tabs/tabRequests"
+import { workbookStructureLocks } from "@/features/spreadsheet/lib/modelStore"
 
 // One menu's parts: the tab's context menu (right click, long press) and its ⋯ button share the items.
 interface MenuParts {
@@ -60,10 +62,11 @@ const DROPDOWN_PARTS: MenuParts = {
 	SubContent: DropdownMenuSubContent
 }
 
-// Whether the workbook's structure is protected now: asked of the session after every change (one small query).
+// Whether the workbook's structure is protected now: asked of the session after every change (one small query, here
+// only; the ribbon reads the answer).
 function useStructureLocked(grid: SheetGridState, wanted: boolean): boolean {
 	const { model, sheet, state } = grid
-	const [locked, setLocked] = useState<{ version: number; locked: boolean }>({ version: -1, locked: false })
+	const locked = workbookStructureLocks.useValue(model)
 
 	useEffect(() => {
 		if (!wanted) {
@@ -75,7 +78,7 @@ function useStructureLocked(grid: SheetGridState, wanted: boolean): boolean {
 		model.session.query("commandState", { sheet, ranges: [], types: ["sheet.add"] }).then(
 			result => {
 				if (live) {
-					setLocked({ version: state.version, locked: result.reasons[0] === "protectedWorkbook" })
+					workbookStructureLocks.set(model, result.reasons[0] === "protectedWorkbook")
 				}
 			},
 			() => undefined
@@ -86,7 +89,7 @@ function useStructureLocked(grid: SheetGridState, wanted: boolean): boolean {
 		}
 	}, [model, sheet, state.version, wanted])
 
-	return wanted && locked.locked
+	return wanted && locked
 }
 
 // The workbook's sheets as tabs along the bottom edge (hidden ones left out), each with its colour. Arrow keys move
@@ -173,31 +176,44 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 		run({ type: "sheet.state", sheet, state: "hidden" })
 	}
 
+	// A sheet change the tab's menu would show disabled: said, as the session says a refusal, not dropped silently.
+	function structureAllowed(): boolean {
+		if (locked) toast.error(t("previewSheetProtectedWorkbook"), { id: "protectedWorkbook" })
+
+		return structure
+	}
+
+	function moreThanOneShown(): boolean {
+		if (shown.length < 2) toast.error(t("previewSheetLastSheet"), { id: "lastSheet" })
+
+		return shown.length > 1
+	}
+
 	// The ribbon's and the keyboard's sheet commands, for the sheet on show, as its tab's menu runs them and behind its gating.
 	useSheetTabRequests(model, request => {
 		const sheetProtected = (model.layout(grid.sheet)?.protection ?? null) !== null
 
 		switch (request) {
 			case "rename":
-				if (structure) setRenaming(grid.sheet)
+				if (structureAllowed()) setRenaming(grid.sheet)
 				break
 			case "delete":
-				if (structure && shown.length > 1) setDeleting(grid.sheet)
+				if (structureAllowed() && moreThanOneShown()) setDeleting(grid.sheet)
 				break
 			case "duplicate":
-				if (structure) duplicate(grid.sheet)
+				if (structureAllowed()) duplicate(grid.sheet)
 				break
 			case "moveLeft":
-				if (structure) moveBy(grid.sheet, -1)
+				if (structureAllowed()) moveBy(grid.sheet, -1)
 				break
 			case "moveRight":
-				if (structure) moveBy(grid.sheet, 1)
+				if (structureAllowed()) moveBy(grid.sheet, 1)
 				break
 			case "hide":
-				if (structure && shown.length > 1) hide(grid.sheet)
+				if (structureAllowed() && moreThanOneShown()) hide(grid.sheet)
 				break
 			case "unhide":
-				if (structure && hidden.length > 0) startUnhide()
+				if (structureAllowed() && hidden.length > 0) startUnhide()
 				break
 			case "protectSheet":
 				if (!canEdit) break

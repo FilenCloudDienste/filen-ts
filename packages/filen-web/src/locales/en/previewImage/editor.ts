@@ -9,7 +9,7 @@ export const previewImageEditor = {
 	previewImageEditLoadFailed: "This image couldn't be opened for editing.",
 	/** Image editor — accessible name of the panel holding the editing tools (tabs Adjust, Crop, Filters, Markup) */
 	previewImageEditTools: "Editing tools",
-	/** Image editor — side panel tab with the light and colour sliders */
+	/** Image editor — side panel tab with the light and color sliders */
 	previewImageEditTabAdjust: "Adjust",
 	/** Image editor — side panel tab with cropping, rotating, straightening and flipping */
 	previewImageEditTabCrop: "Crop",
@@ -33,10 +33,10 @@ export const previewImageEditor = {
 	/** Adjust tab — heading of the collapsible group of sliders for exposure, brightness, contrast, highlights and shadows */
 	previewImageEditSectionLight: "Light",
 	/** Adjust tab — heading of the collapsible group of sliders for warmth, tint, saturation and vibrance */
-	previewImageEditSectionColour: "Colour",
+	previewImageEditSectionColour: "Color",
 	/** Adjust tab — heading of the collapsible group of sliders for sharpness and vignette */
 	previewImageEditSectionDetail: "Detail",
-	/** Adjust tab — button putting every slider of one group back to zero; {{section}} is the group's heading (Light, Colour, Detail) */
+	/** Adjust tab — button putting every slider of one group back to zero; {{section}} is the group's heading (Light, Color, Detail) */
 	previewImageEditResetSection: "Reset {{section}}",
 
 	/** Adjust tab — slider: overall exposure of the image */
@@ -49,13 +49,13 @@ export const previewImageEditor = {
 	previewImageEditHighlights: "Highlights",
 	/** Adjust tab — slider: the brightness of the dark parts of the image */
 	previewImageEditShadows: "Shadows",
-	/** Adjust tab — slider: colour temperature (towards warm orange or cool blue) */
+	/** Adjust tab — slider: color temperature (towards warm orange or cool blue) */
 	previewImageEditWarmth: "Warmth",
-	/** Adjust tab — slider: colour tint (towards green or magenta) */
+	/** Adjust tab — slider: color tint (towards green or magenta) */
 	previewImageEditTint: "Tint",
-	/** Adjust tab — slider: colour saturation */
+	/** Adjust tab — slider: color saturation */
 	previewImageEditSaturation: "Saturation",
-	/** Adjust tab — slider: boosts muted colours more than already vivid ones */
+	/** Adjust tab — slider: boosts muted colors more than already vivid ones */
 	previewImageEditVibrance: "Vibrance",
 	/** Adjust tab — slider: sharpening */
 	previewImageEditSharpness: "Sharpness",
@@ -80,7 +80,7 @@ export const previewImageEditor = {
 	previewImageEditFlipHorizontal: "Flip horizontally",
 	/** Crop tab — button mirroring the image top to bottom */
 	previewImageEditFlipVertical: "Flip vertically",
-	/** Crop tab — button undoing the crop, turns, flips and straightening (the colours and markup stay) */
+	/** Crop tab — button undoing the crop, turns, flips and straightening (the colors and markup stay) */
 	previewImageEditResetCrop: "Reset",
 	/** Crop tab — accessible name of the crop frame drawn over the image (dragged to move it) */
 	previewImageEditCropArea: "Crop area",
@@ -103,7 +103,7 @@ export const previewImageEditor = {
 
 	/** Filters tab — the choice with no filter applied */
 	previewImageEditFilterNone: "Original",
-	/** Filters tab — filter preset: stronger, richer colours */
+	/** Filters tab — filter preset: stronger, richer colors */
 	previewImageEditFilterVivid: "Vivid",
 	/** Filters tab — filter preset: warmer, golden tones */
 	previewImageEditFilterWarm: "Warm",
@@ -113,9 +113,9 @@ export const previewImageEditor = {
 	previewImageEditFilterMono: "Mono",
 	/** Filters tab — filter preset: high-contrast black and white */
 	previewImageEditFilterNoir: "Noir",
-	/** Filters tab — filter preset: washed-out, faded colours */
+	/** Filters tab — filter preset: washed-out, faded colors */
 	previewImageEditFilterFade: "Fade",
-	/** Filters tab — filter preset: crisp, slightly metallic colours */
+	/** Filters tab — filter preset: crisp, slightly metallic colors */
 	previewImageEditFilterChrome: "Chrome",
 	/** Filters tab — filter preset: deep contrast and darker shadows */
 	previewImageEditFilterDramatic: "Dramatic",
@@ -132,8 +132,8 @@ export const previewImageEditor = {
 	previewImageEditText: "Text",
 	/** Markup tab — tool: clicking a drawing or text removes it */
 	previewImageEditEraser: "Eraser",
-	/** Markup tab — label of the group of colours */
-	previewImageEditColor: "Colour",
+	/** Markup tab — label of the group of colors */
+	previewImageEditColor: "Color",
 	/** Markup tab — label of the group of stroke widths (thin, medium, thick) */
 	previewImageEditWidth: "Size",
 	/** Markup tab — stroke width or text size: small */
@@ -142,21 +142,21 @@ export const previewImageEditor = {
 	previewImageEditWidthMedium: "Medium",
 	/** Markup tab — stroke width or text size: large */
 	previewImageEditWidthThick: "Large",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorRed: "Red",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorOrange: "Orange",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorYellow: "Yellow",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorGreen: "Green",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorBlue: "Blue",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorPurple: "Purple",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorBlack: "Black",
-	/** Markup tab — colour swatch */
+	/** Markup tab — color swatch */
 	previewImageEditColorWhite: "White",
 	/** Markup — accessible name of the field where text placed on the image is typed */
 	previewImageEditTextField: "Text on the image",

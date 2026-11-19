@@ -1,6 +1,14 @@
 import type { Chat } from "@filen/sdk-rs"
 import { chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
-import { compareChats, isListedChat, isOneOnOneWithBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import {
+	compareChats,
+	isListedChat,
+	isOneOnOneWithBlocked,
+	matchesNameSearch,
+	nameSearchKey,
+	EMPTY_BLOCKED_USERS,
+	type BlockedUsers
+} from "@filen/shared"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 import { isGroupChat } from "@/features/chats/components/thread/thread.logic"
 
@@ -40,7 +48,7 @@ export function filterChats(
 ): Chat[] {
 	// filter() copies, so the sort never touches the caller's array
 	const sorted = chats.filter(chat => isListedChat(chat, currentUserId)).sort(compareChats)
-	const term = search.trim().toLowerCase()
+	const term = nameSearchKey(search)
 
 	if (term.length === 0) {
 		return sorted
@@ -51,12 +59,16 @@ export function filterChats(
 			return false
 		}
 
-		if (currentUserId !== undefined && chatDisplayName(chat, currentUserId, soloFallback).toLowerCase().includes(term)) {
+		if (currentUserId !== undefined && matchesNameSearch(chatDisplayName(chat, currentUserId, soloFallback), term)) {
 			return true
 		}
 
-		if (!isLastMessageFromBlocked(chat, blocked) && chatMessagePreview(chat)?.toLowerCase().includes(term) === true) {
-			return true
+		if (!isLastMessageFromBlocked(chat, blocked)) {
+			const preview = chatMessagePreview(chat)
+
+			if (preview !== null && matchesNameSearch(preview, term)) {
+				return true
+			}
 		}
 
 		return chat.participants.some(p => matchesContactSearch(p, term))

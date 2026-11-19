@@ -187,18 +187,24 @@ export const audio = {
 	tracksAddedToast_other: "Added {{count}} tracks",
 
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
-	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one
 	// track, `_other` counts them; a partial result counts the ones that succeeded.
 	/** Activity toast — moving a track within a playlist by drag running; one item named ({{name}}) */
-	playlistTrackMoveRunning_one: "Moving {{name}}",
+	playlistTrackMoveRunningNamed: "Moving {{name}}",
+	/** Activity toast — moving a track within a playlist by drag running; {{count}} items */
+	playlistTrackMoveRunning_one: "Moving {{count}} track",
 	/** Activity toast — moving a track within a playlist by drag running; {{count}} items */
 	playlistTrackMoveRunning_other: "Moving {{count}} tracks",
 	/** Activity toast — moving a track within a playlist by drag finished; one item named ({{name}}) */
-	playlistTrackMoveDone_one: "Moved {{name}}",
+	playlistTrackMoveDoneNamed: "Moved {{name}}",
+	/** Activity toast — moving a track within a playlist by drag finished; {{count}} items */
+	playlistTrackMoveDone_one: "Moved {{count}} track",
 	/** Activity toast — moving a track within a playlist by drag finished; {{count}} items */
 	playlistTrackMoveDone_other: "Moved {{count}} tracks",
 	/** Activity toast — moving a track within a playlist by drag failed for every item; one item named ({{name}}) */
-	playlistTrackMoveFailed_one: "Couldn't move {{name}}",
+	playlistTrackMoveFailedNamed: "Couldn't move {{name}}",
+	/** Activity toast — moving a track within a playlist by drag failed for every item; {{count}} items */
+	playlistTrackMoveFailed_one: "Couldn't move {{count}} track",
 	/** Activity toast — moving a track within a playlist by drag failed for every item; {{count}} items */
 	playlistTrackMoveFailed_other: "Couldn't move {{count}} tracks",
 	/** Activity toast — moving a track within a playlist by drag partly failed; {{count}} succeeded, {{failed}} failed */

@@ -12,7 +12,7 @@ export type DirectoryPicker = ReturnType<typeof useDirectoryPicker>
 // is the pick (the whole drive only when the dialog's switch says so); Filen's own `.filen` directory, which the
 // engine reserves, is hidden. The picker state lives in the dialog, so going back to this step keeps the path.
 export function RemoteDirectoryChooser({ picker, disabled }: { picker: DirectoryPicker; disabled: boolean }) {
-	const { t } = useTranslation("sync")
+	const { t } = useTranslation(["sync", "drive"])
 	const { pathStack, listingQuery, items, namesQuery, descend, goRoot, goTo } = picker
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const atDriveRoot = pathStack.length === 0
@@ -38,6 +38,7 @@ export function RemoteDirectoryChooser({ picker, disabled }: { picker: Directory
 			<PickerListShell
 				listingQuery={listingQuery}
 				noResults={filter.trim().length > 0}
+				filteredOutMessage={items.length > 0 ? t("drive:driveTreeMenuNoDirectories") : undefined}
 				count={filteredDirectories.length}
 				rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 				renderRow={index => {

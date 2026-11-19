@@ -26,10 +26,10 @@ export interface ArchiveToolbarProps {
 	shown: readonly ArchiveCrumb[]
 	// The levels between the root and `shown`, folded into "…".
 	hidden: readonly ArchiveCrumb[]
-	query: string
-	searchBoxRef: RefObject<HTMLDivElement | null>
 	onNavigate: (dir: number) => void
-	onQueryChange: (query: string) => void
+	// The search below the directory shown; left out where nothing is listed to search (an inner archive's gate, say).
+	search?: { query: string; onQueryChange: (query: string) => void } | undefined
+	searchBoxRef?: RefObject<HTMLDivElement | null> | undefined
 }
 
 function Crumb({ name, current, onClick }: { name: string; current: boolean; onClick: () => void }) {
@@ -59,7 +59,7 @@ function Separator() {
 const OUTER_VISIBLE_CRUMBS = 2
 
 // Where in the archive the browser is, and its search below there.
-export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBoxRef, onNavigate, onQueryChange }: ArchiveToolbarProps) {
+export function ArchiveToolbar({ outer, rootName, shown, hidden, onNavigate, search, searchBoxRef }: ArchiveToolbarProps) {
 	const { t } = useTranslation("preview")
 	const folded = outer.slice(0, Math.max(0, outer.length - OUTER_VISIBLE_CRUMBS))
 	const outerShown = outer.slice(folded.length)
@@ -171,17 +171,19 @@ export function ArchiveToolbar({ outer, rootName, shown, hidden, query, searchBo
 					</Fragment>
 				))}
 			</nav>
-			<div
-				ref={searchBoxRef}
-				className="w-full sm:w-64"
-			>
-				<ListFilterInput
-					value={query}
-					onChange={onQueryChange}
-					placeholder={t("previewArchiveSearchPlaceholder")}
-					ariaLabel={t("previewArchiveSearchPlaceholder")}
-				/>
-			</div>
+			{search === undefined ? null : (
+				<div
+					ref={searchBoxRef}
+					className="w-full sm:w-64"
+				>
+					<ListFilterInput
+						value={search.query}
+						onChange={search.onQueryChange}
+						placeholder={t("previewArchiveSearchPlaceholder")}
+						ariaLabel={t("previewArchiveSearchPlaceholder")}
+					/>
+				</div>
+			)}
 		</div>
 	)
 }

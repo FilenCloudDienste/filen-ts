@@ -18,3 +18,8 @@ export function sheetKindOf(extension: string, bytes: Uint8Array, typeSaysTsv: b
 export function isLegacySheetKind(kind: SheetFileKind): boolean {
 	return kind === "xls" || kind === "xlt"
 }
+
+// A delimited text file: opened in the text worker, never the workbook worker, and saved back as text.
+export function isTextSheetKind(kind: SheetFileKind): boolean {
+	return kind === "csv" || kind === "tsv" || kind === "tab"
+}

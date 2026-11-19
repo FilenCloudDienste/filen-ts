@@ -16,6 +16,7 @@ const { toasts } = vi.hoisted(() => ({ toasts: [] as string[] }))
 vi.mock("sonner", () => ({ toast: { error: (message: string) => toasts.push(message), success: () => undefined } }))
 
 const { SheetTabs } = await import("@/features/spreadsheet/tabs/sheetTabs")
+const { workbookStructureLocks } = await import("@/features/spreadsheet/lib/modelStore")
 const { insertSheetBefore } = await import("@/features/spreadsheet/tabs/sheetTabs.logic")
 const { requestSheetTab } = await import("@/features/spreadsheet/tabs/tabRequests")
 
@@ -315,10 +316,18 @@ describe("the keyboard's tab requests", () => {
 		})
 	})
 
-	it("does nothing while the workbook's structure is protected", async () => {
+	it("changes no sheet while the workbook's structure is protected, says why, and tells the ribbon it is locked", async () => {
 		const model = await opened()
+		const locks: boolean[] = []
+
+		function Reader() {
+			locks.push(workbookStructureLocks.useValue(model))
+
+			return null
+		}
 
 		show(model)
+		render(<Reader />)
 		request(model, "protectWorkbook")
 		fireEvent.click(await screen.findByRole("button", { name: label("previewSheetProtectAction") }))
 		await waitFor(async () => {
@@ -330,14 +339,40 @@ describe("the keyboard's tab requests", () => {
 			await new Promise(resolve => setTimeout(resolve, 50))
 		})
 
+		expect(locks.at(-1)).toBe(true)
+
+		toasts.length = 0
 		request(model, "duplicate")
 		request(model, "moveRight")
 		request(model, "hide")
+		request(model, "rename")
+		request(model, "delete")
 		await act(async () => {
 			await new Promise(resolve => setTimeout(resolve, 50))
 		})
 
 		expect(names(model)).toEqual(["One", "Two", "Three"])
+		expect(screen.queryByRole("dialog")).toBeNull()
+		expect(toasts).toHaveLength(5)
+		expect(toasts.every(message => label("previewSheetProtectedWorkbook").test(message))).toBe(true)
+	})
+
+	it("says a workbook needs a visible sheet when the ribbon deletes or hides its only one", async () => {
+		const model = await openGrid(await workbook([{ name: "Only", rows: [["a"]] }]), "xlsx")
+
+		show(model)
+		request(model, "delete")
+		request(model, "hide")
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 50))
+		})
+
+		expect(names(model)).toEqual(["Only"])
+		expect(screen.queryByRole("dialog")).toBeNull()
+		expect(toasts).toEqual([
+			expect.stringMatching(label("previewSheetLastSheet")),
+			expect.stringMatching(label("previewSheetLastSheet"))
+		])
 	})
 })
 

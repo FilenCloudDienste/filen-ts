@@ -2,10 +2,11 @@ import { territoryCurrency, type SheetLocale } from "@filen/office/core/sheet"
 import type { SheetShortcut } from "@filen/office/react/sheet"
 import { numFmtLocaleOf, quotedText, shortcutDateTimeCodes } from "@/features/spreadsheet/formulaBar/numFmtLocale"
 
-// The locale entries are typed in, from the browser's formatting locale (the core reads no Intl locale; the app
-// injects it): its decimal point and grouping, its date order, ";" between arguments where "," is the decimal
-// point, as Excel types formulas there, and the currency symbols text in formulas reads as a number with. Files keep
-// en-US syntax whatever it is. With it, numFmt: the patterns and names numbers and dates show in (numFmtLocale.ts).
+// The locale entries are typed in, from the regional format (Settings, Office; else the browser's locale; the core
+// reads no Intl locale, the app injects it): its decimal point and grouping, its date order, ";" between arguments
+// where "," is the decimal point, as Excel types formulas there, and the currency symbols text in formulas reads as a
+// number with. Files keep en-US syntax whatever it is. With it, numFmt: the patterns and names numbers and dates show
+// in (numFmtLocale.ts).
 // Built once per language: every grid, dialog and export shares the same object.
 const built = new Map<string, SheetLocale>()
 

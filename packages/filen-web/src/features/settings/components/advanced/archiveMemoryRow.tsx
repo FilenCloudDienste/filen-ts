@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { saveSetting } from "@/lib/saveSetting"
 import { useArchivePreferencesQuery } from "@/features/settings/queries/preferences"
 import {
 	setArchivePreferences,
@@ -47,16 +48,11 @@ function ArchiveMemoryRow() {
 	const inEffectMib = useInEffectMib()
 
 	// The restart note only for a value that was stored.
-	function apply(next: ArchivePreferences): void {
-		setArchivePreferences(next).then(
-			() => {
-				void query.refetch()
-				toast.info(t("settingsAdvancedRestartRequired"))
-			},
-			() => {
-				toast.error(t("settingsDocumentsSaveFailed"))
-			}
-		)
+	async function apply(next: ArchivePreferences): Promise<void> {
+		if (await saveSetting(() => setArchivePreferences(next))) {
+			void query.refetch()
+			toast.info(t("settingsAdvancedRestartRequired"))
+		}
 	}
 
 	const description: string[] = [
@@ -88,7 +84,7 @@ function ArchiveMemoryRow() {
 
 				// The select only renders once prefs loaded.
 				if (prefs !== undefined && size !== undefined) {
-					apply({ ...prefs, codecMemoryMib: size })
+					void apply({ ...prefs, codecMemoryMib: size })
 				}
 			}}
 		/>

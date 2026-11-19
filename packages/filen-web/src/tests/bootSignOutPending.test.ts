@@ -64,7 +64,7 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 vi.mock("@/lib/storage/adapter", () => ({
 	storage: () => Promise.resolve({}),
-	kvGetJson: () => Promise.resolve(null),
+	kvGetJson: (key: string) => Promise.resolve(kv.get(key) ?? null),
 	kvSetJson: (key: string, value: unknown) => {
 		kv.set(key, value)
 
@@ -97,6 +97,7 @@ import { bootSdk } from "@/lib/sdk/boot"
 import { persistSession } from "@/lib/sdk/session"
 import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
 import { useBootStore } from "@/stores/boot"
+import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 
 // kvClear itself, not keepKeymapsAcrossWipe around it, which reads kvEntriesJson first.
 const WIPES = [
@@ -154,6 +155,28 @@ describe("bootSdk after a sign-out cut short", () => {
 		expect(calls).not.toContain("resumeSession")
 		expect(readSignOutPending()).toBe(true)
 		expect(useBootStore.getState().phase).toBe("ready")
+	})
+
+	// The sign-in after it navigates without a reload: the signed-out account's tree map must not be in memory.
+	it("does not load the tree map a failed wipe left", async () => {
+		writeSignOutPending(true)
+		kv.set("drive.treeOpen.v1", { "dir-a": "root" })
+		useDirectoryTreeStore.setState({ open: {} })
+		kvClear.mockRejectedValueOnce(new Error("storage busy"))
+
+		await bootSdk()
+
+		expect(kv.has("drive.treeOpen.v1")).toBe(true)
+		expect(useDirectoryTreeStore.getState().open).toEqual({})
+	})
+
+	it("loads the tree map when no sign-out is pending", async () => {
+		kv.set("drive.treeOpen.v1", { "dir-a": "root" })
+		useDirectoryTreeStore.setState({ open: {} })
+
+		await bootSdk()
+
+		expect(useDirectoryTreeStore.getState().open).toEqual({ "dir-a": "root" })
 	})
 
 	// Without the sign-in finishing the sign-out, the next boot would wipe the new session or open signed out again.

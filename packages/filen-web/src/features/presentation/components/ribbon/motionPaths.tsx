@@ -269,8 +269,10 @@ export function PresentationMotionPaths({ editor, scale }: { editor: Presentatio
 			}}
 			onEdit={(node, path) => {
 				const view = views.find(candidate => candidate.node === node)
+				const op = view === undefined ? undefined : pathOp(slide, view, path)
 
-				if (view !== undefined) run(editor, pathOp(slide, view, path))
+				// The layer keeps showing its edit until this answers.
+				return op === undefined ? undefined : editor.command(op)
 			}}
 			onPoint={point => {
 				motionPaths.point(point)

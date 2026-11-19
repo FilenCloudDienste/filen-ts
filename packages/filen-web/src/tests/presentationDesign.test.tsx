@@ -39,6 +39,20 @@ vi.mock("@/lib/useElementSize", () => ({ useElementSize: () => ({ width: size.wi
 const SLIDES = [0, 1, 2].map(n => ({ ref: slideRef(256 + n), hidden: false }))
 const MASTER = slideRef(1)
 const LAYOUT = slideRef(2)
+// A Filen theme carries the layout names in the UI language, as the new slide layouts are named.
+const LAYOUT_NAMES = {
+	title: "Title Slide",
+	obj: "Title and Content",
+	secHead: "Section Header",
+	twoObj: "Two Content",
+	twoTxTwoObj: "Comparison",
+	titleOnly: "Title Only",
+	blank: "Blank",
+	objTx: "Content with Caption",
+	picTx: "Picture with Caption",
+	vertTx: "Title and Vertical Text",
+	vertTitleAndTx: "Vertical Title and Text"
+}
 const DESIGN: PresentationDesignInfo = {
 	themes: [
 		{
@@ -169,7 +183,7 @@ describe("Design tab", () => {
 			{
 				family: "design",
 				kind: "setTheme",
-				theme: { kind: "gallery", id: "slate", variant: 0 },
+				theme: { kind: "gallery", id: "slate", variant: 0, layoutNames: LAYOUT_NAMES },
 				slides: SLIDES.map(slide => slide.ref)
 			}
 		])
@@ -200,7 +214,7 @@ describe("Design tab", () => {
 			{
 				family: "design",
 				kind: "setTheme",
-				theme: { kind: "gallery", id: "slate", variant: 0 },
+				theme: { kind: "gallery", id: "slate", variant: 0, layoutNames: LAYOUT_NAMES },
 				slides: SLIDES.map(slide => slide.ref)
 			},
 			{ family: "design", kind: "setVariant", master: MASTER, variant: 1 }

@@ -127,7 +127,7 @@ describe("photos library", () => {
 
 		await loadPhotosLibrary()
 
-		expect(photosLibraryView()).toEqual({ roots: [], loaded: true, readOnly: false })
+		expect(photosLibraryView()).toEqual({ roots: [], loaded: true, readOnly: false, loadFailure: null })
 		expect(drive.uploads).toEqual([])
 	})
 
@@ -167,7 +167,7 @@ describe("photos library", () => {
 
 		await loadPhotosLibrary()
 
-		expect(photosLibraryView()).toEqual({ roots: ["legacy-root"], loaded: false, readOnly: false })
+		expect(photosLibraryView()).toEqual({ roots: ["legacy-root"], loaded: false, readOnly: false, loadFailure: null })
 		expect(drive.kv.has(LEGACY_KEY)).toBe(true)
 	})
 
@@ -182,15 +182,41 @@ describe("photos library", () => {
 		drive.offline = true
 		await loadPhotosLibrary()
 
-		expect(photosLibraryView()).toEqual({ roots: ["a", "b"], loaded: false, readOnly: false })
+		expect(photosLibraryView()).toEqual({ roots: ["a", "b"], loaded: false, readOnly: false, loadFailure: null })
 	})
 
-	it("offline with no local copy, the library reads as unset", async () => {
+	it("offline with no local copy, the library reads as empty and says the read failed, until a read succeeds", async () => {
 		drive.offline = true
 
 		await loadPhotosLibrary()
 
-		expect(photosLibraryView().roots).toEqual([])
+		const view = photosLibraryView()
+
+		expect(view.roots).toEqual([])
+		expect(view.loaded).toBe(false)
+		expect(view.loadFailure?.error).toEqual(new Error("offline"))
+		// One snapshot while nothing changed (useSyncExternalStore).
+		expect(photosLibraryView()).toBe(view)
+
+		// The file's own re-read (its backoff), not this module's load, clears it.
+		drive.offline = false
+		drive.text = remoteDoc(["a"])
+		drive.counter = 1
+		await photosLibrary.load()
+
+		expect(photosLibraryView()).toEqual({ roots: ["a"], loaded: true, readOnly: false, loadFailure: null })
+	})
+
+	it("a failed read over a local copy keeps the copy and reports no failure", async () => {
+		drive.text = remoteDoc([])
+		drive.counter = 1
+		await loadPhotosLibrary()
+
+		resetPhotosLibrary()
+		drive.offline = true
+		await loadPhotosLibrary()
+
+		expect(photosLibraryView()).toEqual({ roots: [], loaded: false, readOnly: false, loadFailure: null })
 	})
 
 	it("adds a directory in place of the ones it holds, and removes one", async () => {

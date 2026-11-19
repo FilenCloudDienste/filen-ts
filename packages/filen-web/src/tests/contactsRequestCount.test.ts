@@ -68,18 +68,8 @@ import { handleContactEvent } from "@/features/contacts/lib/socketHandlers"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockContact(label: string): Contact {
-	return {
-		uuid: testUuid(label),
-		userId: 1n,
-		email: `${label}@filen.io`,
-		nickName: label,
-		lastActive: 0n,
-		timestamp: 0n,
-		publicKey: "key"
-	}
-}
+import { drain } from "@/tests/support/drain"
+import { mockContact } from "@/tests/support/contactFixtures"
 
 function mockBlocked(label: string): BlockedContact {
 	return { uuid: testUuid(`${label}-blk`), userId: 2n, email: `${label}@filen.io`, nickName: label, timestamp: 0n }
@@ -145,17 +135,6 @@ function mountContactsPage() {
 	)
 }
 
-async function drain(): Promise<void> {
-	await act(async () => {
-		for (let i = 0; i < 20; i++) {
-			await new Promise(resolve => setTimeout(resolve, 0))
-		}
-	})
-	await waitFor(() => {
-		expect(queryClient.isFetching()).toBe(0)
-	})
-}
-
 function counts() {
 	return {
 		contacts: getContacts.mock.calls.length,
@@ -180,7 +159,7 @@ function pastWindow(): void {
 beforeEach(() => {
 	queryClient.clear()
 	vi.clearAllMocks()
-	serverContacts = [mockContact("alice")]
+	serverContacts = [mockContact({ uuid: testUuid("alice"), email: "alice@filen.io", nickName: "alice" })]
 	serverIncoming = [mockIncoming("carol"), mockIncoming("erin"), mockIncoming("frank")]
 	getContacts.mockImplementation(() => Promise.resolve([...serverContacts]))
 	serverBlocked = [mockBlocked("gina"), mockBlocked("hank"), mockBlocked("ivan")]
@@ -194,7 +173,10 @@ beforeEach(() => {
 		serverBlocked = serverBlocked.filter(b => b.uuid !== uuid)
 
 		if (blocked !== undefined) {
-			serverContacts = [...serverContacts, mockContact(blocked.nickName)]
+			serverContacts = [
+				...serverContacts,
+				mockContact({ uuid: testUuid(blocked.nickName), email: `${blocked.nickName}@filen.io`, nickName: blocked.nickName })
+			]
 		}
 
 		return Promise.resolve()
@@ -220,7 +202,10 @@ beforeEach(() => {
 		serverIncoming = serverIncoming.filter(r => r.uuid !== uuid)
 
 		if (request !== undefined) {
-			serverContacts = [...serverContacts, mockContact(request.nickName)]
+			serverContacts = [
+				...serverContacts,
+				mockContact({ uuid: testUuid(request.nickName), email: `${request.nickName}@filen.io`, nickName: request.nickName })
+			]
 		}
 
 		return Promise.resolve(testUuid("promoted"))
@@ -238,14 +223,14 @@ afterEach(() => {
 describe("contacts request counts", () => {
 	it("opening /contacts after boot reuses the requests the rail already read", async () => {
 		mountIconRail()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 0, blocked: 0, incoming: 1, outgoing: 1 })
 
 		mountContactsPage().unmount()
-		await drain()
+		await drain(queryClient)
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 1, outgoing: 1 })
 	})
@@ -253,16 +238,16 @@ describe("contacts request counts", () => {
 	it("a requests read the socket wasn't up for doesn't count", async () => {
 		socketDropped()
 		mountIconRail()
-		await drain()
+		await drain(queryClient)
 
 		socketAuthenticated()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 2, outgoing: 2 })
 
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 2, outgoing: 2 })
 	})
@@ -270,16 +255,16 @@ describe("contacts request counts", () => {
 	it("focus inside the window reads nothing; past it both read again", async () => {
 		mountIconRail()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		focus()
 		focus()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 1, outgoing: 1 })
 
 		pastWindow()
 		focus()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 2, blocked: 2, incoming: 2, outgoing: 2 })
 	})
@@ -287,20 +272,20 @@ describe("contacts request counts", () => {
 	it("a socket drop ends the requests window; the contacts window is unaffected", async () => {
 		mountIconRail()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		socketDropped()
 		focus()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 2, outgoing: 2 })
 
 		// Read while the socket was down: the focus after re-auth reads again, then the window holds.
 		socketAuthenticated()
 		focus()
-		await drain()
+		await drain(queryClient)
 		focus()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 3, outgoing: 3 })
 	})
@@ -308,20 +293,20 @@ describe("contacts request counts", () => {
 	it("a network reconnect reads both again inside the window", async () => {
 		mountIconRail()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		act(() => {
 			onlineManager.setOnline(false)
 			onlineManager.setOnline(true)
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 2, blocked: 2, incoming: 2, outgoing: 2 })
 	})
 
 	it("a received request lands without a read and doesn't end the window", async () => {
 		mountIconRail()
-		await drain()
+		await drain(queryClient)
 
 		const dave = mockIncoming("dave")
 		handleContactEvent({
@@ -338,7 +323,7 @@ describe("contacts request counts", () => {
 			}
 		})
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts().incoming).toBe(1)
 		expect(queryClient.getQueryData<{ incoming: ContactRequestIn[] }>(CONTACT_REQUESTS_QUERY_KEY)?.incoming.map(r => r.uuid)).toContain(
@@ -349,7 +334,7 @@ describe("contacts request counts", () => {
 	it("accepting a request reads back only the contact list", async () => {
 		mountIconRail()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		expect(await acceptRequest(mockIncoming("carol").uuid)).toEqual({ status: "success" })
@@ -359,7 +344,7 @@ describe("contacts request counts", () => {
 				"carol"
 			])
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 0, incoming: 0, outgoing: 0 })
 		expect(queryClient.getQueryData<{ incoming: ContactRequestIn[] }>(CONTACT_REQUESTS_QUERY_KEY)?.incoming).toHaveLength(2)
@@ -368,7 +353,7 @@ describe("contacts request counts", () => {
 	it("a bulk accept reads the contact list at most twice and ends with every accepted contact", async () => {
 		mountIconRail()
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const outcome = await runBulkOutcomes(serverIncoming, request => acceptRequest(request.uuid))
@@ -377,7 +362,7 @@ describe("contacts request counts", () => {
 		await waitFor(() => {
 			expect(queryClient.getQueryData<ContactsQueryData>(CONTACTS_QUERY_KEY)?.contacts).toHaveLength(4)
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 2, blocked: 0, incoming: 0, outgoing: 0 })
 		expect(queryClient.getQueryData<{ incoming: ContactRequestIn[] }>(CONTACT_REQUESTS_QUERY_KEY)?.incoming).toEqual([])
@@ -385,7 +370,7 @@ describe("contacts request counts", () => {
 
 	it("an accept during a read-back gets a read that starts after it", async () => {
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const releaseFirst = holdNextRead(getContacts, () => [...serverContacts])
@@ -396,14 +381,14 @@ describe("contacts request counts", () => {
 		await waitFor(() => {
 			expect(getContacts).toHaveBeenCalledTimes(2)
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(cachedContacts()?.contacts.map(c => c.nickName)).toEqual(["alice", "carol", "erin"])
 	})
 
 	it("an unblock during a read-back waits for a read that starts after it", async () => {
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const releaseFirst = holdNextRead(getContacts, () => [...serverContacts])
@@ -419,7 +404,7 @@ describe("contacts request counts", () => {
 
 		expect(await first).toEqual({ status: "success" })
 		expect(await second).toEqual({ status: "success" })
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 2, blocked: 0, incoming: 0, outgoing: 0 })
 		expect(cachedContacts()?.contacts.map(c => c.nickName)).toEqual(["alice", "gina", "hank"])
@@ -428,40 +413,45 @@ describe("contacts request counts", () => {
 
 	it("a bulk unblock reads the contact list at most twice and ends with every unblocked contact", async () => {
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const outcome = await runBulkOutcomes([...serverBlocked], blocked => unblockContactAction(blocked.uuid))
-		await drain()
+		await drain(queryClient)
 
 		expect(outcome.failed).toEqual([])
 		expect(counts()).toEqual({ contacts: 2, blocked: 0, incoming: 0, outgoing: 0 })
 		expect(cachedContacts()).toEqual({
-			contacts: [mockContact("alice"), mockContact("gina"), mockContact("hank"), mockContact("ivan")],
+			contacts: [
+				mockContact({ uuid: testUuid("alice"), email: "alice@filen.io", nickName: "alice" }),
+				mockContact({ uuid: testUuid("gina"), email: "gina@filen.io", nickName: "gina" }),
+				mockContact({ uuid: testUuid("hank"), email: "hank@filen.io", nickName: "hank" }),
+				mockContact({ uuid: testUuid("ivan"), email: "ivan@filen.io", nickName: "ivan" })
+			],
 			blocked: []
 		})
 	})
 
 	it("a removal landing during a read-back reads once more, so the removed contact stays gone", async () => {
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const releaseFirst = holdNextRead(getContacts, () => [...serverContacts])
 		await acceptRequest(mockIncoming("carol").uuid)
-		await removeContact(mockContact("alice").uuid)
+		await removeContact(mockContact({ uuid: testUuid("alice"), email: "alice@filen.io", nickName: "alice" }).uuid)
 		releaseFirst()
 		await waitFor(() => {
 			expect(getContacts).toHaveBeenCalledTimes(2)
 		})
-		await drain()
+		await drain(queryClient)
 
 		expect(cachedContacts()?.contacts.map(c => c.nickName)).toEqual(["carol"])
 	})
 
 	it("a cancel landing during a send's read-back reads once more, so the cancelled request stays gone", async () => {
 		mountIconRail()
-		await drain()
+		await drain(queryClient)
 		vi.clearAllMocks()
 
 		const releaseFirst = holdNextRead(listOutgoingContactRequests, () => [...serverOutgoing])
@@ -473,7 +463,7 @@ describe("contacts request counts", () => {
 		releaseFirst()
 
 		expect(await sent).toEqual({ status: "success" })
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 0, blocked: 0, incoming: 0, outgoing: 2 })
 		expect(cachedOutgoing()?.map(r => r.nickName)).toEqual(["kate"])
@@ -481,7 +471,7 @@ describe("contacts request counts", () => {
 
 	it("a patch keeps a pending refresh pending", async () => {
 		mountContactsPage()
-		await drain()
+		await drain(queryClient)
 
 		await act(async () => {
 			await queryClient.invalidateQueries({ queryKey: CONTACTS_QUERY_KEY, refetchType: "none" })
@@ -491,7 +481,7 @@ describe("contacts request counts", () => {
 		expect(queryClient.getQueryCache().find({ queryKey: CONTACTS_QUERY_KEY, exact: true })?.state.isInvalidated).toBe(true)
 
 		focus()
-		await drain()
+		await drain(queryClient)
 
 		expect(counts().contacts).toBe(2)
 	})
@@ -503,7 +493,7 @@ describe("contacts request counts", () => {
 			await screen.findByText("alice")
 			view.unmount()
 		}
-		await drain()
+		await drain(queryClient)
 
 		expect(counts()).toEqual({ contacts: 1, blocked: 1, incoming: 0, outgoing: 0 })
 	})

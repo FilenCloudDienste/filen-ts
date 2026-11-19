@@ -326,25 +326,31 @@ function NotesEditor({
 	)
 }
 
-// The slide's speaker notes under it: collapsible and resizable, collapsed on first use at phone widths. In an
-// editable deck they are edited in place (`editor`); `otherEditing`: a body on the slide is open in the text editor
-// (the notes editor closes, one body is edited at a time), `onEditStart`: the notes editor opens (the slide's closes).
+// The slide's speaker notes under it: collapsible and resizable. Whether they show is the view's (`collapsed`; the
+// ribbon's notes button and the pane's own chevron change the one flag through `onCollapsedChange`); the pane keeps
+// only its height. In an editable deck they are edited in place (`editor`); `otherEditing`: a body on the slide is
+// open in the text editor (the notes editor closes, one body is edited at a time), `onEditStart`: the notes editor
+// opens (the slide's closes).
 export function PresentationNotesPane({
 	text,
 	phone,
+	collapsed,
+	onCollapsedChange,
 	editor,
 	otherEditing = false,
 	onEditStart
 }: {
 	text: string
 	phone: boolean
+	collapsed: boolean
+	onCollapsedChange: (collapsed: boolean) => void
 	editor?: PresentationRibbonEditor | undefined
 	otherEditing?: boolean
 	onEditStart?: () => void
 }) {
 	const { t } = useTranslation("preview")
-	// As read during boot; collapsed at phone widths while nothing is stored.
-	const [layout, setLayout] = useState<NotesLayout>(() => presentationNotesLayout() ?? { collapsed: phone, height: 120 })
+	// As read during boot.
+	const [layout, setLayout] = useState<NotesLayout>(() => presentationNotesLayout() ?? { height: 120 })
 	// A height not stored yet (its write waits for the resize to settle).
 	const unsaved = useRef<{ readonly timer: ReturnType<typeof setTimeout>; readonly layout: NotesLayout } | null>(null)
 	const save = (next: NotesLayout): void => {
@@ -353,14 +359,8 @@ export function PresentationNotesPane({
 		unsaved.current = null
 		setPresentationNotesLayout(next)
 	}
-	const update = (next: NotesLayout, settle: boolean): void => {
+	const update = (next: NotesLayout): void => {
 		setLayout(next)
-
-		if (!settle) {
-			save(next)
-
-			return
-		}
 
 		if (unsaved.current !== null) clearTimeout(unsaved.current.timer)
 
@@ -399,16 +399,14 @@ export function PresentationNotesPane({
 				collapseLabel={t("previewPptxNotesHide")}
 				resizeLabel={t("previewPptxNotesResize")}
 				emptyText={t("previewPptxNotesEmpty")}
-				collapsed={layout.collapsed}
-				onCollapsedChange={collapsed => {
-					update({ ...layout, collapsed }, false)
-				}}
+				collapsed={collapsed}
+				onCollapsedChange={onCollapsedChange}
 				height={layout.height}
 				onHeightChange={height => {
-					update({ ...layout, height }, true)
+					update({ height })
 				}}
 				maxHeight={phone ? 240 : 480}
-				{...(editor === undefined || layout.collapsed
+				{...(editor === undefined || collapsed
 					? {}
 					: {
 							children: (

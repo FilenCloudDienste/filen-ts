@@ -7,17 +7,20 @@ import { useQuery } from "@tanstack/react-query"
 import type { BlockedContact, Chat, ChatMessage, Contact } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
-const { listChats, listMessagesBefore, leaveChatOp, purgeChatInflightState, getContacts, getBlockedContacts } = vi.hoisted(() => ({
-	listChats: vi.fn<() => Promise<Chat[]>>(),
-	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
-	leaveChatOp: vi.fn<(chat: Chat) => Promise<void>>(),
-	purgeChatInflightState: vi.fn<(chatUuid: string) => Promise<void>>(() => Promise.resolve()),
-	getContacts: vi.fn<() => Promise<Contact[]>>(() => Promise.resolve([])),
-	getBlockedContacts: vi.fn<() => Promise<BlockedContact[]>>(() => Promise.resolve([]))
-}))
+const { listChats, listMessagesBefore, leaveChatOp, muteChatOp, purgeChatInflightState, getContacts, getBlockedContacts } = vi.hoisted(
+	() => ({
+		listChats: vi.fn<() => Promise<Chat[]>>(),
+		muteChatOp: vi.fn<(chat: Chat, mute: boolean) => Promise<Chat>>((chat, mute) => Promise.resolve({ ...chat, muted: mute })),
+		listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
+		leaveChatOp: vi.fn<(chat: Chat) => Promise<void>>(),
+		purgeChatInflightState: vi.fn<(chatUuid: string) => Promise<void>>(() => Promise.resolve()),
+		getContacts: vi.fn<() => Promise<Contact[]>>(() => Promise.resolve([])),
+		getBlockedContacts: vi.fn<() => Promise<BlockedContact[]>>(() => Promise.resolve([]))
+	})
+)
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp, getContacts, getBlockedContacts }
+	sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp, muteChat: muteChatOp, getContacts, getBlockedContacts }
 }))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
@@ -29,12 +32,12 @@ import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet, useChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet, chatMessagesQueryKey, useChatMessages } from "@/features/chats/queries/chatMessages"
-import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
+import { sumUnread, useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
-import { leaveChat } from "@/features/chats/lib/actions"
+import { leaveChat, setChatMuted } from "@/features/chats/lib/actions"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { CONTACTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
@@ -371,6 +374,92 @@ describe("rail unread badge", () => {
 		expect(result.current).toBe(2)
 
 		unmount()
+	})
+
+	// The list row proves these chats read: their pages are never read, and a missing cache for them is no
+	// gap for the self-heal to fill.
+	it("reads no page for a chat the list proves read, counts it 0 and never heals it", async () => {
+		const a1 = peerMessage("a1", "a", 150n)
+		const read = mockChat("r", peerMessage("r1", "r", 100n))
+		listChats.mockResolvedValue([mockChat("a", a1), read, mockChat("e")])
+		listMessagesBefore.mockResolvedValue([a1])
+
+		const { result, unmount } = renderBadge()
+		await drain()
+
+		expect(result.current).toBe(1)
+		expect(listMessagesBefore.mock.calls.map(([chat]) => chat.uuid)).toEqual([testUuid("a")])
+
+		act(() => {
+			handleChatEvent({ inner: { type: "conversationsNew", chat: mockChat("n", peerMessage("n1", "n", 90n)) }, chatMessageId: 1n })
+		})
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect(result.current).toBe(1)
+
+		unmount()
+	})
+
+	// A socket message creates the skipped chat's cache with only itself; unmuting must not count just that.
+	it("reads the page of a chat skipped while muted once it is unmuted, counting its whole backlog", async () => {
+		const m1 = peerMessage("m1", "m", 150n)
+		const m2 = peerMessage("m2", "m", 160n)
+		const m3 = peerMessage("m3", "m", 170n)
+		const muted = { ...mockChat("m", m2), muted: true }
+		listChats.mockResolvedValue([muted])
+		listMessagesBefore.mockResolvedValue([m1, m2, m3])
+
+		const { result, unmount } = renderBadge()
+		await drain()
+
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+		expect(result.current).toBe(0)
+
+		act(() => {
+			handleChatEvent({ inner: { type: "messageNew", msg: m3 }, chatMessageId: 1n })
+		})
+		await drain()
+
+		expect(chatMessagesQueryGet(muted.uuid)?.map(m => m.uuid)).toEqual([m3.uuid])
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		const current = chatsQueryGet()?.find(c => c.uuid === muted.uuid)
+
+		if (current === undefined) {
+			throw new Error("chat missing from the list")
+		}
+
+		await act(async () => {
+			await setChatMuted(current, false)
+		})
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect(result.current).toBe(3)
+
+		// Read once: the healed thread is synced, so later renders start no further read.
+		act(() => {
+			handleChatEvent({ inner: { type: "messageNew", msg: peerMessage("m4", "m", 180n) }, chatMessageId: 2n })
+		})
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect(result.current).toBe(4)
+
+		unmount()
+	})
+
+	it("a cache-less chat the list proves read is no missing cache", () => {
+		const unread = mockChat("u", peerMessage("u1", "u", 150n))
+
+		expect(
+			sumUnread([mockChat("r", peerMessage("r1", "r", 100n)), mockChat("e")], () => undefined, USER_ID, EMPTY_BLOCKED_USERS)
+		).toEqual({
+			count: 0,
+			hasMissingMessages: false
+		})
+		expect(sumUnread([unread], () => undefined, USER_ID, EMPTY_BLOCKED_USERS).hasMissingMessages).toBe(true)
 	})
 })
 

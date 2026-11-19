@@ -2,101 +2,41 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Chat } from "@filen/sdk-rs"
 
-// Worker-free seams (self-contained per the project's test convention). This file exercises the PUSH
+// Worker-free seams from the shared outbox harness (tests/support/chatsOutbox). This file exercises the PUSH
 // loop: sequential per-chat order, dequeue-on-commit + cache patch, the commit-boundary never-rethrow
 // tail, the 3-strike failed transition + retry/remove, and the logout-abort flush suppression.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
-	sendChatMessage: vi.fn(),
-	markChatRead: vi.fn(() => Promise.resolve()),
-	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
-	// The push loop resolves a LIVE chat per uuid (never the disk-restored snapshot). With an empty list
-	// cache the loop falls back to getChat; the default returns a valid live chat so every send resolves.
-	getChat: vi.fn((uuid: string): Promise<Chat | undefined> =>
-		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
-	)
-}))
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsSdkMocks()
+)
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
-const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
-	const store = new Map<string, unknown>()
-
-	return {
-		kvStore: store,
-		kvGetJson: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
-		kvSetJson: vi.fn((key: string, value: unknown) => {
-			store.set(key, value)
-
-			return Promise.resolve()
-		}),
-		kvDelete: vi.fn((key: string) => {
-			store.delete(key)
-
-			return Promise.resolve()
-		})
-	}
-})
+const { kvStore, kvGetJson, kvSetJson, kvDelete } = await vi.hoisted(async () =>
+	(await import("@/tests/support/chatsOutbox")).chatsKvMocks()
+)
 
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { sync, enqueueChatMessage } from "@/features/chats/lib/sync"
+import { Sync, sync, enqueueChatMessage } from "@/features/chats/lib/sync"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
-import { buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { chatsQueryGet, chatsQueryUpdate, chatsQueryUpsert } from "@/features/chats/queries/chats"
-import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-
-const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
-
-function makeChat(uuid: string): Chat {
-	return {
-		uuid: uuid as Chat["uuid"],
-		ownerId: 7n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
-}
-
-function makeConfirmed(chatUuid: string, uuid: string) {
-	return {
-		uuid: uuid as ChatMessageWithInflightId["uuid"],
-		chat: chatUuid as ChatMessageWithInflightId["chat"],
-		senderId: 7,
-		senderEmail: "me@filen.io",
-		senderNickName: "Me",
-		message: "hi",
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1n
-	}
-}
-
-function opt(chatUuid: string, inflightId: string, sentTimestamp: bigint, content: string): ChatMessageWithInflightId {
-	return buildOptimisticMessage({
-		chatUuid: chatUuid as ChatMessageWithInflightId["chat"],
-		inflightId: inflightId as ChatMessageWithInflightId["uuid"],
-		content,
-		replyTo: undefined,
-		sentTimestamp,
-		sender: SENDER
-	})
-}
+import {
+	useChatsInflightStore,
+	type ChatMessageWithInflightId,
+	type InflightChatMessageError,
+	type InflightChatMessageErrors,
+	type InflightChatMessages
+} from "@/features/chats/store/useChatsInflight"
+import { SENDER, confirmedMessage, group, mockTransport, optimistic, outboxChat, tick } from "@/tests/support/chatsOutbox"
 
 function seed(chatUuid: string, messages: ChatMessageWithInflightId[]): void {
 	useChatsInflightStore.setState(prev => ({
-		inflightMessages: { ...prev.inflightMessages, [chatUuid]: { chat: makeChat(chatUuid), messages } },
+		inflightMessages: { ...prev.inflightMessages, [chatUuid]: { chat: outboxChat(chatUuid), messages } },
 		inflightErrors: prev.inflightErrors
 	}))
-}
-
-function tick(): Promise<void> {
-	return new Promise(resolve => setTimeout(resolve, 0))
 }
 
 function sdkError(kind: string): { species: "sdk"; kind: string; label: string; message: string } {
@@ -113,7 +53,7 @@ beforeEach(async () => {
 	vi.clearAllMocks()
 	onlineManager.setOnline(true)
 	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {}, sendingInflightIds: {} })
-	sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") }))
+	sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") }))
 	sync.start()
 	await tick()
 })
@@ -128,13 +68,13 @@ describe("push loop — sequential per-chat send in queue order (oldest-first)",
 		sendChatMessage.mockImplementation((chat: Chat, message: string) => {
 			sentContents.push(message)
 
-			return Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, `srv-${message}`) })
+			return Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, `srv-${message}`) })
 		})
 
 		seed("chat-a-a-a", [
-			opt("chat-a-a-a", "inf-3-3-3", 300n, "m3"),
-			opt("chat-a-a-a", "inf-1-1-1", 100n, "m1"),
-			opt("chat-a-a-a", "inf-2-2-2", 200n, "m2")
+			optimistic("chat-a-a-a", "inf-3-3-3", 300n, "m3"),
+			optimistic("chat-a-a-a", "inf-1-1-1", 100n, "m1"),
+			optimistic("chat-a-a-a", "inf-2-2-2", 200n, "m2")
 		])
 
 		sync.syncNow()
@@ -152,21 +92,21 @@ describe("replay-on-launch — the send resolves a LIVE chat, never the disk-res
 		sendChatMessage.mockImplementation((chat: Chat) => {
 			sentChat = chat
 
-			return Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+			return Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
 		})
 
 		// Simulate a disk-restored queue: the stored `chat` is a stale snapshot the wasm send must NOT use
 		// (on the real surface it wedges the loop). It carries a sentinel name so the assertion can prove
 		// the send did not touch it.
-		const stale: Chat = { ...makeChat("chat-a-a-a"), name: "STALE_DISK_SNAPSHOT" }
+		const stale: Chat = { ...outboxChat("chat-a-a-a"), name: "STALE_DISK_SNAPSHOT" }
 
 		useChatsInflightStore.setState({
-			inflightMessages: { "chat-a-a-a": { chat: stale, messages: [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")] } },
+			inflightMessages: { "chat-a-a-a": { chat: stale, messages: [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")] } },
 			inflightErrors: {}
 		})
 
 		// A LIVE chat is warm in the list cache (restore's cache-warm / the sidebar).
-		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), name: "LIVE" })
+		chatsQueryUpsert({ ...outboxChat("chat-a-a-a"), name: "LIVE" })
 
 		sync.syncNow()
 		await tick()
@@ -178,7 +118,7 @@ describe("replay-on-launch — the send resolves a LIVE chat, never the disk-res
 	})
 
 	it("falls back to getChat when the list cache misses (a fresh-boot /drive shell, list not mounted)", async () => {
-		seed("chat-c-c-c", [opt("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
+		seed("chat-c-c-c", [optimistic("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
@@ -192,12 +132,16 @@ describe("replay-on-launch — the send resolves a LIVE chat, never the disk-res
 
 describe("a chat deleted while its socket event was missed", () => {
 	it("drops the chat's queue, failed sends and draft once getChat says it is gone and the list lacks it", async () => {
-		chatsQueryUpsert(makeChat("chat-other-1"))
-		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		chatsQueryUpsert(outboxChat("chat-other-1"))
+		seed("chat-gone-1", [optimistic("chat-gone-1", "inf-1-1-1", 1n, "hi")])
 		useChatsInflightStore.setState(prev => ({
 			inflightErrors: {
 				...prev.inflightErrors,
-				"inf-2-2-2": { error: sdkError("Server"), permanentRejections: 3, message: opt("chat-gone-1", "inf-2-2-2", 2n, "old") }
+				"inf-2-2-2": {
+					error: sdkError("Server"),
+					permanentRejections: 3,
+					message: optimistic("chat-gone-1", "inf-2-2-2", 2n, "old")
+				}
 			}
 		}))
 		getChat.mockResolvedValueOnce(undefined)
@@ -222,7 +166,7 @@ describe("a chat deleted while its socket event was missed", () => {
 	})
 
 	it("keeps the queue for a later pass while the list has not loaded", async () => {
-		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		seed("chat-gone-1", [optimistic("chat-gone-1", "inf-1-1-1", 1n, "hi")])
 		getChat.mockResolvedValueOnce(undefined)
 
 		sync.syncNow()
@@ -233,8 +177,8 @@ describe("a chat deleted while its socket event was missed", () => {
 	})
 
 	it("keeps the queue when getChat fails", async () => {
-		chatsQueryUpsert(makeChat("chat-other-1"))
-		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		chatsQueryUpsert(outboxChat("chat-other-1"))
+		seed("chat-gone-1", [optimistic("chat-gone-1", "inf-1-1-1", 1n, "hi")])
 		getChat.mockRejectedValueOnce(new Error("network down"))
 
 		sync.syncNow()
@@ -251,7 +195,7 @@ function inflightIdsIn(chatUuid: string): string[] {
 
 describe("commit — dequeue + reconcile the message cache off the returned chat", () => {
 	it("replaces the optimistic copy (uuid === inflightId) with the confirmed server message and drains the queue", async () => {
-		await enqueueChatMessage({ chat: makeChat("chat-a-a-a"), content: "hi", sender: SENDER })
+		await enqueueChatMessage({ chat: outboxChat("chat-a-a-a"), content: "hi", sender: SENDER })
 		await tick()
 		await tick()
 
@@ -267,26 +211,26 @@ describe("commit — dequeue + reconcile the message cache off the returned chat
 // The SDK hands back the chat the send started from, with the sent message as its lastMessage.
 describe("commit — the conversation row", () => {
 	it("shows the sent message and keeps the rest of the cached row", async () => {
-		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n })
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		chatsQueryUpsert({ ...outboxChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n })
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
 		await tick()
 
 		expect(chatsQueryGet()).toEqual([
-			{ ...makeChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n, lastMessage: makeConfirmed("chat-a-a-a", "srv-1-1-1") }
+			{ ...outboxChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n, lastMessage: confirmedMessage("chat-a-a-a", "srv-1-1-1") }
 		])
 	})
 
 	it("adds the chat when the list does not hold it", async () => {
-		seed("chat-c-c-c", [opt("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
+		seed("chat-c-c-c", [optimistic("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
 		await tick()
 
-		expect(chatsQueryGet()).toEqual([{ ...makeChat("chat-c-c-c"), lastMessage: makeConfirmed("chat-c-c-c", "srv-1-1-1") }])
+		expect(chatsQueryGet()).toEqual([{ ...outboxChat("chat-c-c-c"), lastMessage: confirmedMessage("chat-c-c-c", "srv-1-1-1") }])
 	})
 
 	it("keeps a reply that landed during the send, and the open chat's read state with it", async () => {
@@ -295,25 +239,25 @@ describe("commit — the conversation row", () => {
 			(chat: Chat) =>
 				new Promise(resolve => {
 					releaseSend = () => {
-						resolve({ ...chat, lastMessage: { ...makeConfirmed(chat.uuid, "srv-1-1-1"), sentTimestamp: 100n } })
+						resolve({ ...chat, lastMessage: { ...confirmedMessage(chat.uuid, "srv-1-1-1"), sentTimestamp: 100n } })
 					}
 				})
 		)
-		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), lastFocus: 50n })
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		chatsQueryUpsert({ ...outboxChat("chat-a-a-a"), lastFocus: 50n })
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
 
 		// What the socket handler writes for a reply in the open chat.
-		const reply = { ...makeConfirmed("chat-a-a-a", "srv-2-2-2"), senderId: 8, sentTimestamp: 200n }
+		const reply = { ...confirmedMessage("chat-a-a-a", "srv-2-2-2"), senderId: 8, sentTimestamp: 200n }
 		chatsQueryUpdate(prev => prev.map(c => ({ ...c, lastMessage: reply, lastFocus: 200n })))
 
 		releaseSend?.()
 		await tick()
 		await tick()
 
-		expect(chatsQueryGet()).toEqual([{ ...makeChat("chat-a-a-a"), lastFocus: 200n, lastMessage: reply }])
+		expect(chatsQueryGet()).toEqual([{ ...outboxChat("chat-a-a-a"), lastFocus: 200n, lastMessage: reply }])
 	})
 })
 
@@ -341,10 +285,10 @@ describe("commit boundary — the durable dequeue lands BEFORE the best-effort h
 			return Promise.resolve()
 		})
 		sendChatMessage.mockImplementation((chat: Chat, message: string) =>
-			Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, `srv-${message}`) })
+			Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, `srv-${message}`) })
 		)
 
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "m1"), opt("chat-a-a-a", "inf-2-2-2", 2n, "m2")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "m1"), optimistic("chat-a-a-a", "inf-2-2-2", 2n, "m2")])
 
 		sync.syncNow()
 		await tick()
@@ -366,7 +310,7 @@ describe("commit boundary — the post-commit tail never re-throws (no duplicate
 		markChatRead.mockRejectedValue(new Error("read failed"))
 		updateLastChatFocusTimesNow.mockRejectedValue(new Error("focus failed"))
 
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
@@ -385,12 +329,12 @@ describe("unrecallable in-flight marker — sendingInflightIds spans the outstan
 			(chat: Chat) =>
 				new Promise(resolve => {
 					releaseSend = () => {
-						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+						resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
 					}
 				})
 		)
 
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
@@ -409,7 +353,7 @@ describe("unrecallable in-flight marker — sendingInflightIds spans the outstan
 		// First pass: a network-class rejection keeps the message queued WITH an error record (the "failed"
 		// bubble a user could otherwise act on).
 		sendChatMessage.mockRejectedValueOnce(sdkError("Reqwest"))
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()
@@ -426,7 +370,7 @@ describe("unrecallable in-flight marker — sendingInflightIds spans the outstan
 			(chat: Chat) =>
 				new Promise(resolve => {
 					releaseSend = () => {
-						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+						resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
 					}
 				})
 		)
@@ -448,7 +392,7 @@ describe("unrecallable in-flight marker — sendingInflightIds spans the outstan
 describe("failed transition — 3 strikes drops from the queue but KEEPS the error record", () => {
 	it("increments permanentRejections per pass and drops the message on the third", async () => {
 		sendChatMessage.mockRejectedValue(sdkError("Server"))
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		for (let pass = 0; pass < 3; pass += 1) {
 			sync.syncNow()
@@ -464,7 +408,7 @@ describe("failed transition — 3 strikes drops from the queue but KEEPS the err
 
 	it("keeps a network-class failure queued forever without ever counting toward the drop", async () => {
 		sendChatMessage.mockRejectedValue(sdkError("Reqwest"))
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		for (let pass = 0; pass < 5; pass += 1) {
 			sync.syncNow()
@@ -481,7 +425,7 @@ describe("retry / remove of a failed send", () => {
 	it("retry re-queues the message with a cleared error record and resends it", async () => {
 		// Drive it to failed first.
 		sendChatMessage.mockRejectedValue(sdkError("Server"))
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		for (let pass = 0; pass < 3; pass += 1) {
 			sync.syncNow()
@@ -492,9 +436,11 @@ describe("retry / remove of a failed send", () => {
 		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeDefined()
 
 		// Now succeed on retry.
-		sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") }))
+		sendChatMessage.mockImplementation((chat: Chat) =>
+			Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
+		)
 
-		await retryInflightMessage({ chat: makeChat("chat-a-a-a"), message: opt("chat-a-a-a", "inf-1-1-1", 1n, "hi") })
+		await retryInflightMessage({ chat: outboxChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi") })
 		await tick()
 		await tick()
 
@@ -503,7 +449,7 @@ describe("retry / remove of a failed send", () => {
 	})
 
 	it("remove drops the queued entry, its error record and the optimistic cache copy", async () => {
-		await enqueueChatMessage({ chat: makeChat("chat-b-b-b"), content: "hi", sender: SENDER })
+		await enqueueChatMessage({ chat: outboxChat("chat-b-b-b"), content: "hi", sender: SENDER })
 		// Grab the minted inflightId from the queue.
 		const message = queue()["chat-b-b-b"]?.messages[0]
 		expect(message).toBeDefined()
@@ -516,13 +462,260 @@ describe("retry / remove of a failed send", () => {
 		}))
 
 		if (message) {
-			await removeInflightMessage({ chat: makeChat("chat-b-b-b"), message })
+			await removeInflightMessage({ chat: outboxChat("chat-b-b-b"), message })
 		}
 
 		expect(queue()["chat-b-b-b"]).toBeUndefined()
 		expect(useChatsInflightStore.getState().inflightErrors).toEqual({})
 		const cached = chatMessagesQueryGet("chat-b-b-b") ?? []
 		expect(message ? cached.some(m => m.uuid === message.uuid) : false).toBe(false)
+	})
+})
+
+describe("a send the leader drops at the rejection bound reaches every tab as failed", () => {
+	// A follower's send, forwarded to a leader whose three passes are all rejected. The store is one per tab
+	// in the app and one per file here, so each tab's turn runs on its own copy of the store. The follower is
+	// the module's own outbox, the one retry/remove drive; beforeEach starts it as leader again.
+	async function droppedForward(): Promise<{
+		follower: Sync
+		followerTransport: ReturnType<typeof mockTransport>
+		leader: Sync
+		leaderTransport: ReturnType<typeof mockTransport>
+		leaderErrors: InflightChatMessageErrors
+		inflightId: string
+	}> {
+		const follower = sync
+		const followerTransport = mockTransport()
+
+		follower.attachTransport(followerTransport)
+		follower.startAsFollower()
+
+		await follower.enqueue({ chat: outboxChat("chat-f-f-f"), content: "lost text", sender: SENDER })
+
+		const forward = followerTransport.sendEnqueue.mock.calls[0]?.[0]
+
+		if (forward === undefined) {
+			throw new Error("expected a forwarded send")
+		}
+
+		const followerTab = useChatsInflightStore.getState()
+
+		useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {}, sendingInflightIds: {} })
+
+		const leader = new Sync()
+		const leaderTransport = mockTransport()
+
+		leader.attachTransport(leaderTransport)
+		leader.start()
+		await tick()
+
+		sendChatMessage.mockRejectedValue(sdkError("Server"))
+		leader.ingestRemoteEnqueue(forward)
+		await tick()
+		await tick()
+
+		for (let pass = 0; pass < 2; pass += 1) {
+			leader.syncNow()
+			await tick()
+			await tick()
+		}
+
+		const leaderTab = useChatsInflightStore.getState()
+
+		// Back to the follower tab: it has seen the leader confirm the forward.
+		useChatsInflightStore.setState({
+			inflightMessages: followerTab.inflightMessages,
+			inflightErrors: followerTab.inflightErrors,
+			sendingInflightIds: {}
+		})
+		follower.applyLeaderState(group("chat-f-f-f", forward.message))
+
+		expect(leaderTab.inflightErrors[forward.message.inflightId]?.permanentRejections).toBe(3)
+
+		return {
+			follower,
+			followerTransport,
+			leader,
+			leaderTransport,
+			leaderErrors: leaderTab.inflightErrors,
+			inflightId: forward.message.inflightId
+		}
+	}
+
+	it("shows a follower its dropped send as failed, with the text, instead of removing the bubble", async () => {
+		const { follower, followerTransport, leaderTransport, inflightId } = await droppedForward()
+
+		expect(leaderTransport.broadcastFailed).toHaveBeenCalledTimes(1)
+
+		for (const [failed] of leaderTransport.broadcastFailed.mock.calls) {
+			follower.applyLeaderFailed(structuredClone(failed))
+		}
+
+		// The leader's next state broadcast no longer lists the send.
+		follower.applyLeaderState({})
+
+		expect(queue()["chat-f-f-f"]).toBeUndefined()
+		const failed = useChatsInflightStore.getState().inflightErrors[inflightId]
+		expect(failed?.message.message).toBe("lost text")
+		expect(failed?.permanentRejections).toBe(3)
+
+		// Settled: a takeover does not forward it again.
+		follower.resendUnacked()
+		expect(followerTransport.sendEnqueue).toHaveBeenCalledTimes(1)
+	})
+
+	it("retries a follower's failed send through the leader, which gives it a fresh rejection budget", async () => {
+		const { follower, followerTransport, leader, leaderTransport, leaderErrors, inflightId } = await droppedForward()
+		const failed = leaderTransport.broadcastFailed.mock.calls[0]?.[0]
+
+		if (failed === undefined) {
+			throw new Error("expected a dropped send")
+		}
+
+		follower.applyLeaderFailed(failed)
+		follower.applyLeaderState({})
+		sendChatMessage.mockClear()
+
+		await retryInflightMessage({ chat: outboxChat("chat-f-f-f"), message: failed.message })
+
+		expect(sendChatMessage).not.toHaveBeenCalled()
+		expect(useChatsInflightStore.getState().inflightErrors[inflightId]).toBeUndefined()
+		expect(queue()["chat-f-f-f"]?.messages.map(m => m.inflightId)).toEqual([inflightId])
+
+		const retry = followerTransport.sendEnqueue.mock.calls[1]?.[0]
+
+		if (retry === undefined) {
+			throw new Error("expected the retry to be forwarded")
+		}
+
+		// The leader confirms it with its next state broadcast.
+		follower.applyLeaderState(group("chat-f-f-f", retry.message))
+
+		// The leader tab, still holding its record of the drop, takes the retry and sends it.
+		useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: leaderErrors, sendingInflightIds: {} })
+		sendChatMessage.mockImplementation((chat: Chat) =>
+			Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-9-9-9") })
+		)
+
+		leader.ingestRemoteEnqueue(retry)
+		await tick()
+		await tick()
+
+		expect(sendChatMessage).toHaveBeenCalledTimes(1)
+		expect(useChatsInflightStore.getState().inflightErrors[inflightId]).toBeUndefined()
+		expect(queue()["chat-f-f-f"]).toBeUndefined()
+	})
+
+	// A send from the leader tab itself, rejected three times there. Returns the leader tab's store and the
+	// dropped entry it broadcast; the leader is the module's own outbox, the one retry drives.
+	async function droppedLocal(leaderTransport: ReturnType<typeof mockTransport>): Promise<InflightChatMessageError> {
+		sync.attachTransport(leaderTransport)
+		seed("chat-l-l-l", [optimistic("chat-l-l-l", "inf-l-l-l", 1n, "leader text")])
+		sendChatMessage.mockRejectedValue(sdkError("Server"))
+
+		for (let pass = 0; pass < 3; pass += 1) {
+			sync.syncNow()
+			await tick()
+			await tick()
+		}
+
+		const failed = leaderTransport.broadcastFailed.mock.calls[0]?.[0]
+
+		if (failed === undefined) {
+			throw new Error("expected a dropped send")
+		}
+
+		return failed
+	}
+
+	it("clears a follower's failed record when a retry in the leader tab queues the send again and commits it", async () => {
+		const leaderTransport = mockTransport()
+		const failed = await droppedLocal(leaderTransport)
+		const inflightId = failed.message.inflightId
+		const leaderTab = useChatsInflightStore.getState()
+
+		// The follower tab has the dropped send as failed.
+		useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {}, sendingInflightIds: {} })
+
+		const follower = new Sync()
+
+		follower.attachTransport(mockTransport())
+		follower.startAsFollower()
+		follower.applyLeaderFailed(structuredClone(failed))
+		follower.applyLeaderState({})
+		expect(useChatsInflightStore.getState().inflightErrors[inflightId]?.message.message).toBe("leader text")
+
+		const followerTab = useChatsInflightStore.getState()
+
+		// Retry in the leader tab, which now commits.
+		useChatsInflightStore.setState({
+			inflightMessages: leaderTab.inflightMessages,
+			inflightErrors: leaderTab.inflightErrors,
+			sendingInflightIds: {}
+		})
+		leaderTransport.broadcastState.mockClear()
+		sendChatMessage.mockImplementation((chat: Chat) =>
+			Promise.resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-7-7-7") })
+		)
+
+		await retryInflightMessage({ chat: outboxChat("chat-l-l-l"), message: failed.message })
+		await tick()
+		await tick()
+
+		expect(sendChatMessage).toHaveBeenCalledTimes(4)
+
+		const states = leaderTransport.broadcastState.mock.calls.map(([state]) => state)
+
+		expect(states[0]?.["chat-l-l-l"]?.messages.map(m => m.inflightId)).toEqual([inflightId])
+
+		// Back in the follower tab, the states the leader really broadcast: pending, then confirmed and gone.
+		useChatsInflightStore.setState({
+			inflightMessages: followerTab.inflightMessages,
+			inflightErrors: followerTab.inflightErrors,
+			sendingInflightIds: {}
+		})
+		follower.applyLeaderState(structuredClone(states[0] ?? {}))
+		expect(useChatsInflightStore.getState().inflightErrors[inflightId]).toBeUndefined()
+		expect(queue()["chat-l-l-l"]?.messages.map(m => m.inflightId)).toEqual([inflightId])
+
+		for (const state of states.slice(1)) {
+			follower.applyLeaderState(structuredClone(state))
+		}
+
+		expect(useChatsInflightStore.getState().inflightErrors[inflightId]).toBeUndefined()
+		expect(queue()["chat-l-l-l"]).toBeUndefined()
+	})
+
+	it("never broadcasts a state still listing the dropped send after announcing the drop", async () => {
+		const leaderTransport = mockTransport()
+		const order: ("failed" | "listed" | "omitted")[] = []
+
+		leaderTransport.broadcastFailed.mockImplementation(() => {
+			order.push("failed")
+		})
+		leaderTransport.broadcastState.mockImplementation(state => {
+			order.push(state["chat-l-l-l"]?.messages.some(m => m.inflightId === "inf-l-l-l") === true ? "listed" : "omitted")
+		})
+
+		// A state request (a newly opened tab) lands while each disk write is in flight, the drop's included.
+		const write = kvDelete.getMockImplementation()
+
+		kvDelete.mockImplementation((key: string) => {
+			sync.broadcastState()
+
+			return write?.(key) ?? Promise.resolve()
+		})
+
+		try {
+			await droppedLocal(leaderTransport)
+		} finally {
+			if (write !== undefined) {
+				kvDelete.mockImplementation(write)
+			}
+		}
+
+		expect(order).toContain("failed")
+		expect(order.slice(order.indexOf("failed") + 1)).not.toContain("listed")
 	})
 })
 
@@ -533,12 +726,12 @@ describe("logout — an aborted pass never flushes (the wipe is not resurrected)
 			(chat: Chat) =>
 				new Promise(resolve => {
 					releaseSend = () => {
-						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+						resolve({ ...chat, lastMessage: confirmedMessage(chat.uuid, "srv-1-1-1") })
 					}
 				})
 		)
 
-		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
 
 		sync.syncNow()
 		await tick()

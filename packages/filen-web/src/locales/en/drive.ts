@@ -102,6 +102,8 @@ export const drive = {
 	driveEmptyTitle: "Nothing here yet",
 	/** Drive page — empty-state body under the title, for a directory (or the move/copy picker) */
 	driveEmptyBody: "Files and directories you add will appear here.",
+	/** Drive file picker (a picture for a document, a chat attachment) — the open directory has content, but no file of the kind asked for */
+	drivePickerNoMatchingFiles: "No matching files",
 	/** Trash — empty-state title when nothing is trashed */
 	driveEmptyTrashTitle: "Trash is empty",
 	/** Trash — empty-state body under the title */
@@ -259,8 +261,10 @@ export const drive = {
 	drivePendingTransfersCancelKeptExtracted: "Items already extracted are kept.",
 	/** Pending transfers — appended to the Cancel confirm when both copies and extracts run */
 	drivePendingTransfersCancelKeptCopiedOrExtracted: "Items already copied or extracted are kept.",
-	/** Pending transfers — appended to the Cancel confirm when compresses run: a stopped compress leaves nothing; {{count}} = compresses running; singular */
-	drivePendingTransfersCancelArchiveDiscarded_one: "The unfinished archive is discarded.",
+	/** Pending transfers — appended to the Cancel confirm when exactly one compress runs: a stopped compress leaves nothing */
+	drivePendingTransfersCancelArchiveDiscardedSingle: "The unfinished archive is discarded.",
+	/** Pending transfers — appended to the Cancel confirm when several compresses run: a stopped compress leaves nothing; {{count}} = compresses running */
+	drivePendingTransfersCancelArchiveDiscarded_one: "Unfinished archives are discarded.",
 	/** Pending transfers — appended to the Cancel confirm when compresses run: a stopped compress leaves nothing; {{count}} = compresses running; plural */
 	drivePendingTransfersCancelArchiveDiscarded_other: "Unfinished archives are discarded.",
 	/** Drive listing — title shown when a directory listing fails to load */
@@ -366,7 +370,7 @@ export const drive = {
 	driveActionMove: "Move",
 	/** Item menu — first entry of the Move submenu; opens the destination picker (driveMoveDialogTitle) */
 	driveMoveChooseDestination: "Choose destination…",
-	/** Item menu — disabled row in a directory-tree submenu (Move) when the directory has no subdirectories */
+	/** Item menu — disabled row in a directory-tree submenu (Move) when the directory has no subdirectories; also the move/copy picker's line for a directory holding files only */
 	driveTreeMenuNoDirectories: "No directories",
 	/** Item menu — move the selected item(s) to the trash; also the trash-confirm dialog's confirm button */
 	driveActionTrash: "Trash",
@@ -417,7 +421,9 @@ export const drive = {
 	/** Trash confirm dialog — title; the confirm button reuses driveActionTrash */
 	driveTrashConfirmTitle: "Move to trash?",
 	/** Trash confirm dialog — body for a single item */
-	driveTrashConfirmBody_one: "Are you sure you want to move this item to the trash? You can restore it later.",
+	driveTrashConfirmBodySingle: "Are you sure you want to move this item to the trash? You can restore it later.",
+	/** Trash confirm dialog — body for multiple items; {{count}} = items being trashed */
+	driveTrashConfirmBody_one: "Are you sure you want to move {{count}} item to the trash? You can restore it later.",
 	/** Trash confirm dialog — body for multiple items; {{count}} = items being trashed */
 	driveTrashConfirmBody_other: "Are you sure you want to move these {{count}} items to the trash? You can restore them later.",
 
@@ -425,7 +431,9 @@ export const drive = {
 	/** Delete-permanently confirm dialog — title; the confirm button reuses driveActionDeletePermanently */
 	driveDeletePermanentlyConfirmTitle: "Delete permanently?",
 	/** Delete-permanently confirm dialog — body for a single item */
-	driveDeletePermanentlyConfirmBody_one: "Are you sure you want to permanently delete this item? This cannot be undone.",
+	driveDeletePermanentlyConfirmBodySingle: "Are you sure you want to permanently delete this item? This cannot be undone.",
+	/** Delete-permanently confirm dialog — body for multiple items; {{count}} = items being deleted */
+	driveDeletePermanentlyConfirmBody_one: "Are you sure you want to permanently delete {{count}} item? This cannot be undone.",
 	/** Delete-permanently confirm dialog — body for multiple items; {{count}} = items being deleted */
 	driveDeletePermanentlyConfirmBody_other: "Are you sure you want to permanently delete these {{count}} items? This cannot be undone.",
 
@@ -475,7 +483,9 @@ export const drive = {
 	/** Bulk-restore confirm dialog — title; the confirm button reuses driveActionRestore. A single restored item needs no confirm (mobile parity) — this dialog is bulk-selection only */
 	driveRestoreSelectedConfirmTitle: "Restore items?",
 	/** Bulk-restore confirm dialog — body for a single selected item */
-	driveRestoreSelectedConfirmBody_one: "Are you sure you want to restore this item?",
+	driveRestoreSelectedConfirmBodySingle: "Are you sure you want to restore this item?",
+	/** Bulk-restore confirm dialog — body for multiple selected items; {{count}} = items being restored */
+	driveRestoreSelectedConfirmBody_one: "Are you sure you want to restore {{count}} item?",
 	/** Bulk-restore confirm dialog — body for multiple selected items; {{count}} = items being restored */
 	driveRestoreSelectedConfirmBody_other: "Are you sure you want to restore these {{count}} items?",
 
@@ -483,7 +493,9 @@ export const drive = {
 	/** Unshare confirm dialog — title (shared-with-me/shared-with-others root only); the confirm button reuses driveActionUnshare */
 	driveUnshareConfirmTitle: "Stop sharing?",
 	/** Unshare confirm dialog — body for a single item */
-	driveUnshareConfirmBody_one: "Are you sure you want to stop sharing this item?",
+	driveUnshareConfirmBodySingle: "Are you sure you want to stop sharing this item?",
+	/** Unshare confirm dialog — body for multiple items; {{count}} = items being unshared */
+	driveUnshareConfirmBody_one: "Are you sure you want to stop sharing {{count}} item?",
 	/** Unshare confirm dialog — body for multiple items; {{count}} = items being unshared */
 	driveUnshareConfirmBody_other: "Are you sure you want to stop sharing these {{count}} items?",
 
@@ -491,7 +503,9 @@ export const drive = {
 	/** Bulk disable-link confirm dialog — title; the confirm button reuses driveLinkDisableAction */
 	driveLinkDisableSelectedConfirmTitle: "Disable public links?",
 	/** Bulk disable-link confirm dialog — body for a single selected item */
-	driveLinkDisableSelectedConfirmBody_one: "Are you sure you want to disable the public link for this item?",
+	driveLinkDisableSelectedConfirmBodySingle: "Are you sure you want to disable the public link for this item?",
+	/** Bulk disable-link confirm dialog — body for multiple selected items; {{count}} = items being disabled */
+	driveLinkDisableSelectedConfirmBody_one: "Are you sure you want to disable the public link for {{count}} item?",
 	/** Bulk disable-link confirm dialog — body for multiple selected items; {{count}} = items being disabled */
 	driveLinkDisableSelectedConfirmBody_other: "Are you sure you want to disable the public links for these {{count}} items?",
 
@@ -543,7 +557,9 @@ export const drive = {
 	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */
 	driveShareDialogTitle: "Share with contacts",
 	/** Share dialog — body under the title for a single item */
-	driveShareDialogBody_one: "Select the contacts to share this item with.",
+	driveShareDialogBodySingle: "Select the contacts to share this item with.",
+	/** Share dialog — body under the title for multiple items; {{count}} = items being shared */
+	driveShareDialogBody_one: "Select the contacts to share {{count}} item with.",
 	/** Share dialog — body under the title for multiple items; {{count}} = items being shared */
 	driveShareDialogBody_other: "Select the contacts to share these {{count}} items with.",
 
@@ -764,18 +780,24 @@ export const drive = {
 	driveLinkExpirationThirtyDays: "30 days",
 
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
-	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one
 	// item, `_other` counts them; a partial result counts the ones that succeeded.
 	/** Activity toast — moving to trash running; one item named ({{name}}) */
-	driveTrashRunning_one: "Moving {{name}} to trash",
+	driveTrashRunningNamed: "Moving {{name}} to trash",
+	/** Activity toast — moving to trash running; {{count}} items */
+	driveTrashRunning_one: "Moving {{count}} item to trash",
 	/** Activity toast — moving to trash running; {{count}} items */
 	driveTrashRunning_other: "Moving {{count}} items to trash",
 	/** Activity toast — moving to trash finished; one item named ({{name}}) */
-	driveTrashDone_one: "Moved {{name}} to trash",
+	driveTrashDoneNamed: "Moved {{name}} to trash",
+	/** Activity toast — moving to trash finished; {{count}} items */
+	driveTrashDone_one: "Moved {{count}} item to trash",
 	/** Activity toast — moving to trash finished; {{count}} items */
 	driveTrashDone_other: "Moved {{count}} items to trash",
 	/** Activity toast — moving to trash failed for every item; one item named ({{name}}) */
-	driveTrashFailed_one: "Couldn't move {{name}} to trash",
+	driveTrashFailedNamed: "Couldn't move {{name}} to trash",
+	/** Activity toast — moving to trash failed for every item; {{count}} items */
+	driveTrashFailed_one: "Couldn't move {{count}} item to trash",
 	/** Activity toast — moving to trash failed for every item; {{count}} items */
 	driveTrashFailed_other: "Couldn't move {{count}} items to trash",
 	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
@@ -783,15 +805,21 @@ export const drive = {
 	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
 	driveTrashPartial_other: "Moved {{count}} items to trash, {{failed}} failed",
 	/** Activity toast — deleting permanently running; one item named ({{name}}) */
-	driveDeletePermanentlyRunning_one: "Deleting {{name}}",
+	driveDeletePermanentlyRunningNamed: "Deleting {{name}}",
+	/** Activity toast — deleting permanently running; {{count}} items */
+	driveDeletePermanentlyRunning_one: "Deleting {{count}} item",
 	/** Activity toast — deleting permanently running; {{count}} items */
 	driveDeletePermanentlyRunning_other: "Deleting {{count}} items",
 	/** Activity toast — deleting permanently finished; one item named ({{name}}) */
-	driveDeletePermanentlyDone_one: "Deleted {{name}}",
+	driveDeletePermanentlyDoneNamed: "Deleted {{name}}",
+	/** Activity toast — deleting permanently finished; {{count}} items */
+	driveDeletePermanentlyDone_one: "Deleted {{count}} item",
 	/** Activity toast — deleting permanently finished; {{count}} items */
 	driveDeletePermanentlyDone_other: "Deleted {{count}} items",
 	/** Activity toast — deleting permanently failed for every item; one item named ({{name}}) */
-	driveDeletePermanentlyFailed_one: "Couldn't delete {{name}}",
+	driveDeletePermanentlyFailedNamed: "Couldn't delete {{name}}",
+	/** Activity toast — deleting permanently failed for every item; {{count}} items */
+	driveDeletePermanentlyFailed_one: "Couldn't delete {{count}} item",
 	/** Activity toast — deleting permanently failed for every item; {{count}} items */
 	driveDeletePermanentlyFailed_other: "Couldn't delete {{count}} items",
 	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
@@ -799,15 +827,21 @@ export const drive = {
 	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
 	driveDeletePermanentlyPartial_other: "Deleted {{count}} items, {{failed}} failed",
 	/** Activity toast — restoring from trash running; one item named ({{name}}) */
-	driveRestoreRunning_one: "Restoring {{name}}",
+	driveRestoreRunningNamed: "Restoring {{name}}",
+	/** Activity toast — restoring from trash running; {{count}} items */
+	driveRestoreRunning_one: "Restoring {{count}} item",
 	/** Activity toast — restoring from trash running; {{count}} items */
 	driveRestoreRunning_other: "Restoring {{count}} items",
 	/** Activity toast — restoring from trash finished; one item named ({{name}}) */
-	driveRestoreDone_one: "Restored {{name}}",
+	driveRestoreDoneNamed: "Restored {{name}}",
+	/** Activity toast — restoring from trash finished; {{count}} items */
+	driveRestoreDone_one: "Restored {{count}} item",
 	/** Activity toast — restoring from trash finished; {{count}} items */
 	driveRestoreDone_other: "Restored {{count}} items",
 	/** Activity toast — restoring from trash failed for every item; one item named ({{name}}) */
-	driveRestoreFailed_one: "Couldn't restore {{name}}",
+	driveRestoreFailedNamed: "Couldn't restore {{name}}",
+	/** Activity toast — restoring from trash failed for every item; {{count}} items */
+	driveRestoreFailed_one: "Couldn't restore {{count}} item",
 	/** Activity toast — restoring from trash failed for every item; {{count}} items */
 	driveRestoreFailed_other: "Couldn't restore {{count}} items",
 	/** Activity toast — restoring from trash partly failed; {{count}} succeeded, {{failed}} failed */
@@ -815,15 +849,21 @@ export const drive = {
 	/** Activity toast — restoring from trash partly failed; {{count}} succeeded, {{failed}} failed */
 	driveRestorePartial_other: "Restored {{count}} items, {{failed}} failed",
 	/** Activity toast — stopping a share running; one item named ({{name}}) */
-	driveUnshareRunning_one: "Stopping sharing {{name}}",
+	driveUnshareRunningNamed: "Stopping sharing {{name}}",
+	/** Activity toast — stopping a share running; {{count}} items */
+	driveUnshareRunning_one: "Stopping sharing {{count}} item",
 	/** Activity toast — stopping a share running; {{count}} items */
 	driveUnshareRunning_other: "Stopping sharing {{count}} items",
 	/** Activity toast — stopping a share finished; one item named ({{name}}) */
-	driveUnshareDone_one: "Stopped sharing {{name}}",
+	driveUnshareDoneNamed: "Stopped sharing {{name}}",
+	/** Activity toast — stopping a share finished; {{count}} items */
+	driveUnshareDone_one: "Stopped sharing {{count}} item",
 	/** Activity toast — stopping a share finished; {{count}} items */
 	driveUnshareDone_other: "Stopped sharing {{count}} items",
 	/** Activity toast — stopping a share failed for every item; one item named ({{name}}) */
-	driveUnshareFailed_one: "Couldn't stop sharing {{name}}",
+	driveUnshareFailedNamed: "Couldn't stop sharing {{name}}",
+	/** Activity toast — stopping a share failed for every item; {{count}} items */
+	driveUnshareFailed_one: "Couldn't stop sharing {{count}} item",
 	/** Activity toast — stopping a share failed for every item; {{count}} items */
 	driveUnshareFailed_other: "Couldn't stop sharing {{count}} items",
 	/** Activity toast — stopping a share partly failed; {{count}} succeeded, {{failed}} failed */
@@ -831,15 +871,21 @@ export const drive = {
 	/** Activity toast — stopping a share partly failed; {{count}} succeeded, {{failed}} failed */
 	driveUnsharePartial_other: "Stopped sharing {{count}} items, {{failed}} failed",
 	/** Activity toast — disabling public links running; one item named ({{name}}) */
-	driveDisableLinkRunning_one: "Disabling the link to {{name}}",
+	driveDisableLinkRunningNamed: "Disabling the link to {{name}}",
+	/** Activity toast — disabling public links running; {{count}} items */
+	driveDisableLinkRunning_one: "Disabling {{count}} link",
 	/** Activity toast — disabling public links running; {{count}} items */
 	driveDisableLinkRunning_other: "Disabling {{count}} links",
 	/** Activity toast — disabling public links finished; one item named ({{name}}) */
-	driveDisableLinkDone_one: "Disabled the link to {{name}}",
+	driveDisableLinkDoneNamed: "Disabled the link to {{name}}",
+	/** Activity toast — disabling public links finished; {{count}} items */
+	driveDisableLinkDone_one: "Disabled {{count}} link",
 	/** Activity toast — disabling public links finished; {{count}} items */
 	driveDisableLinkDone_other: "Disabled {{count}} links",
 	/** Activity toast — disabling public links failed for every item; one item named ({{name}}) */
-	driveDisableLinkFailed_one: "Couldn't disable the link to {{name}}",
+	driveDisableLinkFailedNamed: "Couldn't disable the link to {{name}}",
+	/** Activity toast — disabling public links failed for every item; {{count}} items */
+	driveDisableLinkFailed_one: "Couldn't disable {{count}} link",
 	/** Activity toast — disabling public links failed for every item; {{count}} items */
 	driveDisableLinkFailed_other: "Couldn't disable {{count}} links",
 	/** Activity toast — disabling public links partly failed; {{count}} succeeded, {{failed}} failed */
@@ -849,15 +895,21 @@ export const drive = {
 	/** Activity toast — moving: stands in for {{destination}} when the target directory's name isn't known */
 	driveMoveDestinationFallback: "another directory",
 	/** Activity toast — moving to a directory ({{destination}}) running; one item named ({{name}}) */
-	driveMoveRunning_one: "Moving {{name}} to {{destination}}",
+	driveMoveRunningNamed: "Moving {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) running; {{count}} items */
+	driveMoveRunning_one: "Moving {{count}} item to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) running; {{count}} items */
 	driveMoveRunning_other: "Moving {{count}} items to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) finished; one item named ({{name}}) */
-	driveMoveDone_one: "Moved {{name}} to {{destination}}",
+	driveMoveDoneNamed: "Moved {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) finished; {{count}} items */
+	driveMoveDone_one: "Moved {{count}} item to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) finished; {{count}} items */
 	driveMoveDone_other: "Moved {{count}} items to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) failed for every item; one item named ({{name}}) */
-	driveMoveFailed_one: "Couldn't move {{name}} to {{destination}}",
+	driveMoveFailedNamed: "Couldn't move {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) failed for every item; {{count}} items */
+	driveMoveFailed_one: "Couldn't move {{count}} item to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) failed for every item; {{count}} items */
 	driveMoveFailed_other: "Couldn't move {{count}} items to {{destination}}",
 	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
@@ -865,15 +917,21 @@ export const drive = {
 	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
 	driveMovePartial_other: "Moved {{count}} items to {{destination}}, {{failed}} failed",
 	/** Activity toast — adding to favorites running; one item named ({{name}}) */
-	driveFavoriteRunning_one: "Adding {{name}} to favorites",
+	driveFavoriteRunningNamed: "Adding {{name}} to favorites",
+	/** Activity toast — adding to favorites running; {{count}} items */
+	driveFavoriteRunning_one: "Adding {{count}} item to favorites",
 	/** Activity toast — adding to favorites running; {{count}} items */
 	driveFavoriteRunning_other: "Adding {{count}} items to favorites",
 	/** Activity toast — adding to favorites finished; one item named ({{name}}) */
-	driveFavoriteDone_one: "Added {{name}} to favorites",
+	driveFavoriteDoneNamed: "Added {{name}} to favorites",
+	/** Activity toast — adding to favorites finished; {{count}} items */
+	driveFavoriteDone_one: "Added {{count}} item to favorites",
 	/** Activity toast — adding to favorites finished; {{count}} items */
 	driveFavoriteDone_other: "Added {{count}} items to favorites",
 	/** Activity toast — adding to favorites failed for every item; one item named ({{name}}) */
-	driveFavoriteFailed_one: "Couldn't add {{name}} to favorites",
+	driveFavoriteFailedNamed: "Couldn't add {{name}} to favorites",
+	/** Activity toast — adding to favorites failed for every item; {{count}} items */
+	driveFavoriteFailed_one: "Couldn't add {{count}} item to favorites",
 	/** Activity toast — adding to favorites failed for every item; {{count}} items */
 	driveFavoriteFailed_other: "Couldn't add {{count}} items to favorites",
 	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed */
@@ -881,15 +939,21 @@ export const drive = {
 	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed */
 	driveFavoritePartial_other: "Added {{count}} items to favorites, {{failed}} failed",
 	/** Activity toast — removing from favorites running; one item named ({{name}}) */
-	driveUnfavoriteRunning_one: "Removing {{name}} from favorites",
+	driveUnfavoriteRunningNamed: "Removing {{name}} from favorites",
+	/** Activity toast — removing from favorites running; {{count}} items */
+	driveUnfavoriteRunning_one: "Removing {{count}} item from favorites",
 	/** Activity toast — removing from favorites running; {{count}} items */
 	driveUnfavoriteRunning_other: "Removing {{count}} items from favorites",
 	/** Activity toast — removing from favorites finished; one item named ({{name}}) */
-	driveUnfavoriteDone_one: "Removed {{name}} from favorites",
+	driveUnfavoriteDoneNamed: "Removed {{name}} from favorites",
+	/** Activity toast — removing from favorites finished; {{count}} items */
+	driveUnfavoriteDone_one: "Removed {{count}} item from favorites",
 	/** Activity toast — removing from favorites finished; {{count}} items */
 	driveUnfavoriteDone_other: "Removed {{count}} items from favorites",
 	/** Activity toast — removing from favorites failed for every item; one item named ({{name}}) */
-	driveUnfavoriteFailed_one: "Couldn't remove {{name}} from favorites",
+	driveUnfavoriteFailedNamed: "Couldn't remove {{name}} from favorites",
+	/** Activity toast — removing from favorites failed for every item; {{count}} items */
+	driveUnfavoriteFailed_one: "Couldn't remove {{count}} item from favorites",
 	/** Activity toast — removing from favorites failed for every item; {{count}} items */
 	driveUnfavoriteFailed_other: "Couldn't remove {{count}} items from favorites",
 	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed */
@@ -897,15 +961,21 @@ export const drive = {
 	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed */
 	driveUnfavoritePartial_other: "Removed {{count}} items from favorites, {{failed}} failed",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; one item named ({{name}}) */
-	driveShareRunning_one: "Sharing {{name}} with {{recipients}}",
+	driveShareRunningNamed: "Sharing {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; {{count}} items */
+	driveShareRunning_one: "Sharing {{count}} item with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; {{count}} items */
 	driveShareRunning_other: "Sharing {{count}} items with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) finished; one item named ({{name}}) */
-	driveShareDone_one: "Shared {{name}} with {{recipients}}",
+	driveShareDoneNamed: "Shared {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) finished; {{count}} items */
+	driveShareDone_one: "Shared {{count}} item with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) finished; {{count}} items */
 	driveShareDone_other: "Shared {{count}} items with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) failed for every item; one item named ({{name}}) */
-	driveShareFailed_one: "Couldn't share {{name}} with {{recipients}}",
+	driveShareFailedNamed: "Couldn't share {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) failed for every item; {{count}} items */
+	driveShareFailed_one: "Couldn't share {{count}} item with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) failed for every item; {{count}} items */
 	driveShareFailed_other: "Couldn't share {{count}} items with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) partly failed; {{count}} succeeded, {{failed}} failed */
@@ -917,15 +987,21 @@ export const drive = {
 	/** Activity toast — who a share goes to when it is several contacts; {{count}} contacts */
 	driveShareRecipients_other: "{{count}} contacts",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) running; one item named ({{name}}) */
-	driveDeleteVersionsRunning_one: "Deleting the version from {{name}}",
+	driveDeleteVersionsRunningNamed: "Deleting the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) running; {{count}} items */
+	driveDeleteVersionsRunning_one: "Deleting {{count}} version",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) running; {{count}} items */
 	driveDeleteVersionsRunning_other: "Deleting {{count}} versions",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) finished; one item named ({{name}}) */
-	driveDeleteVersionsDone_one: "Deleted the version from {{name}}",
+	driveDeleteVersionsDoneNamed: "Deleted the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) finished; {{count}} items */
+	driveDeleteVersionsDone_one: "Deleted {{count}} version",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) finished; {{count}} items */
 	driveDeleteVersionsDone_other: "Deleted {{count}} versions",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) failed for every item; one item named ({{name}}) */
-	driveDeleteVersionsFailed_one: "Couldn't delete the version from {{name}}",
+	driveDeleteVersionsFailedNamed: "Couldn't delete the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) failed for every item; {{count}} items */
+	driveDeleteVersionsFailed_one: "Couldn't delete {{count}} version",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) failed for every item; {{count}} items */
 	driveDeleteVersionsFailed_other: "Couldn't delete {{count}} versions",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) partly failed; {{count}} succeeded, {{failed}} failed */

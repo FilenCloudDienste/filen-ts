@@ -1,4 +1,4 @@
-import { CellFlag, type SheetQueryResult, type SheetSummary } from "@filen/office/core/sheet"
+import { CellFlag, quotedSheetName, rangeName, type SheetQueryResult, type SheetSummary } from "@filen/office/core/sheet"
 import type { GridRect } from "@filen/office/react/sheet"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 
@@ -25,26 +25,12 @@ export function noteStart(author: string | null): string {
 	return author === null || author === "" ? "" : `${author}:\n`
 }
 
-function quotedSheet(name: string): string {
-	return /^[A-Za-z_][\w.]*$/.test(name) && !/^[A-Za-z]{1,3}\d+$/.test(name) ? name : `'${name.replaceAll("'", "''")}'`
-}
-
-function column(index: number): string {
-	let name = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + ((n - 1) % 26)) + name
-
-	return name
-}
-
 // A place in the workbook as Excel names it ("Sheet2!B3:C4").
 export function placeName(sheets: readonly SheetSummary[], place: NonNullable<SheetLink["place"]>): string {
 	const sheet = sheets.find(candidate => candidate.id === place.sheet)
-	const { startRow, startCol, endRow, endCol } = place.range
-	const start = `${column(startCol)}${String(startRow + 1)}`
-	const reference = startRow === endRow && startCol === endCol ? start : `${start}:${column(endCol)}${String(endRow + 1)}`
+	const reference = rangeName(place.range)
 
-	return sheet === undefined ? reference : `${quotedSheet(sheet.name)}!${reference}`
+	return sheet === undefined ? reference : `${quotedSheetName(sheet.name)}!${reference}`
 }
 
 export type LinkAction =
@@ -126,7 +112,7 @@ export function linkTarget(form: LinkForm): LinkFormResult {
 
 		return {
 			ok: true,
-			target: { location: sheet === "" || !REFERENCE.test(reference) ? reference : `${quotedSheet(sheet)}!${reference}` }
+			target: { location: sheet === "" || !REFERENCE.test(reference) ? reference : `${quotedSheetName(sheet)}!${reference}` }
 		}
 	}
 

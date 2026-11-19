@@ -101,7 +101,7 @@ import {
 	type ExtractReportDTO,
 	type ListReportDTO
 } from "@/lib/sdk/jobErrors"
-import { log } from "@/lib/log"
+import { log, type LogEntry } from "@/lib/log"
 import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import {
 	cacheDirs,
@@ -3547,6 +3547,10 @@ const api = {
 	// side-effect-free otherwise: never touches the live `client`.
 	setClientConfig(config: JsClientConfig): void {
 		clientConfig = config
+	},
+	// This realm's log ring (lib/log.ts), pulled by the page's Logs view and export (features/settings/lib/logs.ts).
+	dumpLogs(): LogEntry[] {
+		return log.dump()
 	}
 }
 export type SdkWorkerApi = typeof api
@@ -3564,10 +3568,14 @@ Comlink.expose(
 				try {
 					return await (v as (...a: unknown[]) => unknown).apply(t, args)
 				} catch (e) {
-					// The method, so a failure the caller swallows still says which call it was.
-					log.error("sdk.worker", String(p), e)
+					const dto = asErrorDTO(e)
+					// The method, so a failure the caller swallows still says which call it was. A cancel is the
+					// caller's own doing (a scrolled-away thumbnail, a stopped transfer), not a failure.
+					if (dto.kind !== "Cancelled") {
+						log.error("sdk.worker", String(p), e)
+					}
 					// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate: Comlink structured-clones a plain thrown object intact; an Error subclass would lose the DTO's custom fields to Comlink's lossy Error serializer.
-					throw asErrorDTO(e)
+					throw dto
 				}
 			}
 		}

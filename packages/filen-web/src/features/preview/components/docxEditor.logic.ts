@@ -21,6 +21,7 @@ import {
 	type DocxThemeColor,
 	type DocxValuesSnapshot,
 	type DocxReadOnlyReason,
+	type DocxEditStrings,
 	type LockReason,
 	type DocumentMatch,
 	type ReplaceAllResult,
@@ -1469,6 +1470,19 @@ export function controlLockedKey(locked: NonNullable<DocxControlContext["locked"
 			return "previewDocxControlLockedBound"
 		default:
 			return "previewDocxControlLockedDisabled"
+	}
+}
+
+// The text the editor saves into a document (new form controls' placeholders, an empty table of contents), in the
+// user's language as Word writes it in its own: the editing context's strings, made once per document.
+export function docxEditStrings(t: (key: PreviewKey) => string): DocxEditStrings {
+	return {
+		placeholders: {
+			text: t("previewDocxControlPlaceholderText"),
+			date: t("previewDocxControlPlaceholderDate"),
+			list: t("previewDocxControlPlaceholderList")
+		},
+		noTocEntries: t("previewDocxTocNoEntries")
 	}
 }
 

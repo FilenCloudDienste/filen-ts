@@ -1,9 +1,9 @@
 import type { Locator, Page, Route } from "@playwright/test"
 import { expect } from "../fixtures"
-import { escapeRegExp } from "./archive"
 import { trackCspViolations } from "./csp"
 import { boxOf } from "./geometry"
 import { dismissOverlays, LIVE_WRITE_TIMEOUT_MS, openTransfers, setTallListingViewport, toasts, withScratchDirectory } from "./listing"
+import { escapeRegExp } from "./rows"
 
 // The drive-job cards (copy, compress, extract) and everything a spec does with a job: wait for it,
 // read it, pause, cancel, answer its password prompt, open its report, and stop whatever is left in
@@ -370,7 +370,7 @@ export async function openReport(page: Page, card: Locator): Promise<Locator> {
 
 // A report section's heading button, whose name is the section's title then its count.
 export function reportSection(dialog: Locator, title: string): Locator {
-	return dialog.getByRole("button", { name: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\d+$`) })
+	return dialog.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)} \\d+$`) })
 }
 
 // The report's virtualized rows as rendered (only those near the scroll position are in the DOM).

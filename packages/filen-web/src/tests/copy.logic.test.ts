@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, ItemCounts } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import { applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
@@ -14,47 +14,16 @@ import {
 	isCopyTrashPending,
 	retryEntries
 } from "@/features/drive/lib/copy.logic"
-import type { CopyFailureDTO, CopyFailureInfoDTO, CopyReportDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
+import type { CopyFailureDTO, CopyFailureInfoDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
 import { testUuid } from "@/tests/support/uuid"
+import { copyJobFixtures, counts } from "@/tests/fixtures/copyJob"
 import { sdkErrorDTO } from "@/tests/support/sdkError"
 
 const DESTINATION = { uuid: null, name: "My Drive" }
+const { copyUpdate, copyReport } = copyJobFixtures({ dirs: 1n, files: 3n, bytes: 300n })
 // The SDK's own message: developer text, kept on the error for logs.
 const SERVER_INNER_MESSAGE = 'error: API Error, message: `Some("Server said no")`'
 const SERVER_MESSAGE = `Error of kind Server: ${SERVER_INNER_MESSAGE}`
-
-function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
-	return {
-		dirsCreated: 0n,
-		dirsFailed: 0n,
-		filesDone: 0n,
-		filesFailed: 0n,
-		bytesDone: 0n,
-		bytesFailed: 0n,
-		dirsNotAttempted: 0n,
-		filesNotAttempted: 0n,
-		bytesNotAttempted: 0n,
-		entriesSkipped: 0n,
-		bytesSkipped: 0n,
-		...overrides
-	}
-}
-
-function update(overrides: Partial<CopyUpdateDTO> = {}): CopyUpdateDTO {
-	return {
-		phase: "copyingFiles",
-		runState: "running",
-		scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
-		totals: { dirs: 1n, files: 3n, bytes: 300n },
-		counts: counts(),
-		active: [],
-		events: [],
-		bytesPerSecond: undefined,
-		etaMs: undefined,
-		activeTimeMs: 0n,
-		...overrides
-	}
-}
 
 function failureInfo(overrides: Partial<CopyFailureInfoDTO> = {}): CopyFailureInfoDTO {
 	return {
@@ -98,25 +67,12 @@ function failure(overrides: Partial<CopyFailureInfoDTO> = {}): CopyFailureDTO {
 	return { item: mockFile("failed"), info: failureInfo(overrides) }
 }
 
-function report(overrides: Partial<CopyReportDTO> = {}): CopyReportDTO {
-	return {
-		topLevel: [],
-		failures: [],
-		skipped: [],
-		renamed: [],
-		totals: { dirs: 1n, files: 3n, bytes: 300n },
-		counts: counts({ filesDone: 3n, bytesDone: 300n, dirsCreated: 1n }),
-		error: undefined,
-		...overrides
-	}
-}
-
 describe("copyUpdateInput", () => {
 	it("narrows the SDK's bigint state to numbers through the shared job", () => {
 		const job = applyCopyUpdate(
 			createCopyJob("j", DESTINATION, 2),
 			copyUpdateInput(
-				update({
+				copyUpdate({
 					counts: counts({ filesDone: 2n, bytesDone: 200n }),
 					active: [
 						{
@@ -145,7 +101,7 @@ describe("copyUpdateInput", () => {
 
 	it("keeps failures, counting a saved-as-version file apart from them", () => {
 		const { events } = copyUpdateInput(
-			update({
+			copyUpdate({
 				events: [
 					{ type: "fileFailed", ...failureInfo() },
 					{ type: "dirFailed", ...failureInfo({ sourcePath: "a/dir", destName: "dir" }) },
@@ -161,7 +117,7 @@ describe("copyUpdateInput", () => {
 
 	it("reads the run state into the shared job's pause and cancel flags", () => {
 		const flags = (runState: CopyUpdateDTO["runState"]) => {
-			const { pausing, paused, cancelling } = copyUpdateInput(update({ runState }))
+			const { pausing, paused, cancelling } = copyUpdateInput(copyUpdate({ runState }))
 
 			return { pausing, paused, cancelling }
 		}
@@ -171,15 +127,15 @@ describe("copyUpdateInput", () => {
 		expect(flags("paused")).toEqual({ pausing: false, paused: true, cancelling: false })
 		expect(flags("cancelling")).toEqual({ pausing: false, paused: false, cancelling: true })
 
-		const job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), copyUpdateInput(update({ runState: "paused" })))
+		const job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), copyUpdateInput(copyUpdate({ runState: "paused" })))
 
 		expect(job.paused).toBe(true)
-		expect(applyCopyUpdate(job, copyUpdateInput(update({ runState: "running" }))).paused).toBe(false)
+		expect(applyCopyUpdate(job, copyUpdateInput(copyUpdate({ runState: "running" }))).paused).toBe(false)
 	})
 
 	it("leaves skipped entries to the counts: they are neither failures nor retryable", () => {
 		const { events } = copyUpdateInput(
-			update({
+			copyUpdate({
 				counts: counts({ entriesSkipped: 2n, bytesSkipped: 150n }),
 				events: [
 					{
@@ -198,7 +154,7 @@ describe("copyUpdateInput", () => {
 
 	it("counts renames and propagation failures and ignores routine events", () => {
 		const { events } = copyUpdateInput(
-			update({
+			copyUpdate({
 				events: [
 					{ type: "renamed", sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" },
 					{ type: "propagationFailed", destUuid: testUuid("d"), error: failureInfo().error },
@@ -242,7 +198,7 @@ describe("copyReportInput", () => {
 	it("pairs each retryable failure with its SDK form and counts saved-as-version files apart", () => {
 		const version = failure({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } })
 		const failed = failure()
-		const input = copyReportInput(report({ failures: [failed, version] }))
+		const input = copyReportInput(copyReport({ failures: [failed, version] }))
 
 		expect(input.failures).toHaveLength(1)
 		expect(input.failures[0]?.retryable).toBe(failed)
@@ -252,7 +208,7 @@ describe("copyReportInput", () => {
 
 	it("reads a version target off its stage, never from another stage's failure", () => {
 		const input = copyReportInput(
-			report({
+			copyReport({
 				failures: [
 					failure({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } }),
 					failure({ stage: { type: "download" } }),
@@ -277,7 +233,7 @@ describe("copyReportInput", () => {
 			meta: { type: "decoded", data: { name: "copied" } }
 		}
 		const input = copyReportInput(
-			report({
+			copyReport({
 				topLevel: [{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } }],
 				renamed: [{ sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" }],
 				error: sdkErrorDTO("Server", "Error of kind Server: error: API Error", { innerMessage: "error: API Error" })
@@ -292,7 +248,7 @@ describe("copyReportInput", () => {
 	it("settles through the shared job with the report's retryable failures", () => {
 		const failed = failure()
 		const job = settleCopyJob(createCopyJob("j", DESTINATION, 3), {
-			report: copyReportInput(report({ failures: [failed] })),
+			report: copyReportInput(copyReport({ failures: [failed] })),
 			maxBytes: undefined
 		})
 
@@ -304,7 +260,7 @@ describe("copyReportInput", () => {
 	it("reads a quota pre-flight refusal through the shared job", () => {
 		const job = settleCopyJob(createCopyJob("j", DESTINATION, 3), {
 			report: copyReportInput(
-				report({
+				copyReport({
 					counts: counts(),
 					totals: { dirs: 0n, files: 2n, bytes: 300n },
 					error: sdkErrorDTO(
@@ -339,7 +295,7 @@ describe("copiedTopLevel", () => {
 		const versioned = mockFile("versioned")
 		const settlement = {
 			report: copyReportInput(
-				report({
+				copyReport({
 					topLevel: [
 						{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } },
 						{ request: 1n, sourceUuid: testUuid("s"), item: { type: "file", ...listed } },

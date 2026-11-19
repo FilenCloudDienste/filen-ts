@@ -10,7 +10,10 @@ import {
 } from "@/workers/videoIndex/engine"
 import { SNAPSHOT_HEADER_BYTES, crc32, decodeSnapshot, readSnapshotHeader } from "@/workers/videoIndex/snapshot.logic"
 import { LOOKUP_RETRY_MS, WALK_FLOOR_MS } from "@/workers/videoIndex/engine"
-import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
+import { LibraryFiles, buildTitlesSteps, type VideoTitleView } from "@/workers/videoIndex/view.logic"
+import { titleCard } from "@/features/videos/lib/homeRows.logic"
+import { buildTitleWatch, buildVideoHomeIndex, homeEntries } from "@/features/videos/lib/titleWatch.logic"
+import { titleHomeItems } from "@/features/videos/lib/titleDetail.logic"
 import { FakeDrive, driveDir, driveEvent, driveFile, hexUuid } from "@/tests/support/videoDrive"
 import { memoryCatalogStore, trackCatalogTitles } from "@/tests/support/videoIndex"
 import { decodeCatalog, encodeCatalog, readCatalogHeader } from "@/workers/videoIndex/catalogFile.logic"
@@ -260,6 +263,88 @@ describe("library index classification", () => {
 		expect(episodes.map(episode => episode.episode)).toEqual([1, 2])
 		expect(episodes[1]?.versions[0]?.parts[0]?.subtitles.map(subtitle => subtitle.language)).toEqual(["en"])
 		expect(JSON.stringify(detail)).not.toContain('"key"')
+	})
+
+	it("marks a series unsupported only when every episode is, and its card offers no Play then", async () => {
+		const root = drive.addDir(hexUuid(), "Shows")
+		const old = drive.addDir(drive.addDir(root, "Old Show"), "Season 1")
+		const mixed = drive.addDir(drive.addDir(root, "Mixed Show"), "Season 1")
+
+		drive.addFile(old, "Old Show S01E01.wmv")
+		drive.addFile(old, "Old Show S01E02.wmv")
+		drive.addFile(mixed, "Mixed Show S01E01.wmv")
+		drive.addFile(mixed, "Mixed Show S01E02.mkv")
+
+		const engine = engineFor()
+
+		await engine.configure(roots([root, "auto"]))
+		await engine.check(latest)
+		await settle()
+
+		const series = [...titles.values()].filter(title => title.kind === "series")
+		const oldShow = series.find(title => title.title === "Old Show")
+		const mixedShow = series.find(title => title.title === "Mixed Show")
+
+		expect(oldShow?.unsupported).toBe(true)
+		expect(mixedShow?.unsupported).toBe(false)
+
+		if (oldShow === undefined || mixedShow === undefined) {
+			throw new Error("series not classified")
+		}
+
+		const details = await Promise.all([engine.titleDetail(oldShow.id), engine.titleDetail(mixedShow.id)])
+		const items = details.flatMap(detail => (detail === null ? [] : titleHomeItems(detail)))
+		const index = buildVideoHomeIndex({ items, watchItems: {}, lastPlayedCeilingMs: undefined, durationOf: () => null })
+		const data = { index, entries: homeEntries(index), watch: buildTitleWatch(index) }
+
+		const oldCard = titleCard({ data, title: oldShow, shape: "poster" })
+		const mixedCard = titleCard({ data, title: mixedShow, shape: "poster" })
+
+		expect(oldCard.sublines).toEqual([{ kind: "unsupported", container: "wmv" }])
+		expect(oldCard.play).toBeNull()
+		expect(mixedCard.sublines.some(subline => subline.kind === "unsupported")).toBe(false)
+		expect(mixedCard.play).not.toBeNull()
+		// Unplayable episodes count as unwatched, but the card shows no count it could never clear.
+		expect(items).toHaveLength(4)
+		expect(oldCard.badge).toBeNull()
+		expect(mixedCard.badge).toEqual({ kind: "unwatched", count: 2 })
+	})
+
+	it("doesn't mark a series without episodes unsupported", () => {
+		const noArt = { poster: -1, backdrop: -1, logo: -1 }
+		const files = new LibraryFiles({
+			library: {
+				classifierVersion: CLASSIFIER_VERSION,
+				videos: [],
+				movies: [],
+				others: [],
+				series: [
+					{
+						id: "empty",
+						title: "Empty",
+						sortName: "empty",
+						year: 0,
+						mergeKey: "",
+						roots: [0],
+						nfo: -1,
+						art: noArt,
+						seasons: [{ number: 1, dirUuid: "", nfo: -1, art: noArt, episodes: [] }],
+						extras: [],
+						dateAdded: 0
+					}
+				]
+			},
+			files: [],
+			rootUuids: ["root"]
+		})
+		const steps = buildTitlesSteps(files)
+		let step = steps.next()
+
+		while (step.done !== true) {
+			step = steps.next()
+		}
+
+		expect(step.value.map(title => [title.id, title.unsupported])).toEqual([["empty", false]])
 	})
 
 	it("answers calls made after a failed classification from what is held, and waits for a rerun under way", async () => {

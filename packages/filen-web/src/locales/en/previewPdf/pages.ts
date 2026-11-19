@@ -1,18 +1,18 @@
-// "preview" namespace, PDF editor — page organisation and crop: the pages rail and Organise grid, their toolbar and
+// "preview" namespace, PDF editor — page organization and crop: the pages rail and Organize grid, their toolbar and
 // Insert menu, the Extract and Split dialogs, names of the files they make, what the screen reader hears after a page
 // change, and the crop bar and handles. Spread into preview.ts; same catalog rules.
 export const previewPdfPages = {
-	/** PDF pages rail and Organise grid — accessible name of the list of page thumbnails */
+	/** PDF pages rail and Organize grid — accessible name of the list of page thumbnails */
 	previewPdfPagesRailLabel: "Pages",
 	/** PDF ribbon, Pages tab — toggle button that shows or hides the column of page thumbnails beside the document; also names that column */
 	previewPdfPagesRailToggle: "Page thumbnails",
 	/** PDF pages rail — accessible name of one page thumbnail; {{page}} is its number, {{count}} the number of pages */
 	previewPdfPagesItemLabel: "Page {{page}} of {{count}}",
-	/** PDF Organise grid — title of the full-screen view of every page, where pages are moved, rotated, deleted and inserted */
-	previewPdfPagesOrganise: "Organise pages",
-	/** PDF Organise grid — button that closes the grid and returns to the document */
+	/** PDF Organize grid — title of the full-screen view of every page, where pages are moved, rotated, deleted and inserted */
+	previewPdfPagesOrganise: "Organize pages",
+	/** PDF Organize grid — button that closes the grid and returns to the document */
 	previewPdfPagesOrganiseDone: "Done",
-	/** PDF Organise grid — accessible name of the toolbar above the pages */
+	/** PDF Organize grid — accessible name of the toolbar above the pages */
 	previewPdfPagesToolbarLabel: "Page actions",
 	/** PDF pages toolbar — menu button that inserts pages after the current one */
 	previewPdfPagesInsert: "Insert",
@@ -43,23 +43,33 @@ export const previewPdfPages = {
 	/** Notice when every page is selected for deletion */
 	previewPdfPagesLastPage: "A PDF needs at least one page, so not every page can be deleted.",
 	/** Screen reader announcement after a page was moved; {{page}} is its old number, {{position}} its new one */
-	previewPdfPagesMoved_one: "Page {{page}} moved to position {{position}}",
+	previewPdfPagesMovedSingle: "Page {{page}} moved to position {{position}}",
+	/** Screen reader announcement after several pages were moved together; {{position}} is where the first of them now is */
+	previewPdfPagesMoved_one: "{{count}} page moved to position {{position}}",
 	/** Screen reader announcement after several pages were moved together; {{position}} is where the first of them now is */
 	previewPdfPagesMoved_other: "{{count}} pages moved to position {{position}}",
 	/** Screen reader announcement after pages were rotated; {{page}} is the page's number */
-	previewPdfPagesRotated_one: "Page {{page}} rotated",
+	previewPdfPagesRotatedSingle: "Page {{page}} rotated",
+	/** Screen reader announcement after pages were rotated */
+	previewPdfPagesRotated_one: "{{count}} page rotated",
 	/** Screen reader announcement after pages were rotated */
 	previewPdfPagesRotated_other: "{{count}} pages rotated",
 	/** Screen reader announcement after pages were deleted; {{page}} is the page's number */
-	previewPdfPagesDeleted_one: "Page {{page}} deleted",
+	previewPdfPagesDeletedSingle: "Page {{page}} deleted",
+	/** Screen reader announcement after pages were deleted */
+	previewPdfPagesDeleted_one: "{{count}} page deleted",
 	/** Screen reader announcement after pages were deleted */
 	previewPdfPagesDeleted_other: "{{count}} pages deleted",
 	/** Screen reader announcement after pages were duplicated; {{page}} is the page's number */
-	previewPdfPagesDuplicated_one: "Page {{page}} duplicated",
+	previewPdfPagesDuplicatedSingle: "Page {{page}} duplicated",
+	/** Screen reader announcement after pages were duplicated */
+	previewPdfPagesDuplicated_one: "{{count}} page duplicated",
 	/** Screen reader announcement after pages were duplicated */
 	previewPdfPagesDuplicated_other: "{{count}} pages duplicated",
 	/** Screen reader announcement after pages were inserted; {{position}} is the number of the first new page */
-	previewPdfPagesInserted_one: "Page inserted at position {{position}}",
+	previewPdfPagesInsertedSingle: "Page inserted at position {{position}}",
+	/** Screen reader announcement after pages were inserted; {{position}} is the number of the first new page */
+	previewPdfPagesInserted_one: "{{count}} page inserted at position {{position}}",
 	/** Screen reader announcement after pages were inserted; {{position}} is the number of the first new page */
 	previewPdfPagesInserted_other: "{{count}} pages inserted at position {{position}}",
 	/** Error toast: the picture could not be read as an image */
@@ -73,12 +83,14 @@ export const previewPdfPages = {
 	/** PDF Insert — the password prompt's text when the PDF chosen to insert from is password-protected */
 	previewPdfPagesInsertPasswordBody: "The PDF to insert from is password-protected. Enter its password.",
 	/** Screen reader announcement after pages were cropped; {{page}} is the page's number */
-	previewPdfPagesCropped_one: "Page {{page}} cropped",
+	previewPdfPagesCroppedSingle: "Page {{page}} cropped",
+	/** Screen reader announcement after pages were cropped */
+	previewPdfPagesCropped_one: "{{count}} page cropped",
 	/** Screen reader announcement after pages were cropped */
 	previewPdfPagesCropped_other: "{{count}} pages cropped",
 	/** Button that closes a one-line notice under the ribbon */
 	previewPdfPagesNoticeDismiss: "Dismiss",
-	/** PDF Organise grid — button on a signed PDF: saves a copy of it without its signatures, whose pages can then be organised */
+	/** PDF Organize grid — button on a signed PDF: saves a copy of it without its signatures, whose pages can then be organized */
 	previewPdfPagesCopyWithoutSignatures: "Edit a copy without signatures",
 	/** Name of that copy, in parentheses after the original name: "contract (without signatures).pdf" */
 	previewPdfPagesUnsignedSuffix: "without signatures",
@@ -101,7 +113,7 @@ export const previewPdfPages = {
 	previewPdfPageRangePlaceholder: "e.g. 1-3, 7, 10-",
 	/** PDF pages fields — error under the field when it cannot be read; {{last}} is the last page's number */
 	previewPdfPageRangeInvalid: "Enter pages from 1 to {{last}}, such as 1-3, 7, 10-",
-	/** PDF editor — a page named in a list (a comment's page, a search match, a redaction mark, a page being recognised); {{page}} is its 1-based number */
+	/** PDF editor — a page named in a list (a comment's page, a search match, a redaction mark, a page being recognized); {{page}} is its 1-based number */
 	previewPdfPageNumber: "Page {{page}}",
 	/** PDF Extract dialog — switch: make a separate PDF of each page */
 	previewPdfExtractSeparate: "One file per page",
@@ -126,7 +138,9 @@ export const previewPdfPages = {
 	/** PDF Extract and Split dialogs — note for a signed PDF */
 	previewPdfExtractSignatures: "Signatures aren't copied. Where a signature shows on a page, its picture stays.",
 	/** PDF Extract and Split dialogs — the name of the file that will be made; {{name}} is a file name */
-	previewPdfExtractOutput_one: "Saves {{name}}",
+	previewPdfExtractOutputSingle: "Saves {{name}}",
+	/** PDF Extract and Split dialogs — the files that will be made; {{name}} is the first file's name */
+	previewPdfExtractOutput_one: "Saves {{count}} file, starting with {{name}}",
 	/** PDF Extract and Split dialogs — the files that will be made; {{name}} is the first file's name */
 	previewPdfExtractOutput_other: "Saves {{count}} files, starting with {{name}}",
 	/** PDF Extract dialog — what extracting opens; {{name}} is the name the new PDF gets when it is saved */
@@ -138,7 +152,9 @@ export const previewPdfPages = {
 	/** PDF Extract and Split dialogs — the submit button while files are saved: files done of all */
 	previewPdfExtractProgress: "Saving {{done}} of {{count}}…",
 	/** Success toast after extracting or splitting; {{name}} is a file name */
-	previewPdfExtractSaved_one: "Saved {{name}}",
+	previewPdfExtractSavedSingle: "Saved {{name}}",
+	/** Success toast after extracting or splitting */
+	previewPdfExtractSaved_one: "Saved {{count}} file",
 	/** Success toast after extracting or splitting */
 	previewPdfExtractSaved_other: "Saved {{count}} files",
 	/** Error toast: extracting pages failed */
@@ -182,9 +198,11 @@ export const previewPdfPages = {
 	/** Error toast: splitting the PDF failed */
 	previewPdfSplitFailed: "The PDF couldn't be split.",
 
-	/** Name of an extracted PDF, in parentheses after the original name: "report (page 3).pdf"; {{pages}} is the page */
-	previewPdfPagesCopySuffix_one: "page {{pages}}",
-	/** Name of an extracted PDF, in parentheses after the original name: "report (pages 3-5).pdf"; {{pages}} lists the pages */
+	/** Name of a PDF extracted from exactly one page, in parentheses after the original name: "report (page 3).pdf"; {{pages}} is the page */
+	previewPdfPagesCopySuffixSingle: "page {{pages}}",
+	/** Name of a PDF extracted from several pages ({{count}} of them), in parentheses after the original name: "report (pages 3-5).pdf"; {{pages}} lists the pages */
+	previewPdfPagesCopySuffix_one: "pages {{pages}}",
+	/** Name of a PDF extracted from several pages ({{count}} of them), in parentheses after the original name: "report (pages 3-5).pdf"; {{pages}} lists the pages */
 	previewPdfPagesCopySuffix_other: "pages {{pages}}",
 	/** Name of a split part, in parentheses after the original name: "report (part 1).pdf" */
 	previewPdfPagesPartSuffix: "part {{part}}",

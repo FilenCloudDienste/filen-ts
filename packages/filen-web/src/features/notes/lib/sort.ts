@@ -1,4 +1,5 @@
 import type { Note, NoteTag } from "@filen/sdk-rs"
+import { matchesNameSearch, nameSearchKey } from "@filen/shared"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`
 // is a bigint on this surface — every comparison below stays in bigint (`<`/`>`), never Number(): a
@@ -62,9 +63,9 @@ export function isTagUndecryptable(tag: NoteTag): boolean {
 export { isNoteOwner, hasNoteWriteAccess } from "@filen/shared"
 
 // The one search-term normalization every notes filter shares, so body-fetch scoping can never
-// disagree with the filter it feeds.
+// disagree with the filter it feeds. NFC as well, so a title stored decomposed still matches a typed query.
 export function normalizeSearch(search: string): string {
-	return search.trim().toLowerCase()
+	return nameSearchKey(search)
 }
 
 // Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
@@ -72,12 +73,13 @@ export function normalizeSearch(search: string): string {
 // eager content fetch scoped to only the notes that actually need it. A query equal to the full uuid
 // also matches, so an undecryptable note stays findable without phantom single-character hits.
 export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): boolean {
-	return note.uuid.toLowerCase() === normalizedSearch || noteSearchTitle(note).toLowerCase().includes(normalizedSearch)
+	return note.uuid.toLowerCase() === normalizedSearch || matchesNameSearch(noteSearchTitle(note), normalizedSearch)
 }
 
 // Search filter over title + full decrypted body (mirrors mobile's filterNoteListItemsBySearchQuery
 // parity: matches title + eagerly-fetched content, not just a short summary). `bodies` is the
-// uuid-keyed map of ALREADY-LOWERCASED bodies useNoteSearchBodies.ts eagerly fetches ONLY while a
+// uuid-keyed map of bodies ALREADY FOLDED by nameSearchKey (lowercased, NFC when non-ASCII, the same form
+// as the key, so a body hit and its preview fallback agree) useNoteSearchBodies.ts eagerly fetches ONLY while a
 // search is active (opt-in, per its own doc comment) — a note absent from the map (fetch still in
 // flight, or the caller never wired bodies through at all) falls back to `preview`, the SDK's own short summary of the same content, so a
 // body-only match briefly reads as "not found" rather than crashing or matching everything. Empty/
@@ -94,9 +96,13 @@ export function filterNotesBySearch(notes: readonly Note[], search: string, bodi
 			return true
 		}
 
-		const bodyText = bodies?.get(note.uuid) ?? note.preview?.toLowerCase()
+		const body = bodies?.get(note.uuid)
 
-		return bodyText?.includes(normalized) ?? false
+		if (body !== undefined) {
+			return body.includes(normalized)
+		}
+
+		return note.preview !== undefined && matchesNameSearch(note.preview, normalized)
 	})
 }
 

@@ -36,7 +36,8 @@ vi.mock("comlink", () => {
 						resolve(4096)
 					}, 30_000)
 				}),
-			kvKeys: () => new Promise(() => undefined)
+			kvKeys: () => new Promise(() => undefined),
+			dumpLogs: () => Promise.resolve([{ t: 1, level: "warn", scope: "db.worker", msg: "from-leader" }])
 		})
 	}
 })
@@ -357,6 +358,12 @@ describe("follower RPC", () => {
 		const api = await follower()
 
 		await expect(api.kvPrefixBytes(["rq.", "audio.v1.tags."])).resolves.toEqual([3, 14])
+	})
+
+	it("reaches dumpLogs on the leader", async () => {
+		const api = await follower()
+
+		await expect(api.dumpLogs()).resolves.toEqual([{ t: 1, level: "warn", scope: "db.worker", msg: "from-leader" }])
 	})
 
 	it("waits out a vacuum that runs past the default timeout", async () => {

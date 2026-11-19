@@ -73,6 +73,7 @@ import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { log } from "@/lib/log"
 import { officeViewSettings } from "@/features/office/lib/officeViewSettings"
+import { officeChartText } from "@/features/office/lib/chartText"
 import { useElementSize } from "@/lib/useElementSize"
 import { useLatestRef } from "@/lib/useLatestRef"
 
@@ -119,7 +120,11 @@ function fileContent(bytes: Uint8Array): DocxContent {
 
 // Tracked changes are laid out as the markup mode shows them (a new layout per view).
 function sourceFor(content: DocxContent, mode: DocxMarkupMode, format: "docx" | "odt"): DocxSource {
-	return { host: content.host, bytes: content.bytes, options: { fontUrls: DOCX_FONT_URLS, view: markupInfo(mode).view, format } }
+	return {
+		host: content.host,
+		bytes: content.bytes,
+		options: { fontUrls: DOCX_FONT_URLS, view: markupInfo(mode).view, format, chartText: officeChartText() }
+	}
 }
 
 // The document's File menus offer Download as for this file (editorDownloadAs.tsx).
@@ -1112,6 +1117,7 @@ function DocxPageList({
 					className="size-full select-text"
 					label={alt}
 					pageLabel={(page, total) => t("previewDocxPageIndicator", { current: page + 1, total })}
+					objectLabels={{ checkbox: t("previewDocxCheckBox") }}
 					onLinkActivate={openLink}
 					{...(annotations === undefined || index === undefined || !reviewed
 						? {}

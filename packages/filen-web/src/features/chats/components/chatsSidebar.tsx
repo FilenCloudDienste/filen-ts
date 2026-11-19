@@ -37,6 +37,7 @@ import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { Button } from "@/components/ui/button"
@@ -365,6 +366,18 @@ export function ChatsSidebar() {
 					role="alert"
 					icon={<MessagesSquareIcon />}
 					title={t("chatsLoadError")}
+					description={errorLabel(chatsQuery.error)}
+					action={
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => {
+								void chatsQuery.refetch()
+							}}
+						>
+							{t("common:tryAgain")}
+						</Button>
+					}
 				/>
 			)
 		}

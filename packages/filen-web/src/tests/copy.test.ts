@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { AnyItemWithContext, CopiedTopLevelItem, Dir, File, ItemCounts, UserInfo, UuidStr } from "@filen/sdk-rs"
-import type { CopyFailureDTO, CopyReportDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
+import type { AnyItemWithContext, CopiedTopLevelItem, Dir, File, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { CopyFailureDTO, CopyReportDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
 type SdkCopyItems = (
@@ -47,57 +47,13 @@ import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
+import { copyJobFixtures, counts } from "@/tests/fixtures/copyJob"
 import { sdkErrorDTO } from "@/tests/support/sdkError"
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }
-function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
-	return {
-		dirsCreated: 0n,
-		dirsFailed: 0n,
-		filesDone: 0n,
-		filesFailed: 0n,
-		bytesDone: 0n,
-		bytesFailed: 0n,
-		dirsNotAttempted: 0n,
-		filesNotAttempted: 0n,
-		bytesNotAttempted: 0n,
-		entriesSkipped: 0n,
-		bytesSkipped: 0n,
-		...overrides
-	}
-}
-
-function update(overrides: Partial<CopyUpdateDTO> = {}): CopyUpdateDTO {
-	return {
-		phase: "copyingFiles",
-		runState: "running",
-		scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
-		totals: { dirs: 0n, files: 2n, bytes: 200n },
-		counts: counts(),
-		active: [],
-		events: [],
-		bytesPerSecond: undefined,
-		etaMs: undefined,
-		activeTimeMs: 0n,
-		...overrides
-	}
-}
-
-function report(overrides: Partial<CopyReportDTO> = {}): CopyReportDTO {
-	return {
-		topLevel: [],
-		failures: [],
-		skipped: [],
-		renamed: [],
-		totals: { dirs: 0n, files: 2n, bytes: 200n },
-		counts: counts({ filesDone: 2n, bytesDone: 200n }),
-		error: undefined,
-		...overrides
-	}
-}
-
-const QUOTA_REPORT = report({
+const { copyUpdate, copyReport } = copyJobFixtures({ dirs: 0n, files: 2n, bytes: 200n })
+const QUOTA_REPORT = copyReport({
 	totals: { dirs: 0n, files: 3n, bytes: 900n },
 	counts: counts(),
 	error: sdkErrorDTO("MaxStorageReached", "the copy needs 900 bytes but only 100 are free")
@@ -216,7 +172,7 @@ describe("runCopyJob", () => {
 		deps.copyItems.mockImplementation(() => {
 			seenRow = row()
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		await runCopyJob(deps, request())
@@ -233,7 +189,7 @@ describe("runCopyJob", () => {
 		const deps = makeDeps()
 		const linked = { dir: { inner: { uuid: "root" }, linkedTag: true }, link: { linkUuid: "link" } } as unknown as AnyItemWithContext
 
-		deps.copyItems.mockResolvedValue(report())
+		deps.copyItems.mockResolvedValue(copyReport())
 
 		await runCopyJob(deps, {
 			...request(),
@@ -254,12 +210,12 @@ describe("runCopyJob", () => {
 		let midRun: { bytesDone: number | undefined; created: number | undefined; row: ReturnType<typeof row> } | undefined
 
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
-			onEvent({ type: "update", update: update({ counts: counts({ bytesDone: 50n }) }) })
+			onEvent({ type: "update", update: copyUpdate({ counts: counts({ bytesDone: 50n }) }) })
 			onEvent({ type: "created", item: created(dir) })
 
 			midRun = { bytesDone: getCopyJob("job")?.counts.bytesDone, created: getCopyJob("job")?.created.length, row: row() }
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -280,7 +236,7 @@ describe("runCopyJob", () => {
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
 			onEvent({
 				type: "update",
-				update: update({
+				update: copyUpdate({
 					counts: counts({ bytesDone: 50n }),
 					active: [
 						{ sourceUuid: testUuid("s"), destUuid: testUuid("d"), destParent: ROOT, name: "b.txt", size: 100n, bytesDone: 30n }
@@ -290,7 +246,7 @@ describe("runCopyJob", () => {
 
 			expect(row()).toMatchObject({ size: 200, bytesTransferred: 50 })
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		await runCopyJob(deps, request())
@@ -303,11 +259,11 @@ describe("runCopyJob", () => {
 		const deps = makeDeps()
 
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
-			onEvent({ type: "update", update: update({ counts: counts({ bytesDone: 200n }) }) })
+			onEvent({ type: "update", update: copyUpdate({ counts: counts({ bytesDone: 200n }) }) })
 
 			expect(row()).toMatchObject({ size: 200, bytesTransferred: 198 })
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		await runCopyJob(deps, request())
@@ -318,7 +274,7 @@ describe("runCopyJob", () => {
 	it("settles a clean copy as done and hands the settled job to the announcer", async () => {
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report())
+		deps.copyItems.mockResolvedValue(copyReport())
 
 		const job = await runCopyJob(deps, request())
 
@@ -337,7 +293,7 @@ describe("runCopyJob", () => {
 			onEvent({ type: "created", item: created(dir) })
 			onEvent({ type: "created", item: createdFile(mockFile("copied-file")) })
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -357,9 +313,9 @@ describe("runCopyJob", () => {
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: createdFile(file) })
 			onEvent({ type: "created", item: created(mockDir("copied")) })
-			onEvent({ type: "update", update: update({ events: [{ type: "fileDone", ...done }] }) })
+			onEvent({ type: "update", update: copyUpdate({ events: [{ type: "fileDone", ...done }] }) })
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		await runCopyJob(deps, request())
@@ -380,7 +336,7 @@ describe("runCopyJob", () => {
 		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { rootDirUuid: ROOT })
 		// The outer directory is a row of the destination's listing; the inner one's listing was never read.
 		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [narrowItem(outer)])
-		deps.copyItemsTo.mockResolvedValue(report())
+		deps.copyItemsTo.mockResolvedValue(copyReport())
 
 		const entries = [{ item: mockFile("x"), destination: inner, name: "x.txt" }]
 		const job = await runCopyJob(deps, { ...request(), source: { kind: "entries", entries } })
@@ -405,7 +361,7 @@ describe("runCopyJob", () => {
 			}
 		}
 
-		deps.copyItems.mockResolvedValue(report({ failures: [failure] }))
+		deps.copyItems.mockResolvedValue(copyReport({ failures: [failure] }))
 
 		const job = await runCopyJob(deps, request())
 
@@ -416,7 +372,7 @@ describe("runCopyJob", () => {
 	it("drops the row of a cancelled copy but keeps its job", async () => {
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
+		deps.copyItems.mockResolvedValue(copyReport({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 
 		const job = await runCopyJob(deps, request())
 
@@ -451,7 +407,7 @@ describe("runCopyJob", () => {
 		const deps = makeDeps()
 		const entries = [{ item: mockFile("x"), destination: { uuid: ROOT }, name: "x.txt" }]
 
-		deps.copyItemsTo.mockResolvedValue(report())
+		deps.copyItemsTo.mockResolvedValue(copyReport())
 
 		await runCopyJob(deps, { ...request(), source: { kind: "entries", entries } })
 
@@ -465,7 +421,7 @@ describe("runCopyJob quota", () => {
 		const withAccount = makeDeps()
 
 		withAccount.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 250n })
-		withAccount.copyItems.mockResolvedValue(report())
+		withAccount.copyItems.mockResolvedValue(copyReport())
 
 		await runCopyJob(withAccount, request("a"))
 
@@ -473,7 +429,7 @@ describe("runCopyJob quota", () => {
 
 		const withoutAccount = makeDeps()
 
-		withoutAccount.copyItems.mockResolvedValue(report())
+		withoutAccount.copyItems.mockResolvedValue(copyReport())
 
 		await runCopyJob(withoutAccount, request("b"))
 
@@ -486,7 +442,7 @@ describe("runCopyJob quota", () => {
 
 		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
 		deps.account.fetchFresh.mockResolvedValue({ maxStorage: 1_000n, storageUsed: 0n })
-		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockResolvedValueOnce(report())
+		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockResolvedValueOnce(copyReport())
 
 		const job = await runCopyJob(deps, request())
 
@@ -516,7 +472,7 @@ describe("runCopyJob quota", () => {
 
 		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 250n })
 		deps.account.fetchFresh.mockRejectedValue(new Error("offline"))
-		deps.copyItems.mockResolvedValue(report())
+		deps.copyItems.mockResolvedValue(copyReport())
 
 		await runCopyJob({ ...deps, account }, request())
 
@@ -612,7 +568,7 @@ describe("runCopyJob quota", () => {
 
 		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { maxStorage: 1_000n, storageUsed: 900n })
 		getUserInfo.mockReturnValueOnce(fresh.promise)
-		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockResolvedValueOnce(report())
+		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockResolvedValueOnce(copyReport())
 
 		const running = runCopyJob(deps, request())
 
@@ -639,7 +595,7 @@ describe("runCopyJob quota", () => {
 		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockImplementationOnce(() => {
 			expect(deps.release).not.toHaveBeenCalled()
 
-			return Promise.resolve(report())
+			return Promise.resolve(copyReport())
 		})
 
 		await runCopyJob(deps, request())
@@ -666,7 +622,7 @@ describe("cancel", () => {
 				onEvent({ type: "created", item: created(dir) })
 				requestJobCancel(id, mode)
 
-				return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
+				return Promise.resolve(copyReport({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 			})
 
 			const job = await runCopyJob(deps, request())
@@ -702,7 +658,7 @@ describe("cancel", () => {
 			unsubscribe()
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
+			return Promise.resolve(copyReport({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		await runCopyJob(deps, request())
@@ -721,7 +677,7 @@ describe("cancel", () => {
 			onEvent({ type: "created", item: created(dir) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
+			return Promise.resolve(copyReport({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -736,7 +692,7 @@ describe("cancel", () => {
 		deps.copyItems.mockImplementation(id => {
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
+			return Promise.resolve(copyReport({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		await runCopyJob(deps, request())
@@ -749,7 +705,7 @@ describe("cancel", () => {
 
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report())
+		deps.copyItems.mockResolvedValue(copyReport())
 
 		await runCopyJob(deps, request())
 		requestJobCancel("job", "trash")
@@ -768,7 +724,7 @@ describe("cancel", () => {
 			requestJobCancel(id, "trash")
 			requestJobCancel(id, "keep")
 
-			return Promise.resolve(report({ error: CANCELLED }))
+			return Promise.resolve(copyReport({ error: CANCELLED }))
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -788,7 +744,7 @@ describe("cancel", () => {
 			onEvent({ type: "created", item: created(dir) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: CANCELLED }))
+			return Promise.resolve(copyReport({ error: CANCELLED }))
 		})
 
 		const running = runCopyJob(deps, request())
@@ -820,7 +776,7 @@ describe("cancel", () => {
 			onEvent({ type: "created", item: created(stuck) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ topLevel: [created(moved), created(stuck)] }))
+			return Promise.resolve(copyReport({ topLevel: [created(moved), created(stuck)] }))
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -849,7 +805,7 @@ describe("cancel", () => {
 				onEvent({ type: "created", item: created(dir) })
 				requestJobCancel(id, "trash")
 
-				return Promise.resolve(report({ topLevel: [created(dir)], failures }))
+				return Promise.resolve(copyReport({ topLevel: [created(dir)], failures }))
 			})
 
 			const job = await runCopyJob(deps, request())
@@ -875,7 +831,7 @@ describe("cancel", () => {
 			requestJobCancel(id, "trash")
 
 			return Promise.resolve(
-				report({
+				copyReport({
 					topLevel: [createdFile(versioned)],
 					failures: [copyFailure("existing", { type: "registeredAsVersion", existingFile: versioned.uuid })]
 				})
@@ -900,7 +856,7 @@ describe("cancel", () => {
 			onEvent({ type: "created", item: created(stuck) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: CANCELLED }))
+			return Promise.resolve(copyReport({ error: CANCELLED }))
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -932,7 +888,7 @@ describe("cancel", () => {
 			useTransfersStore.getState().setPaused(id, true)
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ error: CANCELLED }))
+			return Promise.resolve(copyReport({ error: CANCELLED }))
 		})
 
 		const running = runCopyJob(deps, request())
@@ -963,7 +919,7 @@ describe("events after the result", () => {
 			requestJobCancel(id, "trash")
 
 			return Promise.resolve(
-				report({
+				copyReport({
 					topLevel: [created(delivered), createdFile(listedOnly), createdFile(versioned)],
 					failures: [copyFailure("existing", { type: "registeredAsVersion", existingFile: versioned.uuid })],
 					error: CANCELLED
@@ -993,7 +949,7 @@ describe("events after the result", () => {
 			deliverLate = () => {
 				onEvent({
 					type: "update",
-					update: update({
+					update: copyUpdate({
 						phase: "cancelled",
 						events: [
 							{ type: "fileFailed", ...failed.info },
@@ -1006,7 +962,7 @@ describe("events after the result", () => {
 			}
 
 			return Promise.resolve(
-				report({ topLevel: [created(early), created(late)], failures: [failed], renamed: [renamed], error: CANCELLED })
+				copyReport({ topLevel: [created(early), created(late)], failures: [failed], renamed: [renamed], error: CANCELLED })
 			)
 		})
 
@@ -1043,7 +999,7 @@ describe("events after the result", () => {
 				onEvent({ type: "created", item: created(late) })
 			}
 
-			return Promise.resolve(report({ topLevel: [created(early)], failures: [failed], error: CANCELLED }))
+			return Promise.resolve(copyReport({ topLevel: [created(early)], failures: [failed], error: CANCELLED }))
 		})
 
 		const running = runCopyJob(deps, request())
@@ -1135,7 +1091,7 @@ describe("startCopy and retryFailedCopy", () => {
 					onEvent({ type: "created", item: created(mockDir("nested", testUuid("unread"))) })
 					resolve()
 
-					return Promise.resolve(report())
+					return Promise.resolve(copyReport())
 				}
 			)
 		})
@@ -1159,7 +1115,7 @@ describe("startCopy and retryFailedCopy", () => {
 
 	// The card, or the transfers row, is how a copy's end shows.
 	it("announces no ending with a toast, whether the copy finished or failed", async () => {
-		copyItems.mockResolvedValueOnce(report()).mockResolvedValueOnce(report({ error: sdkErrorDTO("Server", "boom") }))
+		copyItems.mockResolvedValueOnce(copyReport()).mockResolvedValueOnce(copyReport({ error: sdkErrorDTO("Server", "boom") }))
 
 		for (const expected of ["done", "failed"]) {
 			const id = startCopy([narrowItem(mockFile("a"))], DESTINATION) ?? ""
@@ -1190,9 +1146,9 @@ describe("startCopy and retryFailedCopy", () => {
 		}
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report({ failures: [failure] }))
+		deps.copyItems.mockResolvedValue(copyReport({ failures: [failure] }))
 		await runCopyJob(deps, request())
-		copyItemsTo.mockResolvedValue(report())
+		copyItemsTo.mockResolvedValue(copyReport())
 
 		const retryId = retryFailedCopy("job")
 
@@ -1206,7 +1162,7 @@ describe("startCopy and retryFailedCopy", () => {
 	it("lets a retried job offer no retry again, and drops it with its row once its card is hidden", async () => {
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report({ failures: [copyFailure("failed")] }))
+		deps.copyItems.mockResolvedValue(copyReport({ failures: [copyFailure("failed")] }))
 		await runCopyJob(deps, request())
 		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: true }))
 		copyItemsTo.mockReturnValue(new Promise(() => undefined))
@@ -1234,7 +1190,7 @@ describe("startCopy and retryFailedCopy", () => {
 			onEvent({ type: "created", item: created(stuck) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
+			return Promise.resolve(copyReport({ failures: [copyFailure("failed")], error: CANCELLED }))
 		})
 
 		const running = runCopyJob(deps, request())
@@ -1272,7 +1228,7 @@ describe("startCopy and retryFailedCopy", () => {
 			onEvent({ type: "created", item: created(stuck) })
 			requestJobCancel(id, "trash")
 
-			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
+			return Promise.resolve(copyReport({ failures: [copyFailure("failed")], error: CANCELLED }))
 		})
 
 		await runCopyJob(deps, request())

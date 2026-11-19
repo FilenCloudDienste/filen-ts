@@ -8,7 +8,7 @@ import type {
 	LinkedDirsAndFiles,
 	NonRootLinkedItem
 } from "@filen/sdk-rs"
-import { copyJobGlyph, driveItemName, type CopyJobGlyph } from "@filen/shared"
+import { copyJobGlyph, driveItemName, matchesNameSearch, nameSearchKey, type CopyJobGlyph } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
 
@@ -74,16 +74,16 @@ export function entryName(entry: BrowseEntry): string {
 	return driveItemName(entry.item)
 }
 
-// Case-insensitive substring filter over the current level's already-fetched entries — no server round
+// Case- and composition-insensitive substring filter over the current level's already-fetched entries — no server round
 // trip (old-web parity). A blank/whitespace query returns the list unchanged.
 export function filterEntries(entries: readonly BrowseEntry[], query: string): BrowseEntry[] {
-	const needle = query.trim().toLowerCase()
+	const key = nameSearchKey(query)
 
-	if (needle.length === 0) {
+	if (key.length === 0) {
 		return [...entries]
 	}
 
-	return entries.filter(entry => entryName(entry).toLowerCase().includes(needle))
+	return entries.filter(entry => matchesNameSearch(entryName(entry), key))
 }
 
 // The drive listing's own order (@/features/drive/lib/sort): directories before files, the chosen field

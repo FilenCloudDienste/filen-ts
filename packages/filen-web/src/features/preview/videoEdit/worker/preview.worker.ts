@@ -6,7 +6,6 @@ import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
 import { createFramePipeline, type FramePipeline } from "@/features/preview/videoEdit/gl/pipeline"
 import { fitWidth } from "@/features/preview/videoEdit/gl/pipeline.logic"
 import { outputGeometry, sourceFrame, sourceToOutputTime } from "@/features/preview/videoEdit/lib/plan"
-import { FRAME_BATCH_MAX_FRAMES } from "@/features/videos/lib/frameBatch.logic"
 import { keyframeAtOrBefore } from "@/features/preview/videoEdit/lib/timeline.logic"
 import { GopDecoder, SupersededError } from "@/features/preview/videoEdit/worker/gopDecoder"
 import { WaveformTap } from "@/features/preview/videoEdit/worker/waveform"
@@ -47,6 +46,10 @@ type WaveformCallback = ((peaks: Float32Array) => void | Promise<void>) & Partia
 
 // Index reads the keyframe list may make (Cues or an mfra) beyond what the demuxer already read.
 const KEYFRAME_INDEX_READS = 16
+
+// Keyframes one filmstrip call decodes at most: a call stays short enough to yield promptly and its bitmaps few
+// enough to hold.
+const FRAME_BATCH_MAX_FRAMES = 24
 
 interface Session {
 	block: BlockInput

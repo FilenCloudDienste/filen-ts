@@ -1,7 +1,13 @@
 import { type } from "arktype"
-import { experimental_createQueryPersister, type AsyncStorage, type PersistedQuery } from "@tanstack/react-query-persist-client"
+import {
+	experimental_createQueryPersister,
+	type AsyncStorage,
+	type PersistedQuery,
+	type StoragePersisterOptions
+} from "@tanstack/react-query-persist-client"
 import { hashKey, type QueryClient, type QueryFunction, type QueryFunctionContext, type QueryKey } from "@tanstack/react-query"
-import { storage } from "@/lib/storage/adapter"
+import { DECODE_SLICE_MS, kvEntryPages, storage } from "@/lib/storage/adapter"
+import { nextTask } from "@/lib/nextTask"
 import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
 
@@ -32,7 +38,7 @@ import { log } from "@/lib/log"
 // fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
 // row on read — deliberately a single constant so the two can never drift apart. Bump on ANY
 // change to the persisted shape (mobile's client.ts:13 flags this as the easy-to-forget step).
-// Rows of a retired version are deleted by the next boot's restore (kvStorage.entries).
+// Rows of a retired version are deleted by the next boot's restore (restorePersistedQueries).
 export const PERSIST_FAMILY = "rq."
 export const PERSIST_PREFIX = `${PERSIST_FAMILY}v3`
 
@@ -153,7 +159,7 @@ async function removeRow(key: string): Promise<void> {
 //   previous row.
 // - removeItem: self-heal deletions are also best-effort — log + swallow keeps one failed delete
 //   from aborting a whole `restoreQueries` walk.
-// - entries: propagates — its only callers run under `restorePersistedQueries`'s own catch below.
+// No `entries`: restorePersistedQueries hands the library one page of rows at a time instead.
 const kvStorage: AsyncStorage<string | undefined> = {
 	getItem: async key => {
 		try {
@@ -176,39 +182,19 @@ const kvStorage: AsyncStorage<string | undefined> = {
 			log.error("query.persist", "kv write failed — query row not persisted", e)
 		}
 	},
-	removeItem: removeRow,
-	// One bulk read, not a round trip per row: this sits on the boot critical path, and on a follower tab
-	// every round trip also waits on the leader tab's main thread.
-	entries: async () => {
-		const { api } = await storage()
-		const rows = await api.kvEntries(PERSIST_FAMILY)
-		const out: [string, string][] = []
-		const retired: string[] = []
-
-		for (const row of rows) {
-			if (row[0].startsWith(KV_KEY_PREFIX)) {
-				out.push(row)
-			} else {
-				retired.push(row[0])
-			}
-		}
-
-		if (retired.length > 0) {
-			await Promise.allSettled(retired.map(key => api.kvDelete(key)))
-		}
-
-		return out
-	}
+	removeItem: removeRow
 }
 
-export const persister = experimental_createQueryPersister({
+const persisterOptions: StoragePersisterOptions<string | undefined> = {
 	storage: kvStorage,
 	prefix: PERSIST_PREFIX,
 	buster: PERSIST_PREFIX,
 	maxAge: PERSIST_MAX_AGE,
 	serialize,
 	deserialize
-})
+}
+
+export const persister = experimental_createQueryPersister(persisterOptions)
 
 // The one way to keep a query off disk: set `persister: noDiskPersister` on the query. It runs the
 // queryFn with no storage round trip (an explicit `undefined` is rejected under
@@ -217,15 +203,53 @@ export function noDiskPersister<T, K extends QueryKey>(queryFn: QueryFunction<T,
 	return queryFn(context)
 }
 
-// Boot-time restore-all (called once, after storage init): walks every `<PERSIST_PREFIX>-*` row via
-// the bridge's `entries()` and `setQueryData`s each fresh, current-buster row back into `client`
-// (the library's documented restore mechanism for this API — mobile's hand-rolled equivalent walks
-// its buffer the same way). Expired/busted/corrupt rows are deleted as it walks, which is also why
-// no separate `persisterGc` pass exists: every boot IS the gc pass. Never rejects — a failed
-// restore means an empty cache and real fetches, never a blocked boot.
+// Boot-time restore-all (called once, after storage init): `setQueryData`s each fresh, current-buster
+// `<PERSIST_PREFIX>-*` row back into `client` (the library's documented restore mechanism for this API —
+// mobile's hand-rolled equivalent walks its buffer the same way). Expired/busted/corrupt rows are deleted as it
+// walks, and so are a retired version's rows, which is also why no separate `persisterGc` pass exists: every
+// boot IS the gc pass. Never rejects — a failed restore means an empty cache and real fetches, never a blocked
+// boot.
+// The rows arrive a page per message (one message for the whole family would be one huge structured clone, on a
+// follower tab relayed through the leader tab's main thread), and each page goes through the library's own
+// `restoreQueries`, so its checks stay the library's. Decoding lets the thread go every few milliseconds: the
+// library awaits `deserialize` per row, which alone is only a microtask.
 export async function restorePersistedQueries(client: QueryClient): Promise<void> {
 	try {
-		await persister.restoreQueries(client)
+		const { api } = await storage()
+		let sliceStart = performance.now()
+
+		const deserializeInSlices = async (cached: string | undefined): Promise<PersistedQuery> => {
+			if (performance.now() - sliceStart >= DECODE_SLICE_MS) {
+				await nextTask()
+
+				sliceStart = performance.now()
+			}
+
+			return deserialize(cached)
+		}
+
+		for await (const rows of kvEntryPages(api, PERSIST_FAMILY)) {
+			const current: [string, string][] = []
+			const retired: string[] = []
+
+			for (const row of rows) {
+				if (row[0].startsWith(KV_KEY_PREFIX)) {
+					current.push(row)
+				} else {
+					retired.push(row[0])
+				}
+			}
+
+			if (retired.length > 0) {
+				await Promise.allSettled(retired.map(key => api.kvDelete(key)))
+			}
+
+			await experimental_createQueryPersister({
+				...persisterOptions,
+				storage: { ...kvStorage, entries: () => current },
+				deserialize: deserializeInSlices
+			}).restoreQueries(client)
+		}
 	} catch (e) {
 		log.error("query.persist", "restoring persisted queries failed — continuing with an empty cache", e)
 	}

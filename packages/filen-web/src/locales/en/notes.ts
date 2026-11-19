@@ -115,6 +115,12 @@ export const notes = {
 	notesSearchEmptyTitle: "No results",
 	/** Either view — body under notesSearchEmptyTitle */
 	notesSearchEmptyDescription: "No matches for your search.",
+	/** Either view — shown instead of notesSearchEmptyTitle while note contents are still being read for the search */
+	notesSearchingBodies: "Searching notes…",
+	/** Either view — body under notesSearchEmptyTitle when some note contents could not be read (failed or offline), so they were not searched; {{count}} = unsearched notes; singular */
+	notesSearchUnsearchedBodies_one: "{{count}} note couldn't be searched.",
+	/** Either view — body under notesSearchEmptyTitle when some note contents could not be read (failed or offline), so they were not searched; {{count}} = unsearched notes; plural */
+	notesSearchUnsearchedBodies_other: "{{count}} notes couldn't be searched.",
 	/** Sidebar — title shown when the notes list fails to load; the body is the failing query's own errorLabel */
 	notesLoadError: "Couldn't load notes",
 
@@ -393,23 +399,29 @@ export const notes = {
 	/** Bulk trash confirm dialog — title; the confirm button reuses noteActionTrash */
 	notesTrashSelectedConfirmTitle: "Move to trash?",
 	/** Bulk trash confirm dialog — body; singular */
-	notesTrashSelectedConfirmBody_one: "Are you sure you want to move this note to the trash? You can restore it later.",
+	notesTrashSelectedConfirmBodySingle: "Are you sure you want to move this note to the trash? You can restore it later.",
+	/** Bulk trash confirm dialog — body; plural */
+	notesTrashSelectedConfirmBody_one: "Are you sure you want to move {{count}} note to the trash? You can restore it later.",
 	/** Bulk trash confirm dialog — body; plural */
 	notesTrashSelectedConfirmBody_other: "Are you sure you want to move these {{count}} notes to the trash? You can restore them later.",
 	/** Bulk delete-permanently confirm dialog — title; the confirm button reuses noteActionDeletePermanently */
 	notesDeleteSelectedConfirmTitle: "Delete permanently?",
 	/** Bulk delete-permanently confirm dialog — body; singular */
-	notesDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete this note? This cannot be undone.",
+	notesDeleteSelectedConfirmBodySingle: "Are you sure you want to permanently delete this note? This cannot be undone.",
+	/** Bulk delete-permanently confirm dialog — body; plural */
+	notesDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete {{count}} note? This cannot be undone.",
 	/** Bulk delete-permanently confirm dialog — body; plural */
 	notesDeleteSelectedConfirmBody_other: "Are you sure you want to permanently delete these {{count}} notes? This cannot be undone.",
 	/** Bulk leave confirm dialog — title; the confirm button reuses noteActionLeave */
 	notesLeaveSelectedConfirmTitle: "Leave notes?",
 	/** Bulk leave confirm dialog — body; singular */
-	notesLeaveSelectedConfirmBody_one: "Are you sure you want to leave this note? You will lose access to it.",
+	notesLeaveSelectedConfirmBodySingle: "Are you sure you want to leave this note? You will lose access to it.",
+	/** Bulk leave confirm dialog — body; plural */
+	notesLeaveSelectedConfirmBody_one: "Are you sure you want to leave {{count}} note? You will lose access to it.",
 	/** Bulk leave confirm dialog — body; plural */
 	notesLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} notes? You will lose access to them.",
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
-	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one
 	// note ({{name}}, its title), `_other` counts them; a partial result counts the ones that succeeded.
 	/** Activity toast — creating a note running; it opens once created, so success shows nothing */
 	notesCreating: "Creating a note",
@@ -420,15 +432,21 @@ export const notes = {
 	/** Activity toast — importing a file as a note failed; {{name}} = the file name; the error follows under it */
 	notesImportError: "Couldn't import {{name}}",
 	/** Activity toast — pinning running; one note named ({{name}}) */
-	notesPinRunning_one: "Pinning {{name}}",
+	notesPinRunningNamed: "Pinning {{name}}",
+	/** Activity toast — pinning running; {{count}} notes */
+	notesPinRunning_one: "Pinning {{count}} note",
 	/** Activity toast — pinning running; {{count}} notes */
 	notesPinRunning_other: "Pinning {{count}} notes",
 	/** Activity toast — pinning finished; one note named ({{name}}) */
-	notesPinDone_one: "Pinned {{name}}",
+	notesPinDoneNamed: "Pinned {{name}}",
+	/** Activity toast — pinning finished; {{count}} notes */
+	notesPinDone_one: "Pinned {{count}} note",
 	/** Activity toast — pinning finished; {{count}} notes */
 	notesPinDone_other: "Pinned {{count}} notes",
 	/** Activity toast — pinning failed for every note; one note named ({{name}}) */
-	notesPinFailed_one: "Couldn't pin {{name}}",
+	notesPinFailedNamed: "Couldn't pin {{name}}",
+	/** Activity toast — pinning failed for every note; {{count}} notes */
+	notesPinFailed_one: "Couldn't pin {{count}} note",
 	/** Activity toast — pinning failed for every note; {{count}} notes */
 	notesPinFailed_other: "Couldn't pin {{count}} notes",
 	/** Activity toast — pinning partly failed; {{count}} succeeded, {{failed}} failed */
@@ -436,15 +454,21 @@ export const notes = {
 	/** Activity toast — pinning partly failed; {{count}} succeeded, {{failed}} failed */
 	notesPinPartial_other: "Pinned {{count}} notes, {{failed}} failed",
 	/** Activity toast — unpinning running; one note named ({{name}}) */
-	notesUnpinRunning_one: "Unpinning {{name}}",
+	notesUnpinRunningNamed: "Unpinning {{name}}",
+	/** Activity toast — unpinning running; {{count}} notes */
+	notesUnpinRunning_one: "Unpinning {{count}} note",
 	/** Activity toast — unpinning running; {{count}} notes */
 	notesUnpinRunning_other: "Unpinning {{count}} notes",
 	/** Activity toast — unpinning finished; one note named ({{name}}) */
-	notesUnpinDone_one: "Unpinned {{name}}",
+	notesUnpinDoneNamed: "Unpinned {{name}}",
+	/** Activity toast — unpinning finished; {{count}} notes */
+	notesUnpinDone_one: "Unpinned {{count}} note",
 	/** Activity toast — unpinning finished; {{count}} notes */
 	notesUnpinDone_other: "Unpinned {{count}} notes",
 	/** Activity toast — unpinning failed for every note; one note named ({{name}}) */
-	notesUnpinFailed_one: "Couldn't unpin {{name}}",
+	notesUnpinFailedNamed: "Couldn't unpin {{name}}",
+	/** Activity toast — unpinning failed for every note; {{count}} notes */
+	notesUnpinFailed_one: "Couldn't unpin {{count}} note",
 	/** Activity toast — unpinning failed for every note; {{count}} notes */
 	notesUnpinFailed_other: "Couldn't unpin {{count}} notes",
 	/** Activity toast — unpinning partly failed; {{count}} succeeded, {{failed}} failed */
@@ -452,15 +476,21 @@ export const notes = {
 	/** Activity toast — unpinning partly failed; {{count}} succeeded, {{failed}} failed */
 	notesUnpinPartial_other: "Unpinned {{count}} notes, {{failed}} failed",
 	/** Activity toast — adding to favorites running; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesFavoriteRunning_one: "Adding {{name}} to favorites",
+	notesFavoriteRunningNamed: "Adding {{name}} to favorites",
+	/** Activity toast — adding to favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteRunning_one: "Adding {{count}} note to favorites",
 	/** Activity toast — adding to favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesFavoriteRunning_other: "Adding {{count}} notes to favorites",
 	/** Activity toast — adding to favorites finished; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesFavoriteDone_one: "Added {{name}} to favorites",
+	notesFavoriteDoneNamed: "Added {{name}} to favorites",
+	/** Activity toast — adding to favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteDone_one: "Added {{count}} note to favorites",
 	/** Activity toast — adding to favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesFavoriteDone_other: "Added {{count}} notes to favorites",
 	/** Activity toast — adding to favorites failed for every note; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesFavoriteFailed_one: "Couldn't add {{name}} to favorites",
+	notesFavoriteFailedNamed: "Couldn't add {{name}} to favorites",
+	/** Activity toast — adding to favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteFailed_one: "Couldn't add {{count}} note to favorites",
 	/** Activity toast — adding to favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesFavoriteFailed_other: "Couldn't add {{count}} notes to favorites",
 	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
@@ -468,15 +498,21 @@ export const notes = {
 	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
 	notesFavoritePartial_other: "Added {{count}} notes to favorites, {{failed}} failed",
 	/** Activity toast — removing from favorites running; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesUnfavoriteRunning_one: "Removing {{name}} from favorites",
+	notesUnfavoriteRunningNamed: "Removing {{name}} from favorites",
+	/** Activity toast — removing from favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteRunning_one: "Removing {{count}} note from favorites",
 	/** Activity toast — removing from favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesUnfavoriteRunning_other: "Removing {{count}} notes from favorites",
 	/** Activity toast — removing from favorites finished; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesUnfavoriteDone_one: "Removed {{name}} from favorites",
+	notesUnfavoriteDoneNamed: "Removed {{name}} from favorites",
+	/** Activity toast — removing from favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteDone_one: "Removed {{count}} note from favorites",
 	/** Activity toast — removing from favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesUnfavoriteDone_other: "Removed {{count}} notes from favorites",
 	/** Activity toast — removing from favorites failed for every note; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
-	notesUnfavoriteFailed_one: "Couldn't remove {{name}} from favorites",
+	notesUnfavoriteFailedNamed: "Couldn't remove {{name}} from favorites",
+	/** Activity toast — removing from favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteFailed_one: "Couldn't remove {{count}} note from favorites",
 	/** Activity toast — removing from favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
 	notesUnfavoriteFailed_other: "Couldn't remove {{count}} notes from favorites",
 	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
@@ -484,15 +520,21 @@ export const notes = {
 	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
 	notesUnfavoritePartial_other: "Removed {{count}} notes from favorites, {{failed}} failed",
 	/** Activity toast — duplicating running; one note named ({{name}}) */
-	notesDuplicateRunning_one: "Duplicating {{name}}",
+	notesDuplicateRunningNamed: "Duplicating {{name}}",
+	/** Activity toast — duplicating running; {{count}} notes */
+	notesDuplicateRunning_one: "Duplicating {{count}} note",
 	/** Activity toast — duplicating running; {{count}} notes */
 	notesDuplicateRunning_other: "Duplicating {{count}} notes",
 	/** Activity toast — duplicating finished; one note named ({{name}}) */
-	notesDuplicateDone_one: "Duplicated {{name}}",
+	notesDuplicateDoneNamed: "Duplicated {{name}}",
+	/** Activity toast — duplicating finished; {{count}} notes */
+	notesDuplicateDone_one: "Duplicated {{count}} note",
 	/** Activity toast — duplicating finished; {{count}} notes */
 	notesDuplicateDone_other: "Duplicated {{count}} notes",
 	/** Activity toast — duplicating failed for every note; one note named ({{name}}) */
-	notesDuplicateFailed_one: "Couldn't duplicate {{name}}",
+	notesDuplicateFailedNamed: "Couldn't duplicate {{name}}",
+	/** Activity toast — duplicating failed for every note; {{count}} notes */
+	notesDuplicateFailed_one: "Couldn't duplicate {{count}} note",
 	/** Activity toast — duplicating failed for every note; {{count}} notes */
 	notesDuplicateFailed_other: "Couldn't duplicate {{count}} notes",
 	/** Activity toast — duplicating partly failed; {{count}} succeeded, {{failed}} failed */
@@ -500,15 +542,21 @@ export const notes = {
 	/** Activity toast — duplicating partly failed; {{count}} succeeded, {{failed}} failed */
 	notesDuplicatePartial_other: "Duplicated {{count}} notes, {{failed}} failed",
 	/** Activity toast — changing the type running; one note named ({{name}}); {{type}} = the new type's label */
-	notesChangeTypeRunning_one: "Changing {{name}} to {{type}}",
+	notesChangeTypeRunningNamed: "Changing {{name}} to {{type}}",
+	/** Activity toast — changing the type running; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeRunning_one: "Changing {{count}} note to {{type}}",
 	/** Activity toast — changing the type running; {{count}} notes; {{type}} = the new type's label */
 	notesChangeTypeRunning_other: "Changing {{count}} notes to {{type}}",
 	/** Activity toast — changing the type finished; one note named ({{name}}); {{type}} = the new type's label */
-	notesChangeTypeDone_one: "Changed {{name}} to {{type}}",
+	notesChangeTypeDoneNamed: "Changed {{name}} to {{type}}",
+	/** Activity toast — changing the type finished; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeDone_one: "Changed {{count}} note to {{type}}",
 	/** Activity toast — changing the type finished; {{count}} notes; {{type}} = the new type's label */
 	notesChangeTypeDone_other: "Changed {{count}} notes to {{type}}",
 	/** Activity toast — changing the type failed for every note; one note named ({{name}}); {{type}} = the new type's label */
-	notesChangeTypeFailed_one: "Couldn't change {{name}} to {{type}}",
+	notesChangeTypeFailedNamed: "Couldn't change {{name}} to {{type}}",
+	/** Activity toast — changing the type failed for every note; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeFailed_one: "Couldn't change {{count}} note to {{type}}",
 	/** Activity toast — changing the type failed for every note; {{count}} notes; {{type}} = the new type's label */
 	notesChangeTypeFailed_other: "Couldn't change {{count}} notes to {{type}}",
 	/** Activity toast — changing the type partly failed; {{count}} succeeded, {{failed}} failed; {{type}} = the new type's label */
@@ -516,15 +564,21 @@ export const notes = {
 	/** Activity toast — changing the type partly failed; {{count}} succeeded, {{failed}} failed; {{type}} = the new type's label */
 	notesChangeTypePartial_other: "Changed {{count}} notes to {{type}}, {{failed}} failed",
 	/** Activity toast — adding a tag running; one note named ({{name}}); {{tag}} = the tag's name */
-	notesTagRunning_one: "Tagging {{name}} with {{tag}}",
+	notesTagRunningNamed: "Tagging {{name}} with {{tag}}",
+	/** Activity toast — adding a tag running; {{count}} notes; {{tag}} = the tag's name */
+	notesTagRunning_one: "Tagging {{count}} note with {{tag}}",
 	/** Activity toast — adding a tag running; {{count}} notes; {{tag}} = the tag's name */
 	notesTagRunning_other: "Tagging {{count}} notes with {{tag}}",
 	/** Activity toast — adding a tag finished; one note named ({{name}}); {{tag}} = the tag's name */
-	notesTagDone_one: "Tagged {{name}} with {{tag}}",
+	notesTagDoneNamed: "Tagged {{name}} with {{tag}}",
+	/** Activity toast — adding a tag finished; {{count}} notes; {{tag}} = the tag's name */
+	notesTagDone_one: "Tagged {{count}} note with {{tag}}",
 	/** Activity toast — adding a tag finished; {{count}} notes; {{tag}} = the tag's name */
 	notesTagDone_other: "Tagged {{count}} notes with {{tag}}",
 	/** Activity toast — adding a tag failed for every note; one note named ({{name}}); {{tag}} = the tag's name */
-	notesTagFailed_one: "Couldn't tag {{name}} with {{tag}}",
+	notesTagFailedNamed: "Couldn't tag {{name}} with {{tag}}",
+	/** Activity toast — adding a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
+	notesTagFailed_one: "Couldn't tag {{count}} note with {{tag}}",
 	/** Activity toast — adding a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
 	notesTagFailed_other: "Couldn't tag {{count}} notes with {{tag}}",
 	/** Activity toast — adding a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
@@ -532,15 +586,21 @@ export const notes = {
 	/** Activity toast — adding a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
 	notesTagPartial_other: "Tagged {{count}} notes with {{tag}}, {{failed}} failed",
 	/** Activity toast — removing a tag running; one note named ({{name}}); {{tag}} = the tag's name */
-	notesUntagRunning_one: "Removing {{tag}} from {{name}}",
+	notesUntagRunningNamed: "Removing {{tag}} from {{name}}",
+	/** Activity toast — removing a tag running; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagRunning_one: "Removing {{tag}} from {{count}} note",
 	/** Activity toast — removing a tag running; {{count}} notes; {{tag}} = the tag's name */
 	notesUntagRunning_other: "Removing {{tag}} from {{count}} notes",
 	/** Activity toast — removing a tag finished; one note named ({{name}}); {{tag}} = the tag's name */
-	notesUntagDone_one: "Removed {{tag}} from {{name}}",
+	notesUntagDoneNamed: "Removed {{tag}} from {{name}}",
+	/** Activity toast — removing a tag finished; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagDone_one: "Removed {{tag}} from {{count}} note",
 	/** Activity toast — removing a tag finished; {{count}} notes; {{tag}} = the tag's name */
 	notesUntagDone_other: "Removed {{tag}} from {{count}} notes",
 	/** Activity toast — removing a tag failed for every note; one note named ({{name}}); {{tag}} = the tag's name */
-	notesUntagFailed_one: "Couldn't remove {{tag}} from {{name}}",
+	notesUntagFailedNamed: "Couldn't remove {{tag}} from {{name}}",
+	/** Activity toast — removing a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagFailed_one: "Couldn't remove {{tag}} from {{count}} note",
 	/** Activity toast — removing a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
 	notesUntagFailed_other: "Couldn't remove {{tag}} from {{count}} notes",
 	/** Activity toast — removing a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
@@ -548,15 +608,21 @@ export const notes = {
 	/** Activity toast — removing a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
 	notesUntagPartial_other: "Removed {{tag}} from {{count}} notes, {{failed}} failed",
 	/** Activity toast — archiving running; one note named ({{name}}) */
-	notesArchiveRunning_one: "Archiving {{name}}",
+	notesArchiveRunningNamed: "Archiving {{name}}",
+	/** Activity toast — archiving running; {{count}} notes */
+	notesArchiveRunning_one: "Archiving {{count}} note",
 	/** Activity toast — archiving running; {{count}} notes */
 	notesArchiveRunning_other: "Archiving {{count}} notes",
 	/** Activity toast — archiving finished; one note named ({{name}}) */
-	notesArchiveDone_one: "Archived {{name}}",
+	notesArchiveDoneNamed: "Archived {{name}}",
+	/** Activity toast — archiving finished; {{count}} notes */
+	notesArchiveDone_one: "Archived {{count}} note",
 	/** Activity toast — archiving finished; {{count}} notes */
 	notesArchiveDone_other: "Archived {{count}} notes",
 	/** Activity toast — archiving failed for every note; one note named ({{name}}) */
-	notesArchiveFailed_one: "Couldn't archive {{name}}",
+	notesArchiveFailedNamed: "Couldn't archive {{name}}",
+	/** Activity toast — archiving failed for every note; {{count}} notes */
+	notesArchiveFailed_one: "Couldn't archive {{count}} note",
 	/** Activity toast — archiving failed for every note; {{count}} notes */
 	notesArchiveFailed_other: "Couldn't archive {{count}} notes",
 	/** Activity toast — archiving partly failed; {{count}} succeeded, {{failed}} failed */
@@ -564,15 +630,21 @@ export const notes = {
 	/** Activity toast — archiving partly failed; {{count}} succeeded, {{failed}} failed */
 	notesArchivePartial_other: "Archived {{count}} notes, {{failed}} failed",
 	/** Activity toast — restoring from archive or trash running; one note named ({{name}}) */
-	notesRestoreRunning_one: "Restoring {{name}}",
+	notesRestoreRunningNamed: "Restoring {{name}}",
+	/** Activity toast — restoring from archive or trash running; {{count}} notes */
+	notesRestoreRunning_one: "Restoring {{count}} note",
 	/** Activity toast — restoring from archive or trash running; {{count}} notes */
 	notesRestoreRunning_other: "Restoring {{count}} notes",
 	/** Activity toast — restoring from archive or trash finished; one note named ({{name}}) */
-	notesRestoreDone_one: "Restored {{name}}",
+	notesRestoreDoneNamed: "Restored {{name}}",
+	/** Activity toast — restoring from archive or trash finished; {{count}} notes */
+	notesRestoreDone_one: "Restored {{count}} note",
 	/** Activity toast — restoring from archive or trash finished; {{count}} notes */
 	notesRestoreDone_other: "Restored {{count}} notes",
 	/** Activity toast — restoring from archive or trash failed for every note; one note named ({{name}}) */
-	notesRestoreFailed_one: "Couldn't restore {{name}}",
+	notesRestoreFailedNamed: "Couldn't restore {{name}}",
+	/** Activity toast — restoring from archive or trash failed for every note; {{count}} notes */
+	notesRestoreFailed_one: "Couldn't restore {{count}} note",
 	/** Activity toast — restoring from archive or trash failed for every note; {{count}} notes */
 	notesRestoreFailed_other: "Couldn't restore {{count}} notes",
 	/** Activity toast — restoring from archive or trash partly failed; {{count}} succeeded, {{failed}} failed */
@@ -580,15 +652,21 @@ export const notes = {
 	/** Activity toast — restoring from archive or trash partly failed; {{count}} succeeded, {{failed}} failed */
 	notesRestorePartial_other: "Restored {{count}} notes, {{failed}} failed",
 	/** Activity toast — moving to trash running; one note named ({{name}}) */
-	notesTrashRunning_one: "Moving {{name}} to trash",
+	notesTrashRunningNamed: "Moving {{name}} to trash",
+	/** Activity toast — moving to trash running; {{count}} notes */
+	notesTrashRunning_one: "Moving {{count}} note to trash",
 	/** Activity toast — moving to trash running; {{count}} notes */
 	notesTrashRunning_other: "Moving {{count}} notes to trash",
 	/** Activity toast — moving to trash finished; one note named ({{name}}) */
-	notesTrashDone_one: "Moved {{name}} to trash",
+	notesTrashDoneNamed: "Moved {{name}} to trash",
+	/** Activity toast — moving to trash finished; {{count}} notes */
+	notesTrashDone_one: "Moved {{count}} note to trash",
 	/** Activity toast — moving to trash finished; {{count}} notes */
 	notesTrashDone_other: "Moved {{count}} notes to trash",
 	/** Activity toast — moving to trash failed for every note; one note named ({{name}}) */
-	notesTrashFailed_one: "Couldn't move {{name}} to trash",
+	notesTrashFailedNamed: "Couldn't move {{name}} to trash",
+	/** Activity toast — moving to trash failed for every note; {{count}} notes */
+	notesTrashFailed_one: "Couldn't move {{count}} note to trash",
 	/** Activity toast — moving to trash failed for every note; {{count}} notes */
 	notesTrashFailed_other: "Couldn't move {{count}} notes to trash",
 	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
@@ -596,15 +674,21 @@ export const notes = {
 	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
 	notesTrashPartial_other: "Moved {{count}} notes to trash, {{failed}} failed",
 	/** Activity toast — deleting permanently running; one note named ({{name}}) */
-	notesDeletePermanentlyRunning_one: "Deleting {{name}}",
+	notesDeletePermanentlyRunningNamed: "Deleting {{name}}",
+	/** Activity toast — deleting permanently running; {{count}} notes */
+	notesDeletePermanentlyRunning_one: "Deleting {{count}} note",
 	/** Activity toast — deleting permanently running; {{count}} notes */
 	notesDeletePermanentlyRunning_other: "Deleting {{count}} notes",
 	/** Activity toast — deleting permanently finished; one note named ({{name}}) */
-	notesDeletePermanentlyDone_one: "Deleted {{name}}",
+	notesDeletePermanentlyDoneNamed: "Deleted {{name}}",
+	/** Activity toast — deleting permanently finished; {{count}} notes */
+	notesDeletePermanentlyDone_one: "Deleted {{count}} note",
 	/** Activity toast — deleting permanently finished; {{count}} notes */
 	notesDeletePermanentlyDone_other: "Deleted {{count}} notes",
 	/** Activity toast — deleting permanently failed for every note; one note named ({{name}}) */
-	notesDeletePermanentlyFailed_one: "Couldn't delete {{name}}",
+	notesDeletePermanentlyFailedNamed: "Couldn't delete {{name}}",
+	/** Activity toast — deleting permanently failed for every note; {{count}} notes */
+	notesDeletePermanentlyFailed_one: "Couldn't delete {{count}} note",
 	/** Activity toast — deleting permanently failed for every note; {{count}} notes */
 	notesDeletePermanentlyFailed_other: "Couldn't delete {{count}} notes",
 	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
@@ -612,15 +696,21 @@ export const notes = {
 	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
 	notesDeletePermanentlyPartial_other: "Deleted {{count}} notes, {{failed}} failed",
 	/** Activity toast — leaving shared notes running; one note named ({{name}}) */
-	notesLeaveRunning_one: "Leaving {{name}}",
+	notesLeaveRunningNamed: "Leaving {{name}}",
+	/** Activity toast — leaving shared notes running; {{count}} notes */
+	notesLeaveRunning_one: "Leaving {{count}} note",
 	/** Activity toast — leaving shared notes running; {{count}} notes */
 	notesLeaveRunning_other: "Leaving {{count}} notes",
 	/** Activity toast — leaving shared notes finished; one note named ({{name}}) */
-	notesLeaveDone_one: "Left {{name}}",
+	notesLeaveDoneNamed: "Left {{name}}",
+	/** Activity toast — leaving shared notes finished; {{count}} notes */
+	notesLeaveDone_one: "Left {{count}} note",
 	/** Activity toast — leaving shared notes finished; {{count}} notes */
 	notesLeaveDone_other: "Left {{count}} notes",
 	/** Activity toast — leaving shared notes failed for every note; one note named ({{name}}) */
-	notesLeaveFailed_one: "Couldn't leave {{name}}",
+	notesLeaveFailedNamed: "Couldn't leave {{name}}",
+	/** Activity toast — leaving shared notes failed for every note; {{count}} notes */
+	notesLeaveFailed_one: "Couldn't leave {{count}} note",
 	/** Activity toast — leaving shared notes failed for every note; {{count}} notes */
 	notesLeaveFailed_other: "Couldn't leave {{count}} notes",
 	/** Activity toast — leaving shared notes partly failed; {{count}} succeeded, {{failed}} failed */

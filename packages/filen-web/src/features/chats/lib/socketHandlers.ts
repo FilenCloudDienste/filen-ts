@@ -4,6 +4,7 @@ import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { accountQueryGet } from "@/queries/account"
 import { log } from "@/lib/log"
 import { withoutKey } from "@/lib/utils"
+import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet, markChatsListUnsynced } from "@/features/chats/queries/chats"
 import {
 	chatMessagesQueryUpdate,
@@ -77,6 +78,82 @@ export interface TypedChatSocketEvent {
 // broadcast and the park's expiry.
 const OWN_MESSAGE_RECONCILE_DELAY_MS = 3_000
 const FOREIGN_MESSAGE_DELAY_MS = 1
+
+// A foreign message read in the open chat advances lastFocus in the cache at once; the server learns it
+// once per burst, this long after the burst's last message (or sooner: the thread closing or the tab
+// hiding flushes it). Without the write, the next list read brings the server's older lastFocus back and
+// turns messages already read unread again, here and on every other device.
+export const CHAT_FOCUS_PERSIST_DELAY_MS = 2_500
+
+const pendingFocusPersists = new Map<string, ReturnType<typeof setTimeout>>()
+
+function scheduleChatFocusPersist(chatUuid: string): void {
+	clearTimeout(pendingFocusPersists.get(chatUuid))
+	pendingFocusPersists.set(
+		chatUuid,
+		setTimeout(() => {
+			persistChatFocus(chatUuid)
+		}, CHAT_FOCUS_PERSIST_DELAY_MS)
+	)
+}
+
+function persistChatFocus(chatUuid: string): void {
+	pendingFocusPersists.delete(chatUuid)
+
+	const chat = chatsQueryGet()?.find(c => c.uuid === chatUuid)
+
+	if (chat === undefined) {
+		return
+	}
+
+	sdkApi
+		.updateLastChatFocusTimesNow([chat])
+		.then(([refreshed]) => {
+			if (refreshed === undefined) {
+				return
+			}
+
+			const current = chatsQueryGet()?.find(c => c.uuid === chatUuid)
+
+			// Only lastFocus is taken, onto the current row, and never backwards; a chat removed meanwhile
+			// stays removed.
+			if (current === undefined || chatLastFocus(refreshed) <= chatLastFocus(current)) {
+				return
+			}
+
+			chatsQueryUpdate(prev => prev.map(c => (c.uuid === chatUuid ? { ...c, lastFocus: refreshed.lastFocus } : c)))
+		})
+		.catch((e: unknown) => {
+			log.warn("socket", "persisting the open chat's read position failed", e)
+		})
+}
+
+// Sends a pending read-position write now: the thread closing (one chat) or the tab hiding (all).
+export function flushChatFocusPersist(chatUuid?: string): void {
+	for (const [uuid, timeoutId] of [...pendingFocusPersists]) {
+		if (chatUuid === undefined || uuid === chatUuid) {
+			clearTimeout(timeoutId)
+			persistChatFocus(uuid)
+		}
+	}
+}
+
+function cancelChatFocusPersist(chatUuid?: string): void {
+	for (const [uuid, timeoutId] of [...pendingFocusPersists]) {
+		if (chatUuid === undefined || uuid === chatUuid) {
+			clearTimeout(timeoutId)
+			pendingFocusPersists.delete(uuid)
+		}
+	}
+}
+
+if (typeof document !== "undefined") {
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") {
+			flushChatFocusPersist()
+		}
+	})
+}
 
 // Resolve the chat that currently holds `messageUuid` in its message cache — MessageDelete /
 // MessageEmbedDisabled carry only the message uuid (no chat), so mobile searches every cached thread.
@@ -266,22 +343,25 @@ function handleMessageNew(msg: ChatMessage): void {
 
 				// Always refresh lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance
 				// lastFocus so the derived per-row unread stays false — unread accrues ONLY when the chat is
-				// not the open one.
+				// not the open one — and schedule the write that tells the server.
+				const current = chatsQueryGet()?.find(c => c.uuid === msg.chat)
+				const advanceFocus = current !== undefined && !isOwn && focused && msg.sentTimestamp > chatLastFocus(current)
+
 				chatsQueryUpdate(prev =>
-					prev.map(c => {
-						if (c.uuid !== msg.chat) {
-							return c
-						}
-
-						const advanceFocus = !isOwn && focused && msg.sentTimestamp > chatLastFocus(c)
-
-						return {
-							...c,
-							lastMessage: newestMessage(c.lastMessage, message),
-							...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {})
-						}
-					})
+					prev.map(c =>
+						c.uuid === msg.chat
+							? {
+									...c,
+									lastMessage: newestMessage(c.lastMessage, message),
+									...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {})
+								}
+							: c
+					)
 				)
+
+				if (advanceFocus) {
+					scheduleChatFocusPersist(msg.chat)
+				}
 
 				// No separate unread-badge write is needed: the message landing in the cache above is what
 				// the client-derived count re-reads on its next render — a foreign message in a non-focused
@@ -302,6 +382,7 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 	// Cancel first: an own-message reconcile patch still pending for this chat would otherwise fire after
 	// the purge below and recreate the message-cache slice it just emptied.
 	cancelOwnMessageEchoesForChat(uuid)
+	cancelChatFocusPersist(uuid)
 
 	// Purge-first: drop the deleted chat's queued unsent messages, send errors and input draft
 	// BEFORE the cache removal so a concurrent send loop never resolves + retries into a gone chat. Best-
@@ -331,10 +412,10 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 // FOLLOWS a reconnecting — never the initial post-login authSuccess (the list/thread are already fetching
 // then). The reconnect drives two things: the chat disconnect indicator (the status store, flipped to
 // "reconnecting" the moment the socket drops and back to "connected" on the recovering authSuccess), and
-// a full authoritative resync — refetchChatsAndMessages pulls the list AND every chat's messages, which
-// is both the missed-events reconcile and the self-heal that keeps the client-derived unread count
-// correct without depending on a flaky per-count endpoint. Exported for the unit tests' reconnect
-// assertions.
+// a full authoritative resync — refetchChatsAndMessages pulls the list AND the messages of the open thread
+// and of every chat that may hold unread messages, which is both the missed-events reconcile and the
+// self-heal that keeps the client-derived unread count correct without depending on a flaky per-count
+// endpoint. Exported for the unit tests' reconnect assertions.
 let sawReconnecting = false
 
 // A dropped socket may miss events, so cached chats and threads stop counting as current: a mount
@@ -349,6 +430,9 @@ function markChatsUnsynced(): void {
 // resync it never needed. performLogout calls this; the synced markers are session state too.
 export function resetSocketReconnectState(): void {
 	sawReconnecting = false
+
+	// A read-position write still pending belongs to the session that is ending.
+	cancelChatFocusPersist()
 
 	markChatsUnsynced()
 }

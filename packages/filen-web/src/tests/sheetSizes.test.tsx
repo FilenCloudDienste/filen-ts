@@ -4,7 +4,6 @@ import "@/tests/support/officeKeys"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useEffect } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
 import type { SheetGridModel, SheetGridProps, SheetGridSizes } from "@filen/office/react/sheet"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { preview } from "@/locales/en/preview"
@@ -34,24 +33,17 @@ vi.mock("@/lib/storage/adapter", () => ({
 	}
 }))
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: CSV, refetch: () => undefined })
 }))
 
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 // The grid itself draws on a canvas jsdom does not have: a stand-in that keeps what the shell hands it and passes the
 // size layer on to the model, as the grid does.
@@ -228,7 +220,7 @@ describe("sizes kept beside a text file", () => {
 		}
 
 		fireEvent.contextMenu(trigger)
-		fireEvent.click(await screen.findByText(preview.previewSpreadsheetResetColumnWidth_one))
+		fireEvent.click(await screen.findByText(preview.previewSpreadsheetResetColumnWidthSingle))
 		await waitFor(
 			() => {
 				expect(columns()?.get(1)).toBeUndefined()

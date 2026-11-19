@@ -31,6 +31,7 @@ import {
 import { runBulkOutcomes } from "@/lib/actions/bulk"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { type ActivityKeys } from "@/lib/activity/activity.logic"
+import { singleOrCountKey } from "@/lib/i18n"
 import {
 	CONTACTS_ACCEPT,
 	CONTACTS_BLOCK,
@@ -426,7 +427,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			case "deny":
 				return renderConfirm({
 					title: t("contactsDenyConfirmTitle"),
-					body: t("contactsDenyConfirmBody", { count }),
+					body: t(singleOrCountKey(count, "contactsDenyConfirmBodySingle", "contactsDenyConfirmBody"), { count }),
 					confirmLabel: t("contactsActionDeny"),
 					section: "requests",
 					keys: CONTACTS_DENY,
@@ -437,7 +438,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			case "cancel":
 				return renderConfirm({
 					title: t("contactsCancelConfirmTitle"),
-					body: t("contactsCancelConfirmBody", { count }),
+					body: t(singleOrCountKey(count, "contactsCancelConfirmBodySingle", "contactsCancelConfirmBody"), { count }),
 					confirmLabel: t("contactsActionCancelRequest"),
 					section: "pending",
 					keys: CONTACTS_CANCEL_REQUEST,
@@ -448,7 +449,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			case "remove":
 				return renderConfirm({
 					title: t("contactsRemoveConfirmTitle"),
-					body: t("contactsRemoveConfirmBody", { count }),
+					body: t(singleOrCountKey(count, "contactsRemoveConfirmBodySingle", "contactsRemoveConfirmBody"), { count }),
 					confirmLabel: t("contactsActionRemove"),
 					destructive: true,
 					section: "contacts",
@@ -460,7 +461,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			case "block":
 				return renderConfirm({
 					title: t("contactsBlockConfirmTitle"),
-					body: t("contactsBlockConfirmBody", { count }),
+					body: t(singleOrCountKey(count, "contactsBlockConfirmBodySingle", "contactsBlockConfirmBody"), { count }),
 					confirmLabel: t("contactsActionBlock"),
 					destructive: true,
 					section: "contacts",
@@ -472,7 +473,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			case "unblock":
 				return renderConfirm({
 					title: t("contactsUnblockConfirmTitle"),
-					body: t("contactsUnblockConfirmBody", { count }),
+					body: t(singleOrCountKey(count, "contactsUnblockConfirmBodySingle", "contactsUnblockConfirmBody"), { count }),
 					confirmLabel: t("contactsActionUnblock"),
 					section: "blocked",
 					keys: CONTACTS_UNBLOCK,

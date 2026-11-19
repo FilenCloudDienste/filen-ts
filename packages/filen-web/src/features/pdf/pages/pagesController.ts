@@ -17,6 +17,7 @@ import type { CopySuffix } from "@/features/pdf/pages/names"
 import { openSyncRange, syncRangeSlots } from "@/lib/media/syncRange"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
+import { singleOrCountKey } from "@/lib/i18n"
 
 // The pages rail's and Organise grid's state (stable page ids, the current page, the selection, the live region's
 // sentence, thumbnails to draw again), and the page operations the tools run: each change one engine command through
@@ -247,6 +248,11 @@ export class PdfPagesController {
 		this.navigator?.(index)
 	}
 
+	// Brings a page into view for a tool's list (a redaction mark), the rail's selection left as it is.
+	show(index: number): void {
+		this.navigate(index)
+	}
+
 	// The document's page count as the view shows it: ids follow it (new ones when it changed some other way than
 	// through this controller, an undo or redo).
 	sync(count: number): void {
@@ -441,7 +447,13 @@ export class PdfPagesController {
 		)
 		this.set({
 			crop: null,
-			announcement: host === null || count === 0 ? "" : host.t("previewPdfPagesCropped", { count, page: (result.pages[0] ?? 0) + 1 })
+			announcement:
+				host === null || count === 0
+					? ""
+					: host.t(singleOrCountKey(count, "previewPdfPagesCroppedSingle", "previewPdfPagesCropped"), {
+							count,
+							page: (result.pages[0] ?? 0) + 1
+						})
 		})
 	}
 
@@ -598,25 +610,24 @@ export class PdfPagesController {
 		this.set({ progress: { done: 0, count: files.length } })
 		this.run(
 			async session => {
-				const saved = await this.copies(session, files, options.protect).catch((error: unknown) => {
-					log.warn("pdf", "making new files of pages failed", { error })
-
-					return null
-				})
+				const { saved, failed } = await this.copies(session, files, options.protect)
 
 				this.set({ progress: undefined })
 
-				if (saved === null) {
+				// The files made before a failure exist: recorded as this tab's own saves before the failure is said.
+				if (saved.length > 0) {
+					this.host?.onCopied(
+						saved.map(entry => entry.name),
+						saved.map(entry => entry.item)
+					)
+				}
+
+				if (failed) {
 					this.host?.onFailed(options.failedKey)
 					done.resolve(false)
 
 					return
 				}
-
-				this.host?.onCopied(
-					saved.map(entry => entry.name),
-					saved.map(entry => entry.item)
-				)
 
 				// The files exist whatever the delete does: a failed delete is the editor's to report (onChangeFailed).
 				try {
@@ -750,17 +761,37 @@ export class PdfPagesController {
 		return saved
 	}
 
+	// The files made, in order, and whether one failed (the run stops at the first failure; those made before it stay).
 	private async copies(
 		session: PdfEditSessionModel,
 		files: readonly PdfCopyFile[],
 		protect: boolean
-	): Promise<{ readonly name: string; readonly item: DriveItem }[]> {
+	): Promise<{ readonly saved: readonly { readonly name: string; readonly item: DriveItem }[]; readonly failed: boolean }> {
+		const saved: { readonly name: string; readonly item: DriveItem }[] = []
+
+		try {
+			await this.copyEach(session, files, protect, saved)
+		} catch (error) {
+			log.warn("pdf", "making new files of pages failed", { error, made: saved.length, count: files.length })
+
+			return { saved, failed: true }
+		}
+
+		return { saved, failed: false }
+	}
+
+	// Pushes each file onto `saved` once it was uploaded; throws on the first failure.
+	private async copyEach(
+		session: PdfEditSessionModel,
+		files: readonly PdfCopyFile[],
+		protect: boolean,
+		saved: { readonly name: string; readonly item: DriveItem }[]
+	): Promise<void> {
 		const host = this.host
 
 		if (host === null) throw new Error("no host")
 
 		const { engine } = session
-		const saved: { readonly name: string; readonly item: DriveItem }[] = []
 
 		for (const file of files) {
 			const pages = rangesToPages(file.ranges)
@@ -805,7 +836,5 @@ export class PdfPagesController {
 
 			this.set({ progress: { done: saved.length, count: files.length } })
 		}
-
-		return saved
 	}
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { toast } from "sonner"
 import { ImagesIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -8,7 +9,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { useAccountQuery } from "@/queries/account"
-import { usePhotosTimeline } from "@/features/photos/queries/photos"
+import { unreadPhotosRootCount, usePhotosTimeline } from "@/features/photos/queries/photos"
 import { loadPhotosLibrary, removePhotosRoot, usePhotosLibrary } from "@/features/photos/lib/library"
 import { shouldResetRootOnError } from "@/features/photos/lib/root"
 import { PHOTOS_CHOOSE_ACTION_ID } from "@/features/photos/lib/focusTargets"
@@ -48,6 +49,8 @@ export function PhotosScreen() {
 	const namesQuery = useDirectoryNamesQuery(singleRoot !== undefined && !isWholeDrive ? [singleRoot] : [])
 	const { timeline, listedRoots, failures, retry } = usePhotosTimeline(roots)
 	const rootViews = usePhotosRootViews(roots, dialog !== null)
+	// Roots that failed with nothing held while others listed: their photos are missing from what shows.
+	const unreadCount = timeline.status === "success" ? unreadPhotosRootCount(failures, isOnline) : 0
 
 	// Root-gone detection, per root: an error whose message matches DIRECTORY_NOT_FOUND_PREFIX (isRootGoneError,
 	// features/photos/lib/root.ts) AND the tab believes it's online (shouldResetRootOnError's defense-in-depth
@@ -107,6 +110,22 @@ export function PhotosScreen() {
 
 	if (library.roots === null) {
 		return <LoadingState size="lg" />
+	}
+
+	// No local copy and the file could not be read: nothing says no directory was chosen. The file is read again
+	// on its own too (SyncedDotFilenFile's backoff), which clears this.
+	if (roots.length === 0 && library.loadFailure !== null) {
+		return (
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+				<EmptyState
+					variant="error"
+					error={asErrorDTO(library.loadFailure.error)}
+					onRetry={() => {
+						void loadPhotosLibrary()
+					}}
+				/>
+			</div>
+		)
 	}
 
 	if (roots.length === 0) {
@@ -177,6 +196,21 @@ export function PhotosScreen() {
 					</Button>
 				</div>
 			</header>
+			{unreadCount > 0 ? (
+				<div
+					role="status"
+					className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2 text-sm text-muted-foreground"
+				>
+					<span className="min-w-0 truncate">{t("photosUnreadDirectories", { count: unreadCount })}</span>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={retry}
+					>
+						{t("common:tryAgain")}
+					</Button>
+				</div>
+			) : null}
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{timeline.status === "pending" ? (
 					<LoadingState size="lg" />
@@ -194,7 +228,9 @@ export function PhotosScreen() {
 									<ImagesIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("photosEmptyTitle")}</EmptyTitle>
-								<EmptyDescription>{t("photosEmptyBody", { count: roots.length })}</EmptyDescription>
+								<EmptyDescription>
+									{t(singleOrCountKey(roots.length, "photosEmptyBodySingle", "photosEmptyBody"), { count: roots.length })}
+								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					</div>

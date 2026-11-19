@@ -9,6 +9,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { batchCopyNames, extractSuffix } from "@/features/pdf/pages/names"
 import { copiesProtected, defaultExtractForm, extractPlan, selectionText, type ExtractForm } from "@/features/pdf/pages/organise.logic"
+import { singleOrCountKey } from "@/lib/i18n"
 
 // Shared by the Extract and Split dialogs: what the PDF is and how the new files are named.
 export interface PdfCopyContext {
@@ -107,7 +108,10 @@ export function OutputNames({ names }: { names: readonly string[] }) {
 			className="text-xs break-all text-muted-foreground"
 			role="status"
 		>
-			{t("previewPdfExtractOutput", { count: names.length, name: first })}
+			{t(singleOrCountKey(names.length, "previewPdfExtractOutputSingle", "previewPdfExtractOutput"), {
+				count: names.length,
+				name: first
+			})}
 		</p>
 	)
 }

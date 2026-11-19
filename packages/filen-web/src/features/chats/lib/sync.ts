@@ -13,7 +13,7 @@ import { log } from "@/lib/log"
 import { withoutKey } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
+import { decodeOutboxPayload, type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, chatMessagesQueryAppend } from "@/features/chats/queries/chatMessages"
 import { compareBySentTimestamp } from "@/features/chats/lib/sort"
@@ -25,12 +25,14 @@ import {
 	dequeueInflightMessage,
 	clearInflightError,
 	type ChatMessageWithInflightId,
+	type InflightChatMessageError,
 	type InflightChatMessages
 } from "@/features/chats/store/useChatsInflight"
 import {
 	reconcileChatFollower,
 	buildOptimisticMessage,
 	CommittedIdLedger,
+	droppedChatSendSchema,
 	INFLIGHT_CHAT_MESSAGES_KV_KEY,
 	inflightChatMessagesSchema,
 	type OptimisticSender,
@@ -38,10 +40,11 @@ import {
 } from "@/features/chats/lib/sync.logic"
 
 // The multi-tab transport (leader-owned outbox): a follower forwards a send to the leader and asks it to
-// flush; the leader broadcasts the authoritative per-chat queue + a hello on takeover. `E` is one forwarded
-// send, `S` the whole queue. Without an attached transport (unit tests) every forward/broadcast is a guarded
-// no-op; the real one skips full-state broadcasts until a peer tab exists.
-export type ChatOutboxTransport = OutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>
+// flush; the leader broadcasts the authoritative per-chat queue + a hello on takeover, and each send it drops
+// at the rejection bound. `E` is one forwarded send, `S` the whole queue, `F` one dropped send. Without an
+// attached transport (unit tests) every forward/broadcast is a guarded no-op; the real one skips full-state
+// and failed broadcasts until a peer tab exists.
+export type ChatOutboxTransport = OutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages, InflightChatMessageError>
 
 // Read the abort flag through a function boundary so an early guard does not narrow later reads to a
 // literal `false` — the signal is aborted externally by cancel(), mid-pass; the later checks are
@@ -191,6 +194,17 @@ export class Sync {
 			return
 		}
 
+		// A forward of a send this leader dropped (no longer queued, error record kept) is a follower's retry:
+		// clear the record so the send gets a fresh rejection budget, as a retry in this tab does. A still-queued
+		// id is a takeover re-forward and keeps its strike count.
+		const queued = useChatsInflightStore
+			.getState()
+			.inflightMessages[msg.chat.uuid]?.messages.some(m => m.inflightId === msg.message.inflightId)
+
+		if (queued !== true) {
+			clearInflightError(msg.message.inflightId)
+		}
+
 		this.applyLeaderOptimistic(msg.chat, msg.message)
 
 		// The broadcast carries the queue this write persisted: a fast send can commit and dequeue the forwarded
@@ -214,6 +228,65 @@ export class Sync {
 
 		this.unacked = reconciled.unacked
 		useChatsInflightStore.getState().setInflightMessages(() => reconciled.store)
+
+		// A failed send the leader queued again (a retry in the leader tab) is pending, not failed, here too.
+		useChatsInflightStore.getState().setInflightErrors(prev => {
+			if (Object.keys(prev).length === 0) {
+				return prev
+			}
+
+			const remaining = Object.entries(prev).filter(
+				([inflightId, entry]) => !(state[entry.message.chat]?.messages.some(m => m.inflightId === inflightId) ?? false)
+			)
+
+			return remaining.length === Object.keys(prev).length ? prev : Object.fromEntries(remaining)
+		})
+	}
+
+	// FOLLOWER: the leader dropped a send at the rejection bound. Show it as failed here too, holding its text,
+	// instead of letting the next state broadcast silently remove the bubble. A send this tab still tracks as
+	// unacked is settled: it must not be re-forwarded on a takeover.
+	public applyLeaderFailed(payload: unknown): void {
+		if (this.role !== "follower") {
+			return
+		}
+
+		const failed = decodeOutboxPayload(payload, droppedChatSendSchema, "dropped send")
+
+		if (failed === null) {
+			return
+		}
+
+		const { chat: chatUuid, inflightId } = failed.message
+		const unackedGroup = this.unacked[chatUuid]
+
+		if (unackedGroup?.messages.some(m => m.inflightId === inflightId)) {
+			const remaining = unackedGroup.messages.filter(m => m.inflightId !== inflightId)
+
+			this.unacked =
+				remaining.length === 0
+					? withoutKey(this.unacked, chatUuid)
+					: { ...this.unacked, [chatUuid]: { ...unackedGroup, messages: remaining } }
+		}
+
+		dequeueInflightMessage(chatUuid, inflightId)
+
+		useChatsInflightStore.getState().setInflightErrors(prev => ({
+			...prev,
+			[inflightId]: failed
+		}))
+	}
+
+	// FOLLOWER: retry a failed send by forwarding it to the leader again, which owns the loop. Returns false
+	// unless this tab is a follower, so the caller runs the leader's own retry instead.
+	public forwardRetry(chat: Chat, message: ChatMessageWithInflightId): boolean {
+		if (this.role !== "follower") {
+			return false
+		}
+
+		void this.followerEnqueue(chat, message)
+
+		return true
 	}
 
 	// FOLLOWER: on a new leader announcing itself, re-forward every still-unacked send so a send that was in
@@ -634,6 +707,20 @@ export class Sync {
 										permanentRejections
 									)
 									dequeueInflightMessage(chatUuid, message.inflightId)
+
+									// Never flush once aborted (logout wipes kv next); the loop's own check ends the pass.
+									if (isAborted(signal)) {
+										return
+									}
+
+									// Durable before it is announced: a state broadcast still listing the send after
+									// `failed` would turn the follower's failed bubble back to pending, and the pass-end
+									// state would then remove it silently. db-worker writes land in order, so an earlier
+									// flush and its broadcast settle before this one.
+									await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
+
+									// Followers would otherwise see the bubble vanish with the next state broadcast.
+									this.transport?.broadcastFailed?.({ error: dto, permanentRejections, message })
 
 									continue
 								}

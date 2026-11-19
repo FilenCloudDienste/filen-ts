@@ -1,4 +1,5 @@
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, sniffImage, type DocxEditorCommand, type DocxImageInfo } from "@filen/office/core/docx/edit"
+import { extensionOf } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { AVIF_BRANDS, HEIF_BRANDS } from "@/features/preview/imageEdit/lib/heifMeta"
@@ -145,8 +146,7 @@ const PICTURE_EXTENSIONS: ReadonlySet<string> = new Set([
 // What a source is by its name and type alone (before a byte is read): HEIC or AVIF (refused without reading),
 // a picture, something else, or unknown (no extension, no type).
 export function sourceKind(source: Pick<PictureSource, "name" | "type">): "heic" | "avif" | "picture" | "other" | "unknown" {
-	const dot = source.name?.lastIndexOf(".") ?? -1
-	const extension = source.name === undefined || dot <= 0 ? "" : source.name.slice(dot + 1).toLowerCase()
+	const extension = source.name === undefined ? "" : extensionOf(source.name)
 	const type = (source.type ?? "").toLowerCase()
 
 	if (HEIC_EXTENSIONS.has(extension) || type === "image/heic" || type === "image/heif") {

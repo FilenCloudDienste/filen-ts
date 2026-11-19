@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import type { Plugin } from "vite"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
-import { ensureTessdata, gzippedTessdata, readTessdataManifest, sha256, type TessdataFile } from "./ocr-tessdata"
+import { ensureTessdata, gzippedTessdata, readTessdataManifest, type TessdataFile } from "./ocr-tessdata"
+import { COI_HEADERS, sha256 } from "./shared"
 
 // Text recognition for the PDF editor, served from 'self': tesseract.js-core's LSTM-only wasm builds (relaxed SIMD,
 // SIMD and plain) and the tessdata_fast models (ocr-tessdata.ts), under /assets/ocr/ with the first 8 hex digits of

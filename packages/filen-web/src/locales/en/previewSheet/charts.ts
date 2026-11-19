@@ -162,5 +162,7 @@ export const previewSheetCharts = {
 	/** Label positions — below a point */
 	previewSheetChartPositionBelow: "Below",
 	/** Toast — the chart holds something the editor cannot change without losing it */
-	previewSheetChartUnsupported: "This chart uses features the editor doesn't support, so it can't be changed that way."
+	previewSheetChartUnsupported: "This chart uses features the editor doesn't support, so it can't be changed that way.",
+	/** Toast — a value typed into the chart editor can't be used (not a number, a unit that isn't positive, a minimum not below the maximum) */
+	previewSheetChartValueInvalid: "That value can't be used here."
 }

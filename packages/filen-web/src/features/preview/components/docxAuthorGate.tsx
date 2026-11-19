@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
+import type { DocxEditorCommand, DocxRefusalReason } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxAuthorGate } from "@/features/preview/components/docxAuthorGate.logic"
 import { ensureAuthorName } from "@/features/office/lib/officeSettings"
@@ -30,14 +30,15 @@ interface Question {
 
 // What a question asked after the editor closed gets.
 const CLOSED = AbortSignal.abort()
-// Edits refused as unsaveable this close together are one burst (a key held, say): told about once.
+// Edits refused for one reason this close together are one burst (a key held, say): told about once.
 const REFUSAL_BURST_MS = 2000
 
 // The author name gate: commands that record one ask for it first (withAuthor); an edit the editor refused
 // for want of it (typing while tracking) asks too, offering to turn track changes off. The refused edit is
 // dropped, never made later and never with a stand-in name; a dismissed prompt asks again at the next edit,
 // and refusals while it is open are not asked about again. An edit refused because what it changes cannot be
-// saved (tracked) is told about in a toast, once per burst of them.
+// saved (tracked), or because it would break what the document keeps (a section break, a locked block, a form
+// field), is told about in a toast, once per burst of them.
 export function useDocxAuthorGate({ authorName, editor, execute }: DocxAuthorGateOptions): DocxAuthorGateControls {
 	const { t } = useTranslation("preview")
 	const tRef = useLatestRef(t)
@@ -86,18 +87,27 @@ export function useDocxAuthorGate({ authorName, editor, execute }: DocxAuthorGat
 			return
 		}
 
-		// When the last unsaveable edit was refused: a burst goes on while they come closer than REFUSAL_BURST_MS.
-		let lastUnsupported = Number.NEGATIVE_INFINITY
+		// When the last edit told about in a toast was refused, and why: a burst goes on while refusals for the same
+		// reason come closer than REFUSAL_BURST_MS.
+		let lastToasted = Number.NEGATIVE_INFINITY
+		let lastReason: DocxRefusalReason | undefined = undefined
 
 		return editor.onRefused(reason => {
-			if (reason === "unsupported") {
+			if (reason !== "authorNeeded") {
 				const now = Date.now()
-				const burst = now - lastUnsupported < REFUSAL_BURST_MS
+				const burst = reason === lastReason && now - lastToasted < REFUSAL_BURST_MS
 
-				lastUnsupported = now
+				lastToasted = now
+				lastReason = reason
 
 				if (!burst) {
-					toast.error(tRef.current("previewDocxEditUnsupported"), { description: tRef.current("previewDocxEditUnsupportedBody") })
+					if (reason === "unsupported") {
+						toast.error(tRef.current("previewDocxEditUnsupported"), {
+							description: tRef.current("previewDocxEditUnsupportedBody")
+						})
+					} else {
+						toast.error(tRef.current("previewDocxEditProtected"), { description: tRef.current("previewDocxEditProtectedBody") })
+					}
 				}
 
 				return

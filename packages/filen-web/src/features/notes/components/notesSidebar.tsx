@@ -57,7 +57,7 @@ import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
-import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
+import { noteSearchEmptyState, useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
@@ -312,6 +312,7 @@ export function NotesSidebar() {
 	// Eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
 	// doc comment for why this never fires a single request outside an active search.
 	const searchBodies = useNoteSearchBodies(allNotes, search)
+	const searchEmptyState = noteSearchEmptyState(searchBodies)
 
 	// One host for every row's menu (noteRow.tsx never opens a dialog itself — it only calls onAction).
 	// currentUuid drives the delete/leave nav-away guard: a row-triggered delete of the currently-open
@@ -332,7 +333,7 @@ export function NotesSidebar() {
 	// member notes interleaved.
 	const rows: NotesSidebarRow[] =
 		viewMode === "notes"
-			? buildNotesGroupedRows(allNotes, search, now, searchBodies)
+			? buildNotesGroupedRows(allNotes, search, now, searchBodies.bodies)
 			: buildTagsViewRows({
 					tags: allTags,
 					notesByTag: buildNotesByTag(allNotes),
@@ -340,7 +341,7 @@ export function NotesSidebar() {
 					search,
 					sortBy: tagsSortBy,
 					untaggedLabel: t("notesTagUntagged"),
-					bodies: searchBodies
+					bodies: searchBodies.bodies
 				})
 
 	// The ordered, currently-visible note set click-selection ranges walk (search-filtered, spans both
@@ -703,6 +704,27 @@ export function NotesSidebar() {
 
 		if (rows.length === 0) {
 			if (searching) {
+				// A body still being read may yet match, and one that could not be read was never searched:
+				// neither is a definitive "no results".
+				if (searchEmptyState === "searching") {
+					return (
+						<SidebarNotice
+							icon={<SearchIcon />}
+							title={t("notesSearchingBodies")}
+						/>
+					)
+				}
+
+				if (searchEmptyState === "unsearched") {
+					return (
+						<SidebarNotice
+							icon={<SearchIcon />}
+							title={t("notesSearchEmptyTitle")}
+							description={t("notesSearchUnsearchedBodies", { count: searchBodies.failed })}
+						/>
+					)
+				}
+
 				return (
 					<SidebarNotice
 						icon={<SearchIcon />}

@@ -11,6 +11,7 @@ import {
 } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
 import { menuItemName } from "./helpers/menu"
+import { escapeRegExp } from "./helpers/rows"
 
 // An open editor follows its file when a newer version is saved elsewhere. Two tabs of one session stand
 // in for two devices: each save goes through the socket to the other exactly as it would across
@@ -136,7 +137,7 @@ test("an open editor follows saves made elsewhere, asks over unsaved edits, and 
 
 		await page.keyboard.press("Escape")
 		await expect(listbox.getByRole("option", { name: /\(conflicted copy .*\)\.txt / })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(listbox.getByRole("option", { name: new RegExp(`^${fileName.replaceAll(".", "\\.")} `) })).toBeVisible()
+		await expect(listbox.getByRole("option", { name: new RegExp(`^${escapeRegExp(fileName)} `) })).toBeVisible()
 	} finally {
 		await other?.close()
 		await page.keyboard.press("Escape").catch(() => undefined)

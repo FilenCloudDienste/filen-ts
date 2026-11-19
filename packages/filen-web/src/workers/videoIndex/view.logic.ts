@@ -562,9 +562,15 @@ function* visibleTitles(files: LibraryFiles): Generator<VideoTitleView> {
 	for (const series of library.series) {
 		const episode = firstEpisode(series)
 		let episodeCount = 0
+		// Stays true until a playable episode turns up; a series without episodes isn't unsupported.
+		let allUnsupported = true
 
 		for (const season of series.seasons) {
 			episodeCount += season.episodes.length
+
+			if (allUnsupported) {
+				allUnsupported = season.episodes.every(item => files.allUnsupported(item.versions))
+			}
 		}
 
 		yield {
@@ -578,7 +584,7 @@ function* visibleTitles(files: LibraryFiles): Generator<VideoTitleView> {
 			dateAdded: series.dateAdded,
 			...artRefs(files, series.art),
 			...playable(files, episode?.versions ?? []),
-			unsupported: false,
+			unsupported: episodeCount > 0 && allUnsupported,
 			disc: false,
 			versionCount: 1,
 			extraCount: series.extras.length,

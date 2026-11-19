@@ -129,6 +129,20 @@ function lengthOf(draft: Draft, key: LengthKey, unit: DocxLengthUnit): number {
 	return shown?.text === text ? shown.twips : toTwips(text, unit)
 }
 
+// The page's orientation: the typed paper's shape once its width or height is typed (Word: wider than tall is
+// landscape), else the chosen one (also for a square paper or no number). Read, never stored: the margins do not
+// turn with each keystroke.
+function orientationOf(draft: Draft, unit: DocxLengthUnit): DocxOrientation {
+	if (draft.exact.width?.text === draft.lengths.width && draft.exact.height?.text === draft.lengths.height) {
+		return draft.orientation
+	}
+
+	const width = lengthOf(draft, "width", unit)
+	const height = lengthOf(draft, "height", unit)
+
+	return width > height ? "landscape" : height > width ? "portrait" : draft.orientation
+}
+
 // The draft as the dialog's choices; null while a length or the start number is no valid number.
 function formOf(draft: Draft, unit: DocxLengthUnit): DocxPageSetupForm | null {
 	const keys: readonly LengthKey[] = ["width", "height", "top", "bottom", "left", "right"]
@@ -151,7 +165,7 @@ function formOf(draft: Draft, unit: DocxLengthUnit): DocxPageSetupForm | null {
 	return {
 		width: Math.min(width, height),
 		height: Math.max(width, height),
-		orientation: draft.orientation,
+		orientation: orientationOf(draft, unit),
 		margins: { top, bottom, left, right },
 		mirrored: draft.mirrored,
 		columns: draft.columns,
@@ -214,6 +228,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 		update(previous => ({ ...previous, lengths: { ...previous.lengths, [key]: text } }))
 	}
 	const twips = (key: LengthKey) => lengthOf(draft, key, unit)
+	const orientation = orientationOf(draft, unit)
 	const form = formOf(draft, unit)
 	const command: DocxEditorCommand | null = form === null ? null : pageSetupCommand(draft.current, form)
 	const paper = draft.customPaper ? CUSTOM : paperOf(Math.min(twips("width"), twips("height")), Math.max(twips("width"), twips("height")))
@@ -222,7 +237,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 		: marginsPresetOf(
 				{ top: twips("top"), bottom: twips("bottom"), left: twips("left"), right: twips("right") },
 				draft.mirrored,
-				draft.orientation === "landscape"
+				orientation === "landscape"
 			)
 	const columns = [1, 2, 3, ...(draft.columns > 3 ? [draft.columns] : [])]
 	const close = (): void => {
@@ -276,7 +291,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 							return
 						}
 
-						const landscape = draft.orientation === "landscape"
+						const landscape = orientation === "landscape"
 
 						update(previous => ({
 							...withLengths(
@@ -284,19 +299,21 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 								{ width: landscape ? size.height : size.width, height: landscape ? size.width : size.height },
 								unit
 							),
+							// The shape typed before stays the page's once the preset's lengths show.
+							orientation,
 							customPaper: false
 						}))
 					}}
 				/>
 				<DocxChoiceField
 					label={t("previewDocxOrientation")}
-					value={draft.orientation}
+					value={orientation}
 					items={[
 						{ value: "portrait", label: t("previewDocxPortrait") },
 						{ value: "landscape", label: t("previewDocxLandscape") }
 					]}
-					onChange={orientation => {
-						if (orientation === draft.orientation) {
+					onChange={chosen => {
+						if (chosen === orientation) {
 							return
 						}
 
@@ -304,7 +321,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 						update(previous => {
 							const turnedPage: Draft = {
 								...previous,
-								orientation,
+								orientation: chosen,
 								lengths: { ...previous.lengths, width: previous.lengths.height, height: previous.lengths.width },
 								exact: {
 									...previous.exact,
@@ -319,7 +336,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 									left: lengthOf(previous, "left", unit),
 									right: lengthOf(previous, "right", unit)
 								},
-								orientation === "landscape"
+								chosen === "landscape"
 							)
 
 							return Object.values(turned).some(Number.isNaN) ? turnedPage : withLengths(turnedPage, turned, unit)
@@ -359,7 +376,7 @@ export function DocxPageSetupDialog({ editor, readOnly, enabled, inputRequest, o
 								return
 							}
 
-							const turned = draft.orientation === "landscape" ? turnedMargins(preset.margins, true) : preset.margins
+							const turned = orientation === "landscape" ? turnedMargins(preset.margins, true) : preset.margins
 
 							// Word's gallery sets mirror margins with its Mirrored preset and clears them with the others.
 							update(previous => ({

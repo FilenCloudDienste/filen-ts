@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
 import {
@@ -107,12 +108,27 @@ export interface SheetPrintDialogProps {
 	onClose: () => void
 }
 
+// How many of a job's failed objects are logged: each failure is logged once, whichever previews and prints draw it.
+const loggedFailures = new WeakMap<PrintJob, number>()
+
+// The objects (charts, pictures, shapes) a job left off its pages because they failed to draw, logged once each.
+function logFailedObjects(job: PrintJob): void {
+	if (job.failed.size <= (loggedFailures.get(job) ?? 0)) {
+		return
+	}
+
+	loggedFailures.set(job, job.failed.size)
+	log.warn("preview", "spreadsheet print objects failed", { objects: job.failed.size, keys: [...job.failed] })
+}
+
 // The print dialog: what prints (the active sheet, the workbook or the selection), paper, orientation, scaling,
 // gridlines and headings, with the pages as they will print. The choices are saved into the active sheet's page setup
 // when the file is edited here, then the browser prints the pages.
 export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run, onSavePdf, onClose }: SheetPrintDialogProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const id = useId()
+	// The header and footer date and time in the regional format, as the cells print theirs.
+	const language = useRegionalLanguage()
 	const [form, setForm] = useState<PrintForm>(() => formOf(active.setup))
 	const [workbook, setWorkbook] = useState<WorkbookSettings | null>(null)
 	// The pages laid out, with the choices they were laid out for.
@@ -221,8 +237,10 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 		// A large page is drawn in slices: a page left for another stops at the next one.
 		const signal = { aborted: false }
 
-		void renderPrintPage({ job: printed, values: headerValues(name), id: `${id}-preview`, signal }, shown).then(
+		void renderPrintPage({ job: printed, values: headerValues(name, language), id: `${id}-preview`, signal }, shown).then(
 			markup => {
+				logFailedObjects(printed)
+
 				if (live && markup !== null) {
 					setPreview({ printed, index: shown, svg: markup })
 				}
@@ -248,7 +266,7 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 			live = false
 			signal.aborted = true
 		}
-	}, [printed, pages, shown, name, id])
+	}, [printed, pages, shown, name, language, id])
 
 	const percentInvalid = form.scaling === "custom" && percentOf(form.percent) === null
 	const busy = progress !== null
@@ -273,10 +291,11 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 
 		const total = Math.min(pages, MAX_BROWSER_PAGES)
 		setProgress({ done: 0, pages: total })
-		renderPages({ job: printed, values: headerValues(name), id: `${id}-print` }, total, done => {
+		renderPages({ job: printed, values: headerValues(name, language), id: `${id}-print` }, total, done => {
 			setProgress({ done, pages: total })
 		}).then(
 			async out => {
+				logFailedObjects(printed)
 				// Closed once printed: the pages' pictures are the job's until then (the dialog is not printed).
 				await printPages(out)
 				onClose()

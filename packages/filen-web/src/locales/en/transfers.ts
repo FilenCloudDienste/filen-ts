@@ -181,8 +181,10 @@ export const transfers = {
 	/** Directory-upload summary toast — at least one directory or file in the batch failed; {{count}} = items that succeeded, {{failed}} = items that failed; plural */
 	transfersDirectoryUploadSummaryCompleteWithFailures_other: "{{count}} items uploaded, {{failed}} failed",
 
-	// ── Download summary toast (startDownloads) ───────────────────────────────
-	/** Download summary toast — the download failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
+	// ── Download failure and summary toasts ───────────────────────────────────
+	/** Toast shown when the download of one file, archive entry or zip archive failed; {{name}} = its name, the zip's for an archive */
+	transfersDownloadFailed: "Couldn't download {{name}}",
+	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
 	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",

@@ -1,3 +1,4 @@
+import { fileStem } from "@filen/shared"
 import type { SheetRefusal } from "@filen/office/core/sheet"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -11,12 +12,7 @@ export interface SpreadsheetSnapshot {
 // What the viewer hands the overlay to save with.
 export type SpreadsheetSaveSource = () => Promise<SpreadsheetSnapshot>
 
-// A file name without its extension ("budget.csv" → "budget"); a name that is all extension (".csv") stays.
-export function fileStem(name: string): string {
-	const dot = name.lastIndexOf(".")
-
-	return dot > 0 ? name.slice(0, dot) : name
-}
+export { fileStem }
 
 // Characters no file name may hold on the systems a download lands on (Windows' list is the longest).
 const UNSAFE_FILE_CHARS = /[\\/:*?"<>|]/g

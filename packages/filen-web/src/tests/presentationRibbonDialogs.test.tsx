@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import i18n from "i18next"
 import { slideRef, type DeckOp, type Xfrm } from "@filen/office/core/presentation"
-import type { CommandResult, OpenInfo, PresentationSessionApi, SlideLayer, SlideRender } from "@filen/office/dom/presentation"
+import type {
+	CommandResult,
+	OpenInfo,
+	PictureFormat,
+	PresentationSessionApi,
+	SlideLayer,
+	SlideRender
+} from "@filen/office/dom/presentation"
 import { createShapeSelection } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
 import { arrangeGroups } from "@/features/presentation/components/ribbon/arrange"
@@ -33,7 +40,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 vi.mock("@filen/office/core/smartart", async importOriginal => ({
 	...(await importOriginal<Record<string, unknown>>()),
-	SMARTART_LAYOUTS: [{ uniqueId: "urn:test:row", category: "list", nameKey: "previewPptxSmartArtLayoutRow", sample: [] }]
+	SMARTART_LAYOUTS: [{ uniqueId: "urn:test:row", category: "list", nameKey: "previewPptxSmartArtLayoutBasicList", sample: [] }]
 }))
 
 // The drive picker as far as these tests go: a dialog by its title that stays until it is closed.
@@ -81,11 +88,13 @@ function renderOf(role: SlideLayer["role"]): SlideRender {
 	} as unknown as SlideRender
 }
 
-function mount(groups: PresentationGroups, role: SlideLayer["role"], selected: boolean): DeckOp[] {
+// `format`: the selected picture's crop and adjustments as the session reads them.
+function mount(groups: PresentationGroups, role: SlideLayer["role"], selected: boolean, format: PictureFormat = {}): DeckOp[] {
 	const ops: DeckOp[] = []
 	const selection = createShapeSelection()
 	const session = {
-		smartArtPreview: vi.fn(() => Promise.resolve({ width: 240, height: 180, close: () => undefined }))
+		smartArtPreview: vi.fn(() => Promise.resolve({ width: 240, height: 180, close: () => undefined })),
+		pictureFormat: vi.fn(() => Promise.resolve(format))
 	} as unknown as PresentationSessionApi
 
 	selection.show(ref)
@@ -357,6 +366,84 @@ describe("picture crop and corrections", () => {
 		fireEvent.change(within(dialog).getByRole("textbox", { name: "Top (%)" }), { target: { value: "abc" } })
 
 		expect(within(dialog).getByText("Enter a number from 0 to 99.")).toBeTruthy()
+	})
+
+	// Cropped 20 % on the left, drawn in grayscale and duotone at a brightness of 10 %.
+	const FORMATTED: PictureFormat = {
+		crop: { l: 20_000, t: 0, r: 0, b: 0 },
+		adjust: {
+			brightness: 10_000,
+			grayscale: true,
+			duotone: [
+				{ kind: "srgb", rgb: "000000" },
+				{ kind: "scheme", slot: "accent1" }
+			]
+		}
+	}
+
+	async function applied(dialog: HTMLElement): Promise<void> {
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog", { name: dialog.getAttribute("aria-label") ?? "" })).toBeNull()
+		})
+	}
+
+	it("adds a top crop to a picture cropped on the left, keeping the left crop", async () => {
+		const ops = mount(pictureGroups, "picture", true, FORMATTED)
+
+		await fromOverflow("Crop")
+
+		const dialog = await screen.findByRole("dialog", { name: "Crop" })
+
+		expect(within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Left (%)" }).value).toBe("20")
+
+		fireEvent.change(within(dialog).getByRole("textbox", { name: "Top (%)" }), { target: { value: "10" } })
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+
+		await waitFor(() => {
+			expect(ops).toEqual([
+				{ family: "picture", kind: "crop", target: { slide: ref, id: 7 }, crop: { l: 20_000, t: 10_000, r: 0, b: 0 } }
+			])
+		})
+	})
+
+	it("issues no command when either dialog is applied unchanged", async () => {
+		const ops = mount(pictureGroups, "picture", true, FORMATTED)
+
+		await fromOverflow("Crop")
+		await applied(await screen.findByRole("dialog", { name: "Crop" }))
+		await fromOverflow("Corrections")
+
+		const corrections = await screen.findByRole("dialog", { name: "Corrections" })
+
+		expect(within(corrections).getByRole<HTMLInputElement>("textbox", { name: "Brightness (%)" }).value).toBe("10")
+		expect(within(corrections).getByRole("switch", { name: "Grayscale" }).getAttribute("aria-checked")).toBe("true")
+
+		await applied(corrections)
+
+		expect(ops).toEqual([])
+	})
+
+	it("changes the contrast keeping the brightness, grayscale and duotone", async () => {
+		const ops = mount(pictureGroups, "picture", true, FORMATTED)
+
+		await fromOverflow("Corrections")
+
+		const dialog = await screen.findByRole("dialog", { name: "Corrections" })
+
+		fireEvent.change(within(dialog).getByRole("textbox", { name: "Contrast (%)" }), { target: { value: "30" } })
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+
+		await waitFor(() => {
+			expect(ops).toEqual([
+				{
+					family: "picture",
+					kind: "adjust",
+					target: { slide: ref, id: 7 },
+					adjust: { ...FORMATTED.adjust, contrast: 30_000 }
+				}
+			])
+		})
 	})
 })
 

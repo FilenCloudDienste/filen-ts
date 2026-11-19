@@ -97,8 +97,8 @@ let legacyRoot: string | null = null
 let localRead: Promise<void> | null = null
 // The serialized document last written to the local copy.
 let persistedText: string | null = null
-// The last read of the file failed (offline, say) and no read succeeded since.
-let loadFailed = false
+// The last read of the file failed (offline, say) and no read succeeded since: its error.
+let loadFailure: { error: unknown } | null = null
 // The legacy root's move into the file while one runs, so every trigger joins it.
 let migration: Promise<void> | null = null
 const changes = createListenerSet("photos.library")
@@ -161,7 +161,7 @@ function handleDoc(doc: PhotosLibraryDoc): void {
 		return
 	}
 
-	loadFailed = false
+	loadFailure = null
 
 	const text = serializePhotosLibrary(doc)
 
@@ -235,7 +235,7 @@ export async function loadPhotosLibrary(): Promise<void> {
 		log.warn("photos.library", "photos library not loaded", { error })
 
 		if (!photosLibrary.isLoaded) {
-			loadFailed = true
+			loadFailure = { error }
 			changes.emit()
 		}
 
@@ -254,14 +254,21 @@ export interface PhotosLibraryView {
 	loaded: boolean
 	// The file was written by a newer version: shown, never changed here.
 	readOnly: boolean
+	// The file could not be read and no local copy says what it holds: `roots` is then empty for want of an
+	// answer, not because none was chosen. null otherwise.
+	loadFailure: { error: unknown } | null
 }
 
 let viewCache: {
 	doc: PhotosLibraryDoc | null
 	loaded: boolean
 	readOnly: boolean
+	loadFailure: { error: unknown } | null
 	view: PhotosLibraryView
 } | null = null
+
+// The one document standing in for a file that could not be read: one object, so the view stays the same snapshot.
+const UNREAD_DOC: PhotosLibraryDoc = /* @__PURE__ */ emptyPhotosLibrary()
 
 function currentDoc(): PhotosLibraryDoc | null {
 	if (photosLibrary.isLoaded) {
@@ -272,23 +279,31 @@ function currentDoc(): PhotosLibraryDoc | null {
 		return localCopy
 	}
 
-	return localCopy === null && loadFailed ? emptyPhotosLibrary() : null
+	return localCopy === null && loadFailure !== null ? UNREAD_DOC : null
+}
+
+// Shown only while nothing else says what the file holds: not once read, nor over a local copy.
+function currentLoadFailure(): { error: unknown } | null {
+	return !photosLibrary.isLoaded && localCopy === null ? loadFailure : null
 }
 
 export function photosLibraryView(): PhotosLibraryView {
 	const doc = currentDoc()
 	const loaded = photosLibrary.isLoaded
 	const readOnly = loaded && photosLibrary.isReadOnly
+	const failure = currentLoadFailure()
 
-	if (viewCache?.doc !== doc || viewCache.loaded !== loaded || viewCache.readOnly !== readOnly) {
+	if (viewCache?.doc !== doc || viewCache.loaded !== loaded || viewCache.readOnly !== readOnly || viewCache.loadFailure !== failure) {
 		viewCache = {
 			doc,
 			loaded,
 			readOnly,
+			loadFailure: failure,
 			view: {
 				roots: doc === null ? null : activePhotosRoots(doc).map(root => root.dirUuid),
 				loaded,
-				readOnly
+				readOnly,
+				loadFailure: failure
 			}
 		}
 	}
@@ -376,7 +391,7 @@ export function resetPhotosLibrary(): void {
 	legacyRoot = null
 	localRead = null
 	persistedText = null
-	loadFailed = false
+	loadFailure = null
 	migration = null
 	clock = 0
 	viewCache = null

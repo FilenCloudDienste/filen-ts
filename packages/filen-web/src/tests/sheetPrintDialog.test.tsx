@@ -11,6 +11,8 @@ import { SheetPrintDialog } from "@/features/spreadsheet/print/printDialog"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
 import { applyForm, formOf, patchOf, percentOf, printRequests, type PrintSheetSettings } from "@/features/spreadsheet/print/print.logic"
 import { printPages, svgElement } from "@/features/spreadsheet/print/printRoot"
+import { setRegionalFormat } from "@/features/office/lib/regionalFormat"
+import { log } from "@/lib/log"
 import { GridHarness } from "@/tests/sheetMenusHarness"
 import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
 
@@ -19,14 +21,25 @@ import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
 
 // A page past what a print draws (MAX_PAGE_CELLS) needs millions of cells; the drawing refuses it here instead.
 const refusing = vi.hoisted(() => ({ on: false }))
+// The header and footer values each preview page is drawn with.
+const drawnValues = vi.hoisted(() => [] as { date: string; time: string }[])
+// An object key each preview page records as failed to draw (null: every object draws).
+const failing = vi.hoisted(() => ({ key: null as string | null }))
 
 vi.mock("@filen/office/react/sheet/print", async original => {
 	const actual = await original<typeof import("@filen/office/react/sheet/print")>()
 
 	return {
 		...actual,
-		renderPrintPage: (...args: Parameters<typeof actual.renderPrintPage>) =>
-			refusing.on ? Promise.reject(new actual.PrintPageTooLarge(args[1] + 1)) : actual.renderPrintPage(...args)
+		renderPrintPage: (...args: Parameters<typeof actual.renderPrintPage>) => {
+			drawnValues.push(args[0].values)
+
+			if (failing.key !== null) {
+				args[0].job.failed.add(failing.key)
+			}
+
+			return refusing.on ? Promise.reject(new actual.PrintPageTooLarge(args[1] + 1)) : actual.renderPrintPage(...args)
+		}
 	}
 })
 
@@ -54,6 +67,9 @@ afterEach(() => {
 	cleanup()
 	vi.restoreAllMocks()
 	refusing.on = false
+	drawnValues.length = 0
+	failing.key = null
+	setRegionalFormat(null)
 	held.on = false
 	held.release = []
 })
@@ -257,6 +273,92 @@ describe("the print dialog", () => {
 				gridLines: true
 			})
 		})
+	})
+
+	it("draws the header's date and time in the regional format, not the browser's language", async () => {
+		vi.spyOn(navigator, "languages", "get").mockReturnValue(["en-US"])
+		setRegionalFormat("de-DE")
+
+		const model = await openGrid(await workbook([{ name: "Data", rows: [["a", 1]] }]), "xlsx")
+		const active = await sheetSettings(model, "xlsx", model.getSnapshot().sheets[0] ?? SHEET)
+
+		if (active === null) throw new Error("no settings")
+
+		render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetPrintDialog
+						active={active}
+						grid={grid}
+						model={model}
+						kind="xlsx"
+						name="book.xlsx"
+						canSave
+						run={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				)}
+			</GridHarness>
+		)
+
+		await waitFor(() => {
+			expect(drawnValues.length).toBeGreaterThan(0)
+		})
+
+		// German short dates are day.month.year with two-digit parts; en-US would print month/day/year.
+		expect(drawnValues[0]?.date).toMatch(/^\d{2}\.\d{2}\.\d{2}$/)
+		expect(drawnValues[0]?.time).toMatch(/^\d{2}:\d{2}$/)
+	})
+
+	it("logs an object that failed to draw once per job, however many pages are previewed", async () => {
+		const rows = Array.from({ length: 120 }, (_, k) => [`row ${String(k + 1)}`, k])
+		const model = await openGrid(await workbook([{ name: "Data", rows }]), "xlsx")
+		const active = await sheetSettings(model, "xlsx", model.getSnapshot().sheets[0] ?? SHEET)
+		const warn = vi.spyOn(log, "warn")
+		const failedLogs = (): unknown[][] => warn.mock.calls.filter(call => call[1] === "spreadsheet print objects failed")
+
+		if (active === null) throw new Error("no settings")
+
+		failing.key = "0:chart:1"
+
+		render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetPrintDialog
+						active={active}
+						grid={grid}
+						model={model}
+						kind="xlsx"
+						name="book.xlsx"
+						canSave={false}
+						run={() => undefined}
+						onClose={() => undefined}
+					/>
+				)}
+			</GridHarness>
+		)
+
+		await screen.findByText("Page 1 of 3")
+		await waitFor(() => {
+			expect(failedLogs()).toHaveLength(1)
+		})
+		expect(failedLogs()[0]).toEqual(["preview", "spreadsheet print objects failed", { objects: 1, keys: ["0:chart:1"] }])
+
+		const shown = screen.getByRole("img", { name: preview.previewSheetPrintPreview })
+
+		await waitFor(() => {
+			expect(shown.querySelector("svg")?.textContent).toContain("row 1")
+		})
+
+		const first = shown.querySelector("svg")?.textContent
+
+		// The second page of the same job settles with no new failure: nothing more is logged.
+		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetPrintNextPage }))
+		await screen.findByText("Page 2 of 3")
+		await waitFor(() => {
+			expect(shown.querySelector("svg")?.textContent).not.toBe(first)
+		})
+		expect(failedLogs()).toHaveLength(1)
 	})
 
 	it("prints a text file with the defaults and saves nothing into it", async () => {

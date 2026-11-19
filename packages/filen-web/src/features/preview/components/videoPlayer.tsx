@@ -19,7 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { MEDIA_GLASS_SURFACE_CLASS, MEDIA_GLASS_TONE_CLASS } from "@/components/ui/surface"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
 import { fullscreenSupported, toggleFullscreen, useIsFullscreen } from "@/lib/media/fullscreen"
-import { handlePlayerKeyDown, seekPlayerTo } from "@/lib/media/playerKeyboard"
+import { handlePlayerKeyDown, measureFrameInterval, seekPlayerTo } from "@/lib/media/playerKeyboard"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { useBindings } from "@/lib/keymap/registry"
 import {
@@ -243,6 +243,15 @@ export function VideoPlayer({
 			idleTimer.stop()
 		}
 	}, [video, idleTimer])
+
+	// From mount, so a frame step right after a pause already has the interval measured while it played.
+	useEffect(() => {
+		if (video === null) {
+			return
+		}
+
+		return measureFrameInterval(video)
+	}, [video])
 
 	function handlePointerDown(event: PointerEvent<HTMLDivElement>): void {
 		// Read before the poke below shows the controls.

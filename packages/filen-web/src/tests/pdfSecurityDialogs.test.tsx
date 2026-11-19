@@ -2,17 +2,14 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { PDF_PERMISSIONS_ALL } from "@filen/office/core/pdfedit/security"
-import type { PdfSecurityDescription } from "@filen/office/dom/pdfedit/security"
+import { PDF_PERMISSIONS_ALL, type PdfSecuritySummary } from "@filen/office/core/pdfedit/security"
 import { PdfProtectDialog } from "@/features/pdf/security/protectDialog"
 import { PdfOwnerUnlockDialog } from "@/features/pdf/security/ownerUnlockDialog"
 import "@/lib/i18n"
 
 // The Protect document dialog and the owner password prompt: values in, callbacks out.
 
-const GRANTED = { print: true, printHq: true, copy: true, edit: true, annotate: true, form: true, assemble: true, accessibility: true }
-
-function description(overrides: Partial<PdfSecurityDescription>): PdfSecurityDescription {
+function description(overrides: Partial<PdfSecuritySummary>): PdfSecuritySummary {
 	return {
 		method: "none",
 		rc4: false,
@@ -21,13 +18,12 @@ function description(overrides: Partial<PdfSecurityDescription>): PdfSecurityDes
 		restricted: false,
 		allowed: { print: true, copy: true, change: true },
 		ownerAccess: true,
-		granted: GRANTED,
 		upgrade: "notRc4",
 		...overrides
 	}
 }
 
-function protect(current: PdfSecurityDescription) {
+function protect(current: PdfSecuritySummary) {
 	const onApply = vi.fn()
 	const onUnlock = vi.fn()
 

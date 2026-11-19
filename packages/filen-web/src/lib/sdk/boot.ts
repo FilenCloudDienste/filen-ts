@@ -48,6 +48,7 @@ import { loadPdfOutlinePreferences } from "@/features/preview/lib/pdfOutlineOpen
 import { loadEbookTextSize } from "@/features/preview/lib/ebookTextSize"
 import { loadComicPreferences } from "@/features/comics/lib/comicPreferences"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
+import { clearDirectoryTreeState, loadDirectoryTreeOpen } from "@/features/drive/store/useDirectoryTreeStore"
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
@@ -200,7 +201,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadPdfOutlinePreferences(),
 		loadEbookTextSize(),
 		loadComicPreferences(),
-		loadCollapsedChatSections()
+		loadCollapsedChatSections(),
+		loadDirectoryTreeOpen()
 	]).then(() => undefined)
 }
 
@@ -297,6 +299,11 @@ export async function bootSdk(): Promise<void> {
 			}
 		}
 		await Promise.all([devicePreferences, defaultNoteType])
+		// The tree map a failed wipe left is the signed-out account's: the next sign-in navigates without a reload, so
+		// it must not start from it (memory only; the deferred sign-out wipes the row).
+		if (signedOut) {
+			clearDirectoryTreeState()
+		}
 		if (await resumeAndOpen(injected, signedOut)) {
 			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}

@@ -246,6 +246,11 @@ export const previewDocxReview = {
 	previewDocxEditUnsupported: "This edit can't be made here",
 	/** Docx editor — toast body: why the edit was refused */
 	previewDocxEditUnsupportedBody: "Part of what it changes can't be saved as a tracked change.",
+	/** Docx editor — toast: an edit refused because it would break part of the document the editor keeps as it is (a section break, a table of contents, a form field) */
+	previewDocxEditProtected: "This part of the document can't be changed this way",
+	/** Docx editor — toast body: why the edit was refused */
+	previewDocxEditProtectedBody:
+		"It would change something kept as it is, such as a section break, a locked block, merged table cells, a form field or deleted text.",
 	/** Docx editor — Review ribbon group holding document protection (Word's "Protect") */
 	previewDocxRibbonProtect: "Protect",
 	/** Docx editor — Review ribbon button limiting what others may change (Word's "Restrict Editing") */

@@ -1,8 +1,8 @@
-import { createReadStream, readFileSync, statSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, extname, join } from "node:path"
 import type { Plugin } from "vite"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
+import { serveListedFiles } from "./shared"
 
 // The 3D viewer's decoders, served from 'self': Draco (compressed glTF geometry) and Basis Universal (KTX2 textures),
 // the wasm builds three ships. Their loaders ask for them by directory URL plus file name, so they cannot be
@@ -56,33 +56,12 @@ export function threeAssets(options: { readonly emit?: boolean } = {}): Plugin {
 
 	return {
 		...plugin,
-		// The preview serves the build's copies from dist/ instead, under the preview header set.
 		configureServer(server) {
-			server.middlewares.use((req, res, next) => {
-				const path = (req.url ?? "").split("?")[0] ?? ""
-				const rel = path.startsWith(THREE_ASSETS_BASE) ? path.slice(THREE_ASSETS_BASE.length) : null
-
-				if (rel === null || !served.has(rel)) {
-					next()
-
-					return
-				}
-
-				const file = join(LIBS_DIR, rel)
-
-				res.setHeader("Content-Type", MIME[extname(rel)] ?? "application/octet-stream")
-				res.setHeader("Content-Length", statSync(file).size)
-
-				for (const [name, value] of Object.entries(COI_HEADERS)) {
-					res.setHeader(name, value)
-				}
-
-				createReadStream(file)
-					.on("error", () => {
-						res.statusCode = 500
-						res.end()
-					})
-					.pipe(res)
+			serveListedFiles(server, {
+				base: THREE_ASSETS_BASE,
+				dir: LIBS_DIR,
+				served,
+				mime: rel => MIME[extname(rel)] ?? "application/octet-stream"
 			})
 		},
 		generateBundle() {

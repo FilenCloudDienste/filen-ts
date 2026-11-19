@@ -47,7 +47,7 @@ export function markChatMessagesUnsynced(): void {
 	syncedChatEpochs.clear()
 }
 
-function chatMessagesSynced(chatUuid: string): boolean {
+export function chatMessagesSynced(chatUuid: string): boolean {
 	const epoch = syncedChatEpochs.get(chatUuid)
 
 	return epoch !== undefined && socketLiveSince(epoch)

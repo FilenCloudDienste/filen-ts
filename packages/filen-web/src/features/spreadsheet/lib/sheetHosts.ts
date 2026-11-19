@@ -1,7 +1,6 @@
 import { sheetWorkerHost, type SheetWorkerLike } from "@filen/office/dom/sheet"
 import type {
 	SheetEvent,
-	SheetFileKind,
 	SheetHost,
 	SheetLockedFile,
 	SheetOpenOptions,
@@ -14,6 +13,11 @@ import TextWorker from "@/features/spreadsheet/workers/sheetText.worker.ts?worke
 import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
 import { loadedRegionalLanguage } from "@/features/office/lib/regionalFormat"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { officeChartText } from "@/features/office/lib/chartText"
+import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetKind"
+
+// Defined beside the other kind predicates so worker-free modules can use it; kept here for the modules that open a sheet.
+export { isTextSheetKind }
 
 // A worker keeps its code and the heap its largest file grew, so it is terminated once nothing is open in it for
 // this long; the next file starts a fresh one.
@@ -175,10 +179,6 @@ function hostPool(create: () => Worker) {
 const openWorkbook = hostPool(() => new WorkbookWorker())
 const openText = hostPool(() => new TextWorker())
 
-export function isTextSheetKind(kind: SheetFileKind): boolean {
-	return kind === "csv" || kind === "tsv" || kind === "tab"
-}
-
 // Opens a file in the worker for its kind: a text file never loads the workbook worker's code. The bytes are
 // transferred: pass a copy of anything still held elsewhere. A text file opens in the regional format (Settings,
 // Office; the browser's by default), whose list separator settles a CSV's separator where the file leaves it open, as
@@ -189,7 +189,14 @@ export async function openSheet(
 	onEvent: (event: SheetEvent) => void
 ): Promise<SheetOpenResult> {
 	if (!isTextSheetKind(options.kind)) {
-		return openWorkbook(bytes, options, onEvent)
+		// Its charts name what the file leaves unnamed in the app's language.
+		return openWorkbook(
+			bytes,
+			options.settings?.chartText === undefined
+				? { ...options, settings: { ...options.settings, chartText: officeChartText() } }
+				: options,
+			onEvent
+		)
 	}
 
 	return openText(

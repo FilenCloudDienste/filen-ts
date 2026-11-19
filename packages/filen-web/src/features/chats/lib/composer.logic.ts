@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
+import { nameSearchKey } from "@filen/shared"
 import { matchesContactSearch, sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
 import { isOwnMessage } from "@/features/chats/lib/sender"
 
@@ -212,7 +213,7 @@ export function filterMentionParticipants(
 	query: string,
 	currentUserId: bigint | undefined
 ): ChatParticipant[] {
-	const normalized = query.trim().toLowerCase()
+	const normalized = nameSearchKey(query)
 
 	return sortContactsByDisplayName(
 		participants.filter(participant => {

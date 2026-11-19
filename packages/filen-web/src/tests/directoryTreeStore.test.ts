@@ -1,11 +1,35 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { reconcileTreeLevel, TREE_ROOT_KEY, type TreeEntries } from "@/features/drive/store/useDirectoryTreeStore"
 
-const STORAGE_KEY = "driveTreeOpen"
+// The tree's open state lives in the kv store (never localStorage), read once at boot.
+const KV_KEY = "drive.treeOpen.v1"
 
-// Fresh module per case: the store reads localStorage once, at creation.
+const { kvStore, kvSetJson } = vi.hoisted(() => {
+	const kvStore = new Map<string, unknown>()
+
+	return {
+		kvStore,
+		kvSetJson: vi.fn((key: string, value: unknown) => {
+			kvStore.set(key, value)
+
+			return Promise.resolve()
+		})
+	}
+})
+
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: (key: string) => Promise.resolve(kvStore.get(key) ?? null),
+	kvSetJson,
+	kvClear: () => {
+		kvStore.clear()
+
+		return Promise.resolve()
+	}
+}))
+
+// Fresh module per case: the store's state is module-level.
 async function loadStore() {
 	vi.resetModules()
 
@@ -13,28 +37,46 @@ async function loadStore() {
 }
 
 function stored(): unknown {
-	return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")
+	return kvStore.get(KV_KEY) ?? null
 }
 
+let storageSpies: ReturnType<typeof vi.spyOn>[] = []
+
 beforeEach(() => {
+	kvStore.clear()
+	kvSetJson.mockClear()
 	localStorage.clear()
+	storageSpies = (["getItem", "setItem", "removeItem"] as const).map(method => vi.spyOn(Storage.prototype, method))
+})
+
+afterEach(() => {
+	for (const spy of storageSpies) {
+		expect(spy).not.toHaveBeenCalled()
+	}
+
+	vi.restoreAllMocks()
 })
 
 describe("useDirectoryTreeStore", () => {
 	it("starts with the root expanded and every directory collapsed", async () => {
-		const { useDirectoryTreeStore, isTreeNodeOpen } = await loadStore()
+		const { useDirectoryTreeStore, isTreeNodeOpen, loadDirectoryTreeOpen } = await loadStore()
+
+		await loadDirectoryTreeOpen()
+
 		const open = useDirectoryTreeStore.getState().open
 
 		expect(isTreeNodeOpen(open, TREE_ROOT_KEY)).toBe(true)
 		expect(isTreeNodeOpen(open, "dir-1")).toBe(false)
+		expect(kvSetJson).not.toHaveBeenCalled()
 	})
 
-	it("collapses the root on its first toggle", async () => {
+	it("collapses the root on its first toggle, writing through the kv store", async () => {
 		const { useDirectoryTreeStore, isTreeNodeOpen } = await loadStore()
 
 		useDirectoryTreeStore.getState().toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
 
 		expect(isTreeNodeOpen(useDirectoryTreeStore.getState().open, TREE_ROOT_KEY)).toBe(false)
+		expect(kvSetJson).toHaveBeenCalledWith(KV_KEY, { [TREE_ROOT_KEY]: false })
 		expect(stored()).toEqual({ [TREE_ROOT_KEY]: false })
 	})
 
@@ -53,13 +95,14 @@ describe("useDirectoryTreeStore", () => {
 		expect(useDirectoryTreeStore.getState().open).toEqual({ "dir-2": "dir-1" })
 	})
 
-	it("restores what was saved and sheds entries saved at their default or malformed", async () => {
-		localStorage.setItem(
-			STORAGE_KEY,
-			JSON.stringify({ root: true, "dir-1": true, "dir-2": false, "dir-3": "yes", "dir-4": "", "dir-5": 1 })
-		)
+	it("takes the value read at boot as its state, shedding entries saved at their default or malformed", async () => {
+		kvStore.set(KV_KEY, { root: true, "dir-1": true, "dir-2": false, "dir-3": "yes", "dir-4": "", "dir-5": 1 })
 
-		const { useDirectoryTreeStore } = await loadStore()
+		const { useDirectoryTreeStore, loadDirectoryTreeOpen } = await loadStore()
+
+		expect(useDirectoryTreeStore.getState().open).toEqual({})
+
+		await loadDirectoryTreeOpen()
 
 		expect(useDirectoryTreeStore.getState().open).toEqual({ "dir-1": true, "dir-3": "yes" })
 	})
@@ -76,13 +119,17 @@ describe("useDirectoryTreeStore", () => {
 		expect(stored()).toEqual({ "dir-2": TREE_ROOT_KEY })
 	})
 
-	it("forgets everything on clear", async () => {
+	it("forgets everything on logout: clear resets memory without writing, the kv wipe removes the row", async () => {
 		const { useDirectoryTreeStore, clearDirectoryTreeState } = await loadStore()
+		const { kvClear } = await import("@/lib/storage/adapter")
 
 		useDirectoryTreeStore.getState().toggle("dir-1", TREE_ROOT_KEY)
+		kvSetJson.mockClear()
 		clearDirectoryTreeState()
+		await kvClear()
 
-		expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+		expect(kvSetJson).not.toHaveBeenCalled()
+		expect(stored()).toBeNull()
 		expect(useDirectoryTreeStore.getState().open).toEqual({})
 	})
 })

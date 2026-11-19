@@ -189,6 +189,39 @@ function fakeSession(
 	}
 }
 
+// A session whose phase the test moves on, heard by the browser as a real run's would be.
+function liveSession(phase: ListingSnapshot["phase"]): {
+	session: ReturnType<typeof fakeSession>
+	set: (next: ListingSnapshot["phase"]) => void
+} {
+	const listeners = new Set<() => void>()
+	const base = fakeSession(storeOf([]), undefined, phase)
+	let snapshot = base.getSnapshot()
+	const session = {
+		...base,
+		getSnapshot: () => snapshot,
+		subscribe: (listener: () => void) => {
+			listeners.add(listener)
+
+			return () => {
+				listeners.delete(listener)
+			}
+		}
+	}
+
+	return {
+		session,
+		set: next => {
+			snapshot = { ...snapshot, phase: next, version: snapshot.version + 1 }
+			act(() => {
+				for (const listener of listeners) {
+					listener()
+				}
+			})
+		}
+	}
+}
+
 function mockListViewport(): void {
 	mockViewportHeight(element => element.getAttribute("role") === "listbox", 360)
 }
@@ -907,6 +940,130 @@ describe("an archive entry on its own", () => {
 		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Open" }))
 		await vi.waitFor(() => {
 			expect(gated.start).toHaveBeenCalled()
+		})
+	})
+
+	it("lists a confirmed inner archive's gate once: a cancel back to the gate shows it, never starts again", async () => {
+		const outer = fakeSession(storeOf([{ path: "late.zip", size: MiB, access: SOLID_GZIP_LATE }]))
+		const { session: gated, set } = liveSession({ type: "gate", format: { type: "zip" } })
+
+		archiveEntryAccess.mockResolvedValue("seekable")
+		openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : gated))
+		renderBrowser()
+
+		fireEvent.doubleClick(row("late.zip"))
+		fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Open" }))
+		await vi.waitFor(() => {
+			expect(gated.start).toHaveBeenCalledTimes(1)
+		})
+
+		// Another job holds the slot; Cancel ends the run before it read anything, back at the gate.
+		set({ type: "waiting" })
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+		expect(gated.stop).toHaveBeenCalledTimes(1)
+		set({ type: "gate", format: { type: "zip" } })
+
+		expect(await screen.findByRole("button", { name: "Browse contents" })).toBeTruthy()
+		expect(gated.start).toHaveBeenCalledTimes(1)
+	})
+
+	describe("an inner archive showing no list keeps the way back out", () => {
+		const PHASES: readonly { name: string; phase: ListingSnapshot["phase"]; shows: string | RegExp }[] = [
+			{ name: "its gate", phase: { type: "gate", format: { type: "zip" } }, shows: /Browse/ },
+			{ name: "its password, the prompt dismissed", phase: { type: "needsPassword", wrong: false }, shows: "Enter password" },
+			{ name: "a wait for the slot", phase: { type: "waiting" }, shows: "Cancel" },
+			{
+				name: "a failed listing",
+				phase: {
+					type: "failed",
+					error: { species: "sdk", kind: "ArchiveCorrupt", label: "ArchiveCorrupt", message: "x" },
+					summary: null
+				},
+				shows: /Try again|Retry/
+			}
+		]
+
+		function enterInner(phase: ListingSnapshot["phase"]): ListingSession {
+			const outer = fakeSession(storeOf([{ path: "trip/inner.zip", size: MiB, access: DIRECT }]))
+			const inner = fakeSession(storeOf([]), undefined, phase)
+
+			archiveEntryAccess.mockResolvedValue("mapped")
+			openListingSession.mockImplementation((source: ArchiveSource) => (source.nested === null ? outer : inner))
+			renderBrowser()
+			fireEvent.doubleClick(row("trip"))
+			fireEvent.doubleClick(row("inner.zip"))
+
+			return inner
+		}
+
+		async function shown(phase: ListingSnapshot["phase"], shows: string | RegExp): Promise<void> {
+			if (phase.type === "needsPassword") {
+				const prompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+				fireEvent.click(within(prompt).getByRole("button", { name: "Close" }))
+			}
+
+			expect(await screen.findByRole("button", { name: shows })).toBeTruthy()
+			expect(screen.queryByRole("listbox")).toBeNull()
+		}
+
+		for (const { name, phase, shows } of PHASES) {
+			it(`leaves from an outer crumb on ${name}`, async () => {
+				enterInner(phase)
+				await shown(phase, shows)
+
+				const crumbs = screen.getByRole("navigation", { name: "Location in the archive" })
+
+				expect(
+					within(crumbs)
+						.getAllByRole("button")
+						.map(button => button.textContent)
+				).toEqual(["bundle.7z", "trip", "inner.zip"])
+				fireEvent.click(within(crumbs).getByRole("button", { name: "bundle.7z" }))
+				expect(await screen.findByRole("listbox", { name: /bundle\.7z/ })).toBeTruthy()
+			})
+
+			it(`leaves on Escape, taken from the overlay, on ${name}`, async () => {
+				enterInner(phase)
+				await shown(phase, shows)
+
+				// Wherever focus was left: the hidden outer list, the page, the overlay.
+				let notPrevented = true
+
+				act(() => {
+					notPrevented = fireEvent.keyDown(document.activeElement ?? document.body, withCode({ key: "Escape" }))
+				})
+
+				// Prevented: the overlay's dismissal leaves an Escape something inside took.
+				expect(notPrevented).toBe(false)
+				expect(await screen.findByRole("listbox", { name: /trip/ })).toBeTruthy()
+			})
+
+			it(`leaves on Escape pressed on its own outer crumb on ${name}`, async () => {
+				enterInner(phase)
+				await shown(phase, shows)
+
+				const crumb = within(screen.getByRole("navigation", { name: "Location in the archive" })).getByRole("button", {
+					name: "trip"
+				})
+
+				expect(fireEvent.keyDown(crumb, withCode({ key: "Escape" }))).toBe(false)
+				expect(await screen.findByRole("listbox", { name: /trip/ })).toBeTruthy()
+			})
+		}
+
+		it("only dismisses the password prompt on its Escape, staying inside", async () => {
+			enterInner({ type: "needsPassword", wrong: false })
+
+			const prompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+			act(() => {
+				fireEvent.keyDown(within(prompt).getByLabelText("Password"), withCode({ key: "Escape" }))
+			})
+
+			expect(await screen.findByRole("button", { name: "Enter password" })).toBeTruthy()
+			expect(screen.queryByRole("listbox")).toBeNull()
+			expect(screen.getByRole("navigation", { name: "Location in the archive" })).toBeTruthy()
 		})
 	})
 

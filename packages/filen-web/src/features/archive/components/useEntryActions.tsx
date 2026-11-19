@@ -238,7 +238,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 			if (outcome.status === "password") {
 				setPasswordAsk({ ...target, wrong: outcome.wrong })
 			} else if (outcome.status === "error") {
-				toastDownloadFailed(outcome)
+				toastDownloadFailed(request.name, outcome)
 			}
 		})
 	}

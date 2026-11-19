@@ -1,5 +1,6 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { singleOrCountKey } from "@/lib/i18n"
 import { useNavigate, useRouter } from "@tanstack/react-router"
 import type { Chat } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
@@ -201,7 +202,14 @@ export function useChatDialogHost(): ChatDialogHost {
 						open
 						pending={dialogPending}
 						title={t("chatsDeleteSelectedConfirmTitle")}
-						body={t("chatsDeleteSelectedConfirmBody", { count: activeDialog.chats.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.chats.length,
+								"chatsDeleteSelectedConfirmBodySingle",
+								"chatsDeleteSelectedConfirmBody"
+							),
+							{ count: activeDialog.chats.length }
+						)}
 						confirmLabel={t("chatActionDelete")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -221,7 +229,14 @@ export function useChatDialogHost(): ChatDialogHost {
 						open
 						pending={dialogPending}
 						title={t("chatsLeaveSelectedConfirmTitle")}
-						body={t("chatsLeaveSelectedConfirmBody", { count: activeDialog.chats.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.chats.length,
+								"chatsLeaveSelectedConfirmBodySingle",
+								"chatsLeaveSelectedConfirmBody"
+							),
+							{ count: activeDialog.chats.length }
+						)}
 						confirmLabel={t("chatActionLeave")}
 						cancelLabel={t("common:cancel")}
 						destructive

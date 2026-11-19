@@ -2,6 +2,7 @@ import type { TFunction } from "i18next"
 import { nameCollisionKey } from "@filen/shared"
 import { formatPageRanges, type PageRange } from "@filen/office/core/pdfedit/pageRanges"
 import { editedCopyName } from "@/features/drive/lib/copyName"
+import { singleOrCountKey } from "@/lib/i18n"
 
 // Names of the PDFs extract and split make, in the drive's edited-copy convention (editedCopyName): the original's
 // name with a suffix in parentheses, "report (pages 3-5).pdf", "report (part 1).pdf", the suffix numbered when the
@@ -17,7 +18,13 @@ function numbered(t: TFunction<"preview">, suffix: string): CopySuffix {
 export function extractSuffix(t: TFunction<"preview">, ranges: readonly PageRange[]): CopySuffix {
 	const count = ranges.reduce((sum, range) => sum + range.last - range.first + 1, 0)
 
-	return numbered(t, t("previewPdfPagesCopySuffix", { count, pages: formatPageRanges(ranges) }))
+	return numbered(
+		t,
+		t(singleOrCountKey(count, "previewPdfPagesCopySuffixSingle", "previewPdfPagesCopySuffix"), {
+			count,
+			pages: formatPageRanges(ranges)
+		})
+	)
 }
 
 // "part 1".

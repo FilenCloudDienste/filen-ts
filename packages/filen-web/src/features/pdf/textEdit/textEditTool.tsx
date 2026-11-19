@@ -81,8 +81,14 @@ function replacement(target: TextEditTarget, text: string): { readonly target: T
 	return narrowed === null ? { target, text } : { target: narrowed, text: change.text }
 }
 
+// Closes the editor once the edit was made (or nothing changed); a refused or failed one leaves it open with the typed
+// text (the textarea is uncontrolled and stays mounted), unless it was closed or replaced meanwhile.
 async function apply(context: PdfToolContext, editor: OpenEditor, text: string, words: ApplyWords): Promise<void> {
-	editorState.set({ ...editor, busy: true })
+	const applying = { ...editor, busy: true }
+
+	editorState.set(applying)
+	// A retry after a refusal starts without its notice, so a retry that succeeds never leaves "it wasn't applied".
+	context.notify(null)
 
 	try {
 		const tagged = await withPdfSession(context, async session => {
@@ -127,9 +133,13 @@ async function apply(context: PdfToolContext, editor: OpenEditor, text: string, 
 			log.warn("pdf", "text edit failed", { error })
 			toast.error(words.failed)
 		}
+
+		if (editorState.get() === applying) editorState.set({ ...editor, busy: false })
+
+		return
 	}
 
-	editorState.set(null)
+	if (editorState.get() === applying) editorState.set(null)
 }
 
 // The surface box (CSS px over the page) of a display-space rect (points, origin top left), at any view turn.

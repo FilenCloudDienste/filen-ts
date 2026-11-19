@@ -200,7 +200,7 @@ describe("countUnreadMessages", () => {
 
 describe("sumUnread (global tally + missing-cache self-heal signal)", () => {
 	const chatA = mockChat({ uuid: testUuid("a"), lastFocus: 100n })
-	const chatB = mockChat({ uuid: testUuid("b"), lastFocus: 100n })
+	const chatB = mockChat({ uuid: testUuid("b"), lastFocus: 100n, lastMessage: mockMessage({ senderId: 2, sentTimestamp: 150n }) })
 
 	it("sums unread across every chat whose message cache is resident", () => {
 		const cache = new Map<string, ChatMessage[]>([

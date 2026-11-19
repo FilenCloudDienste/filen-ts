@@ -53,8 +53,12 @@ import { testUuid } from "@/tests/support/uuid"
 
 const USER_ID = 7n
 
+// A chat with a last message newer than its read position: its row cannot prove it read, so every full pass reads its
+// messages (a provably read chat is skipped, see chatsRefetchAndMessages.test.ts).
 function mockChat(label: string): Chat {
-	return { uuid: testUuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 0n }
+	const chat: Chat = { uuid: testUuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 0n }
+
+	return { ...chat, lastMessage: mockMessage(chat) }
 }
 
 function mockMessage(chat: Chat): ChatMessage {

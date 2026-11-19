@@ -1,5 +1,5 @@
 // "preview" namespace, video editor — the editing surface: the stage, the timeline and the tools panel (Trim, Crop,
-// Adjust, Audio, Speed, Text). Spread into preview.ts; same catalog rules. The colour sliders and filters reuse the
+// Adjust, Audio, Speed, Text). Spread into preview.ts; same catalog rules. The color sliders and filters reuse the
 // image editor's names.
 export const previewVideoEditor = {
 	/** Video preview header — button that opens the video in the editor */
@@ -18,7 +18,7 @@ export const previewVideoEditor = {
 	previewVideoEditTabTrim: "Trim",
 	/** Video editor — panel tab: cropping, rotating and flipping the picture */
 	previewVideoEditTabCrop: "Crop",
-	/** Video editor — panel tab: colour sliders and filters */
+	/** Video editor — panel tab: color sliders and filters */
 	previewVideoEditTabAdjust: "Adjust",
 	/** Video editor — panel tab: mute, volume and audio tracks */
 	previewVideoEditTabAudio: "Audio",
@@ -28,8 +28,8 @@ export const previewVideoEditor = {
 	previewVideoEditTabText: "Text",
 	/** Video editor — a tool this browser cannot apply to a saved video (it has no video encoder for it) */
 	previewVideoEditFeatureUnavailable: "Not available in this browser",
-	/** Video editor — note under the stage: colour, crop and text show exactly only on a paused frame */
-	previewVideoEditPausedPreviewHint: "Colour and text show exactly while paused.",
+	/** Video editor — note under the stage: color, crop and text show exactly only on a paused frame */
+	previewVideoEditPausedPreviewHint: "Color and text show exactly while paused.",
 
 	// ── Transport and timeline ───────────────────────────────────────────────
 	/** Video editor — start playback */
@@ -130,8 +130,8 @@ export const previewVideoEditor = {
 	previewVideoEditCropSize: "{{width}} × {{height}}",
 
 	// ── Adjust ───────────────────────────────────────────────────────────────
-	/** Video editor, Adjust tab — colour changes to this HDR video save it as standard range (SDR) */
-	previewVideoEditAdjustHdr: "Colour changes save this HDR video as SDR.",
+	/** Video editor, Adjust tab — color changes to this HDR video save it as standard range (SDR) */
+	previewVideoEditAdjustHdr: "Color changes save this HDR video as SDR.",
 	/** Video editor, Adjust tab — the filters' heading */
 	previewVideoEditFilters: "Filters",
 
@@ -170,8 +170,8 @@ export const previewVideoEditor = {
 	previewVideoEditTextField: "Text",
 	/** Video editor, Text tab — the text's size */
 	previewVideoEditTextSize: "Size",
-	/** Video editor, Text tab — the text's colour */
-	previewVideoEditTextColor: "Colour",
+	/** Video editor, Text tab — the text's color */
+	previewVideoEditTextColor: "Color",
 	/** Video editor, Text tab — switch: a dark rounded background behind the text */
 	previewVideoEditTextBackground: "Background",
 	/** Video editor, Text tab — when the text shows, from */
@@ -190,14 +190,14 @@ export const previewVideoEditor = {
 	previewVideoEditTextHint: "Drag text on the video to move it. Times are on the edited video.",
 	/** Video editor, stage — accessible name of a text box over the video; {{text}} is what it says */
 	previewVideoEditTextBox: "Text: {{text}}",
-	/** Video editor, Text tab — colour swatch names */
+	/** Video editor, Text tab — color swatch names */
 	previewVideoEditColorWhite: "White",
-	/** Video editor, Text tab — colour swatch names */
+	/** Video editor, Text tab — color swatch names */
 	previewVideoEditColorBlack: "Black",
-	/** Video editor, Text tab — colour swatch names */
+	/** Video editor, Text tab — color swatch names */
 	previewVideoEditColorYellow: "Yellow",
-	/** Video editor, Text tab — colour swatch names */
+	/** Video editor, Text tab — color swatch names */
 	previewVideoEditColorRed: "Red",
-	/** Video editor, Text tab — colour swatch names */
+	/** Video editor, Text tab — color swatch names */
 	previewVideoEditColorBlue: "Blue"
 } as const

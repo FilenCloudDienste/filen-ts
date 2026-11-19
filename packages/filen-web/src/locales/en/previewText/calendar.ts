@@ -69,31 +69,45 @@ export const previewTextCalendar = {
 	/** Calendar preview — under an agenda time, a zone that could not be converted; {{zone}} is the zone's name as the file gives it */
 	previewCalendarZoneUnconvertedShort: "time zone: {{zone}} (not converted)",
 	/** Calendar preview — a recurrence: every N seconds */
-	previewCalendarEverySecond_one: "Every second",
+	previewCalendarEverySecondSingle: "Every second",
+	/** Calendar preview — a recurrence: every N seconds */
+	previewCalendarEverySecond_one: "Every {{count}} second",
 	/** Calendar preview — a recurrence: every N seconds */
 	previewCalendarEverySecond_other: "Every {{count}} seconds",
 	/** Calendar preview — a recurrence: every N minutes */
-	previewCalendarEveryMinute_one: "Every minute",
+	previewCalendarEveryMinuteSingle: "Every minute",
+	/** Calendar preview — a recurrence: every N minutes */
+	previewCalendarEveryMinute_one: "Every {{count}} minute",
 	/** Calendar preview — a recurrence: every N minutes */
 	previewCalendarEveryMinute_other: "Every {{count}} minutes",
 	/** Calendar preview — a recurrence: every N hours */
-	previewCalendarEveryHour_one: "Every hour",
+	previewCalendarEveryHourSingle: "Every hour",
+	/** Calendar preview — a recurrence: every N hours */
+	previewCalendarEveryHour_one: "Every {{count}} hour",
 	/** Calendar preview — a recurrence: every N hours */
 	previewCalendarEveryHour_other: "Every {{count}} hours",
 	/** Calendar preview — a recurrence: every N days */
-	previewCalendarEveryDay_one: "Every day",
+	previewCalendarEveryDaySingle: "Every day",
+	/** Calendar preview — a recurrence: every N days */
+	previewCalendarEveryDay_one: "Every {{count}} day",
 	/** Calendar preview — a recurrence: every N days */
 	previewCalendarEveryDay_other: "Every {{count}} days",
 	/** Calendar preview — a recurrence: every N weeks */
-	previewCalendarEveryWeek_one: "Every week",
+	previewCalendarEveryWeekSingle: "Every week",
+	/** Calendar preview — a recurrence: every N weeks */
+	previewCalendarEveryWeek_one: "Every {{count}} week",
 	/** Calendar preview — a recurrence: every N weeks */
 	previewCalendarEveryWeek_other: "Every {{count}} weeks",
 	/** Calendar preview — a recurrence: every N months */
-	previewCalendarEveryMonth_one: "Every month",
+	previewCalendarEveryMonthSingle: "Every month",
+	/** Calendar preview — a recurrence: every N months */
+	previewCalendarEveryMonth_one: "Every {{count}} month",
 	/** Calendar preview — a recurrence: every N months */
 	previewCalendarEveryMonth_other: "Every {{count}} months",
 	/** Calendar preview — a recurrence: every N years */
-	previewCalendarEveryYear_one: "Every year",
+	previewCalendarEveryYearSingle: "Every year",
+	/** Calendar preview — a recurrence: every N years */
+	previewCalendarEveryYear_one: "Every {{count}} year",
 	/** Calendar preview — a recurrence: every N years */
 	previewCalendarEveryYear_other: "Every {{count}} years",
 	/** Calendar preview — after a recurrence's frequency, for a rule with parts the preview does not describe (BYSETPOS, BYWEEKNO and the like) */

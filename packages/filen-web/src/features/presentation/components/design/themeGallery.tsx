@@ -19,6 +19,7 @@ import { RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonCon
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import { THEME_NAME_KEYS, deckThemePreview, galleryPreview } from "@/features/presentation/components/design/design.logic"
+import { layoutNames } from "@/features/presentation/components/deckChrome.logic"
 import { designState } from "@/features/presentation/components/design/designState"
 import { ThemeSwatch } from "@/features/presentation/components/design/themeSwatch"
 import { usePresentationEditor, type PresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
@@ -104,7 +105,7 @@ export function ThemesControl() {
 									aria-label={name}
 									className="flex-col items-center gap-1 px-1 py-1.5"
 									onClick={() => {
-										run(galleryThemeOp(theme.id, 0, targets()))
+										run(galleryThemeOp(theme.id, 0, targets(), layoutNames(t)))
 									}}
 								>
 									<ThemeSwatch

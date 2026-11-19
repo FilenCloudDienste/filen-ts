@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto"
-import { createReadStream, readFileSync, statSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import type { Plugin } from "vite"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
+import { type PinnedFile, serveListedFiles, verifyPinned } from "./shared"
 
 // @filen/office's hyphenation patterns (assets/hyphenation), served from 'self'. A build emits each file under
 // /assets/office-hyphenation/ with the first 8 hex digits of its manifest SHA-256 in the name (immutable); the dev
@@ -18,11 +17,7 @@ const RESOLVED_ID = `\0${VIRTUAL_ID}`
 const DIR = join(dirname(createRequire(import.meta.url).resolve("@filen/office/assets/fonts/manifest.json")), "..", "hyphenation")
 const MANIFEST = join(DIR, "manifest.json")
 
-interface PatternFile {
-	file: string
-	bytes: number
-	sha256: string
-}
+type PatternFile = PinnedFile
 
 function readManifest(): PatternFile[] {
 	const parsed: unknown = JSON.parse(readFileSync(MANIFEST, "utf8"))
@@ -85,43 +80,13 @@ export function officeHyphenation(options: { readonly emit?: boolean } = {}): Pl
 	return {
 		...plugin,
 		configureServer(server) {
-			server.middlewares.use((req, res, next) => {
-				const path = (req.url ?? "").split("?")[0] ?? ""
-				const rel = path.startsWith(OFFICE_HYPHENATION_BASE) ? path.slice(OFFICE_HYPHENATION_BASE.length) : null
-
-				if (rel === null || !served.has(rel)) {
-					next()
-
-					return
-				}
-
-				const file = join(DIR, rel)
-
-				res.setHeader("Content-Type", "application/gzip")
-				res.setHeader("Content-Length", statSync(file).size)
-
-				for (const [name, value] of Object.entries(COI_HEADERS)) {
-					res.setHeader(name, value)
-				}
-
-				createReadStream(file)
-					.on("error", () => {
-						res.statusCode = 500
-						res.end()
-					})
-					.pipe(res)
-			})
+			serveListedFiles(server, { base: OFFICE_HYPHENATION_BASE, dir: DIR, served, mime: () => "application/gzip" })
 		},
 		generateBundle() {
 			for (const entry of files) {
 				const source = readFileSync(join(DIR, entry.file))
-				const sha256 = createHash("sha256").update(source).digest("hex")
 
-				if (sha256 !== entry.sha256 || source.byteLength !== entry.bytes) {
-					this.error(
-						`${entry.file} is ${String(source.byteLength)} bytes with SHA-256 ${sha256}; manifest.json says ${String(entry.bytes)} bytes, ${entry.sha256}`
-					)
-				}
+				verifyPinned(this, source, entry)
 
 				this.emitFile({ type: "asset", fileName: hashedPath(entry), source })
 			}

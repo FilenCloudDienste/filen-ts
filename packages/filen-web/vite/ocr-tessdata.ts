@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { gzip as gzipCallback, gzipSync } from "node:zlib"
+import { type PinnedFile, record, sha256 } from "./shared"
 
 // The text recognition models (tessdata_fast, Apache-2.0) the app serves, pinned to one upstream commit. Committed:
 // ocr-tessdata.json, each model's size and SHA-256 and its gzip size (what a user downloads). Downloaded, verified,
@@ -19,11 +19,7 @@ export const TESSDATA_GZIP_LEVEL = 9
 
 const gzip = promisify(gzipCallback)
 
-export interface TessdataFile {
-	readonly file: string
-	readonly bytes: number
-	readonly sha256: string
-}
+export type TessdataFile = PinnedFile
 
 export interface TessdataLanguage extends TessdataFile {
 	readonly code: string
@@ -36,10 +32,6 @@ export interface TessdataManifest {
 	readonly commit: string
 	readonly license: TessdataFile
 	readonly languages: readonly TessdataLanguage[]
-}
-
-function record(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {}
 }
 
 function fileOf(value: unknown, where: string): TessdataFile {
@@ -86,10 +78,6 @@ export function tessdataCache(commit: string): string {
 
 export function tessdataUrl(commit: string, file: string): string {
 	return `https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/${commit}/${file}`
-}
-
-export function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex")
 }
 
 // A pinned file, downloaded once into the cache and checked against its pin; null pin = any content (the update).

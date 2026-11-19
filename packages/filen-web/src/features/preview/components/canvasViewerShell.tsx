@@ -318,8 +318,8 @@ export function CanvasViewerShell<Status = never, Notice = never>({
 	}, [session])
 
 	return (
-		<div className="flex size-full min-h-0">
-			<div className="relative min-w-0 flex-1">
+		<div className="flex size-full min-h-0 max-sm:flex-col">
+			<div className="@container relative min-h-0 min-w-0 flex-1">
 				<div
 					ref={hostRef}
 					className="absolute inset-0"
@@ -358,7 +358,11 @@ export function CanvasViewerShell<Status = never, Notice = never>({
 					</div>
 				) : null}
 			</div>
-			{sidePanel !== undefined ? <aside className="w-72 shrink-0 overflow-y-auto border-l">{sidePanel}</aside> : null}
+			{sidePanel !== undefined ? (
+				<aside className="w-72 shrink-0 overflow-y-auto border-s max-sm:max-h-[45%] max-sm:w-full max-sm:border-s-0 max-sm:border-t">
+					{sidePanel}
+				</aside>
+			) : null}
 		</div>
 	)
 }

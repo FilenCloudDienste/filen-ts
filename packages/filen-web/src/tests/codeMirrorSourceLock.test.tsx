@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, render } from "@testing-library/react"
 import { EditorView } from "@codemirror/view"
+import { editorView } from "@/tests/support/codeMirror"
 
 vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
 	languageExtensionFor: () => null,
@@ -10,17 +11,6 @@ vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
 }))
 
 const { CodeMirrorSource } = await import("@/features/preview/components/codeMirrorSource")
-
-function editorView(container: HTMLElement): EditorView {
-	const dom = container.querySelector<HTMLElement>(".cm-editor")
-	const view = dom === null ? null : EditorView.findFromDOM(dom)
-
-	if (view === null) {
-		throw new Error("no editor view")
-	}
-
-	return view
-}
 
 // A save in flight locks the editor without remounting it: the buffer, and what was typed before the
 // save, stay; nothing can be typed until it settles.

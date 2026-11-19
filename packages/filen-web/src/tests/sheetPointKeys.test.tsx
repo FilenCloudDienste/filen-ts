@@ -1,76 +1,35 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { preview } from "@/locales/en/preview"
+import { openViewer as openSheetViewer, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // Point mode from the keyboard, as in Excel: in a formula's entry where a reference may go, an arrow points at a cell
 // and Shift+arrow widens the reference to a range; elsewhere an arrow commits the entry.
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-	return { bytes: held }
-})
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
+beforeEach(stubSheetCanvas)
 
 // Opens the in-cell editor on A1 and types `text` into it, the caret at its end.
 async function typeInCell(text: string): Promise<HTMLTextAreaElement> {
-	bytes.current = await writeXlsx({ sheets: [{ name: "Data", rows: [[null, 5], [1], [2]] }] })
-
-	render(
-		<SheetViewer
-			item={file("point.xlsx")}
-			documentKey="point"
-			alt="point.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	const grid = await screen.findByRole("grid")
+	const grid = await openSheetViewer(await writeXlsx({ sheets: [{ name: "Data", rows: [[null, 5], [1], [2]] }] }), {
+		name: "point.xlsx",
+		documentKey: "point"
+	})
 
 	await act(async () => {
 		grid.focus()

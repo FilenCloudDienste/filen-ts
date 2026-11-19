@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetSta
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import { toast } from "sonner"
-import { conflictCopyName, decideRevision, driveItemName, nameCollisionKey } from "@filen/shared"
+import { conflictCopyName, decideRevision, driveItemName, fileStem, nameCollisionKey } from "@filen/shared"
 import { abortSavePort } from "@filen/shared/savePort"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -532,9 +532,7 @@ async function releaseDeckSave(edits: PresentationSaveEdits): Promise<void> {
 
 // "photo.heic" → "photo.jpg".
 function withExtension(name: string, extension: string): string {
-	const dot = name.lastIndexOf(".")
-
-	return `${dot > 0 ? name.slice(0, dot) : name}.${extension}`
+	return `${fileStem(name)}.${extension}`
 }
 
 type CopyOutcome = { status: "success"; item: DriveItem } | { status: "error"; dto: ErrorDTO | null }

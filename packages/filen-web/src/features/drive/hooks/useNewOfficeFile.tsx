@@ -16,6 +16,7 @@ import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { cachedListing, driveListingQueryUpdate, isDriveListingCurrent } from "@/features/drive/queries/drive"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { browserLanguage } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { layoutNames } from "@/features/presentation/components/deckChrome.logic"
 import { loadedOfficeSetting } from "@/features/office/lib/officeSettings"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -58,6 +59,7 @@ function currentNames(parentUuid: string | null): ReadonlySet<string> {
 // inline: uploading onto it would make a new version of that file.
 export function useNewOfficeFile({ parentUuid, openPreview, hiddenNotice }: UseNewOfficeFileParams): NewOfficeFile {
 	const { t } = useTranslation("drive")
+	const { t: tPreview } = useTranslation("preview")
 	const [kind, setKind] = useState<NewOfficeKind | null>(null)
 	const [shownKind, setShownKind] = useState<NewOfficeKind>("docx")
 	const [pending, setPending] = useState(false)
@@ -87,6 +89,7 @@ export function useNewOfficeFile({ parentUuid, openPreview, hiddenNotice }: UseN
 		const outcome: CreateFileOutcome = await officeFileBytes(shownKind, {
 			locale: browserLanguage(),
 			sheetName: t("driveNewXlsxSheetName"),
+			layoutNames: layoutNames(tPreview),
 			paper
 		}).then(
 			bytes =>

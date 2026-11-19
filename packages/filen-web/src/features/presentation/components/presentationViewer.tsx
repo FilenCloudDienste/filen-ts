@@ -52,14 +52,9 @@ import {
 import { DeckNotes } from "@/features/presentation/components/deckChrome"
 import { actionLabel, DEFAULT_SLIDE_SIZE, isTextField, onPageKey } from "@/features/presentation/components/deckChrome.logic"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
-import {
-	presentationWheelZoom,
-	presentationZoom,
-	type PresentationZoom,
-	type PresentationZoomChange
-} from "@/features/presentation/lib/zoom"
+import type { PresentationZoomChange } from "@/features/presentation/lib/zoom"
+import { usePresentationZoom } from "@/features/presentation/hooks/usePresentationZoom"
 import { useBindings } from "@/lib/keymap/registry"
-import { useLatestRef } from "@/lib/useLatestRef"
 import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
 import { PresentationEditor } from "@/features/presentation/components/presentationEditor"
 import type { PresentationEditing, PresentationZoomView } from "@/features/presentation/hooks/usePresentationSession"
@@ -568,7 +563,8 @@ function DeckSurface({
 	const downloadsAs = usePreviewDownloadable() && item !== undefined && deck.session !== undefined
 	const [current, setCurrent] = useState(0)
 	const [railOpen, setRailOpen] = useState(true)
-	const [notesOpen, setNotesOpen] = useState(true)
+	// Hidden on first use at phone widths. The ribbon's notes button and the pane's chevron change this one flag.
+	const [notesOpen, setNotesOpen] = useState(() => !phone)
 	const canvasRef = useRef<HTMLDivElement | null>(null)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const count = deck.slides.length
@@ -598,17 +594,10 @@ function DeckSurface({
 	}
 
 	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef })
-	// SlideView's fit: the media frames over the slide are placed in screen px.
-	const [scale, setScale] = useState(1)
-	// Fit to the window, or a zoom (the editor's keys and Ctrl/Cmd+wheel); never saved.
-	const [zoomMode, setZoomMode] = useState<PresentationZoom>("fit")
-	// Read by the zoom's steps, which build on the zoom shown.
-	const scaleRef = useLatestRef(scale)
+	// SlideView's fit (the media frames over the slide are placed in screen px), fit to the window or a zoom (the
+	// editor's keys, the command bar's zoom and Ctrl/Cmd+wheel); never saved.
+	const { scale, setScale, zoomMode, zoomBy } = usePresentationZoom(canvasRef)
 	const combos = useBindings()
-	// A step, a fit or a zoom on the slide shown: the editor's keys and the command bar's zoom (the wheel steps its own).
-	const zoomBy = (change: PresentationZoomChange): void => {
-		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
-	}
 	const zoom: PresentationZoomView = { scale, fit: zoomMode === "fit", set: zoomBy }
 	// The editor's zoom keys (presentation.zoomIn, zoomOut, zoomFit) on the slide shown; true when the key was one.
 	const zoomKey = (event: ViewerKeyEvent): boolean => {
@@ -623,30 +612,6 @@ function DeckSurface({
 
 		return true
 	}
-
-	// Ctrl/Cmd+wheel (a trackpad pinch) zooms the slide, as in the editor; a plain wheel scrolls. A native non-passive
-	// listener, so the browser's own page zoom stays out.
-	useEffect(() => {
-		const canvas = canvasRef.current
-
-		if (canvas === null) return undefined
-
-		const onWheel = (event: WheelEvent): void => {
-			if (!event.ctrlKey && !event.metaKey) return
-
-			event.preventDefault()
-
-			const { deltaY } = event
-
-			setZoomMode(previous => presentationWheelZoom(previous, scaleRef.current, deltaY))
-		}
-
-		canvas.addEventListener("wheel", onWheel, { passive: false })
-
-		return () => {
-			canvas.removeEventListener("wheel", onWheel)
-		}
-	}, [scaleRef])
 
 	const groups: RibbonGroup[] = [
 		{
@@ -850,10 +815,14 @@ function DeckSurface({
 						)}
 						{show.showing ? null : show.refusedNote("canvas")}
 					</div>
-					{notesOpen && count > 0 ? (
+					{count > 0 ? (
 						<PresentationNotesPane
 							text={render?.notesText ?? ""}
 							phone={phone}
+							collapsed={!notesOpen}
+							onCollapsedChange={collapsed => {
+								setNotesOpen(!collapsed)
+							}}
 						/>
 					) : null}
 				</div>

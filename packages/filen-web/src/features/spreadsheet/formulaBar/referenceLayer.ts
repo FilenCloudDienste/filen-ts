@@ -1,4 +1,4 @@
-import type { HighlightedReference, SheetRange } from "@filen/office/core/sheet"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type HighlightedReference, type SheetRange } from "@filen/office/core/sheet"
 import type { SheetGridLayer } from "@filen/office/react/sheet"
 
 // The references of the formula being typed outlined on the cells they name, each in its colour (Excel's Point mode
@@ -9,9 +9,9 @@ import type { SheetGridLayer } from "@filen/office/react/sheet"
 function rangeOf(reference: HighlightedReference): SheetRange {
 	const area = reference.area
 	const top = area.kind === "cols" ? 0 : Math.min(area.startRow, area.endRow)
-	const bottom = area.kind === "cols" ? 1_048_575 : Math.max(area.startRow, area.endRow)
+	const bottom = area.kind === "cols" ? SHEET_MAX_ROWS - 1 : Math.max(area.startRow, area.endRow)
 	const left = area.kind === "rows" ? 0 : Math.min(area.startCol, area.endCol)
-	const right = area.kind === "rows" ? 16_383 : Math.max(area.startCol, area.endCol)
+	const right = area.kind === "rows" ? SHEET_MAX_COLS - 1 : Math.max(area.startCol, area.endCol)
 
 	return { startRow: top, startCol: left, endRow: bottom, endCol: right }
 }

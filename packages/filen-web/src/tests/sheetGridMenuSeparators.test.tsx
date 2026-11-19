@@ -3,54 +3,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { menuGroups, rendersItems } from "@/features/spreadsheet/components/sheetExtension"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { file, sheetBytes, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // The grid's menu puts a separator only between groups that show something: none first, last or twice in a row,
 // also when a feature's group comes out empty (a read-only file, a cell with nothing to offer).
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-	return { bytes: held }
-})
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
 
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
+beforeEach(stubSheetCanvas)
 
 describe("the grid menu's separators", () => {
 	it("leaves out a group whose parts all came out empty", () => {
@@ -73,10 +47,10 @@ describe("the grid menu's separators", () => {
 	})
 
 	it("starts, ends and runs without a separator on a read-only file", async () => {
-		bytes.current = await writeXlsx({ sheets: [{ name: "One", rows: [["a", "b"]] }] })
+		sheetBytes.current = await writeXlsx({ sheets: [{ name: "One", rows: [["a", "b"]] }] })
 		render(
 			<SheetViewer
-				item={{ type: "file", data: { uuid: "u-ro", decryptedMeta: { name: "ro.xlsx" }, size: 1n } } as unknown as DriveItem}
+				item={file("ro.xlsx")}
 				documentKey="ro"
 				alt="ro.xlsx"
 				editable={false}

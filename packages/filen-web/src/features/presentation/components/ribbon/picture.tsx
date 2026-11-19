@@ -1,7 +1,8 @@
-import { useId, useState } from "react"
+import { useEffect, useId, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CropIcon, ImageIcon, RefreshCcwIcon, SunMediumIcon, TextQuoteIcon } from "lucide-react"
-import { oneStep, type DeckOp, type ShapeRef } from "@filen/office/core/presentation"
+import { oneStep, type DeckOp, type EdgeFractions, type PictureAdjust, type ShapeRef } from "@filen/office/core/presentation"
+import type { PictureFormat, PresentationSessionApi } from "@filen/office/dom/presentation"
 import { selectedShapes, useShapeSelection, type SlideShape } from "@filen/office/react/presentation"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -17,7 +18,9 @@ import type { PresentationGroups, PresentationRibbonEditor } from "@/features/pr
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Picture tab: corrections (brightness, contrast, transparency, grayscale), reset, Change Picture (this device or
-// the drive, keeping the box), crop by edge and alt text, on the one picture selected. Every command is one op.
+// the drive, keeping the box), crop by edge and alt text, on the one picture selected. Every command is one op. Crop
+// and Corrections start from the picture's own crop and adjustments (one read as they open) and send nothing when
+// left as they were.
 
 const BUTTON = 30
 const MENU = 44
@@ -78,9 +81,61 @@ function NumberField({
 	)
 }
 
-function CropDialog({ target, run, onClose }: { target: ShapeRef; run: (op: DeckOp) => void; onClose: () => void }) {
+// 1/100,000 of the box (or of 100 %) as the percentage a field shows.
+function shown(value: number | undefined): string {
+	return String((value ?? 0) / 1000)
+}
+
+function scaled(value: number | undefined): number {
+	return Math.round((value ?? 0) * 1000)
+}
+
+// The picture's crop and adjustments, read once when its dialog opens; the dialog shows once they are known (a read
+// that fails starts it from none).
+function WithPictureFormat({
+	session,
+	target,
+	children
+}: {
+	session: PresentationSessionApi
+	target: ShapeRef
+	children: (format: PictureFormat) => ReactNode
+}) {
+	const [format, setFormat] = useState<PictureFormat | undefined>(undefined)
+
+	useEffect(() => {
+		let live = true
+
+		session.pictureFormat(target).then(
+			read => {
+				if (live) setFormat(read)
+			},
+			() => {
+				if (live) setFormat({})
+			}
+		)
+
+		return () => {
+			live = false
+		}
+	}, [session, target])
+
+	return format === undefined ? null : children(format)
+}
+
+function CropDialog({
+	target,
+	crop: current,
+	run,
+	onClose
+}: {
+	target: ShapeRef
+	crop: EdgeFractions | undefined
+	run: (op: DeckOp) => void
+	onClose: () => void
+}) {
 	const { t } = useTranslation("preview")
-	const [edges, setEdges] = useState({ l: "0", t: "0", r: "0", b: "0" })
+	const [edges, setEdges] = useState({ l: shown(current?.l), t: shown(current?.t), r: shown(current?.r), b: shown(current?.b) })
 	const values = { l: percent(edges.l, 0, 99), t: percent(edges.t, 0, 99), r: percent(edges.r, 0, 99), b: percent(edges.b, 0, 99) }
 	const valid = Object.values(values).every(value => value !== undefined)
 	const leaves = valid && (values.l ?? 0) + (values.r ?? 0) < 100 && (values.t ?? 0) + (values.b ?? 0) < 100
@@ -111,11 +166,16 @@ function CropDialog({ target, run, onClose }: { target: ShapeRef; run: (op: Deck
 			onSubmit={event => {
 				event.preventDefault()
 
-				const fraction = (value: number | undefined): number => Math.round((value ?? 0) * 1000)
-				const crop = { l: fraction(values.l), t: fraction(values.t), r: fraction(values.r), b: fraction(values.b) }
+				const crop = { l: scaled(values.l), t: scaled(values.t), r: scaled(values.r), b: scaled(values.b) }
 				const none = crop.l === 0 && crop.t === 0 && crop.r === 0 && crop.b === 0
+				const unchanged =
+					crop.l === (current?.l ?? 0) &&
+					crop.t === (current?.t ?? 0) &&
+					crop.r === (current?.r ?? 0) &&
+					crop.b === (current?.b ?? 0)
 
-				run({ family: "picture", kind: "crop", target, crop: none ? undefined : crop })
+				if (!unchanged) run({ family: "picture", kind: "crop", target, crop: none ? undefined : crop })
+
 				onClose()
 			}}
 		>
@@ -130,12 +190,22 @@ function CropDialog({ target, run, onClose }: { target: ShapeRef; run: (op: Deck
 	)
 }
 
-function CorrectionsDialog({ target, run, onClose }: { target: ShapeRef; run: (op: DeckOp) => void; onClose: () => void }) {
+function CorrectionsDialog({
+	target,
+	adjust: current,
+	run,
+	onClose
+}: {
+	target: ShapeRef
+	adjust: PictureAdjust | undefined
+	run: (op: DeckOp) => void
+	onClose: () => void
+}) {
 	const { t } = useTranslation("preview")
-	const [brightness, setBrightness] = useState("0")
-	const [contrast, setContrast] = useState("0")
-	const [transparency, setTransparency] = useState("0")
-	const [grayscale, setGrayscale] = useState(false)
+	const [brightness, setBrightness] = useState(shown(current?.brightness))
+	const [contrast, setContrast] = useState(shown(current?.contrast))
+	const [transparency, setTransparency] = useState(shown(current?.alpha))
+	const [grayscale, setGrayscale] = useState(current?.grayscale === true)
 	const grayId = useId()
 	const values = {
 		brightness: percent(brightness, -100, 100),
@@ -159,19 +229,38 @@ function CorrectionsDialog({ target, run, onClose }: { target: ShapeRef; run: (o
 			onSubmit={event => {
 				event.preventDefault()
 
-				const scaled = (value: number | undefined): number => Math.round((value ?? 0) * 1000)
+				const next = {
+					brightness: scaled(values.brightness),
+					contrast: scaled(values.contrast),
+					alpha: scaled(values.transparency)
+				}
+				const unchanged =
+					next.brightness === (current?.brightness ?? 0) &&
+					next.contrast === (current?.contrast ?? 0) &&
+					next.alpha === (current?.alpha ?? 0) &&
+					grayscale === (current?.grayscale === true)
 
-				run({
-					family: "picture",
-					kind: "adjust",
-					target,
-					adjust: {
-						brightness: scaled(values.brightness),
-						contrast: scaled(values.contrast),
-						alpha: scaled(values.transparency),
-						grayscale
+				if (!unchanged) {
+					// What the dialog does not show (bi-level, duotone) stays as the picture has it.
+					const kept = {
+						...(current?.biLevel === undefined ? {} : { biLevel: current.biLevel }),
+						...(current?.duotone === undefined ? {} : { duotone: current.duotone })
 					}
-				})
+
+					run({
+						family: "picture",
+						kind: "adjust",
+						target,
+						adjust: {
+							...kept,
+							...(next.brightness === 0 ? {} : { brightness: next.brightness }),
+							...(next.contrast === 0 ? {} : { contrast: next.contrast }),
+							...(next.alpha === 0 ? {} : { alpha: next.alpha }),
+							...(grayscale ? { grayscale: true } : {})
+						}
+					})
+				}
+
 				onClose()
 			}}
 		>
@@ -226,17 +315,33 @@ function PictureControls({ editor, group }: { editor: PresentationRibbonEditor; 
 			}
 
 			return kind === "crop" ? (
-				<CropDialog
+				<WithPictureFormat
+					session={live.session}
 					target={target}
-					run={apply}
-					onClose={close}
-				/>
+				>
+					{format => (
+						<CropDialog
+							target={target}
+							crop={format.crop}
+							run={apply}
+							onClose={close}
+						/>
+					)}
+				</WithPictureFormat>
 			) : kind === "corrections" ? (
-				<CorrectionsDialog
+				<WithPictureFormat
+					session={live.session}
 					target={target}
-					run={apply}
-					onClose={close}
-				/>
+				>
+					{format => (
+						<CorrectionsDialog
+							target={target}
+							adjust={format.adjust}
+							run={apply}
+							onClose={close}
+						/>
+					)}
+				</WithPictureFormat>
 			) : (
 				<AltTextDialog
 					shape={shape}

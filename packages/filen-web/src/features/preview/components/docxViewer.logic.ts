@@ -13,7 +13,7 @@ import type {
 	DocxViewerCommand,
 	DocxViewerState
 } from "@filen/office/dom/docx"
-import type { DocxDocument } from "@filen/office/react/docx"
+import type { BalloonLayout, DocxDocument } from "@filen/office/react/docx"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
@@ -434,4 +434,17 @@ export function docxFormatOf(name: string): "docx" | "odt" | "rtf" {
 	}
 
 	return extension === "odt" || extension === "ott" ? "odt" : "docx"
+}
+
+// A column's balloons as placeBalloons lays them out: those beside the page (in the order of its tops) and those
+// behind its "+N more" control.
+export function splitBalloons<T>(balloons: readonly T[], placed: BalloonLayout): { shown: T[]; hidden: T[] } {
+	const extra = placed.extra >= 0 ? balloons[placed.extra] : undefined
+	const shown = balloons.slice(0, placed.shown)
+
+	if (extra === undefined) return { shown, hidden: balloons.slice(placed.shown) }
+
+	shown.push(extra)
+
+	return { shown, hidden: balloons.filter((_balloon, k) => k >= placed.shown && k !== placed.extra) }
 }

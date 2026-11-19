@@ -1,14 +1,9 @@
+import { extensionOf } from "@filen/shared"
 import type { ExportContainer, VideoSaveTarget } from "@/features/preview/videoEdit/types"
 
 // Where an edited video can be saved. The export always writes a fragmented ISO BMFF file (streamed into the upload,
 // never staged): MP4, or QuickTime for a .mov (mediabunny's MOV writer fragments the same way). A file whose name
 // says another container (Matroska, WebM, MPEG-TS) is never rewritten under that name: it gets an MP4 copy beside it.
-
-function extensionOf(name: string): string {
-	const dot = name.lastIndexOf(".")
-
-	return dot > 0 ? name.slice(dot + 1).toLowerCase() : ""
-}
 
 // The container an in-place save writes, from the name alone (sync: a rename's re-check must agree with the slot's
 // pin without a probe). Null: the edit can only become a copy.

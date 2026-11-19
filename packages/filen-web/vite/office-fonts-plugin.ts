@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto"
-import { createReadStream, readFileSync, statSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, extname, join } from "node:path"
 import type { Plugin } from "vite"
-import { COI_HEADERS } from "./sdk-artifacts-plugin"
+import { type PinnedFile, record, serveListedFiles, verifyPinned } from "./shared"
 
 // @filen/office's bundled document fonts and their licence files, served from 'self' (CSP font-src). A
 // build emits each face under /assets/ with its manifest SHA-256 in the name (cached as immutable, like
@@ -33,15 +32,7 @@ const MANIFEST = join(FONTS_DIR, "manifest.json")
 // The .ttf.gz faces are sent as stored (no Content-Encoding): the worker decompresses them itself.
 const MIME: Record<string, string> = { ".woff2": "font/woff2", ".gz": "application/gzip", ".txt": "text/plain; charset=utf-8" }
 
-interface Face {
-	file: string
-	bytes: number
-	sha256: string
-}
-
-function record(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {}
-}
+type Face = PinnedFile
 
 function faceOf(value: unknown, owner: string): Face {
 	const { file, bytes, sha256 } = record(value)
@@ -177,45 +168,19 @@ export function officeFonts(options: { readonly emit?: boolean } = {}): Plugin {
 
 	return {
 		...plugin,
-		// The preview serves the build's copies from dist/ instead, under the preview header set.
 		configureServer(server) {
-			server.middlewares.use((req, res, next) => {
-				const path = (req.url ?? "").split("?")[0] ?? ""
-				const rel = path.startsWith(OFFICE_FONTS_BASE) ? path.slice(OFFICE_FONTS_BASE.length) : null
-
-				if (rel === null || !served.has(rel)) {
-					next()
-
-					return
-				}
-
-				const file = join(FONTS_DIR, rel)
-
-				res.setHeader("Content-Type", MIME[extname(rel)] ?? "application/octet-stream")
-				res.setHeader("Content-Length", statSync(file).size)
-
-				for (const [name, value] of Object.entries(COI_HEADERS)) {
-					res.setHeader(name, value)
-				}
-
-				createReadStream(file)
-					.on("error", () => {
-						res.statusCode = 500
-						res.end()
-					})
-					.pipe(res)
+			serveListedFiles(server, {
+				base: OFFICE_FONTS_BASE,
+				dir: FONTS_DIR,
+				served,
+				mime: rel => MIME[extname(rel)] ?? "application/octet-stream"
 			})
 		},
 		generateBundle() {
 			for (const face of [...faces, ...pdfFaces, ...signatureFaces]) {
 				const source = readFileSync(join(FONTS_DIR, face.file))
-				const sha256 = createHash("sha256").update(source).digest("hex")
 
-				if (sha256 !== face.sha256 || source.byteLength !== face.bytes) {
-					this.error(
-						`${face.file} is ${String(source.byteLength)} bytes with SHA-256 ${sha256}; manifest.json says ${String(face.bytes)} bytes, ${face.sha256}`
-					)
-				}
+				verifyPinned(this, source, face)
 
 				this.emitFile({ type: "asset", fileName: hashedPath(face), source })
 			}

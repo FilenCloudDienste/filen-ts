@@ -66,6 +66,8 @@ export const settingsBilling = {
 	settingsBillingMethodCrypto: "Cryptocurrencies",
 	/** Plan card — link opening the payment page in a new tab once the checkout was created */
 	settingsBillingPayInvoice: "Pay invoice",
+	/** Plan card — button under "Pay invoice" that brings the payment method menu back */
+	settingsBillingChangePaymentMethod: "Choose another payment method",
 	/** Plan card — tooltip on the disabled Buy button in development builds, whose test prices do not match the live plans */
 	settingsBillingBuyDevDisabled: "Purchases are disabled in development builds.",
 	/** Plan card — tooltip on the disabled Buy button while current prices are still loading */

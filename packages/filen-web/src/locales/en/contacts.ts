@@ -100,7 +100,9 @@ export const contacts = {
 	/** Deny-request confirm dialog — title; the confirm button reuses contactsActionDeny */
 	contactsDenyConfirmTitle: "Deny request?",
 	/** Deny-request confirm dialog — body for a single request */
-	contactsDenyConfirmBody_one: "Are you sure you want to deny this contact request?",
+	contactsDenyConfirmBodySingle: "Are you sure you want to deny this contact request?",
+	/** Deny-request confirm dialog — body for multiple requests; {{count}} = requests being denied */
+	contactsDenyConfirmBody_one: "Are you sure you want to deny {{count}} contact request?",
 	/** Deny-request confirm dialog — body for multiple requests; {{count}} = requests being denied */
 	contactsDenyConfirmBody_other: "Are you sure you want to deny these {{count}} contact requests?",
 
@@ -108,7 +110,9 @@ export const contacts = {
 	/** Cancel-request confirm dialog — title; the confirm button reuses contactsActionCancelRequest */
 	contactsCancelConfirmTitle: "Cancel request?",
 	/** Cancel-request confirm dialog — body for a single request */
-	contactsCancelConfirmBody_one: "Are you sure you want to cancel this contact request?",
+	contactsCancelConfirmBodySingle: "Are you sure you want to cancel this contact request?",
+	/** Cancel-request confirm dialog — body for multiple requests; {{count}} = requests being cancelled */
+	contactsCancelConfirmBody_one: "Are you sure you want to cancel {{count}} contact request?",
 	/** Cancel-request confirm dialog — body for multiple requests; {{count}} = requests being cancelled */
 	contactsCancelConfirmBody_other: "Are you sure you want to cancel these {{count}} contact requests?",
 
@@ -116,7 +120,9 @@ export const contacts = {
 	/** Remove-contact confirm dialog — title; the confirm button reuses contactsActionRemove */
 	contactsRemoveConfirmTitle: "Remove contact?",
 	/** Remove-contact confirm dialog — body for a single contact */
-	contactsRemoveConfirmBody_one: "Are you sure you want to remove this contact?",
+	contactsRemoveConfirmBodySingle: "Are you sure you want to remove this contact?",
+	/** Remove-contact confirm dialog — body for multiple contacts; {{count}} = contacts being removed */
+	contactsRemoveConfirmBody_one: "Are you sure you want to remove {{count}} contact?",
 	/** Remove-contact confirm dialog — body for multiple contacts; {{count}} = contacts being removed */
 	contactsRemoveConfirmBody_other: "Are you sure you want to remove these {{count}} contacts?",
 
@@ -124,7 +130,9 @@ export const contacts = {
 	/** Block-contact confirm dialog — title; the confirm button reuses contactsActionBlock */
 	contactsBlockConfirmTitle: "Block contact?",
 	/** Block-contact confirm dialog — body for a single contact */
-	contactsBlockConfirmBody_one: "Are you sure you want to block this contact?",
+	contactsBlockConfirmBodySingle: "Are you sure you want to block this contact?",
+	/** Block-contact confirm dialog — body for multiple contacts; {{count}} = contacts being blocked */
+	contactsBlockConfirmBody_one: "Are you sure you want to block {{count}} contact?",
 	/** Block-contact confirm dialog — body for multiple contacts; {{count}} = contacts being blocked */
 	contactsBlockConfirmBody_other: "Are you sure you want to block these {{count}} contacts?",
 
@@ -132,24 +140,32 @@ export const contacts = {
 	/** Unblock-contact confirm dialog — title; the confirm button reuses contactsActionUnblock */
 	contactsUnblockConfirmTitle: "Unblock contact?",
 	/** Unblock-contact confirm dialog — body for a single contact */
-	contactsUnblockConfirmBody_one: "Are you sure you want to unblock this contact?",
+	contactsUnblockConfirmBodySingle: "Are you sure you want to unblock this contact?",
+	/** Unblock-contact confirm dialog — body for multiple contacts; {{count}} = contacts being unblocked */
+	contactsUnblockConfirmBody_one: "Are you sure you want to unblock {{count}} contact?",
 	/** Unblock-contact confirm dialog — body for multiple contacts; {{count}} = contacts being unblocked */
 	contactsUnblockConfirmBody_other: "Are you sure you want to unblock these {{count}} contacts?",
 
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
-	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one
 	// contact or request (nickname, else email), `_other` counts them; a partial result counts the ones
 	// that succeeded.
 	/** Activity toast — accepting contact requests running; one item named ({{name}}) */
-	contactsAcceptRunning_one: "Accepting the request from {{name}}",
+	contactsAcceptRunningNamed: "Accepting the request from {{name}}",
+	/** Activity toast — accepting contact requests running; {{count}} items */
+	contactsAcceptRunning_one: "Accepting {{count}} request",
 	/** Activity toast — accepting contact requests running; {{count}} items */
 	contactsAcceptRunning_other: "Accepting {{count}} requests",
 	/** Activity toast — accepting contact requests finished; one item named ({{name}}) */
-	contactsAcceptDone_one: "Accepted the request from {{name}}",
+	contactsAcceptDoneNamed: "Accepted the request from {{name}}",
+	/** Activity toast — accepting contact requests finished; {{count}} items */
+	contactsAcceptDone_one: "Accepted {{count}} request",
 	/** Activity toast — accepting contact requests finished; {{count}} items */
 	contactsAcceptDone_other: "Accepted {{count}} requests",
 	/** Activity toast — accepting contact requests failed for every item; one item named ({{name}}) */
-	contactsAcceptFailed_one: "Couldn't accept the request from {{name}}",
+	contactsAcceptFailedNamed: "Couldn't accept the request from {{name}}",
+	/** Activity toast — accepting contact requests failed for every item; {{count}} items */
+	contactsAcceptFailed_one: "Couldn't accept {{count}} request",
 	/** Activity toast — accepting contact requests failed for every item; {{count}} items */
 	contactsAcceptFailed_other: "Couldn't accept {{count}} requests",
 	/** Activity toast — accepting contact requests partly failed; {{count}} succeeded, {{failed}} failed */
@@ -157,15 +173,21 @@ export const contacts = {
 	/** Activity toast — accepting contact requests partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsAcceptPartial_other: "Accepted {{count}} requests, {{failed}} failed",
 	/** Activity toast — denying contact requests running; one item named ({{name}}) */
-	contactsDenyRunning_one: "Denying the request from {{name}}",
+	contactsDenyRunningNamed: "Denying the request from {{name}}",
+	/** Activity toast — denying contact requests running; {{count}} items */
+	contactsDenyRunning_one: "Denying {{count}} request",
 	/** Activity toast — denying contact requests running; {{count}} items */
 	contactsDenyRunning_other: "Denying {{count}} requests",
 	/** Activity toast — denying contact requests finished; one item named ({{name}}) */
-	contactsDenyDone_one: "Denied the request from {{name}}",
+	contactsDenyDoneNamed: "Denied the request from {{name}}",
+	/** Activity toast — denying contact requests finished; {{count}} items */
+	contactsDenyDone_one: "Denied {{count}} request",
 	/** Activity toast — denying contact requests finished; {{count}} items */
 	contactsDenyDone_other: "Denied {{count}} requests",
 	/** Activity toast — denying contact requests failed for every item; one item named ({{name}}) */
-	contactsDenyFailed_one: "Couldn't deny the request from {{name}}",
+	contactsDenyFailedNamed: "Couldn't deny the request from {{name}}",
+	/** Activity toast — denying contact requests failed for every item; {{count}} items */
+	contactsDenyFailed_one: "Couldn't deny {{count}} request",
 	/** Activity toast — denying contact requests failed for every item; {{count}} items */
 	contactsDenyFailed_other: "Couldn't deny {{count}} requests",
 	/** Activity toast — denying contact requests partly failed; {{count}} succeeded, {{failed}} failed */
@@ -173,15 +195,21 @@ export const contacts = {
 	/** Activity toast — denying contact requests partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsDenyPartial_other: "Denied {{count}} requests, {{failed}} failed",
 	/** Activity toast — cancelling sent contact requests running; one item named ({{name}}) */
-	contactsCancelRequestRunning_one: "Cancelling the request to {{name}}",
+	contactsCancelRequestRunningNamed: "Cancelling the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests running; {{count}} items */
+	contactsCancelRequestRunning_one: "Cancelling {{count}} request",
 	/** Activity toast — cancelling sent contact requests running; {{count}} items */
 	contactsCancelRequestRunning_other: "Cancelling {{count}} requests",
 	/** Activity toast — cancelling sent contact requests finished; one item named ({{name}}) */
-	contactsCancelRequestDone_one: "Cancelled the request to {{name}}",
+	contactsCancelRequestDoneNamed: "Cancelled the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests finished; {{count}} items */
+	contactsCancelRequestDone_one: "Cancelled {{count}} request",
 	/** Activity toast — cancelling sent contact requests finished; {{count}} items */
 	contactsCancelRequestDone_other: "Cancelled {{count}} requests",
 	/** Activity toast — cancelling sent contact requests failed for every item; one item named ({{name}}) */
-	contactsCancelRequestFailed_one: "Couldn't cancel the request to {{name}}",
+	contactsCancelRequestFailedNamed: "Couldn't cancel the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests failed for every item; {{count}} items */
+	contactsCancelRequestFailed_one: "Couldn't cancel {{count}} request",
 	/** Activity toast — cancelling sent contact requests failed for every item; {{count}} items */
 	contactsCancelRequestFailed_other: "Couldn't cancel {{count}} requests",
 	/** Activity toast — cancelling sent contact requests partly failed; {{count}} succeeded, {{failed}} failed */
@@ -189,15 +217,21 @@ export const contacts = {
 	/** Activity toast — cancelling sent contact requests partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsCancelRequestPartial_other: "Cancelled {{count}} requests, {{failed}} failed",
 	/** Activity toast — removing contacts running; one item named ({{name}}) */
-	contactsRemoveRunning_one: "Removing {{name}}",
+	contactsRemoveRunningNamed: "Removing {{name}}",
+	/** Activity toast — removing contacts running; {{count}} items */
+	contactsRemoveRunning_one: "Removing {{count}} contact",
 	/** Activity toast — removing contacts running; {{count}} items */
 	contactsRemoveRunning_other: "Removing {{count}} contacts",
 	/** Activity toast — removing contacts finished; one item named ({{name}}) */
-	contactsRemoveDone_one: "Removed {{name}}",
+	contactsRemoveDoneNamed: "Removed {{name}}",
+	/** Activity toast — removing contacts finished; {{count}} items */
+	contactsRemoveDone_one: "Removed {{count}} contact",
 	/** Activity toast — removing contacts finished; {{count}} items */
 	contactsRemoveDone_other: "Removed {{count}} contacts",
 	/** Activity toast — removing contacts failed for every item; one item named ({{name}}) */
-	contactsRemoveFailed_one: "Couldn't remove {{name}}",
+	contactsRemoveFailedNamed: "Couldn't remove {{name}}",
+	/** Activity toast — removing contacts failed for every item; {{count}} items */
+	contactsRemoveFailed_one: "Couldn't remove {{count}} contact",
 	/** Activity toast — removing contacts failed for every item; {{count}} items */
 	contactsRemoveFailed_other: "Couldn't remove {{count}} contacts",
 	/** Activity toast — removing contacts partly failed; {{count}} succeeded, {{failed}} failed */
@@ -205,15 +239,21 @@ export const contacts = {
 	/** Activity toast — removing contacts partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsRemovePartial_other: "Removed {{count}} contacts, {{failed}} failed",
 	/** Activity toast — blocking contacts running; one item named ({{name}}) */
-	contactsBlockRunning_one: "Blocking {{name}}",
+	contactsBlockRunningNamed: "Blocking {{name}}",
+	/** Activity toast — blocking contacts running; {{count}} items */
+	contactsBlockRunning_one: "Blocking {{count}} contact",
 	/** Activity toast — blocking contacts running; {{count}} items */
 	contactsBlockRunning_other: "Blocking {{count}} contacts",
 	/** Activity toast — blocking contacts finished; one item named ({{name}}) */
-	contactsBlockDone_one: "Blocked {{name}}",
+	contactsBlockDoneNamed: "Blocked {{name}}",
+	/** Activity toast — blocking contacts finished; {{count}} items */
+	contactsBlockDone_one: "Blocked {{count}} contact",
 	/** Activity toast — blocking contacts finished; {{count}} items */
 	contactsBlockDone_other: "Blocked {{count}} contacts",
 	/** Activity toast — blocking contacts failed for every item; one item named ({{name}}) */
-	contactsBlockFailed_one: "Couldn't block {{name}}",
+	contactsBlockFailedNamed: "Couldn't block {{name}}",
+	/** Activity toast — blocking contacts failed for every item; {{count}} items */
+	contactsBlockFailed_one: "Couldn't block {{count}} contact",
 	/** Activity toast — blocking contacts failed for every item; {{count}} items */
 	contactsBlockFailed_other: "Couldn't block {{count}} contacts",
 	/** Activity toast — blocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
@@ -221,15 +261,21 @@ export const contacts = {
 	/** Activity toast — blocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsBlockPartial_other: "Blocked {{count}} contacts, {{failed}} failed",
 	/** Activity toast — unblocking contacts running; one item named ({{name}}) */
-	contactsUnblockRunning_one: "Unblocking {{name}}",
+	contactsUnblockRunningNamed: "Unblocking {{name}}",
+	/** Activity toast — unblocking contacts running; {{count}} items */
+	contactsUnblockRunning_one: "Unblocking {{count}} contact",
 	/** Activity toast — unblocking contacts running; {{count}} items */
 	contactsUnblockRunning_other: "Unblocking {{count}} contacts",
 	/** Activity toast — unblocking contacts finished; one item named ({{name}}) */
-	contactsUnblockDone_one: "Unblocked {{name}}",
+	contactsUnblockDoneNamed: "Unblocked {{name}}",
+	/** Activity toast — unblocking contacts finished; {{count}} items */
+	contactsUnblockDone_one: "Unblocked {{count}} contact",
 	/** Activity toast — unblocking contacts finished; {{count}} items */
 	contactsUnblockDone_other: "Unblocked {{count}} contacts",
 	/** Activity toast — unblocking contacts failed for every item; one item named ({{name}}) */
-	contactsUnblockFailed_one: "Couldn't unblock {{name}}",
+	contactsUnblockFailedNamed: "Couldn't unblock {{name}}",
+	/** Activity toast — unblocking contacts failed for every item; {{count}} items */
+	contactsUnblockFailed_one: "Couldn't unblock {{count}} contact",
 	/** Activity toast — unblocking contacts failed for every item; {{count}} items */
 	contactsUnblockFailed_other: "Couldn't unblock {{count}} contacts",
 	/** Activity toast — unblocking contacts partly failed; {{count}} succeeded, {{failed}} failed */

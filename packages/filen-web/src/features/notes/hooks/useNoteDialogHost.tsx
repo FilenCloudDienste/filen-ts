@@ -18,6 +18,7 @@ import { ParticipantsDialog } from "@/features/notes/components/participantsDial
 import { HistoryDialog } from "@/features/notes/components/historyDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { singleOrCountKey } from "@/lib/i18n"
 
 // Discriminates on `kind` alone — NoteActionDialogKind/NoteTagDialogKind/NoteBulkDialogActionKind are
 // three disjoint string unions (noteMenu.logic.ts / notesBulkActionBar.logic.ts), so each arm carries
@@ -230,7 +231,7 @@ export function useNoteDialogHost(): NoteDialogHost {
 						open
 						pending={dialogPending}
 						title={t("notesTrashSelectedConfirmTitle")}
-						body={t("notesTrashSelectedConfirmBody", { count: 1 })}
+						body={t("notesTrashSelectedConfirmBodySingle")}
 						confirmLabel={t("noteActionTrash")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -348,7 +349,16 @@ export function useNoteDialogHost(): NoteDialogHost {
 						open
 						pending={dialogPending}
 						title={t("notesTrashSelectedConfirmTitle")}
-						body={t("notesTrashSelectedConfirmBody", { count: activeDialog.notes.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.notes.length,
+								"notesTrashSelectedConfirmBodySingle",
+								"notesTrashSelectedConfirmBody"
+							),
+							{
+								count: activeDialog.notes.length
+							}
+						)}
 						confirmLabel={t("noteActionTrash")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -368,7 +378,16 @@ export function useNoteDialogHost(): NoteDialogHost {
 						open
 						pending={dialogPending}
 						title={t("notesDeleteSelectedConfirmTitle")}
-						body={t("notesDeleteSelectedConfirmBody", { count: activeDialog.notes.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.notes.length,
+								"notesDeleteSelectedConfirmBodySingle",
+								"notesDeleteSelectedConfirmBody"
+							),
+							{
+								count: activeDialog.notes.length
+							}
+						)}
 						confirmLabel={t("noteActionDeletePermanently")}
 						cancelLabel={t("common:cancel")}
 						destructive
@@ -388,7 +407,16 @@ export function useNoteDialogHost(): NoteDialogHost {
 						open
 						pending={dialogPending}
 						title={t("notesLeaveSelectedConfirmTitle")}
-						body={t("notesLeaveSelectedConfirmBody", { count: activeDialog.notes.length })}
+						body={t(
+							singleOrCountKey(
+								activeDialog.notes.length,
+								"notesLeaveSelectedConfirmBodySingle",
+								"notesLeaveSelectedConfirmBody"
+							),
+							{
+								count: activeDialog.notes.length
+							}
+						)}
 						confirmLabel={t("noteActionLeave")}
 						cancelLabel={t("common:cancel")}
 						destructive

@@ -185,6 +185,7 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 				<PickerListShell
 					listingQuery={listingQuery}
 					noResults={filter.trim().length > 0}
+					filteredOutMessage={rows.length > 0 ? t("driveTreeMenuNoDirectories") : undefined}
 					count={filteredDirectories.length}
 					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 					renderRow={index => {

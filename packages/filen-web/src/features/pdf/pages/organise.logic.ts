@@ -7,6 +7,7 @@ import {
 	type PageRange
 } from "@filen/office/core/pdfedit/pageRanges"
 import { extractGroups, splitBefore, splitEvery } from "@filen/office/core/pdfedit/pageOrder"
+import { singleOrCountKey } from "@/lib/i18n"
 
 // The pages rail's selection, the screen reader's sentences after a page change, and the Extract and Split dialogs'
 // plans, as pure functions. Pages are 0-based here, 1-based in ranges and in what people read.
@@ -68,20 +69,28 @@ export type PageChange =
 
 // What the live region says after a change ("Page 3 moved to position 2"); positions and pages read 1-based.
 export function pageChangeAnnouncement(t: TFunction<"preview">, change: PageChange): string {
-	if (change.kind === "inserted") return t("previewPdfPagesInserted", { count: change.count, position: change.position + 1 })
+	if (change.kind === "inserted")
+		return t(singleOrCountKey(change.count, "previewPdfPagesInsertedSingle", "previewPdfPagesInserted"), {
+			count: change.count,
+			position: change.position + 1
+		})
 
 	const count = change.pages.length
 	const page = (change.pages[0] ?? 0) + 1
 
 	switch (change.kind) {
 		case "moved":
-			return t("previewPdfPagesMoved", { count, page, position: change.position + 1 })
+			return t(singleOrCountKey(count, "previewPdfPagesMovedSingle", "previewPdfPagesMoved"), {
+				count,
+				page,
+				position: change.position + 1
+			})
 		case "rotated":
-			return t("previewPdfPagesRotated", { count, page })
+			return t(singleOrCountKey(count, "previewPdfPagesRotatedSingle", "previewPdfPagesRotated"), { count, page })
 		case "deleted":
-			return t("previewPdfPagesDeleted", { count, page })
+			return t(singleOrCountKey(count, "previewPdfPagesDeletedSingle", "previewPdfPagesDeleted"), { count, page })
 		case "duplicated":
-			return t("previewPdfPagesDuplicated", { count, page })
+			return t(singleOrCountKey(count, "previewPdfPagesDuplicatedSingle", "previewPdfPagesDuplicated"), { count, page })
 	}
 }
 

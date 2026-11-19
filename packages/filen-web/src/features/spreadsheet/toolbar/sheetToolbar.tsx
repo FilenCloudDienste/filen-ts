@@ -100,6 +100,7 @@ import { requestImage } from "@/features/spreadsheet/objects/insertRequests"
 import { objectsEditable } from "@/features/spreadsheet/objects/objects.logic"
 import { TAB_COLORS, cssColor } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { requestSheetTab } from "@/features/spreadsheet/tabs/tabRequests"
+import { workbookStructureLocks } from "@/features/spreadsheet/lib/modelStore"
 import { HorizontalAlignMenu, VerticalAlignMenu } from "@/features/spreadsheet/toolbar/alignMenus"
 import { BordersMenu, type BorderLine } from "@/features/spreadsheet/toolbar/bordersMenu"
 import { SheetColorButton } from "@/features/spreadsheet/toolbar/colorButton"
@@ -124,7 +125,7 @@ import {
 } from "@/features/spreadsheet/toolbar/toolbar.logic"
 import { registerRibbonKeys } from "@/features/spreadsheet/toolbar/ribbonKeys"
 import { sheetActionId, type SheetActionShortcut } from "@/features/spreadsheet/lib/keymap"
-import type { PreviewKey } from "@/lib/i18n"
+import { singleOrCountKey, type PreviewKey } from "@/lib/i18n"
 import { useBindings } from "@/lib/keymap/registry"
 import { useLatestRef } from "@/lib/useLatestRef"
 
@@ -352,8 +353,8 @@ function CommandMenu({
 function HideItems({ grid, run }: { grid: SheetGridState; run: (command: SheetCommand) => void }) {
 	const { t } = useTranslation("preview")
 	const items = [
-		{ axis: "rows", hide: "previewSheetHideRows", unhide: "previewSheetUnhideRows" },
-		{ axis: "cols", hide: "previewSheetHideColumns", unhide: "previewSheetUnhideColumns" }
+		{ axis: "rows", hide: "previewSheetHideRows", hideSingle: "previewSheetHideRowsSingle", unhide: "previewSheetUnhideRows" },
+		{ axis: "cols", hide: "previewSheetHideColumns", hideSingle: "previewSheetHideColumnsSingle", unhide: "previewSheetUnhideColumns" }
 	] as const
 
 	return (
@@ -361,6 +362,7 @@ function HideItems({ grid, run }: { grid: SheetGridState; run: (command: SheetCo
 			{items.map(item => {
 				const spans = selectionSpans(grid.selection.ranges, item.axis)
 				const shown = unhideSpans(spans, grid.layout, item.axis)
+				const hideCount = spanCount(spans)
 
 				return (
 					<div
@@ -372,7 +374,7 @@ function HideItems({ grid, run }: { grid: SheetGridState; run: (command: SheetCo
 								run({ type: "axis.hide", sheet: grid.sheet, axis: item.axis, spans, hidden: true })
 							}}
 						>
-							{t(item.hide, { count: spanCount(spans) })}
+							{t(singleOrCountKey(hideCount, item.hideSingle, item.hide), { count: hideCount })}
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							disabled={shown === null}
@@ -458,6 +460,8 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 		return combo === undefined || combo === "" ? undefined : <Kbd action={id} />
 	}
 	const sheetProtected = (grid.layout?.protection ?? null) !== null
+	// The workbook's structure protection as the sheet tabs last read it (one query for both).
+	const structureLocked = workbookStructureLocks.useValue(model)
 	const filtered = clearTarget(grid.layout, grid.selection.active.row, grid.selection.active.col) !== null
 	const filterOn = grid.layout?.extensions?.filters?.ranges.some(entry => entry.table === null) === true
 
@@ -1519,9 +1523,9 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								}}
 							/>
 							<RibbonButton
-								label={t("previewSheetProtectWorkbook")}
+								label={t(structureLocked ? "previewSheetUnprotectWorkbook" : "previewSheetProtectWorkbook")}
 								icon={<ShieldCheckIcon />}
-								text={t("previewSheetProtectWorkbook")}
+								text={t(structureLocked ? "previewSheetUnprotectWorkbook" : "previewSheetProtectWorkbook")}
 								disabled={disabled}
 								onClick={() => {
 									requestSheetTab(model, "protectWorkbook")

@@ -1,61 +1,29 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { preview } from "@/locales/en/preview"
+import { goTo, openViewer as openSheetViewer, stubSheetCanvas, typeInBar } from "@/tests/support/sheetViewerHarness"
 
 // The function suggestions and the call's syntax under the editor a formula is typed in: tied to that editor for a
 // screen reader, and shown above it where they would cover what is below the grid.
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-	return { bytes: held }
-})
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 // The find field is the document editor's, which binds Mod+F through the app's keymap.
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
+beforeEach(stubSheetCanvas)
 
 const NUMBERS = [["Amount"], [1], [2]]
 
@@ -70,47 +38,7 @@ async function openViewer(
 		{ name: "Data", rows: NUMBERS }
 	]
 ): Promise<HTMLElement> {
-	bytes.current = await book(sheets)
-
-	render(
-		<SheetViewer
-			item={file("fruit.xlsx")}
-			documentKey="formula"
-			alt="fruit.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	return await screen.findByRole("grid")
-}
-
-function bar(): HTMLInputElement {
-	return screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSpreadsheetCellContents })
-}
-
-// Starts an entry in the formula bar and types `text` into it, the caret at its end.
-async function typeInBar(text: string): Promise<HTMLInputElement> {
-	const input = bar()
-
-	await act(async () => {
-		input.focus()
-		await Promise.resolve()
-	})
-	fireEvent.input(input, { target: { value: text } })
-
-	return input
-}
-
-async function goTo(reference: string): Promise<void> {
-	const box = screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox })
-
-	fireEvent.focus(box)
-	fireEvent.change(box, { target: { value: reference } })
-	fireEvent.keyDown(box, { key: "Enter" })
-	await waitFor(() => {
-		expect(box.value).toBe(reference)
-	})
+	return await openSheetViewer(await book(sheets), { name: "fruit.xlsx", documentKey: "formula" })
 }
 
 function rect(top: number, bottom: number, left = 0): DOMRect {
@@ -171,9 +99,11 @@ describe("function suggestions", () => {
 		fireEvent.input(input, { target: { value: "=SUMIFS(s" } })
 
 		await waitFor(() => {
-			expect(options().length).toBeGreaterThan(3)
+			const shown = options()
+
+			expect(shown.length).toBeGreaterThan(3)
+			expect(shown[0]?.getAttribute("aria-selected")).toBe("true")
 		})
-		expect(options()[0]?.getAttribute("aria-selected")).toBe("true")
 	})
 
 	it("show the call's syntax above the cell's editor where below it would cover the sheet tabs", async () => {

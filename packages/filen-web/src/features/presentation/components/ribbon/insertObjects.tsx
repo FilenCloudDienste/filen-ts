@@ -161,9 +161,7 @@ export async function insertObject(
 
 // ---- pictures ----------------------------------------------------------------------------------------------------
 
-type Prepared =
-	| { readonly ok: true; readonly image: InsertedImage; readonly name?: string }
-	| { readonly ok: false; readonly refusal: DocxPictureRefusal }
+type Prepared = { readonly ok: true; readonly image: InsertedImage } | { readonly ok: false; readonly refusal: DocxPictureRefusal }
 
 // A picture made what a slide holds: the DOCX preparation (read once, sized from its header as its EXIF orientation
 // turns it, WebP made PNG, SVG with its PNG rendition) within a presentation's pixel budget in place of Word's.
@@ -172,7 +170,6 @@ export async function preparePresentationPicture(
 	signal: AbortSignal,
 	codecs: PictureCodecs = BROWSER_PICTURE_CODECS
 ): Promise<Prepared> {
-	const named = source.name === undefined ? {} : { name: source.name }
 	const prepared = await preparePicture(source, codecs, signal, PRESENTATION_PIXELS)
 
 	if (!prepared.ok) return prepared
@@ -185,7 +182,7 @@ export async function preparePresentationPicture(
 
 	if (size === undefined || size.width < 1 || size.height < 1) return { ok: false, refusal: "corrupt" }
 
-	return { ok: true, image: { bytes, contentType, width: size.width, height: size.height }, ...named }
+	return { ok: true, image: { bytes, contentType, width: size.width, height: size.height } }
 }
 
 // Pictures into the slide in view, or in place of a picture (`replace`): prepared one by one, each one op. `signal`
@@ -219,10 +216,10 @@ async function takePictures(
 						image: prepared.image
 					})
 			} else {
-				// Onto the slide in view, selected or not (insertObject finds it).
+				// Onto the slide in view, selected or not (insertObject finds it); no alt text until the user writes one.
 				const deck: InsertDeck = { size: editor.info.size, format: editor.info.format }
 
-				await insertObject(editor, (at, id) => insertPictureOp(deck, at, prepared.image, id, prepared.name))
+				await insertObject(editor, (at, id) => insertPictureOp(deck, at, prepared.image, id))
 			}
 		} catch (error) {
 			if (!signal.aborted) {

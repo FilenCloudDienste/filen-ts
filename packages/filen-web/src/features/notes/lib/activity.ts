@@ -14,7 +14,7 @@ export const NOTES_PIN = activityKeys("notes:notesPin")
 
 export const NOTES_UNPIN = activityKeys("notes:notesUnpin")
 
-// A tag's favorite toggle too: one subject, so only the `_one` words, which name it, ever show.
+// A tag's favorite toggle too: one subject, so only the Named words, which name it, ever show.
 export const NOTES_FAVORITE = activityKeys("notes:notesFavorite")
 
 export const NOTES_UNFAVORITE = activityKeys("notes:notesUnfavorite")

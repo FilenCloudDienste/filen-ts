@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { ChevronDownIcon } from "lucide-react"
-import { formatValue, type NumFmtOptions } from "@filen/office/core/sheet"
+import { formatValue, type NumFmtOptions, type SheetLocale } from "@filen/office/core/sheet"
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
@@ -12,7 +12,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { NUMBER_ITEMS, numberLabel } from "@/features/spreadsheet/toolbar/toolbar.logic"
+import { numberItems, numberLabel } from "@/features/spreadsheet/toolbar/toolbar.logic"
 import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
 import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 
@@ -24,13 +24,20 @@ function sampleText(sample: number | null, code: string, options: NumFmtOptions)
 	return sample === null ? "" : formatValue(sample, code, options).text
 }
 
+// The currency the Currency and Accounting items write: the regional format's, else the dollar.
+function currencySymbol(sheetLocale: SheetLocale): string {
+	return sheetLocale.currencies?.[0] ?? "$"
+}
+
 function NumberFormatItems({
+	sheetLocale,
 	numFmt,
 	sample,
 	date1904,
 	onFormat,
 	onMore
 }: {
+	sheetLocale: SheetLocale
 	numFmt: string
 	sample: number | null
 	date1904: boolean
@@ -38,19 +45,19 @@ function NumberFormatItems({
 	onMore: () => void
 }) {
 	const { t } = useTranslation("preview")
-	// The regional format the grid shows cells in (separators, month and day names, date patterns), followed live.
-	const locale = sheetLocaleOf(useRegionalLanguage()).numFmt
+	const locale = sheetLocale.numFmt
 	const options: NumFmtOptions = locale === undefined ? { date1904 } : { date1904, locale }
+	const items = numberItems(currencySymbol(sheetLocale))
 
 	return (
 		<>
 			<DropdownMenuRadioGroup
-				value={NUMBER_ITEMS.some(item => item.code === numFmt) ? numFmt : ""}
+				value={items.some(item => item.code === numFmt) ? numFmt : ""}
 				onValueChange={(code: string) => {
 					onFormat(code)
 				}}
 			>
-				{NUMBER_ITEMS.map(item => (
+				{items.map(item => (
 					<DropdownMenuRadioItem
 						key={item.code}
 						value={item.code}
@@ -87,6 +94,9 @@ export function NumberFormatMenu({
 	onMore: () => void
 }) {
 	const { t } = useTranslation("preview")
+	// The regional format the grid shows cells in (separators, month and day names, date patterns, currency),
+	// followed live.
+	const sheetLocale = sheetLocaleOf(useRegionalLanguage())
 
 	return (
 		<DropdownMenu>
@@ -102,7 +112,7 @@ export function NumberFormatMenu({
 									aria-label={t("previewSpreadsheetNumberFormat")}
 									className="w-28 shrink-0 justify-between gap-0.5 px-2"
 								>
-									<span className="truncate">{t(numberLabel(numFmt))}</span>
+									<span className="truncate">{t(numberLabel(numFmt, currencySymbol(sheetLocale)))}</span>
 									<ChevronDownIcon className="size-3" />
 								</Button>
 							}
@@ -113,6 +123,7 @@ export function NumberFormatMenu({
 			</Tooltip>
 			<DropdownMenuContent data-preview-surface>
 				<NumberFormatItems
+					sheetLocale={sheetLocale}
 					numFmt={numFmt}
 					sample={sample}
 					date1904={date1904}

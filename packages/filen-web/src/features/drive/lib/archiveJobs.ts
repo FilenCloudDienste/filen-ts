@@ -18,6 +18,7 @@ import {
 	settleExtractJob,
 	summarizeDispositions,
 	toItemCounts,
+	type CompressReportInput,
 	type CompressUpdateInput,
 	type CopyJobCounts,
 	type ExtractUpdateInput,
@@ -42,7 +43,9 @@ import { accountQuotaDeps } from "@/features/drive/lib/quota"
 import {
 	addTrashOutcome,
 	afterDriveJobSettled,
+	attemptWithQuotaRetry,
 	directoriesBetween,
+	lateTrasher,
 	liesWithin,
 	patchJobCreatedItem,
 	pruneSettledDriveJobs,
@@ -430,41 +433,20 @@ export async function runCompressJob(deps: RunArchiveDeps, request: CompressJobR
 		}
 	}
 
-	const cancelRequested = (): boolean => deps.compressJobs.get(id)?.cancelRequest != null
 	const initial = deps.compressJobs.get(id)
-	const cachedFresh = deps.account.isCachedFresh?.() ?? true
-	let maxBytes = copyMaxBytes(cachedFresh ? deps.account.cached() : await readStartingAccount(deps.account))
-	let settlement = await attemptCompress(deps, request, maxBytes, onEvent)
-
 	// A bare tar states its size up front; a refusal of it reads the account once fresh, as a copy's does.
-	if (
-		cachedFresh &&
-		"report" in settlement &&
-		isCompressPreflightRefusal(settlement.report) &&
-		maxBytes !== undefined &&
-		!cancelRequested()
-	) {
-		const freshMaxBytes = copyMaxBytes(await readFreshAccount(deps.account))
-
-		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !cancelRequested()) {
-			maxBytes = freshMaxBytes
-
-			// The refused call's events would count twice.
+	const settlement: CompressJobSettlement = await attemptWithQuotaRetry<CompressReportInput<DriveItem, ErrorDTO>>({
+		account: deps.account,
+		refusedUpFront: isCompressPreflightRefusal,
+		attempt: maxBytes => attemptCompress(deps, request, maxBytes, onEvent),
+		cancelRequested: () => deps.compressJobs.get(id)?.cancelRequest != null,
+		// The refused call's events would count twice.
+		beforeRetry: () => {
 			if (initial !== undefined) {
 				deps.compressJobs.update(id, job => rewindCompressEvents(job, initial))
 			}
-
-			settlement = await attemptCompress(deps, request, maxBytes, onEvent)
-		} else if (freshMaxBytes !== undefined && freshMaxBytes <= maxBytes) {
-			// Never a figure the SDK's own check didn't refuse.
-			settlement = { report: settlement.report, maxBytes: freshMaxBytes }
 		}
-	}
-
-	// Refused before anything was written, by a job stopped meanwhile: it ends as the stop it was.
-	if ("report" in settlement && isCompressPreflightRefusal(settlement.report) && cancelRequested()) {
-		settlement = { ...settlement, report: { ...settlement.report, error: STOPPED } }
-	}
+	})
 
 	deps.release(id)
 
@@ -643,38 +625,23 @@ export async function runExtractJob(deps: RunArchiveDeps, request: ExtractJobReq
 		}
 	}
 
-	const trashLate = async (item: DriveItem): Promise<void> => {
-		if (trashing.has(item.data.uuid)) {
-			return
+	const trashLate = lateTrasher<ExtractJob>({
+		id,
+		jobs: deps.extractJobs,
+		transfers: deps.transfers,
+		trash: deps.trash,
+		trashing,
+		isTrashPending: isExtractTrashPending,
+		settledJob: () => settledJob,
+		rowOf: job => {
+			const figures = extractJobRowFigures(job)
+
+			return { ...row, size: figures.size, bytesTransferred: figures.shown }
+		},
+		settleRow: job => {
+			settleExtractRow(deps.transfers, id, job)
 		}
-
-		trashing.add(item.data.uuid)
-
-		const outcome = await deps.trash([item])
-		const current = deps.extractJobs.get(id)
-
-		// While the stop's own batch is still moving, that batch settles the row, this one's result included.
-		if (outcome.failed.length === 0 || (current !== undefined && isExtractTrashPending(current))) {
-			deps.extractJobs.update(id, job => ({ ...job, trashResult: addTrashOutcome(job.trashResult, outcome) }))
-
-			return
-		}
-
-		// Left at the destination: a job dropped meanwhile comes back, with the row that says so.
-		const base = deps.extractJobs.get(id) ?? (settledJob === undefined ? undefined : { ...settledJob, cardVisible: false })
-
-		if (base === undefined) {
-			return
-		}
-
-		const job: ExtractJob = { ...base, created: [], trashResult: addTrashOutcome(base.trashResult, outcome) }
-		const figures = extractJobRowFigures(job)
-
-		deps.extractJobs.put(job)
-		deps.transfers.remove(id)
-		deps.transfers.add({ ...row, size: figures.size, bytesTransferred: figures.shown })
-		settleExtractRow(deps.transfers, id, job)
-	}
+	})
 
 	const onEvent: OnExtractEvent = event => {
 		if (event.type === "topLevelBatch") {

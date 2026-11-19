@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
+import { saveSetting } from "@/lib/saveSetting"
 import { setHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 import { useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
 import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
@@ -10,15 +10,10 @@ function UploadsRow() {
 	const { t } = useTranslation("settings")
 	const query = useHeicUploadConvertPreferenceQuery()
 
-	function setConvert(next: boolean): void {
-		setHeicUploadConvertPreference(next).then(
-			() => {
-				void query.refetch()
-			},
-			() => {
-				toast.error(t("settingsDocumentsSaveFailed"))
-			}
-		)
+	async function setConvert(next: boolean): Promise<void> {
+		if (await saveSetting(() => setHeicUploadConvertPreference(next))) {
+			void query.refetch()
+		}
 	}
 
 	return (
@@ -28,7 +23,7 @@ function UploadsRow() {
 			checked={query.data ?? false}
 			disabled={query.data === undefined}
 			onCheckedChange={checked => {
-				setConvert(checked)
+				void setConvert(checked)
 			}}
 		/>
 	)

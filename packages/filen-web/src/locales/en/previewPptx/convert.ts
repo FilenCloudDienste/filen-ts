@@ -69,10 +69,6 @@ export const previewPptxConvert = {
 	previewPptxConvertLossSmartArt_one: "{{count}} SmartArt diagram, kept as a group of shapes",
 	/** Converted copy — as previewPptxConvertLossSmartArt_one, for several */
 	previewPptxConvertLossSmartArt_other: "{{count}} SmartArt diagrams, kept as groups of shapes",
-	/** Converted copy — kept differently: 3D scenes shown as their pictures */
-	previewPptxConvertLossThreeD_one: "{{count}} 3D object, kept as a picture",
-	/** Converted copy — as previewPptxConvertLossThreeD_one, for several */
-	previewPptxConvertLossThreeD_other: "{{count}} 3D objects, kept as pictures",
 	/** Converted copy — kept differently: ink drawings that could not be carried over */
 	previewPptxConvertLossInk_one: "{{count}} ink drawing, left out",
 	/** Converted copy — as previewPptxConvertLossInk_one, for several */

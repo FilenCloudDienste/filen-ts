@@ -153,7 +153,69 @@ export function chapterTarget(starts: readonly number[], time: number, direction
 	return target ?? 0
 }
 
-// Seconds per frame from the frame rate when known, else a common 24 fps.
-export function frameDuration(fps: number | null): number {
-	return fps !== null && fps > 0 && Number.isFinite(fps) ? 1 / fps : 1 / 24
+// Seconds per frame: the measured frame interval when there is one, else a common 24 fps.
+export function frameDuration(interval: number | null): number {
+	return interval !== null && interval > 0 && Number.isFinite(interval) ? interval : 1 / 24
+}
+
+// A presented frame as requestVideoFrameCallback reports it.
+export interface PresentedFrame {
+	mediaTime: number
+	presentedFrames: number
+}
+
+// Frame intervals one run of playback measures. The shortest wins, so a frame the display skipped doesn't double it.
+export const FRAME_INTERVAL_SAMPLES = 4
+
+// Frames one run looks at before it gives up (a display that keeps skipping frames).
+export const FRAME_INTERVAL_MAX_FRAMES = 16
+
+// Longest interval taken as a frame's (2 fps); a longer gap is a stall or a seek.
+const MAX_FRAME_INTERVAL_SECONDS = 0.5
+
+// The frame interval of what plays, from the media times of frames presented one after another at normal speed. Each
+// run of playback (`restart`) measures afresh and replaces the last run's interval once it has a sample, so a variable
+// frame rate is followed run by run.
+export class FrameIntervalMeter {
+	public interval: number | null = null
+	private previous: PresentedFrame | null = null
+	private samples = 0
+	private frames = 0
+
+	// Takes a presented frame; returns whether the run wants another. Off normal speed a frame's media time covers
+	// several frames: the run ends.
+	public add(frame: PresentedFrame, playbackRate: number): boolean {
+		if (playbackRate !== 1) {
+			return false
+		}
+
+		const previous = this.previous
+
+		this.previous = frame
+		this.frames++
+
+		if (previous !== null && frame.presentedFrames === previous.presentedFrames + 1) {
+			const delta = frame.mediaTime - previous.mediaTime
+
+			if (delta > 0 && delta <= MAX_FRAME_INTERVAL_SECONDS) {
+				this.interval = this.samples === 0 || this.interval === null ? delta : Math.min(this.interval, delta)
+				this.samples++
+			}
+		}
+
+		return this.samples < FRAME_INTERVAL_SAMPLES && this.frames < FRAME_INTERVAL_MAX_FRAMES
+	}
+
+	// A new run of playback: its first frame starts over, the last run's interval stays until it has a sample.
+	public restart(): void {
+		this.previous = null
+		this.samples = 0
+		this.frames = 0
+	}
+
+	// A new source: nothing is known.
+	public reset(): void {
+		this.restart()
+		this.interval = null
+	}
 }

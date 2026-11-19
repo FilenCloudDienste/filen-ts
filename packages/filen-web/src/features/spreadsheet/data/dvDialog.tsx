@@ -1,6 +1,13 @@
 import { useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
-import type { SheetFileKind, SheetRefusal, SheetValidationRule } from "@filen/office/core/sheet"
+import {
+	MAX_VALIDATION_ERROR,
+	MAX_VALIDATION_PROMPT,
+	MAX_VALIDATION_TITLE,
+	type SheetFileKind,
+	type SheetRefusal,
+	type SheetValidationRule
+} from "@filen/office/core/sheet"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
@@ -326,7 +333,7 @@ function ValidationForm({ initial, kind, onClose, onApply, onClear }: Validation
 						id="validation-prompt-title"
 						label={t("previewSheetValidationMessageTitle")}
 						value={rule.promptTitle}
-						maxLength={32}
+						maxLength={MAX_VALIDATION_TITLE}
 						onChange={promptTitle => {
 							change({ promptTitle })
 						}}
@@ -335,7 +342,7 @@ function ValidationForm({ initial, kind, onClose, onApply, onClear }: Validation
 						id="validation-prompt"
 						label={t("previewSheetValidationMessageText")}
 						value={rule.prompt}
-						maxLength={255}
+						maxLength={MAX_VALIDATION_PROMPT}
 						lines={3}
 						onChange={prompt => {
 							change({ prompt })
@@ -367,7 +374,7 @@ function ValidationForm({ initial, kind, onClose, onApply, onClear }: Validation
 						id="validation-error-title"
 						label={t("previewSheetValidationMessageTitle")}
 						value={rule.errorTitle}
-						maxLength={32}
+						maxLength={MAX_VALIDATION_TITLE}
 						onChange={errorTitle => {
 							change({ errorTitle })
 						}}
@@ -376,7 +383,7 @@ function ValidationForm({ initial, kind, onClose, onApply, onClear }: Validation
 						id="validation-error-text"
 						label={t("previewSheetValidationMessageText")}
 						value={rule.error}
-						maxLength={225}
+						maxLength={MAX_VALIDATION_ERROR}
 						lines={3}
 						className="sm:col-span-2"
 						onChange={error => {

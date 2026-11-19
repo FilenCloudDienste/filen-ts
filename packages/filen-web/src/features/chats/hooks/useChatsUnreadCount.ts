@@ -7,8 +7,9 @@ import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { CONTACTS_QUERY_KEY, contactsQueryGet, fetchContacts } from "@/features/contacts/queries/contacts"
 import { queryClient } from "@/queries/client"
 import { noop } from "@/lib/utils"
-import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
+import { chatBacklogUnread, refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
+import { chatUnreadProvablyZero } from "@/features/chats/lib/unread.logic"
 import type { BlockedUsers } from "@filen/shared"
 
 export interface GlobalUnread {
@@ -29,7 +30,8 @@ const unreadByMessages = new WeakMap<
 // Pure global tally — sums each chat's unread over its resident message cache (read imperatively via
 // `getMessages`, NOT a hook, so summing over N chats costs zero extra query observers). A chat with no
 // cached messages is skipped and flags `hasMissingMessages` (not counted as 0), so the caller knows to
-// heal rather than trust an under-count. Exported bare for unit testing. _messagesVersion is read only so
+// heal rather than trust an under-count — unless its list row proves it read (chatUnreadProvablyZero),
+// which the bulk refetch never fills, so it counts 0. Exported bare for unit testing. _messagesVersion is read only so
 // memoisation keys on the message-cache version counter.
 export function sumUnread(
 	chats: readonly Chat[],
@@ -44,8 +46,9 @@ export function sumUnread(
 	for (const chat of chats) {
 		const messages = getMessages(chat.uuid)
 
-		if (messages === undefined) {
-			hasMissingMessages = true
+		// A chat skipped while muted and unmuted since may hold only socket-delivered messages: also missing.
+		if (messages === undefined || chatBacklogUnread(chat)) {
+			hasMissingMessages ||= !chatUnreadProvablyZero(chat)
 
 			continue
 		}
@@ -72,8 +75,9 @@ export function sumUnread(
 // scalar. Passively reads the chat-list cache (`enabled: false`) and sums each chat's unread off its
 // resident message cache. Two resync triggers, both funneling through the Semaphore(1)-guarded bulk
 // refetch (so overlapping fires collapse into one pass):
-//   - mount-once: fills every chat's message cache at first shell mount (there is no per-chat message
-//     fetch otherwise — web fetches lazily per opened thread).
+//   - mount-once: fills the message cache of every chat that may hold unread messages at first shell
+//     mount (there is no per-chat message fetch otherwise — web fetches lazily per opened thread); a chat
+//     whose list row proves it read counts 0 without one.
 //   - missing-messages self-heal: any chat still lacking its message cache gets just that cache fetched.
 // Realtime socket cache patches keep the derived count correct between resyncs; the socket reconnect
 // handler fires the same bulk refetch directly.

@@ -87,7 +87,7 @@ export function ServeHero({ controls, credentials }: { controls: ServeControls; 
 }
 
 // One server in the overview grid: its icon, name (opening its page) and switch, then where it listens with copy while
-// it runs, else its state.
+// it runs, else why it failed or its state. The name's link covers the tile: only a `relative` child takes hover.
 export function ServeTile({ protocol }: { protocol: DesktopServeProtocol }) {
 	const { t } = useTranslation("mounts")
 	const controls = useServeControls(protocol)
@@ -131,7 +131,7 @@ export function ServeTile({ protocol }: { protocol: DesktopServeProtocol }) {
 					<>
 						<span
 							title={url}
-							className="min-w-0 flex-1 truncate font-mono text-[13px]"
+							className="relative min-w-0 flex-1 truncate font-mono text-[13px]"
 						>
 							{serveHostPort(serve)}
 						</span>
@@ -147,10 +147,13 @@ export function ServeTile({ protocol }: { protocol: DesktopServeProtocol }) {
 					</>
 				) : (
 					<span
-						title={serve.error === null ? undefined : mountsErrorLabel(serve.error)}
-						className={cn("min-w-0 flex-1 truncate", serve.state === "error" ? "text-destructive" : "text-muted-foreground")}
+						className={cn(
+							"min-w-0 flex-1",
+							serve.error === null ? "truncate" : "line-clamp-2",
+							serve.state === "error" || serve.error !== null ? "text-destructive" : "text-muted-foreground"
+						)}
 					>
-						{t(roleStateKey(protocol, serve.state))}
+						{serve.error === null ? t(roleStateKey(protocol, serve.state)) : mountsErrorLabel(serve.error)}
 					</span>
 				)}
 			</div>

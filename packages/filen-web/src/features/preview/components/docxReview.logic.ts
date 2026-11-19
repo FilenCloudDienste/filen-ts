@@ -12,7 +12,7 @@ import {
 } from "@filen/office/core/docx/paged"
 import { LINE_FLOATS } from "@filen/office/core/text"
 import { RECT_FLOATS } from "@filen/office/dom/docx"
-import { indexAnnotations, placeBalloons, type DocxAnnotationIndex, type DocxPageFrame } from "@filen/office/react/docx"
+import { indexAnnotations, placeBalloons, type BalloonLayout, type DocxAnnotationIndex, type DocxPageFrame } from "@filen/office/react/docx"
 import type { PreviewKey } from "@/lib/i18n"
 import { formatShortDate } from "@/lib/formatDate"
 import { STANDARD_SWATCHES, fromTwips, lengthUnit, type DocxLengthUnit } from "@/features/preview/components/docxEditor.logic"
@@ -568,7 +568,7 @@ export function placeColumn(
 	heights: ReadonlyMap<string, number>,
 	active: string | null,
 	sizes: { readonly estimate: number; readonly connector: number; readonly gap: number; readonly more: number }
-): { tops: Float64Array; shown: number; moreTop: number } {
+): BalloonLayout {
 	const wanted = balloons.map(balloon => frame.top + (balloon.y + balloon.height * 0.5) * zoom - sizes.connector)
 	const measured = balloons.map(balloon => heights.get(balloon.key) ?? sizes.estimate)
 	const at = balloons.findIndex(balloon => balloon.key === active)

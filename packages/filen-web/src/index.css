@@ -292,11 +292,6 @@
     --fo-revision-6: oklch(0.6 0.11 197.1);
     --fo-revision-7: oklch(0.592 0.218 0.6);
     --fo-revision-8: oklch(0.552 0.016 285.9);
-    /* Editing, docx-review.css: commented text without an author colour, the comment being worked on, and the
-       anchor marker shown where no balloon column fits. Drawn on the page, so the same in both themes. */
-    --fo-review-anchor: oklch(0.88 0.14 90 / 45%);
-    --fo-review-anchor-active: oklch(0.82 0.16 80 / 65%);
-    --fo-review-marker: oklch(0.555 0.163 48.998);
     /* Editing, docx-objects.css: the selection frame and resize handles of a drawing, the outline of a
        content control under the pointer. Drawn on the page, so ink on paper in both themes. */
     --fo-handle-size: 8px;

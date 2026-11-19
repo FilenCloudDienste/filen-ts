@@ -7,6 +7,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runResetAttempt } from "@/features/auth/lib/resetAttempt"
+import { navigateAfterSignIn } from "@/features/auth/lib/guard"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -113,7 +114,7 @@ function ResetForm({ token }: ResetFormProps) {
 					if (!outcome.persisted) {
 						toast.warning(t("sessionPersistFailed"))
 					}
-					await navigate({ to: "/drive/$", params: { _splat: "" } })
+					await navigateAfterSignIn(navigate)
 					break
 				case "two-factor-terminal":
 					// The reset landed; only the automatic sign-in didn't. Close the ceremony and replace the

@@ -69,6 +69,9 @@ export interface ImageEditorProps {
 	// A save is in flight: nothing can change.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
+	// The canvas could not be attached or the picture not loaded (the load is never retried): the overlay leaves edit
+	// mode. Called once.
+	onLoadFailed: () => void
 	// Registered while mounted: the overlay reads the export through it to save.
 	saveRef: RefObject<ImageExportSource | null>
 	// Registered while mounted: the overlay header's undo, redo and revert.
@@ -116,6 +119,9 @@ export function ImageEditor(props: ImageEditorProps) {
 	const [snapshot, setSnapshot] = useState<Snapshot>(() => ({ recipe: history.current, canUndo: false, canRedo: false }))
 	const [loaded, setLoaded] = useState<Size | null>(null)
 	const [failed, setFailed] = useState(false)
+	const onLoadFailed = useLatestRef(props.onLoadFailed)
+	// Strict Mode runs the attach twice, both on the session's one cached load: the overlay hears of a failure once.
+	const failureReported = useRef(false)
 	const [stage, setStage] = useState<Size>({ width: 0, height: 0 })
 	const [tab, setTab] = useState<EditTab>("adjust")
 	const [compare, setCompare] = useState(false)
@@ -410,6 +416,11 @@ export function ImageEditor(props: ImageEditorProps) {
 
 					if (alive) {
 						setFailed(true)
+
+						if (!failureReported.current) {
+							failureReported.current = true
+							onLoadFailed.current()
+						}
 					}
 				}
 			)
@@ -434,7 +445,7 @@ export function ImageEditor(props: ImageEditorProps) {
 			observer.disconnect()
 			canvas.remove()
 		}
-	}, [props.session, props.source, props.info, renderArgs])
+	}, [props.session, props.source, props.info, renderArgs, onLoadFailed])
 
 	useEffect(() => {
 		if (loaded !== null) {

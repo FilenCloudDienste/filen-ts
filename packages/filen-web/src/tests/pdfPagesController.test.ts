@@ -455,6 +455,56 @@ describe("new files of pages", () => {
 		})
 	})
 
+	it("records the files made before one fails, says it failed once and deletes nothing", async () => {
+		const fake = fakeSession(5, () => ({ pages: [], count: 0 }), copyEngine(new Uint8Array([37, 80, 68, 70])))
+		const recorded: string[] = []
+		let writes = 0
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			openVerifier: verifier({ ok: true }),
+			write: async (content, suffix) => {
+				writes++
+
+				// The third upload is refused (a connection drop), its port never read.
+				if (writes === 3) return { outcome: { status: "error" }, name: "copy.pdf" } as never
+
+				const reader = savePortReader(content.port)
+
+				while ((await reader.read()) !== undefined) {
+					// Drained.
+				}
+
+				reader.settled(true)
+
+				return {
+					outcome: { status: "success", item: { data: { uuid: `u${String(writes)}` } } as DriveItem },
+					name: `copy ${suffix(1)}.pdf`
+				} as never
+			},
+			onCopied: (names, items) => {
+				bound.copied.push([...names])
+
+				for (const made of items) recorded.push(made.data.uuid)
+			}
+		})
+
+		controller.bind(bound)
+		controller.sync(5)
+
+		const saved = await controller.makeCopies(
+			["a", "b", "c", "d", "e"].map((suffix, index) => ({ ranges: [{ first: index + 1, last: index + 1 }], suffix: () => suffix })),
+			{ protect: false, deletes: [0, 1, 2, 3, 4], failedKey: "previewPdfExtractFailed" }
+		)
+
+		expect(saved).toBe(false)
+		expect(writes).toBe(3)
+		expect(bound.copied).toEqual([["copy a.pdf", "copy b.pdf"]])
+		expect(recorded).toEqual(["u1", "u2"])
+		expect(bound.failed).toEqual(["previewPdfExtractFailed"])
+		expect(fake.dispatched).toEqual([])
+		expect(controller.getSnapshot().progress).toBeUndefined()
+	})
+
 	it("uploads nothing and deletes nothing when a file fails its check", async () => {
 		const fake = fakeSession(3, () => ({ pages: [], count: 2 }), copyEngine(new Uint8Array([1])))
 		const write = vi.fn()

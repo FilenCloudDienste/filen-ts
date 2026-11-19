@@ -180,6 +180,9 @@ export interface AudioEngineDeps {
 	// rather than skipping past it.
 	onFormatFailure?: (track: QueueTrack, stopped: boolean) => void
 	smoothTransitions?: SmoothTransitionsDeps
+	// The connectivity hint (production: TanStack's onlineManager). A failure while offline is the connection's, not
+	// the track's, so playback holds on it instead of skipping. Absent means online.
+	isOnline?: () => boolean
 }
 
 // Cover-art blob URLs are held only for the current + one-ahead prefetched track, so this is headroom
@@ -1967,6 +1970,14 @@ export class AudioEngine {
 			return
 		}
 
+		// Offline, the next track would fail the same way: skipping would run through the whole queue and lose the user's
+		// place. An unsupported format is the file's own failure, so it still skips.
+		if (error.kind !== MEDIA_FORMAT_UNSUPPORTED && this.deps.isOnline?.() === false) {
+			this.holdOffline(track)
+
+			return
+		}
+
 		this.skipGuard += 1
 
 		const advance = withinSkipBudget(this.skipGuard, state.queue.length) ? this.committedOrCompute() : null
@@ -1981,6 +1992,28 @@ export class AudioEngine {
 
 		this.applyAdvance(advance)
 		void this.loadAndPlay(advance.index)
+	}
+
+	// Paused on the failed track, from where it stood: the element no longer counts as holding it, so resuming loads it
+	// again through playCurrent, seeked to the kept position.
+	private holdOffline(track: QueueTrack | null): void {
+		const element = this.element
+
+		if (track !== null && element !== null && this.loadedTrackUuid === track.uuid) {
+			const ms = element.sample().currentTimeMs
+
+			if (ms > 0) {
+				this.pendingResume = { uuid: track.uuid, ms }
+			}
+		}
+
+		this.bumpLoadGeneration()
+		element?.pause()
+		this.loadedTrackUuid = null
+		useAudioStore.getState().setStatus("paused")
+		this.deps.mediaSession?.setPlaybackState("paused")
+		this.deps.smoothTransitions?.output.idle()
+		this.armIdleClose()
 	}
 
 	// The browser cannot play the current track as it is, but its source has another route (its audio
@@ -2052,6 +2085,19 @@ export class AudioEngine {
 		if (this.deps.smoothTransitions?.webkit === true) {
 			this.releaseIdleOutput(false)
 		}
+	}
+
+	// Paused on WebKit with a routed element: the output goes after a long pause, the position kept.
+	private armIdleClose(): void {
+		if (this.deps.smoothTransitions?.webkit !== true || this.element === null || !this.routed.has(this.element)) {
+			return
+		}
+
+		this.clearIdleClose()
+		this.idleCloseTimer = setTimeout(() => {
+			this.idleCloseTimer = null
+			this.releaseIdleOutput(true)
+		}, WEBKIT_IDLE_CLOSE_MS)
 	}
 
 	private clearIdleClose(): void {
@@ -2273,13 +2319,7 @@ export class AudioEngine {
 			void this.schedulePrefetch()
 		}
 
-		if (this.deps.smoothTransitions?.webkit === true && this.element !== null && this.routed.has(this.element)) {
-			this.clearIdleClose()
-			this.idleCloseTimer = setTimeout(() => {
-				this.idleCloseTimer = null
-				this.releaseIdleOutput(true)
-			}, WEBKIT_IDLE_CLOSE_MS)
-		}
+		this.armIdleClose()
 	}
 
 	// "loading" is playback intent already in flight, so a toggle during it is a PAUSE — the transport

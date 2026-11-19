@@ -1,56 +1,18 @@
-import { useSyncExternalStore } from "react"
 import { borderPresetEdges, type SheetCommand, type SheetId, type SheetRange } from "@filen/office/core/sheet"
 import type { SheetGridModel } from "@filen/office/react/sheet"
+import { createModelStore } from "@/features/spreadsheet/lib/modelStore"
 
 // Whether a grid's Format Cells dialog is open, shared by what opens it (Ctrl+1, the toolbar's menus) and the
 // toolbar that holds it.
 
-interface DialogStore {
-	open: boolean
-	readonly listeners: Set<() => void>
-}
-
-const stores = new WeakMap<SheetGridModel, DialogStore>()
-
-function storeOf(model: SheetGridModel): DialogStore {
-	let store = stores.get(model)
-
-	if (store === undefined) {
-		store = { open: false, listeners: new Set() }
-		stores.set(model, store)
-	}
-
-	return store
-}
+const store = createModelStore(false)
 
 export function setFormatCellsOpen(model: SheetGridModel, open: boolean): void {
-	const store = storeOf(model)
-
-	if (store.open === open) {
-		return
-	}
-
-	store.open = open
-
-	for (const listener of store.listeners) {
-		listener()
-	}
+	store.set(model, open)
 }
 
 export function useFormatCellsOpen(model: SheetGridModel): boolean {
-	const store = storeOf(model)
-
-	return useSyncExternalStore(
-		listener => {
-			store.listeners.add(listener)
-
-			return () => {
-				store.listeners.delete(listener)
-			}
-		},
-		() => store.open,
-		() => store.open
-	)
+	return store.useValue(model)
 }
 
 // Excel's border shortcuts: Ctrl+Shift+& puts an outline round the selection, Ctrl+Shift+_ takes its borders off

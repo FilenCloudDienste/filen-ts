@@ -15,6 +15,7 @@ import {
 	replaceAll,
 	replaceMatches,
 	selectMatch,
+	type DocxEditStrings,
 	type DocxEditorCommand,
 	type DocxEditorCommandType,
 	type DocxFontChoice,
@@ -53,7 +54,6 @@ import {
 	type DocxPageOverlay
 } from "@filen/office/react/docx/editor"
 import "@filen/office/css/docx.css"
-import "@filen/office/css/docx-review.css"
 import "@filen/office/css/docx-objects.css"
 import "@filen/office/css/docx-reflow.css"
 import { DOCX_FONT_URLS } from "@/features/preview/lib/docxEngine"
@@ -84,6 +84,7 @@ import {
 	sameToolbarSnapshot,
 	stepMatch,
 	storyMatchRange,
+	docxEditStrings,
 	themeSwatches,
 	type DocxInputRequest,
 	type DocxPainterState,
@@ -145,6 +146,7 @@ import { SaveRefusedError } from "@/features/drive/lib/previewSave.logic"
 import { defaultSpellingLanguage, documentSpellingChecker } from "@/features/spellcheck/lib/spellcheck"
 import { loadOfficeSettings, saveOfficeAutosave, useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { officeViewSettings } from "@/features/office/lib/officeViewSettings"
+import { officeChartText } from "@/features/office/lib/chartText"
 import { createListenerSet } from "@/lib/listenerSet"
 import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { LoadingState } from "@/components/loadingState"
@@ -218,20 +220,26 @@ interface Opened {
 // `writeUnlocked`: the document's password to modify was given (docxWriteProtection.tsx). `encryption`: it was
 // opened with its password, and saves are sealed with its key.
 // `backend`: the proof and writer of a document saved in another format (an RTF document).
+// `strings`: the text the editor writes into the document, in the user's language (docxEditStrings).
 // `protectionUnlocked`: the user stopped the protection that kept it view-only (docxRestrictEditing.tsx).
 function openEditing(
 	bytes: Uint8Array,
 	mode: DocxMarkupMode,
+	strings: DocxEditStrings,
 	writeUnlocked = false,
 	encryption?: DocxSealer,
 	backend?: DocxEditingBackend,
 	protectionUnlocked = false
 ): Opened {
-	const editing = docxEditingHost(writeUnlocked, encryption, backend, protectionUnlocked)
+	const editing = docxEditingHost(writeUnlocked, encryption, backend, protectionUnlocked, strings)
 
 	return {
 		editing,
-		source: { host: editing.host, bytes: bytesSource(bytes), options: { fontUrls: DOCX_FONT_URLS, view: markupInfo(mode).view } }
+		source: {
+			host: editing.host,
+			bytes: bytesSource(bytes),
+			options: { fontUrls: DOCX_FONT_URLS, view: markupInfo(mode).view, chartText: officeChartText() }
+		}
 	}
 }
 
@@ -547,7 +555,7 @@ export function DocxEditView({
 	// The device's choice of markup and view (Settings, Office) as the document opens; the menus change them after.
 	const [openedWith] = useState(officeViewSettings)
 	const [markupMode, setMarkupMode] = useState<DocxMarkupMode>(openedWith.markup)
-	const [opened, setOpened] = useState(() => openEditing(bytes, openedWith.markup, false, encryption, backend))
+	const [opened, setOpened] = useState(() => openEditing(bytes, openedWith.markup, docxEditStrings(t), false, encryption, backend))
 	const document = useDocxDocument(opened.source)
 	const [ready, setReady] = useState<Ready | null>(null)
 	// The open whose editor could not be built while the viewer engine laid the document out: shown read-only. Keyed
@@ -1268,7 +1276,7 @@ export function DocxEditView({
 	const changeMarkup = (mode: DocxMarkupMode): void => {
 		if (editor === undefined) {
 			if (markupInfo(mode).view !== markupInfo(markupMode).view) {
-				setOpened(openEditing(bytes, mode, writeUnlocked, encryption, backend, protectionUnlocked))
+				setOpened(openEditing(bytes, mode, docxEditStrings(t), writeUnlocked, encryption, backend, protectionUnlocked))
 				setPress(null)
 			}
 		} else {
@@ -1288,7 +1296,7 @@ export function DocxEditView({
 		setWriteUnlocked(true)
 
 		if (writeProtection?.password !== undefined) {
-			setOpened(openEditing(bytes, markupMode, true, encryption, backend, protectionUnlocked))
+			setOpened(openEditing(bytes, markupMode, docxEditStrings(t), true, encryption, backend, protectionUnlocked))
 			setPress(null)
 		}
 	}
@@ -1307,7 +1315,7 @@ export function DocxEditView({
 					set: setting => {
 						if (setting === undefined && editContext.gate.includes("protected")) {
 							setProtectionUnlocked(true)
-							setOpened(openEditing(bytes, markupMode, writeUnlocked, encryption, backend, true))
+							setOpened(openEditing(bytes, markupMode, docxEditStrings(t), writeUnlocked, encryption, backend, true))
 							setPress(null)
 
 							return

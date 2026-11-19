@@ -217,6 +217,9 @@ function PlansView({ accountQuery, planId }: PlansViewProps) {
 									onBuy={method => {
 										buy({ planId: card.plan.id, method })
 									}}
+									onChangeMethod={() => {
+										setPurchase(null)
+									}}
 								/>
 							))}
 						</TabsContent>

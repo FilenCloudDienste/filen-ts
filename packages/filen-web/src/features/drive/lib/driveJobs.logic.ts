@@ -20,6 +20,7 @@ import {
 	type ExtractJob
 } from "@/features/drive/lib/archiveJobs.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
+import { COPY_CARD_FAILURES_SHOWN } from "@/features/transfers/components/copyJobToast.logic"
 
 // Reads of any drive job, whatever its kind, for the surfaces that show one by id alone (the transfers
 // row, the card, the pending rows). Copy keeps its own percent and row figures; the rate is shared.
@@ -87,7 +88,8 @@ export function jobRetryKind(job: DriveJob): "failed" | "rerun" | null {
 	}
 }
 
-// Whether a settled archive job has anything its report lists. Copy's card lists its failures itself.
+// Whether a settled job has anything its report lists. A copy's card lists its failures itself up to its
+// cap; the report lists them all once there are more.
 export function jobHasReport(job: DriveJob): boolean {
 	if (isJobRunning(job)) {
 		return false
@@ -95,7 +97,7 @@ export function jobHasReport(job: DriveJob): boolean {
 
 	switch (job.kind) {
 		case "copy":
-			return false
+			return job.failures.length > COPY_CARD_FAILURES_SHOWN
 		case "compress":
 			return (
 				cappedTotal(job.skipped) > 0 ||

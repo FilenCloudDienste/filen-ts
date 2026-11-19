@@ -10,7 +10,7 @@ import {
 	CODE_FILE_EXTENSIONS,
 	SUBTITLE_FILE_EXTENSIONS,
 	ZIP_PACKAGE_EXTENSIONS,
-	extensionStart,
+	extensionOf,
 	resolveFileKind,
 	sniffCandidates,
 	sniffForExtension,
@@ -736,14 +736,9 @@ export const EXTENSION_TIERS: readonly (readonly [Iterable<string>, PreviewCateg
 
 const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensionCategories(EXTENSION_TIERS)
 
-// Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
-// ".gitignore", where the only "." is the leading one — not a real extension). The name's own extension,
-// for what the name itself promises (a spreadsheet's save format); a file's TYPE reads fileTypeExtension.
-export function extensionOf(name: string): string {
-	const dot = extensionStart(name)
-
-	return dot === -1 ? "" : name.slice(dot + 1).toLowerCase()
-}
+// The name's own extension, for what the name itself promises (a spreadsheet's save format); a file's TYPE reads
+// fileTypeExtension.
+export { extensionOf }
 
 export function previewCategoryForExtension(ext: string): PreviewCategory | null {
 	return EXTENSION_CATEGORIES.get(ext) ?? null

@@ -1,62 +1,30 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { writeXlsx } from "hucre/xlsx"
-import { inThreadSheetHost } from "@filen/office/dom/sheet"
-import type { DriveItem } from "@/features/drive/lib/item"
 import { matchNear, walkOrder } from "@/features/spreadsheet/find/sheetFind.logic"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { preview } from "@/locales/en/preview"
+import { goTo, nameBox, openViewer as openSheetViewer, stubSheetCanvas } from "@/tests/support/sheetViewerHarness"
 
 // The find bar over a real session on this thread: Mod+F opens it, typing finds and selects the first match after the
 // active cell, Enter steps through the matches, and Mod+H replaces (one match, or all of them as one undo step).
 
-const { bytes } = vi.hoisted(() => {
-	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
+vi.mock("@/providers/themeProvider", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).themeProviderMock(await importOriginal<object>())
+)
 
-	return { bytes: held }
-})
+vi.mock("@/features/preview/hooks/usePreviewBytes", async () => (await import("@/tests/support/sheetViewerHarness")).previewBytesMock())
 
-vi.mock("@/providers/themeProvider", async importOriginal => ({
-	...(await importOriginal<typeof import("@/providers/themeProvider")>()),
-	useTheme: () => ({ theme: "light" })
-}))
-
-vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
-	usePreviewBytes: () => ({ status: "success", bytes: bytes.current, refetch: () => undefined })
-}))
-
-vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal => {
-	const host = inThreadSheetHost()
-
-	return {
-		...(await importOriginal<typeof import("@/features/spreadsheet/lib/sheetHosts")>()),
-		openSheet: (source: Uint8Array, options: Parameters<typeof host.open>[1], onEvent: Parameters<typeof host.open>[2]) =>
-			host.open(source, options, onEvent)
-	}
-})
-
-const { SheetViewer } = await import("@/features/spreadsheet/sheetViewer")
+vi.mock("@/features/spreadsheet/lib/sheetHosts", async importOriginal =>
+	(await import("@/tests/support/sheetViewerHarness")).sheetHostsMock(await importOriginal<object>())
+)
 
 // The find field is the document editor's, which binds Mod+F through the app's keymap.
 registerAllActions()
 
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-})
-
-function file(name: string): DriveItem {
-	return { type: "file", data: { uuid: `u-${name}`, decryptedMeta: { name }, size: 1n } } as unknown as DriveItem
-}
+beforeEach(stubSheetCanvas)
 
 const FRUIT = [
 	["Item", "Note"],
@@ -69,43 +37,29 @@ async function book(sheets: readonly { readonly name: string; readonly rows: rea
 	return await writeXlsx({ sheets: sheets.map(sheet => ({ name: sheet.name, rows: sheet.rows.map(row => [...row]) })) })
 }
 
-function nameBox(): string {
-	return screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox }).value
-}
-
 async function openViewer(
 	sheets: readonly { readonly name: string; readonly rows: readonly (readonly string[])[] }[] = [{ name: "Fruit", rows: FRUIT }],
 	// Shown in a preview overlay, as the app shows it.
 	overlay = false
 ): Promise<HTMLElement> {
-	bytes.current = await book(sheets)
-
-	const viewer = (
-		<SheetViewer
-			item={file("fruit.xlsx")}
-			documentKey="find"
-			alt="fruit.xlsx"
-			editable
-			saveRef={{ current: null }}
-		/>
-	)
-
-	render(
-		overlay ? (
-			<div
-				role="dialog"
-				data-open=""
-				tabIndex={-1}
-				aria-label="Overlay"
-			>
-				{viewer}
-			</div>
-		) : (
-			viewer
-		)
-	)
-
-	return await screen.findByRole("grid")
+	return await openSheetViewer(await book(sheets), {
+		name: "fruit.xlsx",
+		documentKey: "find",
+		...(overlay
+			? {
+					wrap: viewer => (
+						<div
+							role="dialog"
+							data-open=""
+							tabIndex={-1}
+							aria-label="Overlay"
+						>
+							{viewer}
+						</div>
+					)
+				}
+			: {})
+	})
 }
 
 describe("walkOrder", () => {
@@ -146,18 +100,6 @@ async function typeInto(text: string): Promise<void> {
 	fireEvent.keyDown(bar, { key: "Enter" })
 	await waitFor(() => {
 		expect(bar.value).not.toBe(text)
-	})
-}
-
-async function goTo(reference: string): Promise<void> {
-	const box = screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox })
-
-	fireEvent.focus(box)
-	fireEvent.change(box, { target: { value: reference } })
-	fireEvent.keyDown(box, { key: "Enter" })
-	// The box shows the active cell: a range's top left.
-	await waitFor(() => {
-		expect(nameBox()).toBe(reference.split(":")[0])
 	})
 }
 
