@@ -45,7 +45,7 @@ src/locales/en/<namespace>.ts (+ the sub-files it spreads) ──▶ namespace �
 | `src/locales/<lang>.json` | every run | the app, fetched only for the active language (a static asset, not code) |
 | `src/locales/.en-snapshot.json` | a run that covered every language, or `--snapshot-only` | the next DELTA run |
 | `src/locales/.catalogs.json` | every run, `--snapshot-only` | the app: how many English keys each catalog holds |
-| `src/locales/.sources/<lang>.json` | FULL runs (DELTA updates one that exists) | the next FULL run: what it may skip; deleted by a run that completes every language |
+| `src/locales/.sources/<lang>.json` | every run that translated something | the next run of either mode: what it may skip; deleted by a run that completes every language, and by `--snapshot-only` |
 
 The app offers a language only when its catalog holds at least 95% of the English keys, so a partial run never shows
 a half-English UI. The dotfiles are never served (the app's catalog URL pattern skips them).
@@ -55,26 +55,27 @@ a half-English UI. The dotfiles are never served (the app's catalog URL pattern 
 | Command | Mode | What it translates |
 | --- | --- | --- |
 | `pnpm run translate-i18n` | **DELTA** (default) | Keys added/changed since the snapshot, plus any English key missing from a target catalog. Removed keys are deleted from every catalog. |
-| `pnpm run translate-i18n --full` | **FULL** | Every English key for every target language, except what an earlier FULL run of this campaign already translated (see *Resuming FULL*). Keys English no longer has are deleted. |
+| `pnpm run translate-i18n --full` | **FULL** | Every English key for every target language, except what an earlier run already translated from the current English (see *Resuming*). Keys English no longer has are deleted. |
 | `pnpm run translate-i18n de,fr` | (either) | Only these languages. The snapshot is left alone, so the others still see the changed keys next time. |
 | `pnpm run translate-i18n --budget-minutes=300` | (either) | Stops at the next batch boundary once 300 minutes (decimals allowed) have passed, writes the checkpoint and exits with code **3**. `0` translates nothing: exit 0 means nothing was left to do. |
-| `pnpm run translate-i18n --snapshot-only` | — | Writes the snapshot and the manifest; translates nothing. |
+| `pnpm run translate-i18n --max-keys=2700` | (either) | Plans the whole run first; when it needs more keys than that (summed over every language), it requests nothing, writes nothing and exits with code **4**. A push-triggered CI run passes it. |
+| `pnpm run translate-i18n --snapshot-only` | — | Writes the snapshot and the manifest and deletes the resume records; translates nothing. Use it after filling the catalogs by hand: the next DELTA then requests only what is still missing. |
 
 Until a language's catalog exists, a DELTA run translates that whole language: the missing-key safety net fills every
 absent key. **The first run of any kind is therefore the full paid run.**
 
-### Resuming FULL
+### Resuming
 
-A FULL run records, per language, a hash of the English each key was translated from
-(`src/locales/.sources/<lang>.json`, namespace → key → hash, written with every checkpoint). A FULL re-run skips a key
-when the target catalog holds it **and** its recorded hash matches the current English; it translates every other key,
+A run records, per language, a hash of the English each key was translated from
+(`src/locales/.sources/<lang>.json`, namespace → key → hash, written with every checkpoint). A re-run of either mode skips
+a key when the target catalog holds it **and** its recorded hash matches the current English; it translates every other key,
 so a key whose English changed since, or that the catalog lost, is translated again. A plural group is skipped only
 when all of its forms are, and is otherwise translated whole. Re-running the same command after a failure, a budget
 stop or a killed job therefore pays only for what is missing.
 
 A run that completes for **every** language (the snapshot rule) deletes `src/locales/.sources/`, so the next FULL run
 translates everything again. Delete that directory by hand to start a FULL run over before then. A run over some
-languages keeps the records. DELTA ignores them, but updates the records that exist for the keys it translates.
+languages keeps the records, so a later run over every language does not pay for those languages again.
 
 ### `DRY_RUN=1` — preview with zero token spend
 
@@ -107,7 +108,11 @@ git), or the app offers the stub languages.
    (the push trigger in `.github/workflows/i18n-web.yml`).
 
 `mode=delta` (the default) runs the shared single-job workflow and opens or updates the rolling PR
-`i18n: update web translations`. Either PR is opened by the workflow's `GITHUB_TOKEN`, so it does not trigger
+`i18n: update web translations`. While that PR is open, every run starts from its catalogs, snapshot, manifest and
+resume records instead of main's (main's snapshot only advances when the PR merges), so each English change is
+translated once and the PR accumulates them. A failed run still updates the PR with the batches it got. A push run
+passes `--max-keys` (repository variable `I18N_PUSH_MAX_KEYS`, default 2700; `0` stops every push run from spending);
+past it the job fails without a request, and a dispatch with `mode=delta` (no limit) translates the backlog. Either PR is opened by the workflow's `GITHUB_TOKEN`, so it does not trigger
 downstream CI; merging it by hand runs the full CI on `main`.
 
 ## Adding a language

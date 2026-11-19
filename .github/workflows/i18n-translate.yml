@@ -22,12 +22,13 @@ permissions:
   contents: write
   pull-requests: write
 
-# One rolling translation run per ref: a newer push to the English source cancels an in-flight run
-# so the single auto-translate PR always reflects the latest source (and two runs never race on the
-# fixed branch).
+# One translation run per ref at a time, so two runs never race on the fixed branch. Queued, never
+# cancelled: a cancelled run throws away translations already paid for. Only the newest queued run
+# waits; GitHub drops older pending ones before they start, and the run that does start bases its
+# delta on the open PR, so it translates only what changed since.
 concurrency:
   group: i18n-translate-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   translate:

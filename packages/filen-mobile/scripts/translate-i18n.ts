@@ -5,6 +5,8 @@
 //           pnpm run translate-i18n --full               (FULL mode — every key for every language, resumable)
 //           pnpm run translate-i18n de,fr                (restrict to specific languages)
 //           pnpm run translate-i18n --budget-minutes=300 (stop at the next batch boundary after 300 minutes, exit 3)
+//           pnpm run translate-i18n --max-keys=2700      (request nothing and exit 4 when more keys are planned)
+//           pnpm run translate-i18n --snapshot-only      (write the snapshot, delete the resume records, translate nothing)
 //           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
 // Modes:
@@ -17,9 +19,9 @@
 //                     treated as added (covers a brand-new empty stub or a previously-failed run).
 //                     After a successful run the snapshot is rewritten to the current English catalog.
 //   FULL (--full)   — translate every English key for every target language (ignores the snapshot).
-//                     Resumable: src/locales/.sources/<lang>.json records the English each key was
-//                     translated from, and a re-run skips keys whose English is unchanged. A run that
-//                     completes for every language deletes the records, so the next FULL starts over.
+//   Both modes are resumable: src/locales/.sources/<lang>.json records the English each key was
+//   translated from, and a re-run skips keys whose English is unchanged. A run that completes for
+//   every language deletes the records along with advancing the snapshot.
 //
 // DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>"
 //             (e.g. "de:Cancel"). Lets the catalog-read / delta / file-write logic be exercised
@@ -28,7 +30,7 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
@@ -39,6 +41,8 @@ import {
 	coversEveryLanguage,
 	deadlineAfter,
 	englishSource as toEnglishSource,
+	KEY_LIMIT_EXIT_CODE,
+	keyLimitIssue,
 	keysToTranslate,
 	LANGUAGE_NAMES,
 	parseCliArgs,
@@ -131,9 +135,19 @@ function writeSortedJson(path: string, record: Catalog): void {
 // Main
 // ---------------------------------------------------------------------------
 
-// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run.
+// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run,
+// KEY_LIMIT_EXIT_CODE when the plan exceeded --max-keys.
 async function main(): Promise<number> {
 	const args = parseCliArgs(process.argv.slice(2), TARGET_LANGUAGES)
+
+	if (args.snapshotOnly) {
+		writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
+		rmSync(SOURCES_DIR, { recursive: true, force: true })
+		console.log("[translate-i18n] wrote the snapshot and deleted the resume records; nothing translated")
+
+		return 0
+	}
+
 	const delta = args.full
 		? { upsert: {}, removed: [] }
 		: computeDelta(readCatalog(EN_SNAPSHOT_PATH, ".en-snapshot.json"), EN_CATALOG)
@@ -147,6 +161,33 @@ async function main(): Promise<number> {
 		console.log(
 			`[translate-i18n] delta: ${Object.keys(delta.upsert).length} added/changed, ${delta.removed.length} removed`
 		)
+	}
+
+	// Every language planned before the first request, so the key limit is checked against the whole run.
+	const plans = args.languages.map(lang => {
+		const existing = readCatalog(join(LOCALES_DIR, `${lang}.json`), `Catalog ${lang}.json`) ?? {}
+		// The resume record: what a run that stopped before the snapshot advanced already translated.
+		const record: Catalog = { ...readCatalog(join(SOURCES_DIR, `${lang}.json`), `Resume record ${lang}.json`) }
+		const subset = keysToTranslate({
+			source: EN_SOURCE,
+			full: args.full,
+			delta,
+			existing,
+			lang,
+			sources: record
+		})
+
+		return { lang, existing, record, subset }
+	})
+	const limitIssue = keyLimitIssue(
+		new Map(plans.map(plan => [plan.lang, Object.keys(plan.subset).length])),
+		args.maxKeys
+	)
+
+	if (limitIssue !== null) {
+		console.error(`[translate-i18n] ${limitIssue}`)
+
+		return KEY_LIMIT_EXIT_CODE
 	}
 
 	// Created on the first request, so a run with nothing left to translate needs no key.
@@ -170,31 +211,16 @@ async function main(): Promise<number> {
 			}
 	const shouldStop = deadlineAfter(args.budgetMinutes)
 
-	for (const lang of args.languages) {
+	for (const { lang, existing, record, subset } of plans) {
 		const catalogPath = join(LOCALES_DIR, `${lang}.json`)
 		const sourcesPath = join(SOURCES_DIR, `${lang}.json`)
-		const existing = readCatalog(catalogPath, `Catalog ${lang}.json`) ?? {}
-		// FULL keeps a resume record; DELTA updates the record a stopped FULL run left behind.
-		const storedRecord = readCatalog(sourcesPath, `Resume record ${lang}.json`)
-		const record: Catalog | null = storedRecord !== null || args.full ? { ...storedRecord } : null
-		const subset = keysToTranslate({
-			source: EN_SOURCE,
-			full: args.full,
-			delta,
-			existing,
-			lang,
-			sources: args.full ? record : null
-		})
 		const merged: Catalog = {
 			...existing
 		}
 
 		// DELTA removes what left English since the snapshot; FULL whatever English no longer has.
 		applyRemovals(merged, args.full ? staleKeys(EN_SOURCE, merged) : delta.removed)
-
-		if (record !== null) {
-			applyRemovals(record, args.full ? staleKeys(EN_SOURCE, record) : delta.removed)
-		}
+		applyRemovals(record, args.full ? staleKeys(EN_SOURCE, record) : delta.removed)
 
 		const subsetKeyCount = Object.keys(subset).length
 		let finished = true
@@ -223,10 +249,7 @@ async function main(): Promise<number> {
 									}),
 					onBatch: translated => {
 						Object.assign(merged, translated)
-
-						if (record !== null) {
-							recordSources(record, translated, subset)
-						}
+						recordSources(record, translated, subset)
 					},
 					shouldStop
 				})
@@ -236,7 +259,8 @@ async function main(): Promise<number> {
 		} finally {
 			writeSortedJson(catalogPath, merged)
 
-			if (record !== null) {
+			// No empty record files: a language with nothing recorded has none, unless one is already there.
+			if (Object.keys(record).length > 0 || existsSync(sourcesPath)) {
 				writeSortedJson(sourcesPath, record)
 			}
 		}
@@ -253,10 +277,10 @@ async function main(): Promise<number> {
 	}
 
 	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
-	// snapshot in place, so a re-run re-detects the same delta and retries — and only when the run
-	// covered every language, or the ones left out would never see the changed keys. Written into
-	// the same PR as the translations, so the baseline only advances once that PR is merged. The
-	// resume records go with it: every language is complete, so the next FULL run starts over.
+	// snapshot in place, and the resume records keep the re-run from paying for what it already got —
+	// and only when the run covered every language, or the ones left out would never see the changed
+	// keys. Written into the same PR as the translations; the workflow bases its next run on that
+	// PR's files while it is open. The resume records go with it: every language is complete.
 	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
 		writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
 		rmSync(SOURCES_DIR, { recursive: true, force: true })

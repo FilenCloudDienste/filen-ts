@@ -61,7 +61,39 @@ jobs:
           PNPM_FILTER: ${{ inputs.pnpm-filter }}
         run: pnpm install --frozen-lockfile --filter "$PNPM_FILTER..."
 
+      # While the rolling PR is open, its catalogs, snapshot, manifest and resume records are the state
+      # this run continues from, not main's: main's snapshot only advances when that PR merges, so a delta
+      # against it would pay again for every English change the PR already translated. The PR step below
+      # rebuilds the branch from main plus this working tree, so the PR keeps every earlier translation.
+      # Without an open PR (merged, closed, or none yet) main's own files are the state.
+      - name: Continue from the open translation PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ inputs.branch }}
+          BASE: ${{ github.ref_name }}
+          LOCALES_DIR: ${{ inputs.package-dir }}/src/locales
+        run: |
+          pr=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[0].number // empty')
+
+          if [ -z "$pr" ]; then
+            echo "No open PR from $BRANCH into $BASE: continuing from $BASE's files."
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "$BRANCH"
+
+          # The pipeline's outputs only (the English source stays the pushed commit's). Removed first, so a
+          # file the PR deleted (the resume records) is not kept from main. The pathspec's `*` also matches
+          # dotfiles and `.sources/<lang>.json`.
+          rm -f "${LOCALES_DIR:?}"/*.json "${LOCALES_DIR:?}/.en-snapshot.json" "${LOCALES_DIR:?}/.catalogs.json"
+          rm -rf "${LOCALES_DIR:?}/.sources"
+          git checkout FETCH_HEAD -- "$LOCALES_DIR/*.json"
+          git reset -q
+          echo "Continuing from PR #$pr ($BRANCH)."
+
       - name: Run translation pipeline
+        id: translate
         working-directory: ${{ inputs.package-dir }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -69,12 +101,27 @@ jobs:
           # 'full' maps to a flag. Resolved in env, then passed via a quoted shell variable — no input
           # value is interpolated into the run line.
           TRANSLATE_FLAG: ${{ inputs.mode == 'full' && '--full' || '' }}
+          # A push only ever translates what one English change needs. More keys than this (summed over
+          # every language; repository variable I18N_PUSH_MAX_KEYS, default 2700 = 100 English keys x 27
+          # languages) means a lost baseline, so the run requests nothing and fails. A dispatch has no limit.
+          MAX_KEYS_FLAG: ${{ github.event_name == 'push' && format('--max-keys={0}', vars.I18N_PUSH_MAX_KEYS || '2700') || '' }}
         # No `--` separator: pnpm forwards it to the script as a literal argument, and parseArgs would
         # reject it as an unknown target language. An empty flag still arrives as one empty argument,
         # which parseArgs skips.
-        run: pnpm run translate-i18n "$TRANSLATE_FLAG"
+        run: |
+          status=0
+          pnpm run translate-i18n "$TRANSLATE_FLAG" "$MAX_KEYS_FLAG" || status=$?
 
+          if [ "$status" -eq 4 ]; then
+            echo "::error title=i18n::More keys planned than a push may translate; nothing was requested. Check the log, then dispatch this workflow (mode delta) to translate them anyway."
+          fi
+
+          exit "$status"
+
+      # Also after a failed translation: the catalogs and resume records hold every batch already paid for,
+      # and the next run continues from this PR instead of requesting them again.
       - name: Create Pull Request
+        if: always() && (steps.translate.outcome == 'success' || steps.translate.outcome == 'failure')
         uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8
         with:
           # FIXED branch (not per-run): peter-evans UPDATES this one rolling PR each run. Including
@@ -99,6 +146,10 @@ jobs:
 
             **These translations are machine-generated and need human review** before merging —
             check placeholders (`{{...}}`), `<link>…</link>` markup, plural forms, and tone.
+
+            Every run continues from this PR's files while it is open, so each English change is
+            translated once. Closing it unmerged discards those translations: the next push would
+            request them again (up to the push key limit).
 
             > Note: PRs opened by the workflow's `GITHUB_TOKEN` do not trigger downstream CI
             > (lint / typecheck / tests). Merging this PR by hand runs the full CI on `main`.

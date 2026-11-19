@@ -11,7 +11,8 @@
 //           pnpm run translate-i18n --full              (FULL mode — every key for every language, resumable)
 //           pnpm run translate-i18n de,fr               (restrict to specific languages)
 //           pnpm run translate-i18n --budget-minutes=300 (stop at the next batch boundary after 300 minutes, exit 3)
-//           pnpm run translate-i18n --snapshot-only     (write the snapshot and manifest, translate nothing)
+//           pnpm run translate-i18n --max-keys=2700     (request nothing and exit 4 when more keys are planned)
+//           pnpm run translate-i18n --snapshot-only     (write the snapshot and manifest, delete the resume records, translate nothing)
 //           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
 // DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>".
@@ -19,7 +20,7 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join, relative } from "node:path"
 import {
@@ -31,6 +32,8 @@ import {
 	coversEveryLanguage,
 	deadlineAfter,
 	englishSource,
+	KEY_LIMIT_EXIT_CODE,
+	keyLimitIssue,
 	keysToTranslate,
 	LANGUAGE_NAMES,
 	parseCliArgs,
@@ -45,7 +48,8 @@ import {
 	writeJsonFile,
 	type Catalog,
 	type CreateMessage,
-	type Delta
+	type Delta,
+	type EnglishSource
 } from "@filen/shared/tooling/i18n"
 import { SUPPORTED_LANGUAGES, type TargetLanguage } from "@filen/shared/languages"
 import { EN_NAMESPACES, EN_CATALOGS, type EnNamespace } from "@/lib/i18n/catalog"
@@ -260,19 +264,16 @@ function countKeys(catalog: NestedCatalog): number {
 	return NAMESPACES.reduce((sum, ns) => sum + Object.keys(catalog[ns]).length, 0)
 }
 
-// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run.
+// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run, KEY_LIMIT_EXIT_CODE
+// when the plan exceeded --max-keys.
 async function main(): Promise<number> {
-	const argv = process.argv.slice(2)
-	const snapshotOnly = argv.includes("--snapshot-only")
-	const args = parseCliArgs(
-		argv.filter(arg => arg !== "--snapshot-only"),
-		TARGET_LANGUAGES
-	)
+	const args = parseCliArgs(process.argv.slice(2), TARGET_LANGUAGES)
 
-	if (snapshotOnly) {
+	if (args.snapshotOnly) {
 		writeNested(EN_SNAPSHOT_PATH, EN_CATALOG)
 		writeManifest(new Map())
-		console.log("[translate-i18n] wrote the snapshot and the manifest; nothing translated")
+		rmSync(SOURCES_DIR, { recursive: true, force: true })
+		console.log("[translate-i18n] wrote the snapshot and the manifest, deleted the resume records; nothing translated")
 
 		return 0
 	}
@@ -318,7 +319,7 @@ async function main(): Promise<number> {
 	// Every requested language held in memory (about 0.5 MB each, twice that with its resume record), so each unit can
 	// be written as a checkpoint.
 	const catalogs = new Map<TargetLanguage, NestedCatalog>()
-	// FULL keeps a resume record for every language; DELTA updates the records a stopped FULL run left behind.
+	// A resume record for every language: what a run that stopped before the snapshot advanced already translated.
 	const records = new Map<TargetLanguage, NestedCatalog>()
 
 	for (const lang of args.languages) {
@@ -330,12 +331,56 @@ async function main(): Promise<number> {
 			perNamespace(ns => ({ ...(existing?.[ns] ?? {}) }))
 		)
 
-		if (record !== null || args.full) {
-			records.set(
-				lang,
-				perNamespace(ns => ({ ...(record?.[ns] ?? {}) }))
-			)
+		records.set(
+			lang,
+			perNamespace(ns => ({ ...(record?.[ns] ?? {}) }))
+		)
+	}
+
+	const unitsByNamespace = new Map<Namespace, { unit: Unit; source: EnglishSource; delta: Delta }[]>()
+
+	for (const ns of NAMESPACES) {
+		unitsByNamespace.set(
+			ns,
+			(await unitsOf(ns)).map(unit => ({
+				unit,
+				source: englishSource(pick(EN_CATALOG[ns], unit.keys)),
+				delta: { upsert: pick(delta[ns].upsert, unit.keys), removed: [] }
+			}))
+		)
+	}
+
+	const subsetOf = (lang: TargetLanguage, ns: Namespace, source: EnglishSource, unitDelta: Delta): Catalog =>
+		keysToTranslate({
+			source,
+			full: args.full,
+			delta: unitDelta,
+			existing: catalogs.get(lang)?.[ns] ?? {},
+			lang,
+			sources: records.get(lang)?.[ns] ?? null
+		})
+
+	// The whole run planned before the first request, so the key limit is checked against all of it.
+	const planned = new Map<TargetLanguage, number>()
+
+	for (const lang of catalogs.keys()) {
+		let count = 0
+
+		for (const [ns, units] of unitsByNamespace) {
+			for (const { source, delta: unitDelta } of units) {
+				count += Object.keys(subsetOf(lang, ns, source, unitDelta)).length
+			}
 		}
+
+		planned.set(lang, count)
+	}
+
+	const limitIssue = keyLimitIssue(planned, args.maxKeys)
+
+	if (limitIssue !== null) {
+		console.error(`[translate-i18n] ${limitIssue}`)
+
+		return KEY_LIMIT_EXIT_CODE
 	}
 
 	// Languages changed since their last checkpoint; all of them at first, so every requested catalog is written (sorted,
@@ -351,7 +396,8 @@ async function main(): Promise<number> {
 				writeNested(languagePath(lang), catalog)
 			}
 
-			if (record !== undefined) {
+			// No empty record files: a language with nothing recorded has none, unless one is already there.
+			if (record !== undefined && (countKeys(record) > 0 || existsSync(sourcesPath(lang)))) {
 				writeNested(sourcesPath(lang), record)
 			}
 		}
@@ -383,21 +429,12 @@ async function main(): Promise<number> {
 				}
 			}
 
-			for (const unit of await unitsOf(ns)) {
-				const source = englishSource(pick(EN_CATALOG[ns], unit.keys))
-				const unitDelta: Delta = { upsert: pick(delta[ns].upsert, unit.keys), removed: [] }
+			for (const { unit, source, delta: unitDelta } of unitsByNamespace.get(ns) ?? []) {
 				const system = [buildSystemPrompt(unitContext(unit), "web", true)]
 
 				for (const [lang, catalog] of catalogs) {
 					const record = records.get(lang)?.[ns]
-					const subset = keysToTranslate({
-						source,
-						full: args.full,
-						delta: unitDelta,
-						existing: catalog[ns],
-						lang,
-						sources: args.full ? (record ?? null) : null
-					})
+					const subset = subsetOf(lang, ns, source, unitDelta)
 					const subsetKeyCount = Object.keys(subset).length
 
 					if (subsetKeyCount === 0) {
@@ -465,9 +502,10 @@ async function main(): Promise<number> {
 	}
 
 	// Advance the baseline only after every namespace succeeded, and only when the run covered every language, or the
-	// ones left out would never see the changed keys again. Written into the same PR as the translations, so the
-	// baseline only advances once that PR is merged. The resume records go with it: every language is complete, so the
-	// next FULL run starts over.
+	// ones left out would never see the changed keys again; until then the resume records keep a re-run from paying for
+	// what it already got. Written into the same PR as the translations; the workflow bases its next run on that PR's
+	// files while it is open. The resume records go with it: every language is complete, so the next FULL run starts
+	// over.
 	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
 		writeNested(EN_SNAPSHOT_PATH, EN_CATALOG)
 		rmSync(SOURCES_DIR, { recursive: true, force: true })

@@ -12,6 +12,7 @@ import {
 	isTransientError,
 	MAX_TRANSIENT_ATTEMPTS,
 	MAX_VALIDATION_ATTEMPTS,
+	keyLimitIssue,
 	parseCliArgs,
 	parseTranslatedBatch,
 	retryDelayMs,
@@ -23,17 +24,22 @@ import {
 
 describe("parseCliArgs", () => {
 	const langs = ["de", "fr", "ja"] as const
+	const defaults = { full: false, snapshotOnly: false, languages: langs, budgetMinutes: null, maxKeys: null }
 
 	it("defaults to every language in delta mode", () => {
-		expect(parseCliArgs([], langs)).toEqual({ full: false, languages: langs, budgetMinutes: null })
+		expect(parseCliArgs([], langs)).toEqual(defaults)
 	})
 
 	it("accepts --full and bare or comma-separated lists", () => {
-		expect(parseCliArgs(["--full", "de, fr", "ja"], langs)).toEqual({ full: true, languages: ["de", "fr", "ja"], budgetMinutes: null })
+		expect(parseCliArgs(["--full", "de, fr", "ja"], langs)).toEqual({ ...defaults, full: true, languages: ["de", "fr", "ja"] })
+	})
+
+	it("skips the empty argument an unset workflow flag passes", () => {
+		expect(parseCliArgs(["", ""], langs)).toEqual(defaults)
 	})
 
 	it("reads a time budget in minutes", () => {
-		expect(parseCliArgs(["--budget-minutes=330", "de"], langs)).toEqual({ full: false, languages: ["de"], budgetMinutes: 330 })
+		expect(parseCliArgs(["--budget-minutes=330", "de"], langs)).toEqual({ ...defaults, languages: ["de"], budgetMinutes: 330 })
 		expect(parseCliArgs(["--budget-minutes=0.5"], langs).budgetMinutes).toBe(0.5)
 		expect(parseCliArgs(["--budget-minutes=0"], langs).budgetMinutes).toBe(0)
 
@@ -42,8 +48,35 @@ describe("parseCliArgs", () => {
 		}
 	})
 
+	it("reads a key limit and --snapshot-only", () => {
+		expect(parseCliArgs(["--max-keys=2700"], langs).maxKeys).toBe(2700)
+		expect(parseCliArgs(["--max-keys=0"], langs).maxKeys).toBe(0)
+		expect(parseCliArgs(["--snapshot-only"], langs)).toEqual({ ...defaults, snapshotOnly: true })
+
+		for (const bad of ["--max-keys=", "--max-keys=-1", "--max-keys=1.5", "--max-keys=many"]) {
+			expect(() => parseCliArgs([bad], langs)).toThrow("expected a non-negative whole number of keys")
+		}
+	})
+
 	it("rejects an unknown language", () => {
 		expect(() => parseCliArgs(["xx"], langs)).toThrow('Unknown target language "xx". Valid: de, fr, ja')
+	})
+})
+
+describe("keyLimitIssue", () => {
+	const planned = new Map([
+		["de", 30],
+		["fr", 0],
+		["ja", 30]
+	])
+
+	it("allows a plan within the limit, or without one", () => {
+		expect(keyLimitIssue(planned, 60)).toBeNull()
+		expect(keyLimitIssue(planned, null)).toBeNull()
+	})
+
+	it("refuses a larger plan and names the languages that need keys", () => {
+		expect(keyLimitIssue(planned, 59)).toBe("60 keys planned, more than --max-keys=59 allows (de 30, ja 30). Nothing was requested.")
 	})
 })
 

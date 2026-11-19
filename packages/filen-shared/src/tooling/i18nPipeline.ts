@@ -50,25 +50,51 @@ export const LANGUAGE_NAMES = {
 
 export type CliArgs<L extends string> = {
 	full: boolean
+	// Write the snapshot (and the web manifest) for the current English and translate nothing.
+	snapshotOnly: boolean
 	languages: readonly L[]
 	// Minutes the run may spend before it stops at the next batch boundary; null = unbounded.
 	budgetMinutes: number | null
+	// Most keys the run may request, summed over every language; null = unbounded. See keyLimitIssue.
+	maxKeys: number | null
 }
 
 const BUDGET_FLAG = "--budget-minutes="
+const MAX_KEYS_FLAG = "--max-keys="
 
 /**
- * `--full`, `--budget-minutes=<n>` (decimals allowed, 0 = translate nothing) plus a bare or comma-separated language
- * list, e.g. `de` or `de,fr,ja`. No list means every language.
+ * `--full`, `--snapshot-only`, `--budget-minutes=<n>` (decimals allowed, 0 = translate nothing), `--max-keys=<n>` (a
+ * whole number) plus a bare or comma-separated language list, e.g. `de` or `de,fr,ja`. No list means every language.
  */
 export function parseCliArgs<L extends string>(argv: readonly string[], allowed: readonly L[]): CliArgs<L> {
 	let full = false
+	let snapshotOnly = false
 	let budgetMinutes: number | null = null
+	let maxKeys: number | null = null
 	const requested: L[] = []
 
 	for (const arg of argv) {
 		if (arg === "--full") {
 			full = true
+
+			continue
+		}
+
+		if (arg === "--snapshot-only") {
+			snapshotOnly = true
+
+			continue
+		}
+
+		if (arg.startsWith(MAX_KEYS_FLAG)) {
+			const raw = arg.slice(MAX_KEYS_FLAG.length)
+			const value = Number(raw)
+
+			if (raw.trim().length === 0 || !Number.isSafeInteger(value) || value < 0) {
+				throw new Error(`Invalid ${MAX_KEYS_FLAG}${raw}: expected a non-negative whole number of keys`)
+			}
+
+			maxKeys = value
 
 			continue
 		}
@@ -105,9 +131,45 @@ export function parseCliArgs<L extends string>(argv: readonly string[], allowed:
 
 	return {
 		full,
+		snapshotOnly,
 		languages: requested.length > 0 ? requested : allowed,
-		budgetMinutes
+		budgetMinutes,
+		maxKeys
 	}
+}
+
+/**
+ * The process exit code of a run that stopped before its first request because it planned more keys than
+ * `--max-keys` allows. Nothing was translated or written.
+ */
+export const KEY_LIMIT_EXIT_CODE = 4
+
+/**
+ * Why a planned run must not start: it would request more keys (summed over every language) than `maxKeys` allows,
+ * which for a push-triggered delta means a baseline went missing rather than a real English change. Null when the
+ * plan is within the limit or there is none. `planned` maps each language to its key count.
+ */
+export function keyLimitIssue(planned: ReadonlyMap<string, number>, maxKeys: number | null): string | null {
+	if (maxKeys === null) {
+		return null
+	}
+
+	let total = 0
+
+	for (const count of planned.values()) {
+		total += count
+	}
+
+	if (total <= maxKeys) {
+		return null
+	}
+
+	const perLanguage = [...planned]
+		.filter(([, count]) => count > 0)
+		.map(([lang, count]) => `${lang} ${count}`)
+		.join(", ")
+
+	return `${total} keys planned, more than --max-keys=${maxKeys} allows (${perLanguage}). Nothing was requested.`
 }
 
 /**
@@ -690,11 +752,12 @@ export function coversEveryLanguage<L extends string>(requested: readonly L[], a
 
 // --- Resume record ---------------------------------------------------------
 //
-// Per target language, the English text each key was translated from, so a FULL run that stopped (a failure, a time
-// budget, a CI job limit) resumes where it left off instead of paying for the same keys again. Stored as a short hash
-// of the English (key → hash) in `src/locales/.sources/<lang>.json` (a dot directory, never served or bundled). A run
-// that completes for every language deletes the directory along with advancing the snapshot, so the next FULL run
-// translates everything again.
+// Per target language, the English text each key was translated from, so a run that stopped before the snapshot
+// advanced (a failure, a time budget, a CI job limit, a run over some languages) resumes where it left off instead of
+// paying for the same keys again. FULL and DELTA both keep it. Stored as a short hash of the English (key → hash) in
+// `src/locales/.sources/<lang>.json` (a dot directory, never served or bundled). Advancing the snapshot (a run that
+// completes for every language, or `--snapshot-only`) deletes the directory, so the next FULL run translates
+// everything again.
 
 export type SourceRecord = Record<string, string>
 
@@ -779,11 +842,12 @@ export function pluralGroupSources(source: EnglishSource, base: string, lang: st
 
 /**
  * The English keys (key → source text) a language needs translated. FULL = the whole catalog with plural groups
- * expanded to the language's CLDR set, minus what `sources` shows was already translated from the current English
- * (the key is in the target and its recorded hash matches; a plural group is skipped only when every form is). DELTA = changed English keys + non-plural keys missing from the target + the
+ * expanded to the language's CLDR set. DELTA = changed English keys + non-plural keys missing from the target + the
  * plural categories missing from the target. A changed English plural retranslates its whole group (the wording
  * shifted); a merely incomplete group only fills the missing categories, so reviewed `_one` / `_other` forms are never
- * clobbered.
+ * clobbered. Both modes leave out what `sources` shows was already translated from the current English (the key is in
+ * the target and its recorded hash matches; a plural group is skipped only when every form is), so a run that stopped
+ * before the snapshot advanced never pays for the same key twice.
  */
 export function keysToTranslate({
 	source,
@@ -798,14 +862,14 @@ export function keysToTranslate({
 	delta: Delta
 	existing: Catalog
 	lang: string
-	// FULL only: the language's resume record; null translates everything.
+	// The language's resume record; null skips nothing.
 	sources?: SourceRecord | null
 }): Catalog {
 	const { catalog } = source
 	const result: Catalog = {}
+	const done = (key: string, text: string): boolean => sources !== null && key in existing && sources[key] === sourceHash(text)
 
 	if (full) {
-		const done = (key: string, text: string): boolean => sources !== null && key in existing && sources[key] === sourceHash(text)
 		const fullGroups = new Set<string>()
 
 		for (const [key, value] of Object.entries(catalog)) {
@@ -839,7 +903,9 @@ export function keysToTranslate({
 		const base = pluralBaseOf(source, key)
 
 		if (base === null) {
-			result[key] = value
+			if (!done(key, value)) {
+				result[key] = value
+			}
 		} else {
 			changedGroups.add(base)
 		}
@@ -859,15 +925,17 @@ export function keysToTranslate({
 	// Plural groups: the whole group when its English wording changed, otherwise only the CLDR categories the target
 	// lacks (this is what supplies `_few` / `_many`).
 	for (const base of source.pluralBases.keys()) {
-		const sources = pluralGroupSources(source, base, lang)
+		const group = pluralGroupSources(source, base, lang)
 
 		if (changedGroups.has(base)) {
-			Object.assign(result, sources)
+			if (Object.entries(group).some(([key, value]) => !done(key, value))) {
+				Object.assign(result, group)
+			}
 
 			continue
 		}
 
-		for (const [key, value] of Object.entries(sources)) {
+		for (const [key, value] of Object.entries(group)) {
 			if (!(key in existing)) {
 				result[key] = value
 			}

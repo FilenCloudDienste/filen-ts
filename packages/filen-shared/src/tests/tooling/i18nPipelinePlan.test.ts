@@ -132,6 +132,52 @@ describe("keysToTranslate resuming a FULL run", () => {
 	})
 })
 
+describe("keysToTranslate resuming a DELTA run", () => {
+	const source = englishSource(EN)
+	const translated = {
+		cancel: "Abbrechen",
+		files_one: "{{count}} Datei",
+		files_other: "{{count}} Dateien",
+		link: "Öffne <link>{{name}}</link>"
+	}
+	// Every key changed since the snapshot: the delta a run sees while its translations sit in an unmerged PR.
+	const delta = { upsert: EN, removed: [] }
+
+	function recordOf(english: Record<string, string>): Record<string, string> {
+		const record: Record<string, string> = {}
+
+		recordSources(record, english, english)
+
+		return record
+	}
+
+	it("does not request again what a stopped run already translated from the current English", () => {
+		expect(keysToTranslate({ source, full: false, delta, existing: translated, lang: "de", sources: recordOf(EN) })).toEqual({})
+	})
+
+	it("requests a changed key whose record holds older English, and its whole plural group", () => {
+		const sources = recordOf({ ...EN, cancel: "Abort", files_other: "{{count}} items" })
+
+		expect(keysToTranslate({ source, full: false, delta, existing: translated, lang: "de", sources })).toEqual({
+			cancel: EN.cancel,
+			files_one: EN.files_one,
+			files_other: EN.files_other
+		})
+	})
+
+	it("requests a recorded key the catalog no longer holds", () => {
+		const existing: Record<string, string> = { ...translated }
+
+		Reflect.deleteProperty(existing, "cancel")
+
+		expect(keysToTranslate({ source, full: false, delta, existing, lang: "de", sources: recordOf(EN) })).toEqual({ cancel: EN.cancel })
+	})
+
+	it("requests the whole delta without a record", () => {
+		expect(keysToTranslate({ source, full: false, delta, existing: translated, lang: "de", sources: null })).toEqual(EN)
+	})
+})
+
 describe("staleKeys", () => {
 	it("lists keys no English key or plural group produces", () => {
 		expect(staleKeys(englishSource(EN), { cancel: "a", files_few: "b", files_one: "c", gone: "d", gone_one: "e" })).toEqual([
