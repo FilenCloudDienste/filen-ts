@@ -33,8 +33,11 @@ describe.skipIf(!XMLLINT)("validityErrors", () => {
 		const schema = join(directory, "schema.xsd")
 
 		expect([...validityErrors(schema, encodeUtf8("<a>1</a>"))]).toEqual([])
+		// libxml2 before 2.12 puts "element a: " in front of the message.
 		expect([...validityErrors(schema, encodeUtf8("<a>x</a>")).keys()]).toEqual([
-			"element a: Schemas validity error : Element 'a': 'x' is not a valid value of the atomic type 'xs:int'."
+			expect.stringMatching(
+				/^(?:element a: )?Schemas validity error : Element 'a': 'x' is not a valid value of the atomic type 'xs:int'\.$/
+			)
 		])
 	})
 
@@ -42,8 +45,9 @@ describe.skipIf(!XMLLINT)("validityErrors", () => {
 		expect(() => validityErrors(join(directory, "broken.xsd"), encodeUtf8("<a>1</a>"))).toThrow(/exited 5[\s\S]*failed to compile/)
 	})
 
+	// The status for an input that does not parse is 1 or 4, by libxml2 version; the report line decides.
 	it("throws for an input that does not parse", () => {
-		expect(() => validityErrors(join(directory, "schema.xsd"), encodeUtf8("<a>1"))).toThrow(/exited 1[\s\S]*parser error/)
+		expect(() => validityErrors(join(directory, "schema.xsd"), encodeUtf8("<a>1"))).toThrow(/exited [14][\s\S]*parser error/)
 	})
 })
 
