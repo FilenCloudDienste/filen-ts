@@ -48,6 +48,7 @@ import { textDateParser } from "./textDates"
 import { installErrorValues } from "./errorValues"
 import { installExactSearch } from "./exactSearch"
 import { installSharedRanges } from "./sharedRanges"
+import { installSparseRanges } from "./sparseRanges"
 import { installWholeRanges, WholeRanges, withWholeRanges } from "./wholeRanges"
 import { installCircles, withCircles, type CircleHost, type Iteration } from "./iteration"
 
@@ -325,6 +326,7 @@ function registerHeld(): void {
 	registerSheetFunctions()
 	guardFunctionPlugins()
 	installWholeRanges(LICENSE_KEY)
+	installSparseRanges(LICENSE_KEY)
 	installSharedRanges(LICENSE_KEY)
 	installExactSearch(LICENSE_KEY)
 	installErrorValues(LICENSE_KEY)

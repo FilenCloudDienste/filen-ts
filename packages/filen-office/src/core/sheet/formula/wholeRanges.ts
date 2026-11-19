@@ -2,6 +2,7 @@ import { EmptyValue, HyperFormula, SimpleRangeValue } from "hyperformula"
 import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
 import { compareLookup, lookupValue, sameClass, type Lookup } from "./functions/values"
 import type { PluginScalar } from "./functions/plugin"
+import { blockReach } from "./sparseRanges"
 
 // Whole-column (A:A) and whole-row (1:1) references, as far as the engine reads them. HyperFormula ends one at the
 // sheet's height (or width), so a single cell written in the grid's last row makes every whole-column reference of
@@ -256,12 +257,15 @@ export class WholeRanges {
 		if (axis.end < 0) {
 			const storage = this.storage(graph, sheet)
 
+			// A block joined to its stored cells alone (sparseRanges.ts) counts as stored in every cell, as the engine's
+			// own join stores an empty cell at each.
 			axis.end =
 				storage === null || axis.spans.length === 0
 					? 0
-					: columns
-						? lastRowIn(storage, axis.spans)
-						: lastColumnIn(storage, axis.spans)
+					: Math.max(
+							columns ? lastRowIn(storage, axis.spans) : lastColumnIn(storage, axis.spans),
+							blockReach(graph, sheet, axis.spans, columns)
+						)
 		}
 
 		return axis.end
