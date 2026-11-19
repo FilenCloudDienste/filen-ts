@@ -1,17 +1,6 @@
-import {
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-	useSyncExternalStore,
-	Component,
-	type FocusEvent as ReactFocusEvent,
-	type KeyboardEvent,
-	type ReactNode
-} from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, Component, type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useLatestRef } from "@/lib/useLatestRef"
-import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import {
 	XIcon,
@@ -30,50 +19,28 @@ import { needsContentSniff } from "@/features/drive/lib/preview.logic"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
-	canEditImage,
-	canEditVideo,
 	canSaveCopyBeside,
-	editedSaveTimes,
 	isViewOnlyPdf,
 	isTextCategory,
-	isUnresolvableParentError,
-	presentationSaveRefusalKey,
-	runPreviewSave,
 	SaveRefusedError,
-	settledStorageRefusal,
-	type ImageSaveEdits,
 	type PresentationSaveEdits,
 	type PresentationSaveSource
 } from "@/features/drive/lib/previewSave.logic"
-import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
-import { unshareItems } from "@/features/drive/lib/share/actions"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { splicePhotoSave } from "@/features/photos/queries/photos"
 import { recordOwnSave } from "@/features/preview/lib/ownSaves"
-import { imageSaveDeps, writeEditedCopy } from "@/features/preview/lib/editedCopy"
+import { writeEditedCopy } from "@/features/preview/lib/editedCopy"
+import { readImageEdits } from "@/features/preview/lib/imageSave"
 import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor"
-import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdit/editSession"
+import { enterImageEdit } from "@/features/preview/imageEdit/editSession"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
-import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
-import { createVideoEditClient } from "@/features/preview/videoEdit/client"
-import { isVideoExportRunning, subscribeVideoExports } from "@/features/preview/videoEdit/save"
 import { VideoEditor, type VideoEditorCommands, type VideoFrameSaveOutcome } from "@/features/preview/videoEdit/components/videoEditor"
 import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
 import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
-import { knownUnpreviewable, useVideoEditMode } from "@/features/preview/videoEdit/useVideoEditMode"
-import type { ImageEditorCommands, ImageExportSource, SaveTarget } from "@/features/preview/imageEdit/types"
-import type { ActionOutcome } from "@/lib/actions/outcome"
-import type { ErrorDTO } from "@/lib/sdk/errors"
-import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity } from "@/features/drive/lib/activity"
-import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
-import { type ActivityKeys } from "@/lib/activity/activity.logic"
-import { sdkApi } from "@/lib/sdk/client"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import type { ImageEditorCommands, ImageExportSource } from "@/features/preview/imageEdit/types"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { holdUnload } from "@/lib/unloadGuard"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
 import { PreviewBody } from "@/features/preview/components/previewBody"
 import { cn, driveItemName } from "@filen/shared"
@@ -96,9 +63,7 @@ import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isTextEditingTarget,
 	previewDownloadable,
-	previewNavigationUnmountsOverlay,
 	previewMenuHiddenActionIds,
-	resolveUnsavedConfirm,
 	slotPinSource,
 	unsavedPromptOpen,
 	bodyKey,
@@ -126,21 +91,19 @@ import { bindingOf } from "@/lib/keymap/bindingOf"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
-import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
+import { usePreviewItemMenu } from "@/features/preview/hooks/usePreviewItemMenu"
+import { usePreviewDismissal } from "@/features/preview/hooks/usePreviewDismissal"
+import { usePreviewSave } from "@/features/preview/hooks/usePreviewSave"
+import { usePreviewEditSessions } from "@/features/preview/hooks/usePreviewEditSessions"
+import { usePreviewPagerFocus } from "@/features/preview/hooks/usePreviewPagerFocus"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { toggleItemFavorite } from "@/features/drive/lib/favorite"
-import {
-	applyOfflineGate,
-	driveItemActions,
-	type ItemActionDialogKind,
-	type ItemActionId
-} from "@/features/drive/components/itemMenu.logic"
+import { applyOfflineGate, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
-import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -154,10 +117,6 @@ const IS_MAC = isMacPlatform()
 // The two actions an Escape the dialog dismisses on may be: closing, and leaving the image editor.
 const CLOSE: ActionDef | undefined = PREVIEW_OVERLAY_ACTIONS.find(def => def.id === "preview.close")
 const IMAGE_CANCEL: ActionDef | undefined = IMAGE_EDITOR_ACTIONS.find(def => def.id === "preview.imageCancel")
-
-// Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
-// deps, so a per-render identity would unregister/re-register the history blocker on every render.
-const blockWhenLeavingRoute: ShouldBlockFn = ({ current, next }) => previewNavigationUnmountsOverlay(current.routeId, next.routeId)
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -208,22 +167,6 @@ export interface PreviewOverlayProps {
 // so no tree walk is needed even for a click on the scrubber itself.
 function isMediaTarget(target: EventTarget | null): boolean {
 	return target instanceof HTMLMediaElement
-}
-
-// A removal of `uuid` run as the user's own: its echo can beat the response back, and is no change made elsewhere.
-// Outside the component: the React Compiler cannot lower a try without a catch, and would skip the whole overlay.
-async function asOwnRemoval<T>(
-	remote: Pick<ReturnType<typeof usePreviewRemoteChanges>, "expectOwnChange" | "forgetOwnChange">,
-	uuid: string,
-	run: () => Promise<T>
-): Promise<T> {
-	remote.expectOwnChange(uuid, "remove")
-
-	try {
-		return await run()
-	} finally {
-		remote.forgetOwnChange(uuid)
-	}
 }
 
 interface PreviewErrorBoundaryState {
@@ -367,9 +310,6 @@ export function PreviewOverlay({
 	const logoutRequest = usePreviewUnsavedGuardStore(state => state.logoutRequest)
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PreviewDismissIntent | null>(null)
-	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
-	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
-	const saveAgainRef = useRef<boolean | null>(null)
 
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
 	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
@@ -397,21 +337,6 @@ export function PreviewOverlay({
 	// What a "replace" intent runs once the edits are discarded; kept through the prompt's close (WebKit can report
 	// it before the confirm), cleared by the confirm and replaced by the next request.
 	const pendingReplaceRef = useRef<(() => void) | null>(null)
-	// Which secondary dialog the header's item menu (below) currently has open, if any — a single slot
-	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
-	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
-	// "color" and "openAsText" are part of the shared ItemActionDialogKind union but unreachable here —
-	// driveItemActions only ever offers Color for a directory, which never opens this overlay, and Open
-	// as text only to a surface that opens items (this header menu has its item open already).
-	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
-	const [menuPending, setMenuPending] = useState(false)
-	// The header item menu's dropdown. A save closes it and holds it shut (its trigger disabled, as its keys are):
-	// the save writes by the item it read, so a rename, move or trash meanwhile would see the upload re-create the file.
-	const [menuOpen, setMenuOpen] = useState(false)
-
-	if (saving && menuOpen) {
-		setMenuOpen(false)
-	}
 	// A menu action's Try again can land after this overlay closed, where closing it would close whatever
 	// dialog replaced it.
 	const mountedRef = useRef(false)
@@ -482,71 +407,21 @@ export function PreviewOverlay({
 	const editable = slotWritable && slotText?.writable !== false
 	// Read-only only because a rename changed the format the open edits would be saved in.
 	const renamedReadOnly = driveItem !== undefined && pin?.editable === true && saveFormat(driveItem) !== pin.format
-	// The image editor's session, for the slot and the version it opened on: another file on screen (a newer version
-	// loaded, the slot gone) leaves edit mode, and the effect below ends the session.
-	const [editState, setEditState] = useState<ImageEditState | null>(null)
-	const editing =
-		editState !== null && rawDriveItem?.data.uuid === editState.frozenUuid && driveItem?.data.uuid === editState.uuid ? editState : null
-
-	if (editState !== null && editing === null) {
-		setEditState(null)
-	}
-
-	// Opening the editor (sniffing, the worker's probe, the source's decode) is under way.
-	const [enteringEdit, setEnteringEdit] = useState(false)
-	const enterAbortRef = useRef<AbortController | null>(null)
-	// The slot shows an image the editor can open (saved in place, or as a copy for a format it cannot write).
-	const imageEditable = driveItem !== undefined && !asText && pin?.category === "image" && canEditImage(driveItem, variant)
-	// The header's Save: a new version where the format is written in place and the slot may be, else the copy.
-	const imagePrimaryTarget: SaveTarget | null =
-		editing === null ? null : editing.targets.primary.kind === "inPlace" && editable ? editing.targets.primary : copyTargetOf(editing)
-
-	// The video editor's session, for the slot and the version it opened on, as the image editor's: another file on
-	// screen leaves video edit mode (the effect below), which ends its client.
-	const videoMode = useVideoEditMode(item => createVideoEditClient({ item }))
-	const videoState = videoMode.state
-	const videoEditing =
-		videoState !== null && rawDriveItem?.data.uuid === videoState.frozenUuid && driveItem?.data.uuid === videoState.uuid
-			? videoState
-			: null
-	const videoStale = videoState !== null && videoEditing === null
-	const exitVideoMode = videoMode.exit
-
-	useEffect(() => {
-		if (videoStale) {
-			exitVideoMode()
-		}
-	}, [videoStale, exitVideoMode])
-
-	// The slot shows a video the editor may open: in the user's own drive, in a container the export reads, and not
-	// already found to have no picture this browser shows.
-	const videoEditable =
-		driveItem !== undefined &&
-		!asText &&
-		pin?.category === "video" &&
-		canEditVideo(driveItem, variant) &&
-		!knownUnpreviewable(driveItem.data.uuid)
-	// A save of this video still runs (in an editor gone to the background, or a transfer): a second one would race it for
-	// the same name or version, so Edit waits until it ends. Live, so the button says so before it is pressed.
-	const videoExportRunning = useSyncExternalStore(
-		subscribeVideoExports,
-		() => driveItem !== undefined && isVideoExportRunning(stableUuidOf(driveItem) ?? driveItem.data.uuid)
-	)
-	// Either editor is open: the viewer's header, keys and saves step aside.
-	const anyEditing = editing !== null || videoEditing !== null
-
-	// Leaving edit mode, or the overlay, ends the session: the render worker's idle teardown starts then.
-	useEffect(() => {
-		if (editState === null) {
-			return
-		}
-
-		const state = editState
-
-		return () => {
-			state.release()
-		}
-	}, [editState])
+	// The image and video editors' sessions on the slot on screen, and whether either may open on it.
+	const {
+		setEditState,
+		editing,
+		enteringEdit,
+		setEnteringEdit,
+		enterAbortRef,
+		imageEditable,
+		imagePrimaryTarget,
+		videoMode,
+		videoEditing,
+		videoEditable,
+		videoExportRunning,
+		anyEditing
+	} = usePreviewEditSessions({ variant, asText, driveItem, rawDriveItem, pin, editable })
 
 	// `ownSave`: `item` is what this overlay's own save of the slot made.
 	function commitSaved(frozenUuid: string, item: DriveItem, ownSave?: boolean): void {
@@ -578,6 +453,22 @@ export function PreviewOverlay({
 	// Newer versions of the pager's files saved elsewhere, and a trash, delete or move of the file on
 	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
 	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, readEdits, onItemRemoved })
+	// The header's item menu: its dropdown, the dialog an entry opened, and what each entry runs on the slot on screen.
+	const { menuDialogKind, setMenuDialogKind, menuOpen, setMenuOpen, handleMenuFavoriteToggled, handleMenuRestored, renderMenuDialog } =
+		usePreviewItemMenu({
+			variant,
+			driveItem,
+			rawDriveItem,
+			saving,
+			remote,
+			mountedRef,
+			commitSaved,
+			onItemRemoved,
+			onClose,
+			onFavoriteToggled,
+			onSourcesDisposing,
+			compressParentNaming
+		})
 	// A question is up: the remote-change one, a menu action's dialog, or the unsaved-changes prompt an in-app intent
 	// opened. Nothing starts behind it.
 	const dialogOpen = remote.prompt !== null || pendingIntent !== null || menuDialogKind !== null
@@ -757,230 +648,8 @@ export function PreviewOverlay({
 		return { status: "success", name: written.name }
 	}
 
-	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
-	// at the CURRENT slot (the menu is only ever mounted for it, see the header JSX). Rename/favorite
-	// write into the same per-slot `saved` override map performSave already uses, so the header title and
-	// a reopened menu's own "Unfavorite"/"Favorite" label both reflect the change immediately, with no
-	// dependency on the listing query refetching. Trash/delete/restore instead hand off to onItemRemoved
-	// (the host's frozen-pager-list housekeeping) — see PreviewOverlayProps' own doc comment for why that
-	// one lives on the host, not here.
-	async function handleMenuRename(value: string): Promise<void> {
-		if (driveItem === undefined || rawDriveItem === undefined) {
-			return
-		}
-
-		setMenuPending(true)
-		const outcome = await renameItem(driveItem, value.trim())
-		setMenuPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		commitSaved(rawDriveItem.data.uuid, outcome.item)
-		setMenuDialogKind(null)
-	}
-
-	// The menu's confirm dialog shows the run, so only its result toasts.
-	async function runMenuActivity(spec: BulkActivitySpec<DriveItem>): Promise<void> {
-		setMenuPending(true)
-		await runBulkActivity({ ...spec, showRunning: false })
-		setMenuPending(false)
-		setMenuDialogKind(null)
-	}
-
-	async function removeCurrentItem(remove: BulkActivitySpec<DriveItem>["run"], keys: ActivityKeys): Promise<void> {
-		if (driveItem === undefined || rawDriveItem === undefined) {
-			return
-		}
-
-		const frozenUuid = rawDriveItem.data.uuid
-
-		await runMenuActivity(
-			driveActivity(
-				[driveItem],
-				keys,
-				(targets, onSettled, report) => asOwnRemoval(remote, driveItem.data.uuid, () => remove(targets, onSettled, report)),
-				{
-					onDone: outcome => {
-						if (outcome.succeeded.length > 0) {
-							onItemRemoved(frozenUuid)
-						}
-					}
-				}
-			)
-		)
-	}
-
-	// Mirrors new mobile's removeShare/stopSharing dismissOnSuccess: isPreview === true — closes the
-	// WHOLE preview immediately on success rather than stepping to a neighbour (unlike trash/delete
-	// above), since new mobile's own gallery has no driveItemRemoved-driven "step past it" behavior for
-	// this one.
-	async function handleMenuUnshare(): Promise<void> {
-		if (driveItem === undefined) {
-			return
-		}
-
-		// Only this receiver's row leaves the listing, and no echo prunes a selected row the way trash and
-		// delete echoes do.
-		await runMenuActivity(
-			driveActivity([driveItem], DRIVE_UNSHARE, (targets, onSettled) => unshareItems(targets, variant, onSettled), {
-				prune: "row",
-				onDone: outcome => {
-					if (outcome.succeeded.length > 0 && mountedRef.current) {
-						onClose()
-					}
-				}
-			})
-		)
-	}
-
-	// "favorite" descriptor's onFavoriteToggled — see itemMenu.tsx's own doc comment on why this extension
-	// point exists only for the preview. Fans out to the optional host-level callback too — see
-	// PreviewOverlayProps' own doc comment on onFavoriteToggled for why a photos-opened overlay needs it
-	// and a drive-opened one doesn't.
-	function handleMenuFavoriteToggled(item: DriveItem): void {
-		if (rawDriveItem === undefined) {
-			return
-		}
-
-		commitSaved(rawDriveItem.data.uuid, item)
-		onFavoriteToggled?.(item)
-	}
-
-	// "restore" descriptor's onRestored (trash variant only) — a restored item leaves the trash listing
-	// entirely, the same "gap in the pager" shape as trash/delete above.
-	function handleMenuRestored(): void {
-		if (rawDriveItem === undefined) {
-			return
-		}
-
-		onItemRemoved(rawDriveItem.data.uuid)
-	}
-
-	function closeMenuDialog(): void {
-		setMenuDialogKind(null)
-	}
-
-	// The header item-menu's secondary dialog, if any — nested inside the outer DialogPrimitive.Root
-	// exactly like the unsaved-changes ConfirmDialog below (Base UI supports nesting a dialog inside
-	// another normally, see that one's own doc comment). Move/versions/info/link/share are entirely
-	// self-contained dialog components (own state, own action calls) — reused completely unmodified,
-	// mirroring useDriveDialogHost's identical per-kind dispatch for the row-level menu.
-	function renderMenuDialog(): ReactNode {
-		if (menuDialogKind === null || driveItem === undefined) {
-			return null
-		}
-
-		switch (menuDialogKind) {
-			case "rename":
-				return (
-					<RenameItemDialog
-						item={driveItem}
-						pending={menuPending}
-						onClose={closeMenuDialog}
-						onSubmit={value => {
-							void handleMenuRename(value)
-						}}
-					/>
-				)
-			case "move":
-				return (
-					<MoveTargetDialog
-						items={[driveItem]}
-						onClose={closeMenuDialog}
-					/>
-				)
-			case "copy":
-			case "versions":
-			case "info":
-			case "link":
-			case "share":
-			case "compress":
-			case "extract":
-			case "extractTo":
-				return (
-					<ItemDialog
-						kind={menuDialogKind}
-						items={[driveItem]}
-						variant={variant}
-						onClose={closeMenuDialog}
-						onSourcesDisposing={onSourcesDisposing}
-						compressParentNaming={compressParentNaming}
-					/>
-				)
-			case "unshare":
-				return (
-					<ConfirmDialog
-						open
-						pending={menuPending}
-						title={t("drive:driveUnshareConfirmTitle")}
-						body={t("drive:driveUnshareConfirmBodySingle")}
-						confirmLabel={t("drive:driveActionUnshare")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeMenuDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleMenuUnshare()
-						}}
-					/>
-				)
-			case "trash":
-				return (
-					<TrashConfirmDialog
-						count={1}
-						pending={menuPending}
-						onClose={closeMenuDialog}
-						onConfirm={() => {
-							void removeCurrentItem(trashItems, DRIVE_TRASH)
-						}}
-					/>
-				)
-			case "delete":
-				return (
-					<ConfirmDialog
-						open
-						pending={menuPending}
-						title={t("drive:driveDeletePermanentlyConfirmTitle")}
-						body={t("drive:driveDeletePermanentlyConfirmBodySingle")}
-						confirmLabel={t("drive:driveActionDeletePermanently")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeMenuDialog()
-							}
-						}}
-						onConfirm={() => {
-							void removeCurrentItem(deleteItemsPermanently, DRIVE_DELETE_PERMANENTLY)
-						}}
-					/>
-				)
-			case "color":
-			case "openAsText":
-				// Unreachable — see menuDialogKind's own doc comment.
-				return null
-		}
-	}
-
-	// A step can disable the very pager button that triggered it (index lands on the first/last item,
-	// see the Prev/Next Buttons' own `disabled` below) — the browser blurs a disabled focused control
-	// straight to `<body>` with no app-level recovery, which strands keyboard/AT focus OUTSIDE the
-	// dialog's own DOM subtree (body is an ancestor of the portaled popup, not a descendant, so no
-	// handler scoped to the popup — including handleKeyDown below — ever sees another keypress there).
-	// Live-verified (page.evaluate(() => document.activeElement) read "BODY" right after such a step).
-	// Pulls focus back onto the popup container itself whenever that's happened; a no-op otherwise
-	// (focus already on something valid inside the dialog, e.g. the other, still-enabled pager button).
-	useEffect(() => {
-		if (popupRef.current && !popupRef.current.contains(document.activeElement)) {
-			popupRef.current.focus()
-		}
-	}, [index])
+	// Keyboard focus kept inside the popup as the pager steps (usePreviewPagerFocus).
+	const handlePopupBlur = usePreviewPagerFocus(popupRef, index)
 
 	// videoContinuity.ts's position map is scoped to exactly one overlay SESSION — this component itself
 	// only ever mounts while a preview is open (useDriveDialogHost's conditional render), so its own
@@ -1032,479 +701,35 @@ export function PreviewOverlay({
 		return () => {
 			enterAbortRef.current?.abort()
 		}
-	}, [slotKey])
+	}, [slotKey, enterAbortRef])
 
-	useEffect(() => {
-		return () => {
-			usePreviewUnsavedGuardStore.getState().clear()
-		}
-	}, [])
-
-	// The browser's Back closes the preview and stays where it was opened, rather than moving the page
-	// underneath it: the overlay is not a history entry, so Back would otherwise leave the listing (or the
-	// route) while the preview stayed up. Registered before the unsaved-changes blocker below so a Back
-	// raises only the close path's own prompt. The close runs through a ref so the blocker registers once.
-	const requestCloseRef = useLatestRef(() => {
-		// In edit mode Back leaves edit mode instead, as the header's Cancel does.
-		if (editing !== null) {
-			requestExitImageEdit()
-
-			return
-		}
-
-		if (videoEditing !== null) {
-			requestExitVideoEdit()
-
-			return
-		}
-
-		requestOrRun("close", onClose)
+	// Every way out of the overlay while it holds unsaved edits: the browser's Back, a navigation that unmounts it, a
+	// tab close, a waiting sign-out, and the unsaved-changes prompt that answers them.
+	const { blocker, logoutAsks, handleUnsavedConfirm, handleUnsavedOpenChange } = usePreviewDismissal({
+		items,
+		driveItem,
+		editing,
+		videoEditing,
+		dirty,
+		saving,
+		logoutRequest,
+		pendingIntent,
+		setPendingIntent,
+		pendingReplaceRef,
+		contentRef,
+		requestOrRun,
+		requestExitImageEdit,
+		requestExitVideoEdit,
+		exitImageEdit,
+		exitVideoEdit,
+		onClose,
+		onStep
 	})
-	const closeOnBack = useCallback<ShouldBlockFn>(
-		({ action }) => {
-			if (action !== "BACK") {
-				return false
-			}
-
-			requestCloseRef.current()
-
-			return true
-		},
-		[requestCloseRef]
-	)
-
-	useBlocker({ shouldBlockFn: closeOnBack, enableBeforeUnload: false })
-
-	// Browser-level guard for the two vectors the in-app requestOrRun path cannot see: a tab
-	// refresh/close (the app's one leave-page listener, which excuses its own downloads — the router's
-	// would prompt on them) and any navigation that unmounts this overlay's route body. Armed ONLY while
-	// the buffer is dirty AND a slot is actually rendered: without the second term a vanished slot (early
-	// return below → no ConfirmDialog in the tree) could block a navigation nothing can then resolve,
-	// leaving the blocker's own promise unsettled after the popstate already moved the URL.
-	const guardsUnsaved = dirty && driveItem !== undefined
-	const blocker = useBlocker({
-		shouldBlockFn: blockWhenLeavingRoute,
-		enableBeforeUnload: false,
-		disabled: !guardsUnsaved,
-		withResolver: true
-	})
-
-	useEffect(() => (guardsUnsaved ? holdUnload() : undefined), [guardsUnsaved])
-
-	// A save in flight must never reach the prompt: Discard would release the navigation while the
-	// un-cancellable upload still lands and patches the listing with exactly the content the user just
-	// chose to drop. Cancelling the block outright is the same refusal requestOrRun applies to the in-app
-	// routes (close/prev/next) — the navigation is simply repeatable once the save settles.
-	useEffect(() => {
-		if (saving && blocker.status === "blocked") {
-			blocker.reset()
-		}
-	}, [saving, blocker])
-
-	// A sign-out waits for a save in flight to settle before anything is asked: a discard answered meanwhile
-	// could not stop the upload (the editor's writing, or the upload itself, is already under way). Saved
-	// and clean by then, it proceeds with nothing to lose; otherwise the prompt asks as usual.
-	const logoutAsks = logoutRequest !== null && !saving
-	// The sign-out waiting now waited for a save.
-	const waitedForSaveRef = useRef<object | null>(null)
-
-	useEffect(() => {
-		if (logoutRequest === null) {
-			return
-		}
-
-		if (saving) {
-			waitedForSaveRef.current = logoutRequest
-
-			return
-		}
-
-		if (waitedForSaveRef.current !== logoutRequest || dirty) {
-			return
-		}
-
-		logoutRequest.resolve(true)
-		usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
-		onClose()
-	}, [logoutRequest, saving, dirty, onClose])
 
 	// A save is never started under a question (dialogOpen), nor under the unsaved-changes prompt a blocked navigation
 	// or a waiting sign-out opened: over the remote-change question it would decide it for the user, and from a prompt
 	// or a menu dialog it would act behind it.
 	const saveBlocked = dialogOpen || unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null)
-
-	// A save that failed says why; one whose parent can never resolve (isUnresolvableParentError) leaves the slot
-	// (frozen uuid) read-only, as retrying can never succeed.
-	function saveFailed(dto: ErrorDTO, frozenUuid: string): void {
-		setSaving(false)
-		remote.saveSettled(null)
-		toast.error(errorLabel(dto))
-
-		if (isUnresolvableParentError(dto)) {
-			setLockedReadOnly({ forUuid: frozenUuid })
-			toast.warning(t("previewReadOnlyAfterSaveFailure"))
-		}
-	}
-
-	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
-	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
-	// can never fix (isUnresolvableParentError, see previewSave.logic.ts's own comment on why); every
-	// other failure leaves the buffer editable+dirty for a retry. `dirty` is reset explicitly on SUCCESS
-	// below — a new `item.data.uuid` re-keys PreviewBody and the remounted viewer re-seeds a fresh
-	// editor's own buffer, but a slot that mounts NO editor (markdown returns in rendered mode) would
-	// otherwise never report the buffer clean. A FAILURE never remounts anything, so the buffer (and its
-	// dirty bit) simply survives untouched, which is what keeps the typed content visible and the
-	// close/nav prompt still armed.
-	//
-	// True when a save started; false when one could not start now (nothing to save, one in flight, a dialog
-	// open...), which an idle autosave tries again later.
-	function performSave(auto = false): boolean {
-		// In edit mode a save is the image's own, never an autosave.
-		if (editing !== null) {
-			return !auto && imagePrimaryTarget !== null && saveImage(imagePrimaryTarget)
-		}
-
-		// The video editor's Save popover says what the export will do before anything runs.
-		if (videoEditing !== null) {
-			if (!auto) {
-				videoCommandsRef.current?.openSave()
-			}
-
-			return false
-		}
-
-		// Locals, not the outer `driveItem`/`rawDriveItem` directly — this closure runs asynchronously, well
-		// after this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
-		const targetItem = driveItem
-		const targetRawItem = rawDriveItem
-
-		// Nor under a dialog: over the remote-change question it would decide it for the user, and a save
-		// from the unsaved-changes prompt or a menu dialog would act behind it.
-		if (!editable || !dirty || targetItem === undefined || targetRawItem === undefined || saveBlocked) {
-			return false
-		}
-
-		// One in flight: this one runs once it settles, if the file is still dirty then (saveAgain below).
-		if (saving) {
-			saveAgainRef.current = (saveAgainRef.current ?? true) && auto
-
-			return false
-		}
-
-		setSaving(true)
-		remote.saveStarted()
-		void saveNow(targetItem, targetRawItem, auto)
-
-		return true
-	}
-
-	async function saveNow(targetItem: DriveItem, targetRawItem: DriveItem, auto: boolean): Promise<void> {
-		// An editor that refused to write its file (its own check failed) says why.
-		const edits = await readSaveEdits(auto, true).catch((e: unknown) => {
-			if (e instanceof SaveRefusedError) {
-				return e
-			}
-
-			log.error("preview", "reading the edits to save failed", e)
-
-			return null
-		})
-
-		if (edits === null || edits instanceof SaveRefusedError) {
-			setSaving(false)
-			remote.saveSettled(null)
-
-			if (edits === null) {
-				toast.error(t("previewSaveFailed"))
-			} else if (!edits.silent) {
-				const action = edits.action
-
-				toast.error(t(edits.messageKey), {
-					...(action === undefined ? {} : { action: { label: t(action.labelKey), onClick: action.run }, duration: Infinity })
-				})
-			}
-
-			return
-		}
-
-		if ("kind" in edits) {
-			await savePresentation(edits, targetItem, targetRawItem)
-
-			return
-		}
-
-		const content = edits.bytes
-		// The upload hands the buffer to the SDK worker; the copy seeds the saved version's preview, so the
-		// editor reopens on it without downloading what it just sent.
-		const saved = content.slice()
-
-		const outcome = await runPreviewSave(
-			{
-				uploadFileBytes: (parentUuid, data, name, mime) => sdkApi.uploadFileBytes(parentUuid, data, name, mime),
-				patchListing: driveListingQueryUpdate,
-				rootUuid: currentRootUuid()
-			},
-			{ item: targetItem, content }
-		)
-
-		setSaving(false)
-
-		if (outcome.status === "error") {
-			saveFailed(outcome.dto, targetRawItem.data.uuid)
-
-			return
-		}
-
-		void loadPreviewBytes(cacheScope, outcome.item.data.uuid, saved.byteLength, () => Promise.resolve(saved))
-		// A spreadsheet stays mounted (keyed by its document, see bodyKey) and reports its own dirty bit:
-		// edits made during the upload are still unsaved.
-		edits.commit?.()
-
-		// Text saved in a codepage: the version it made reads in that codepage.
-		if (edits.encoding !== undefined) {
-			const encoding = edits.encoding
-
-			setSavedReadAs(
-				encoding.startsWith("utf-") ? null : { forUuid: targetRawItem.data.uuid, versionUuid: outcome.item.data.uuid, encoding }
-			)
-		}
-
-		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
-		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
-		commitSaved(targetRawItem.data.uuid, outcome.item, true)
-		// A cut of the file now moves the saved version, not the one archived under the old uuid.
-		followClipboardItem(outcome.item, targetItem.data.uuid)
-
-		// A text editor was read-only through the upload, so it holds exactly what was saved.
-		if (edits.commit === null) {
-			// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in
-			// RENDERED mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
-			dropPreviewBuffer(contentRef)
-		}
-
-		// Last, so a version saved elsewhere after this one is judged against it.
-		remote.saveSettled(outcome.item)
-	}
-
-	// The image editor's saves, with performSave's guards: a new version of the file (in place) or a copy beside it.
-	// Nothing to save until the image was edited.
-	function saveImage(target: SaveTarget): boolean {
-		const state = editing
-		const targetItem = driveItem
-		const targetRawItem = rawDriveItem
-
-		if (
-			state === null ||
-			targetItem === undefined ||
-			targetRawItem === undefined ||
-			!dirty ||
-			saving ||
-			(target.kind === "inPlace" && !editable) ||
-			saveBlocked
-		) {
-			return false
-		}
-
-		setSaving(true)
-		remote.saveStarted()
-
-		if (target.kind === "inPlace") {
-			void saveImageInPlace(state, targetItem, targetRawItem, target)
-		} else {
-			void saveImageCopy(targetItem, targetRawItem, target)
-		}
-
-		return true
-	}
-
-	// A new version of the file: shown in the slot as any save is, edit mode left once it landed. A failure keeps the
-	// editor and its edits for another try (or a copy, where the file turned out unwritable).
-	async function saveImageInPlace(
-		state: ImageEditState,
-		targetItem: DriveItem,
-		targetRawItem: DriveItem,
-		target: Extract<SaveTarget, { kind: "inPlace" }>
-	): Promise<void> {
-		const written = await writeImageInPlace(targetItem, target, imageSaveRef.current).catch((e: unknown) => {
-			log.error("preview", "saving the edited image failed", e)
-
-			return null
-		})
-
-		if (written === null) {
-			setSaving(false)
-			remote.saveSettled(null)
-			toast.error(t("previewSaveFailed"))
-
-			return
-		}
-
-		const outcome = written.outcome
-
-		if (outcome.status === "error") {
-			saveFailed(outcome.dto, targetRawItem.data.uuid)
-
-			return
-		}
-
-		// A slot shown from its held bytes reopens on the saved version from memory; a streamed one streams it.
-		if (state.buffered && written.blob !== null) {
-			await seedSavedImage(cacheScope, outcome.item.data.uuid, written.blob)
-		}
-
-		setSaving(false)
-		commitSaved(targetRawItem.data.uuid, outcome.item, true)
-		followClipboardItem(outcome.item, targetItem.data.uuid)
-		splicePhotoSave(targetItem.data.uuid, outcome.item, "replace")
-		exitImageEdit()
-		remote.saveSettled(outcome.item)
-	}
-
-	// A copy beside the file: never shown in the slot nor followed by the clipboard (the file itself is unchanged);
-	// its toast offers to open it.
-	async function saveImageCopy(
-		targetItem: DriveItem,
-		targetRawItem: DriveItem,
-		target: Extract<SaveTarget, { kind: "copy" }>
-	): Promise<void> {
-		const written = await writeImageCopy(targetItem, target, imageSaveRef.current, editedCopySuffix).catch((e: unknown) => {
-			log.error("preview", "saving the edited image as a copy failed", e)
-
-			return null
-		})
-
-		setSaving(false)
-
-		if (written === null) {
-			remote.saveSettled(null)
-			toast.error(t("previewSaveFailed"))
-
-			return
-		}
-
-		if (written.outcome.status === "error") {
-			remote.saveSettled(null)
-			toast.error(errorLabel(written.outcome.dto))
-
-			return
-		}
-
-		const copy = written.outcome.item
-		const frozenUuid = targetRawItem.data.uuid
-		const slot = `${frozenUuid}/${targetItem.data.uuid}`
-
-		recordOwnSave(copy.data.uuid)
-		splicePhotoSave(targetItem.data.uuid, copy, "beside")
-		// Left before the newer versions held through the save are judged: nothing unsaved is asked about.
-		exitImageEdit()
-		remote.saveSettled(null)
-		toast.success(t("previewImageSaveSavedAsCopy", { name: written.name }), {
-			action: {
-				label: t("previewImageSaveOpenCopyAction"),
-				onClick: () => {
-					// Only into the slot it was saved from, still on screen, with nothing unsaved there.
-					if (mountedRef.current && currentSlotRef.current === slot) {
-						openSavedCopyRef.current(frozenUuid, copy)
-					}
-				}
-			}
-		})
-	}
-
-	// A deck's save: the session streams the package to the upload over a port while it reads the old file; once the
-	// upload made the new file, the session moves onto it (commit), so a drive without versioning deleting the old one
-	// never leaves it reading a file that is gone. The editor stays mounted (bodyKey) with its history.
-	async function savePresentation(edits: PresentationSaveEdits, targetItem: DriveItem, targetRawItem: DriveItem): Promise<void> {
-		// No upload at all unless the session is going to write (an untouched or fully undone deck, a refusal).
-		const writes = await Promise.race([
-			edits.announced,
-			edits.result.then(
-				() => false,
-				() => false
-			)
-		])
-
-		if (!writes) {
-			edits.port.close()
-
-			const result = await edits.result.catch((e: unknown) => {
-				log.error("preview", "the presentation save failed", e)
-
-				return { kind: "refused" as const, reason: "failed" as const }
-			})
-
-			setSaving(false)
-			remote.saveSettled(null)
-
-			if (result.kind === "refused") {
-				toast.error(t(presentationSaveRefusalKey(result.reason)))
-			}
-
-			return
-		}
-
-		const upload = runPreviewSave(
-			{
-				uploadFileBytes: (parentUuid, data, name, mime) => sdkApi.uploadFileBytes(parentUuid, data, name, mime),
-				uploadFileFromPort: (parentUuid, port, name, mime, size) => sdkApi.uploadFileFromPort(parentUuid, name, mime, port, size),
-				patchListing: driveListingQueryUpdate,
-				rootUuid: currentRootUuid()
-			},
-			{
-				item: targetItem,
-				// A PDF knows its file's exact size before the upload, and keeps the original's creation time.
-				content: { port: edits.port, ...(edits.size === undefined ? {} : { size: edits.size }) },
-				...(edits.times === undefined ? {} : { times: edits.times })
-			}
-		)
-		const result = await edits.result.catch((e: unknown) => {
-			log.error("preview", "the presentation save failed", e)
-
-			return { kind: "refused" as const, reason: "failed" as const }
-		})
-
-		// A refusal is told at once and the upload behind the port ended (no new version), never waited for: an upload
-		// whose reader missed the abort would never settle. One the quota pre-flight refused (it aborted the port, so the
-		// writer's refusal follows) is told as the storage refusal it is.
-		if (result.kind === "refused") {
-			edits.port.close()
-			void upload.catch(() => undefined)
-
-			const storage = await settledStorageRefusal(upload)
-
-			setSaving(false)
-			remote.saveSettled(null)
-			toast.error(storage === null ? t(presentationSaveRefusalKey(result.reason)) : errorLabel(storage))
-
-			return
-		}
-
-		const outcome = await upload
-
-		// Nothing to save (every edit undone): the upload was ended without a file.
-		if (result.kind === "unchanged") {
-			setSaving(false)
-			remote.saveSettled(null)
-
-			return
-		}
-
-		if (outcome.status === "error") {
-			void edits.abandon?.()
-			saveFailed(outcome.dto, targetRawItem.data.uuid)
-
-			return
-		}
-
-		// A written save is always committed: the session holds its reads of the old file until then.
-		await edits.commit(outcome.item).catch((e: unknown) => {
-			log.error("preview", "moving the presentation onto its saved file failed", e)
-		})
-		setSaving(false)
-		commitSaved(targetRawItem.data.uuid, outcome.item, true)
-		followClipboardItem(outcome.item, targetItem.data.uuid)
-		remote.saveSettled(outcome.item)
-	}
 
 	// What a save uploads, and for a spreadsheet the call that marks that version saved once it landed; for a deck,
 	// the save its session streams; for text, the encoding the bytes are in. Text its encoding cannot hold is refused:
@@ -1546,33 +771,37 @@ export function PreviewOverlay({
 			: { bytes: encoded.bytes, commit: null, encoding: slotText.encoding }
 	}
 
-	// Idle autosave (the Word document editor's, the spreadsheet editor's) runs the same save, with its guards, as it
-	// stands now.
-	const performSaveRef = useLatestRef(performSave)
-	// A saved copy's Open, as things stand when it is clicked: not over edits or a save.
-	const openSavedCopyRef = useLatestRef((frozenUuid: string, copy: DriveItem) => {
-		if (!anyEditing && !dirty && !saving) {
-			commitSaved(frozenUuid, copy)
-		}
-	})
 	const startImageEditRef = useLatestRef(startImageEdit)
 	const startVideoEditRef = useLatestRef(startVideoEdit)
 	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
 	const videoSaveSettledRef = useLatestRef(videoSaveSettled)
 
-	useEffect(() => {
-		const auto = saveAgainRef.current
-
-		if (saving || auto === null) {
-			return
-		}
-
-		saveAgainRef.current = null
-
-		if (dirty) {
-			performSaveRef.current(auto)
-		}
-	}, [saving, dirty, performSaveRef])
+	// The overlay's saves: the text, sheet, Word document, deck and PDF editors' (performSave), and the image editor's.
+	const { performSave, performSaveRef, saveImage } = usePreviewSave({
+		cacheScope,
+		driveItem,
+		rawDriveItem,
+		editable,
+		dirty,
+		saving,
+		setSaving,
+		saveBlocked,
+		anyEditing,
+		editing,
+		imagePrimaryTarget,
+		videoEditing,
+		videoCommandsRef,
+		imageSaveRef,
+		contentRef,
+		mountedRef,
+		currentSlotRef,
+		remote,
+		readSaveEdits,
+		commitSaved,
+		exitImageEdit,
+		setLockedReadOnly,
+		setSavedReadAs
+	})
 
 	useAction(
 		"preview.save",
@@ -1749,31 +978,6 @@ export function PreviewOverlay({
 		}
 	}
 
-	// Base UI's focus trap does not cover focus lost because the focused control DISABLED ITSELF: paging
-	// to either end disables the very pager button that was just clicked, and the browser then drops
-	// focus on the floor (document.body) rather than moving it anywhere. Because Base UI stops composite
-	// keys from reaching the document (see handleKeyDown below), the popup's own handler is the ONLY
-	// route to the pager — so once focus lands outside, arrow paging is silently dead until the user
-	// clicks back in. Pull it back to the popup, which is focusable (tabIndex -1).
-	//
-	// Deliberately narrow: only when focus actually fell to <body>. A Base UI menu/dialog opened from the
-	// preview header portals OUTSIDE this popup's subtree and legitimately takes focus with it — that
-	// lands on a real element, never body, so this never fights it.
-	function handlePopupBlur(event: ReactFocusEvent<HTMLDivElement>): void {
-		if (event.relatedTarget !== null) {
-			return
-		}
-
-		// focusout runs BEFORE the browser settles the new focus target; read it a microtask later.
-		queueMicrotask(() => {
-			const popup = popupRef.current
-
-			if (popup !== null && popup.isConnected && document.activeElement === document.body) {
-				popup.focus()
-			}
-		})
-	}
-
 	// Base UI's DialogPopup calls event.stopPropagation() for every composite key (Arrow*/Home/End) in
 	// its own onKeyDown (dialog/popup/DialogPopup.js + internals/composite/composite.js's
 	// COMPOSITE_KEYS, verified against the installed package) before it can bubble to the document-level
@@ -1924,59 +1128,6 @@ export function PreviewOverlay({
 		}
 
 		setMenuDialogKind(kind)
-	}
-
-	function handleUnsavedConfirm(): void {
-		// Never while a save is in flight: what it writes would still be uploaded after the user discarded it.
-		if (saving) {
-			return
-		}
-
-		const actions = resolveUnsavedConfirm(pendingIntent, blocker.status === "blocked", logoutAsks)
-
-		setPendingIntent(null)
-		// The buffer is gone by the user's own choice: drop the dirty bit and the stale content with it.
-		// The slot-change effect above cannot cover this one — a discarded "close" answer changes no slot,
-		// and a discarded prev/next must be clean BEFORE the step, not after it.
-		dropPreviewBuffer(contentRef)
-
-		// `logoutRequest !== null` is re-tested (not read off `actions` alone) so TS narrows it — same
-		// reason `blocker.status` is re-tested below.
-		if (actions.proceedLogout && logoutRequest !== null) {
-			logoutRequest.resolve(true)
-			usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
-			// Closing is what makes the sign-out deterministic rather than timing-dependent: the editor
-			// unmounts here, so nothing can re-dirty the buffer (and re-arm beforeunload) during the wipe
-			// that follows, which stays fully interactive until its final reload.
-			onClose()
-		}
-
-		if (actions.proceedNavigation && blocker.status === "blocked") {
-			blocker.proceed()
-		}
-
-		if (actions.intent === "close") {
-			onClose()
-		} else if (actions.intent === "prev") {
-			onStep(-1)
-		} else if (actions.intent === "next") {
-			onStep(1)
-		} else if (actions.intent === "first") {
-			// Clamped to the ends by the host's step (stepPreviewIndex).
-			onStep(-items.length)
-		} else if (actions.intent === "last") {
-			onStep(items.length)
-		} else if (actions.intent === "replace") {
-			pendingReplaceRef.current?.()
-		} else if (actions.intent === "exitEdit") {
-			if (videoEditing !== null) {
-				exitVideoEdit()
-			} else {
-				exitImageEdit()
-			}
-		}
-
-		pendingReplaceRef.current = null
 	}
 
 	if (driveItem === undefined) {
@@ -2175,7 +1326,7 @@ export function PreviewOverlay({
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
-						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
+						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions (usePreviewItemMenu). */}
 									{!isLinkedEmbedItem(driveItem) ? (
 										<DropdownMenu
 											open={menuOpen}
@@ -2375,22 +1526,7 @@ export function PreviewOverlay({
 						confirmLabel={t("previewDiscardAction")}
 						cancelLabel={t("common:cancel")}
 						destructive
-						onOpenChange={open => {
-							if (!open) {
-								setPendingIntent(null)
-
-								// Cancel settles every live waiter with "don't proceed" — the mirror image of
-								// confirm — so neither promise can strand.
-								if (blocker.status === "blocked") {
-									blocker.reset()
-								}
-
-								if (logoutRequest !== null) {
-									logoutRequest.resolve(false)
-									usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
-								}
-							}
-						}}
+						onOpenChange={handleUnsavedOpenChange}
 						onConfirm={handleUnsavedConfirm}
 					/>
 					{/* The header item-menu's own secondary dialog (rename/move/trash/etc.) — same nesting
@@ -2438,120 +1574,6 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
-}
-
-type ImageExport = Awaited<ReturnType<ImageExportSource>>
-
-async function exportImage(source: ImageExportSource | null, target: SaveTarget): Promise<ImageExport | null> {
-	if (source === null) {
-		return null
-	}
-
-	return await source(target).catch((e: unknown) => {
-		log.error("preview", "exporting the edited image failed", e)
-
-		return null
-	})
-}
-
-function rewriteUnavailable(dto: ErrorDTO): boolean {
-	return dto.species === "plain" && dto.message.startsWith(ORIENTATION_REWRITE_UNAVAILABLE)
-}
-
-// A new version of the file in its own format: the export, or for a JPEG only turned or flipped its Orientation
-// rewritten in the file itself, re-encoded after all when that cannot be done. `blob`: what was uploaded, if a Blob.
-// Null when there was nothing to upload (the export failed).
-async function writeImageInPlace(
-	item: DriveItem,
-	target: Extract<SaveTarget, { kind: "inPlace" }>,
-	source: ImageExportSource | null
-): Promise<{ outcome: ActionOutcome<DriveItem>; blob: Blob | null } | null> {
-	const exported = await exportImage(source, target)
-
-	if (exported === null) {
-		return null
-	}
-
-	const times = editedSaveTimes(item, Date.now())
-	const deps = imageSaveDeps()
-
-	if (exported.geometryOnly !== null) {
-		const rewritten = await runPreviewSave(deps, {
-			item,
-			content: { orientation: exported.geometryOnly.orientation },
-			times,
-			mime: target.mime
-		})
-
-		if (rewritten.status === "success" || !rewriteUnavailable(rewritten.dto)) {
-			return { outcome: rewritten, blob: null }
-		}
-
-		// The same JPEG encode a copy gets, uploaded in place.
-		const reencoded = (await exportImage(source, { kind: "copy", mime: "image/jpeg", extension: "jpg" }))?.blob ?? null
-
-		if (reencoded === null) {
-			return null
-		}
-
-		return { outcome: await runPreviewSave(deps, { item, content: { blob: reencoded }, times, mime: target.mime }), blob: reencoded }
-	}
-
-	const blob = exported.blob
-
-	if (blob === null) {
-		return null
-	}
-
-	return { outcome: await runPreviewSave(deps, { item, content: { blob }, times, mime: target.mime }), blob }
-}
-
-// A copy beside the file, named "photo (edited).jpg" (or the first such name free) from one read of the directory's
-// names, and typed by the SDK from that name.
-async function writeImageCopy(
-	item: DriveItem,
-	target: Extract<SaveTarget, { kind: "copy" }>,
-	source: ImageExportSource | null,
-	suffix: (number: number) => string
-): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
-	const blob = (await exportImage(source, target))?.blob ?? null
-
-	return blob === null ? null : await writeEditedCopy(item, { blob }, target.extension, suffix)
-}
-
-// The edited image for the remote-change dialog's "save mine as new": as the header's Save would write it, or
-// re-encoded where that is the lossless rewrite of the file itself (a new file has no file to rewrite).
-async function readImageEdits(state: ImageEditState, source: ImageExportSource | null, inPlace: boolean): Promise<ImageSaveEdits | null> {
-	const target = inPlace && state.targets.primary.kind === "inPlace" ? state.targets.primary : copyTargetOf(state)
-	const exported = await exportImage(source, target)
-
-	if (exported === null) {
-		return null
-	}
-
-	if (exported.blob !== null) {
-		return {
-			kind: "blob",
-			blob: exported.blob,
-			extension: target.kind === "copy" && target.mime !== state.info.mime ? target.extension : null
-		}
-	}
-
-	const copy = copyTargetOf(state)
-	const encoded = (await exportImage(source, copy))?.blob ?? null
-
-	if (encoded === null) {
-		return null
-	}
-
-	return { kind: "blob", blob: encoded, extension: copy.mime !== state.info.mime ? copy.extension : null }
-}
-
-// Keeps a saved image's bytes for the preview of the version it made, read from the Blob that was uploaded.
-async function seedSavedImage(cacheScope: string | null, uuid: string, blob: Blob): Promise<void> {
-	await loadPreviewBytes(cacheScope, uuid, blob.size, async () => new Uint8Array(await blob.arrayBuffer())).catch((e: unknown) => {
-		log.warn("preview", "keeping the saved image's bytes failed", e)
-	})
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail

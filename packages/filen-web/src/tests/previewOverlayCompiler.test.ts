@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { transformFileSync } from "@babel/core"
 
-// The React Compiler silently skips a component it cannot compile (a try without a catch, a write to a value a hook
-// was handed, a function used before its declaration), and lint does not notice. The preview overlay and its body are
-// compiled the way vite.config.ts compiles them and must come out compiled.
+// The React Compiler silently skips a component or hook it cannot compile (a try without a catch, a write to a value
+// a hook was handed, a function used before its declaration), and lint does not notice. The preview overlay, its body
+// and the hooks it is split into are compiled the way vite.config.ts compiles them and must come out compiled.
 
 interface CompilerEvent {
 	kind: string
@@ -40,7 +40,12 @@ describe("preview overlay compilation", () => {
 	it.each([
 		["src/features/preview/components/previewOverlay.tsx", "PreviewOverlay"],
 		["src/features/preview/components/previewBody.tsx", "PreviewBody"],
-		["src/features/preview/components/readOnlyPreviewBody.tsx", "ReadOnlyViewer"]
+		["src/features/preview/components/readOnlyPreviewBody.tsx", "ReadOnlyViewer"],
+		["src/features/preview/hooks/usePreviewItemMenu.tsx", "usePreviewItemMenu"],
+		["src/features/preview/hooks/usePreviewDismissal.ts", "usePreviewDismissal"],
+		["src/features/preview/hooks/usePreviewSave.ts", "usePreviewSave"],
+		["src/features/preview/hooks/usePreviewEditSessions.ts", "usePreviewEditSessions"],
+		["src/features/preview/hooks/usePreviewPagerFocus.ts", "usePreviewPagerFocus"]
 	])("compiles %s whole", (file, fnName) => {
 		const events = compile(file)
 

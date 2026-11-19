@@ -11,7 +11,7 @@ import type { ExternalToast } from "sonner"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
-import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
+import { mockChat, mockChatParticipant, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import "@/lib/i18n"
 
@@ -98,9 +98,7 @@ describe("chatActivityName", () => {
 		expect(chatActivityName(chat({ name: "", participants: [SELF] }))).toBe("Just you")
 
 		// exactOptionalPropertyTypes: an undecryptable chat has no `key` at all, not an undefined one.
-		const { uuid, ownerId, participants: members, muted, created, lastFocus } = chat()
-
-		expect(chatActivityName({ uuid, ownerId, participants: members, muted, created, lastFocus })).toBe("Encrypted conversation")
+		expect(chatActivityName(mockUndecryptableChat({ name: "Team", participants: [SELF, BOB] }))).toBe("Encrypted conversation")
 	})
 })
 

@@ -9,7 +9,7 @@ import { useState } from "react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
-import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
+import { mockChat, mockChatParticipant, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 import { mockBlockedContact, mockContact } from "@/tests/support/contactFixtures"
 import "@/lib/i18n"
 
@@ -201,7 +201,7 @@ describe("chat info panel — beside the thread", () => {
 	it("is never offered for an undecryptable conversation", () => {
 		useChatInfoStore.setState({ panelOpen: true })
 		// No `key` at all: the group key did not decrypt.
-		renderThread({ uuid: testUuid("chat"), ownerId: 1n, participants: [SELF, BOB], muted: false, created: 0n, lastFocus: 0n })
+		renderThread(mockUndecryptableChat({ participants: [SELF, BOB] }))
 
 		expect(screen.queryByRole("button", { name: "Participants" })).toBeNull()
 		expect(screen.queryByRole("complementary")).toBeNull()

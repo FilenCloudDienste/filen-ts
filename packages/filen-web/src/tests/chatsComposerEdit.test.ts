@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
+import type { ChatMessage } from "@filen/sdk-rs"
 
 // messageActions imports the real sdk client (a Vite `?worker`, unresolvable under node) and the query client.
 const { editMessageOp } = vi.hoisted(() => ({ editMessageOp: vi.fn() }))
@@ -11,7 +11,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import { editMessage } from "@/features/chats/lib/messageActions"
-import { mockChatMessage } from "@/tests/fixtures/sdk"
+import { mockChat, mockChatMessage } from "@/tests/fixtures/sdk"
 
 // Starting an edit loads the message body over the composer's draft; ending it (save, cancel, emptied
 // input) must bring back whatever was typed before, including a pending reply quote.
@@ -129,15 +129,7 @@ describe("beginMessageEdit / endMessageEdit", () => {
 })
 
 describe("editMessage", () => {
-	const chat: Chat = {
-		uuid: CHAT,
-		ownerId: 7n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
+	const chat = mockChat({ uuid: CHAT, ownerId: 7n })
 
 	beforeEach(() => {
 		editMessageOp.mockReset()
